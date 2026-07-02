@@ -1,0 +1,28 @@
+{
+  "source_path": "/Users/primeropanther/Projects/mega-crm/docs/research/crm-platform-research.md",
+  "type": "DOC",
+  "confidence": "high",
+  "manifest_override": false,
+  "title": "CRM Platform Research",
+  "summary": "Research-only study of eight CRM/marketing-automation tools, grounding MVP recommendations for a date-attribute countdown email reminder platform on a SQL + SendGrid baseline.",
+  "scope": [
+    "date-triggered email reminders",
+    "profile and tracked-entity data model",
+    "send ledger and idempotency",
+    "SendGrid integration (Mail Send API, Event Webhook)",
+    "suppression and consent",
+    "campaign lifecycle and safety rails",
+    "deliverability and compliance (CAN-SPAM, GDPR/PECR, CASL, Gmail/Yahoo rules)",
+    "MVP module scoping and deferrals"
+  ],
+  "cross_refs": [
+    "docs/decisions/mvp-scope-decisions.md",
+    "docs/design/trigger-lifecycle-spec.md",
+    "docs/design/data-model.md",
+    "docs/policy/consent-and-compliance.md",
+    "docs/ops/send-safety-runbook.md"
+  ],
+  "locked": false,
+  "precedence": null,
+  "notes": "Path (docs/research/) and self-description ('Research-only sprint. No code, no schemas, no final architecture decisions') mark this as DOC despite embedded recommendations, one inline '[Decision]' tag (SendGrid sole v1 provider), and PRD/SPEC-adjacent content (MVP modules, open questions). Cross-refs listed are proposed future documents, not yet existing. Decisions here are candidates for formal ADRs, not locked."
+}
