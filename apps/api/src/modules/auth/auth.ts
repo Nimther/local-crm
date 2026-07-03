@@ -67,6 +67,16 @@ export const auth = betterAuth({
       roles: { owner, admin, member },
       // D-11: invites expire after 7 days.
       invitationExpiresIn: 60 * 60 * 24 * 7,
+      // Pitfall 2 (RESEARCH.md): better-auth infers a default of `true` for
+      // this option whenever `advanced.database.generateId` isn't left
+      // exactly `undefined`/`"uuid"` -- which our uuid-PK setup above
+      // triggers. Left at its inferred default, accepting an invite (D-12's
+      // register-from-invite included) would 403 with
+      // EMAIL_VERIFICATION_REQUIRED_BEFORE_ACCEPTING_OR_REJECTING_INVITATION
+      // for every brand-new invited user, since a user can't have a verified
+      // email before their account even exists. Explicitly off, matching
+      // D-02/D-12 (soft verification, never gates workspace access).
+      requireEmailVerificationOnInvitation: false,
       schema: {
         organization: {
           additionalFields: {
@@ -75,10 +85,15 @@ export const auth = betterAuth({
           },
         },
       },
-      sendInvitationEmail: async () => {
-        // TODO(01-04): dispatch via the platform SendGrid account (D-07),
-        // never a tenant's own key. Team invites land in 01-04; until then
-        // this is a stub so `organization.createInvitation` doesn't throw.
+      // D-07/D-10: dispatched through the platform SendGrid account, never a
+      // tenant's own key. The copyable-link fallback (D-10) is the same URL,
+      // rendered by the invite-create route response in invites.ts.
+      sendInvitationEmail: async (data) => {
+        await platformMail.sendInvite({
+          to: data.email,
+          inviteUrl: `${env.WEB_URL}/invite/${data.id}`,
+          orgName: data.organization.name,
+        });
       },
     }),
   ],

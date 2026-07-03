@@ -1,0 +1,1 @@
+ALTER TABLE "invitation" ADD COLUMN "createdAt" timestamp DEFAULT now() NOT NULL;

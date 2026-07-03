@@ -19,29 +19,52 @@ if (!TEST_DATABASE_URL) {
 
 let migratedPromise: Promise<void> | null = null;
 
+// Arbitrary fixed key for the advisory lock below -- any int8 works, it just
+// needs to be the same constant across every process taking the lock.
+const MIGRATION_ADVISORY_LOCK_KEY = 8_472_991;
+
 async function applyPendingMigrations(pool: Pool): Promise<void> {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS _test_migrations_applied (
-      filename text PRIMARY KEY,
-      applied_at timestamptz NOT NULL DEFAULT now()
-    )
-  `);
+  // 01-04 fix: each vitest test FILE runs in its own worker process (its own
+  // module registry), so the `migratedPromise` cache below is only
+  // per-process, not per-suite -- every test file's `beforeAll` calls this
+  // independently. When two files' migration runs raced against a genuinely
+  // pending migration (verified: 0002_invitation_created_at.sql, the first
+  // migration added since this fixture started being exercised by more than
+  // one file with real pending work), both workers observed "not yet
+  // applied" before either recorded it, and both ran the same `ALTER TABLE
+  // ADD COLUMN`, so the second one failed with "column already exists".
+  // A session-scoped Postgres advisory lock serializes the whole
+  // check-then-apply-then-record sequence across concurrent processes.
+  const client = await pool.connect();
+  try {
+    await client.query("SELECT pg_advisory_lock($1)", [MIGRATION_ADVISORY_LOCK_KEY]);
 
-  mkdirSync(MIGRATIONS_DIR, { recursive: true });
-  const files = readdirSync(MIGRATIONS_DIR)
-    .filter((f) => f.endsWith(".sql"))
-    .sort();
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS _test_migrations_applied (
+        filename text PRIMARY KEY,
+        applied_at timestamptz NOT NULL DEFAULT now()
+      )
+    `);
 
-  for (const file of files) {
-    const { rows } = await pool.query<{ exists: boolean }>(
-      "SELECT true as exists FROM _test_migrations_applied WHERE filename = $1",
-      [file]
-    );
-    if (rows.length > 0) continue;
+    mkdirSync(MIGRATIONS_DIR, { recursive: true });
+    const files = readdirSync(MIGRATIONS_DIR)
+      .filter((f) => f.endsWith(".sql"))
+      .sort();
 
-    const sql = readFileSync(path.join(MIGRATIONS_DIR, file), "utf8");
-    await pool.query(sql);
-    await pool.query("INSERT INTO _test_migrations_applied (filename) VALUES ($1)", [file]);
+    for (const file of files) {
+      const { rows } = await client.query<{ exists: boolean }>(
+        "SELECT true as exists FROM _test_migrations_applied WHERE filename = $1",
+        [file]
+      );
+      if (rows.length > 0) continue;
+
+      const sql = readFileSync(path.join(MIGRATIONS_DIR, file), "utf8");
+      await client.query(sql);
+      await client.query("INSERT INTO _test_migrations_applied (filename) VALUES ($1)", [file]);
+    }
+  } finally {
+    await client.query("SELECT pg_advisory_unlock($1)", [MIGRATION_ADVISORY_LOCK_KEY]);
+    client.release();
   }
 }
 

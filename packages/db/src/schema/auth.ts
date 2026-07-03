@@ -115,4 +115,11 @@ export const invitation = pgTable("invitation", {
   inviterId: uuid("inviterId")
     .notNull()
     .references(() => user.id, { onDelete: "cascade" }),
+  // 01-04 fix: the organization plugin's own adapter
+  // (better-auth/dist/plugins/organization/adapter.mjs createInvitation)
+  // writes a `createdAt` value on every insert -- 01-01's hand-authored
+  // schema omitted it, which throws "field createdAt does not exist in the
+  // invitation Drizzle schema" the moment TENANT-02's invite-create route
+  // runs (caught by invite-flow.test.ts).
+  createdAt: timestamp("createdAt").notNull().defaultNow(),
 });

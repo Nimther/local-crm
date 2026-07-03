@@ -1,4 +1,5 @@
 import Fastify from "fastify";
+import rateLimit from "@fastify/rate-limit";
 import {
   serializerCompiler,
   validatorCompiler,
@@ -9,17 +10,26 @@ import { env } from "./env.js";
 import { authPlugin } from "./modules/auth/plugin.js";
 import { registerWorkspaceRoutes } from "./modules/tenancy/workspaces.js";
 import { registerProfileRoutes } from "./modules/tenancy/profile.js";
+import { registerInviteRoutes } from "./modules/tenancy/invites.js";
+import { registerMemberRoutes } from "./modules/tenancy/members.js";
 
-/** Assembles the Fastify app: zod type provider, better-auth handler, workspace + profile routes. */
+/** Assembles the Fastify app: zod type provider, better-auth handler, workspace/profile/invite/member routes. */
 export async function buildServer() {
   const app = Fastify({ loggerInstance: logger }).withTypeProvider<ZodTypeProvider>();
 
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
 
+  // `global: false`: only routes that opt in via `{ config: { rateLimit } }`
+  // are limited (invite accept/register-from-invite, T-01-13 brute-force
+  // mitigation) -- every other route is unaffected.
+  await app.register(rateLimit, { global: false });
+
   await app.register(authPlugin);
   await app.register(registerWorkspaceRoutes);
   await app.register(registerProfileRoutes);
+  await app.register(registerInviteRoutes);
+  await app.register(registerMemberRoutes);
 
   return app;
 }

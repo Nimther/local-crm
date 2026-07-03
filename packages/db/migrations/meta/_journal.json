@@ -15,6 +15,13 @@
       "when": 1783070027842,
       "tag": "0001_rls_policies",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783075859811,
+      "tag": "0002_invitation_created_at",
+      "breakpoints": true
     }
   ]
 }
