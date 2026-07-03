@@ -5,16 +5,16 @@ milestone_name: milestone
 current_phase: 01
 current_phase_name: workspace-foundation-team-access
 status: executing
-stopped_at: Phase 1 UI-SPEC approved
-last_updated: "2026-07-03T09:23:30.116Z"
+stopped_at: Completed 01-02-PLAN.md
+last_updated: "2026-07-03T09:56:04.723Z"
 last_activity: 2026-07-03
 last_activity_desc: Phase 01 execution started
 progress:
   total_phases: 7
   completed_phases: 0
   total_plans: 5
-  completed_plans: 1
-  percent: 0
+  completed_plans: 2
+  percent: 40
 ---
 
 # Project State
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-07-03)
 ## Current Position
 
 Phase: 01 (workspace-foundation-team-access) — EXECUTING
-Plan: 2 of 5
+Plan: 3 of 5
 Status: Ready to execute
 Last activity: 2026-07-03 — Phase 01 execution started
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [████░░░░░░] 40%
 
 ## Performance Metrics
 
@@ -56,6 +56,7 @@ Progress: [░░░░░░░░░░] 0%
 
 *Updated after each plan completion*
 | Phase 01 P01 | 45min | 3 tasks | 37 files |
+| Phase 01 P02 | 25min | 4 tasks | 41 files |
 
 ## Accumulated Context
 
@@ -70,6 +71,9 @@ Recent decisions affecting current work:
 - [Phase 01]: IDs across better-auth's schema are native Postgres uuid (gen_random_uuid()) with advanced.database.generateId:false, matching the ::uuid cast every RLS policy uses
 - [Phase 01]: FORCE ROW LEVEL SECURITY required on workspace_sendgrid_keys -- Postgres exempts the table owner from RLS by default, and the app role owns its own tables
 - [Phase 01]: better-auth's own tables (user/session/account/verification/organization/member/invitation) are deliberately outside RLS -- scoped by session/active-organization membership instead
+- [Phase 01]: 01-02: /api/workspaces POST/GET now returns role, needed for WorkspaceHome's live Owner-role requirement
+- [Phase 01]: 01-02: authClient baseURL resolved from window.location.origin at runtime (better-auth client rejects a bare relative path)
+- [Phase 01]: 01-02: root npm run dev fixed to run API + web concurrently, matching SKELETON.md's documented local-run contract
 
 ### Pending Todos
 
@@ -94,6 +98,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-03T09:22:38.544Z
-Stopped at: Phase 1 UI-SPEC approved
-Resume file: .planning/phases/01-workspace-foundation-team-access/01-UI-SPEC.md
+Last session: 2026-07-03T09:55:10.927Z
+Stopped at: Completed 01-02-PLAN.md
+Resume file: None
