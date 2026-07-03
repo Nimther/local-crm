@@ -185,6 +185,81 @@ describe("SendGrid key connect (TENANT-04, D-02/D-19/D-21)", () => {
     expect(res.json().error).toBe(UNVERIFIED_COPY);
   });
 
+  it("GET returns 404 (no keyMask) for an unauthenticated caller (CR-01)", async () => {
+    const { workspace } = await verifiedOwner("get-unauth-owner");
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/sendgrid-key`,
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).not.toHaveProperty("keyMask");
+  });
+
+  it("GET returns the same 404 for an authenticated non-member as for a nonexistent workspace (no enumeration oracle)", async () => {
+    const { workspace } = await verifiedOwner("get-nonmember-owner");
+    const outsider = await signUp(`get-outsider-${Date.now()}@example.com`, "correct horse battery staple 42", "Outsider");
+    await markVerified(outsider.userId);
+
+    const nonMemberRes = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/sendgrid-key`,
+      headers: { cookie: outsider.cookie },
+    });
+    const missingWorkspaceRes = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/does-not-exist-${Date.now()}/sendgrid-key`,
+      headers: { cookie: outsider.cookie },
+    });
+
+    expect(nonMemberRes.statusCode).toBe(404);
+    expect(nonMemberRes.json()).toEqual(missingWorkspaceRes.json());
+  });
+
+  it("GET returns 200 for a plain Member (not over-restricted to Owner/Admin)", async () => {
+    const { workspace } = await verifiedOwner("get-member-owner");
+    const memberEmail = `get-member-${Date.now()}@example.com`;
+    const memberAccount = await signUp(memberEmail, "correct horse battery staple 42", "Get Member");
+    await markVerified(memberAccount.userId);
+    await db.insert(member).values({ organizationId: workspace.id, userId: memberAccount.userId, role: "member" });
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/sendgrid-key`,
+      headers: { cookie: memberAccount.cookie },
+    });
+
+    expect(res.statusCode, `member GET failed: ${res.body}`).toBe(200);
+    expect(res.json().connected).toBe(false);
+  });
+
+  it("GET returns 200 with keyMask for the Owner after a successful connect", async () => {
+    const { cookie, workspace } = await verifiedOwner("get-connected-owner");
+    mockScopes(VALID_KEY, ["mail.send"]);
+    mockVerifiedSenders(VALID_KEY);
+
+    const connectRes = await app.inject({
+      method: "POST",
+      url: `/api/workspaces/${workspace.slug}/sendgrid-key`,
+      headers: { cookie },
+      payload: { apiKey: VALID_KEY },
+    });
+    expect(connectRes.statusCode, `connect failed: ${connectRes.body}`).toBe(200);
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/sendgrid-key`,
+      headers: { cookie },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.connected).toBe(true);
+    expect(body.status).toBe("active");
+    expect(body.keyMask).toMatch(/^.+…\w{4}$/);
+  });
+
   it("stores the key envelope-encrypted at rest -- no column contains the plaintext key", async () => {
     const { cookie, workspace } = await verifiedOwner("noplaintext-owner");
     mockScopes(VALID_KEY, ["mail.send"]);

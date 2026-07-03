@@ -1,12 +1,13 @@
 import type { FastifyInstance } from "fastify";
 import { connectSendgridKeySchema } from "@mega-crm/shared-schemas";
-import { requirePermission } from "../../middleware/role-guard.js";
+import { requirePermission, toFetchHeaders } from "../../middleware/role-guard.js";
 import { requireVerifiedEmail } from "../auth/verification-gate.js";
 import { withTenant } from "../../middleware/tenant-context.js";
 import { encryptTenantSecret, decryptTenantSecret } from "../../kms/client.js";
 import { validateTenantSendGridKey } from "./sendgrid-client.js";
 import { getKey, upsertKey, updateKeyStatus } from "./sendgrid-key.repository.js";
 import { findActiveWorkspaceBySlug } from "./workspace-lookup.js";
+import { getCallerRoles } from "./member-roles.js";
 
 const INVALID_KEY_ERROR =
   "SendGrid отклонил ключ: он недействителен или отозван. Проверьте ключ в настройках SendGrid и вставьте его заново.";
@@ -32,11 +33,24 @@ function maskKey(apiKey: string): string {
  * kms/client.ts) and its display mask are stored.
  */
 export async function registerSendgridKeyRoutes(fastify: FastifyInstance): Promise<void> {
-  /** GET status (D-22): masked key + badge state, visible to any workspace member -- no live SendGrid call. */
+  /**
+   * GET status (D-22, CR-01): masked key + badge state, gated to workspace
+   * members -- no live SendGrid call. getCallerRoles throws for an
+   * unauthenticated caller, an unknown slug, and a non-member alike
+   * (better-auth's getActiveMemberRole); ANY throw here maps to the SAME 404
+   * a nonexistent workspace returns, so the route cannot be used as a
+   * workspace-enumeration oracle (T-01-06/T-01-07/T-01-11).
+   */
   fastify.get("/api/workspaces/:slug/sendgrid-key", async (request, reply) => {
     const { slug } = request.params as { slug: string };
     const workspace = await findActiveWorkspaceBySlug(slug);
     if (!workspace) {
+      return reply.code(404).send({ error: "Workspace not found" });
+    }
+
+    try {
+      await getCallerRoles(toFetchHeaders(request), slug);
+    } catch {
       return reply.code(404).send({ error: "Workspace not found" });
     }
 
