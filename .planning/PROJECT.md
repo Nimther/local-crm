@@ -19,12 +19,12 @@ Multi-tenant SaaS-платформа marketing automation для B2C-компа�
 
 ### Validated
 
-(None yet — ship to validate)
+- [x] Multi-tenant воркспейсы: регистрация, приглашение команды по email, базовые роли (Owner/Admin/Member) — Validated in Phase 1: Workspace Foundation & Team Access
+- [x] Подключение SendGrid (connect-половина): тенант привязывает свой API key, ключ валидируется на подключении и хранится зашифрованным (envelope encryption) — Validated in Phase 1; отправка от имени тенанта остаётся в Active
 
 ### Active
 
-- [ ] Multi-tenant воркспейсы: регистрация, приглашение команды по email, базовые роли (Owner/Admin/Member)
-- [ ] Подключение SendGrid: тенант привязывает свой API key, платформа шлёт от его имени
+- [ ] Отправка через SendGrid от имени тенанта (BYO key) — connect выполнен в Phase 1, send-путь в Phase 4
 - [ ] Управление контактами: CRUD в UI, CSV-импорт с маппингом колонок, Contacts CRUD API, автосоздание из событий (upsert)
 - [ ] Идентификация контакта: external_id (основной ключ) + email (запасной)
 - [ ] Event ingestion: server-side HTTP API с API-ключом, свободная схема событий (имя + JSON-свойства, как у Klaviyo)
@@ -99,4 +99,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-03 after initialization*
+*Last updated: 2026-07-03 after Phase 1 completion (workspace foundation & team access verified)*
