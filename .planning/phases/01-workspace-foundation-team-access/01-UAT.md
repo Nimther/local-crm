@@ -1,16 +1,20 @@
 ---
-status: diagnosed
+status: testing
 phase: 01-workspace-foundation-team-access
-source: [01-01-SUMMARY.md, 01-02-SUMMARY.md, 01-03-SUMMARY.md, 01-04-SUMMARY.md, 01-05-SUMMARY.md, 01-06-SUMMARY.md]
+source: [01-01-SUMMARY.md, 01-02-SUMMARY.md, 01-03-SUMMARY.md, 01-04-SUMMARY.md, 01-05-SUMMARY.md, 01-06-SUMMARY.md, 01-07-SUMMARY.md, 01-VERIFICATION.md]
 mode: mvp
 user_story: "As a marketer, I want to create a workspace, bring my team in with the right permissions, and connect my SendGrid account, so that my company's email marketing runs on data fully isolated from every other workspace from day one."
 started: 2026-07-03T13:38:11Z
-updated: 2026-07-03T13:51:15Z
+updated: 2026-07-03T14:45:00Z
 ---
 
 ## Current Test
 
-[halted — user-flow step 2 failed (MVP mode: do not advance past a broken step)]
+number: 2
+name: Register a New Account (re-run after 01-07 gap closure)
+expected: |
+  Open /register. Fill name, email, password and submit. You are signed in without errors and routed to the create-workspace step.
+awaiting: user response
 
 ## Tests
 
@@ -20,9 +24,8 @@ result: pass
 
 ### 2. Register a New Account
 expected: Open /register. Fill name, email, password and submit. You are signed in without errors and routed to the create-workspace step.
-result: issue
-reported: "Что-то пошло не так. Попробуйте ещё раз — если ошибка повторится, обновите страницу. Console: [vite] http proxy error: /api/auth/sign-up/email — AggregateError [ECONNREFUSED] at internalConnectMultiple (node:net:1193:18)"
-severity: blocker
+result: [pending]
+retest: required — original run failed with ECONNREFUSED (see Gaps, resolved); fixed by plan 01-07, re-verified live at the API layer (POST /api/auth/sign-up/email → 200 + session cookie against the real .env). Browser confirmation still owed.
 
 ### 3. Create a Workspace, Become Owner
 expected: Enter a workspace name and submit. You land at /w/{slug}; the workspace home shows the workspace name and your role Owner (live server data), and the onboarding checklist renders with pending items (connect SendGrid, invite team).
@@ -204,15 +207,17 @@ coverage_id: 01-06/D4
 
 total: 34
 passed: 25
-issues: 1
-pending: 8
+issues: 0
+pending: 9
 skipped: 0
 blocked: 0
 
 ## Gaps
 
 - truth: "Submitting the /register form signs the user in and routes to the create-workspace step"
-  status: failed
+  status: resolved
+  resolved_by: "01-07 (commits 7572608, f039ebe, 5a93c99)"
+  resolution: ".env/.env.example completed with platform-mail + KMS vars; env.ts now safeParses with a human-readable secret-safe boot error; scripts/check-env.mjs wired as predev so npm run dev fails loudly on missing env. Verifier re-ran the exact failing endpoint live against the real .env: POST /api/auth/sign-up/email → 200 + session cookie, create-workspace → 200 role:owner. Test 2 reset to pending for browser re-run."
   reason: "User reported: generic failure toast on submit; vite dev-server console shows http proxy error for /api/auth/sign-up/email — AggregateError ECONNREFUSED (API server unreachable from the web dev proxy)"
   severity: blocker
   test: 2
