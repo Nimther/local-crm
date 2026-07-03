@@ -25,7 +25,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 ### Phase 1: Workspace Foundation & Team Access
 
-**Goal**: A marketer can create a workspace, bring their team in with the right permissions, and connect their SendGrid account — with every workspace's data fully isolated from day one.
+**Goal**: As a marketer, I want to create a workspace, bring my team in with the right permissions, and connect my SendGrid account, so that my company's email marketing runs on data fully isolated from every other workspace from day one.
 **Mode:** mvp
 **Depends on**: Nothing (first phase)
 **Requirements**: TENANT-01, TENANT-02, TENANT-03, TENANT-04, TENANT-05
