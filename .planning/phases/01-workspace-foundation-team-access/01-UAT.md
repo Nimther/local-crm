@@ -1,20 +1,16 @@
 ---
-status: testing
+status: complete
 phase: 01-workspace-foundation-team-access
 source: [01-01-SUMMARY.md, 01-02-SUMMARY.md, 01-03-SUMMARY.md, 01-04-SUMMARY.md, 01-05-SUMMARY.md, 01-06-SUMMARY.md, 01-07-SUMMARY.md, 01-VERIFICATION.md]
 mode: mvp
 user_story: "As a marketer, I want to create a workspace, bring my team in with the right permissions, and connect my SendGrid account, so that my company's email marketing runs on data fully isolated from every other workspace from day one."
 started: 2026-07-03T13:38:11Z
-updated: 2026-07-03T14:45:00Z
+updated: 2026-07-03T20:39:54Z
 ---
 
 ## Current Test
 
-number: 2
-name: Register a New Account (re-run after 01-07 gap closure)
-expected: |
-  Open /register. Fill name, email, password and submit. You are signed in without errors and routed to the create-workspace step.
-awaiting: user response
+[testing complete]
 
 ## Tests
 
@@ -24,40 +20,41 @@ result: pass
 
 ### 2. Register a New Account
 expected: Open /register. Fill name, email, password and submit. You are signed in without errors and routed to the create-workspace step.
-result: [pending]
-retest: required — original run failed with ECONNREFUSED (see Gaps, resolved); fixed by plan 01-07, re-verified live at the API layer (POST /api/auth/sign-up/email → 200 + session cookie against the real .env). Browser confirmation still owed.
+result: pass
+note: re-run after 01-07 gap closure — original ECONNREFUSED gap resolved (see Gaps), browser confirmation received
 
 ### 3. Create a Workspace, Become Owner
 expected: Enter a workspace name and submit. You land at /w/{slug}; the workspace home shows the workspace name and your role Owner (live server data), and the onboarding checklist renders with pending items (connect SendGrid, invite team).
-result: [pending]
+result: pass
 
 ### 4. Email Verification Banner + Real Verification Email
 expected: As this freshly registered (unverified) user, a verification banner is visible. Clicking resend delivers a real verification email from the platform noreply@ address; the app remains usable before verifying; following the link marks you verified and the banner disappears.
-result: [pending]
+result: pass
+note: initial run failed (missing platform SendGrid key in .env, then a transient 500 before restart); after user configured PLATFORM_SENDGRID_API_KEY/PLATFORM_MAIL_FROM the email delivered and verification completed. Config issue, not code — see Gaps (resolved).
 
 ### 5. Password Reset via Real Email
 expected: Log out. From the login page open the reset-request flow, submit your email. A reset email arrives from the platform noreply@ address; following the link lets you set a new password in the browser, and you can log in with the new password.
-result: [pending]
+result: pass
 
 ### 6. Profile Page
 expected: Open your profile page. Editing display name persists (visible after reload). Change-password flow works with your current password. There is no email-change or avatar control.
-result: [pending]
+result: pass
 
 ### 7. Invite a Colleague + Accept Flows
 expected: On the Team page, invite a colleague by email with a role. The invite email arrives with an /invite/{id} link (org name rendered as plain text, no markup). The copyable-link control works. A brand-new user opening the link registers with the invite's fixed email and immediately joins with the assigned role; an existing account accepting also joins with its assigned role.
-result: [pending]
+result: pass
 
 ### 8. Role-Gated Team UI (Member vs Owner/Admin)
 expected: Logged in as a Member, the Team page hides invite/role-change/remove/delete-workspace controls, and the pending-invites list is not readable. As Owner, delete-workspace requires typing the workspace name to confirm, and the deleted workspace disappears from the switcher.
-result: [pending]
+result: pass
 
 ### 9. Connect SendGrid Key (Real Keys)
 expected: As Owner (verified email) open SendGrid key settings. Pasting a valid key with mail.send scope validates live and shows: masked key, status badge, verified senders table, and a working re-check button; the onboarding checklist item flips to done. An invalid/revoked key or a key missing mail.send is rejected with the exact clear error copy. A Member does not see the connect control.
-result: [pending]
+result: pass
 
 ### 10. Workspace Isolation (User-Story Outcome)
 expected: With a second account in its own workspace, opening the first workspace's URLs directly (/w/{first-slug} and its SendGrid key settings/API) yields 404/not-found — never the other tenant's data. The workspace switcher lists only workspaces you belong to.
-result: [pending]
+result: pass
 
 ### 11. Register → create workspace → Owner over HTTP (integration-tested)
 expected: A new user can register (email/password) and create a workspace over HTTP, becoming its Owner with a unique slug
@@ -206,9 +203,9 @@ coverage_id: 01-06/D4
 ## Summary
 
 total: 34
-passed: 25
+passed: 34
 issues: 0
-pending: 9
+pending: 0
 skipped: 0
 blocked: 0
 
@@ -235,3 +232,14 @@ blocked: 0
     - "Human-readable missing-env boot error in env.ts instead of raw Zod stack"
     - "Dev script should fail loudly when the API cannot boot (no silent crash under tsx watch)"
   debug_session: .planning/debug/registration-api-econnrefused.md
+
+- truth: "Clicking resend on the verification banner delivers a real verification email from the platform noreply@ address"
+  status: resolved
+  resolution: "Environment configuration, not code: .env had a placeholder platform SendGrid key. After the user set a real PLATFORM_SENDGRID_API_KEY/PLATFORM_MAIL_FROM (and the transient 500 cleared on retry), resend delivered the email and the verification link worked. No fix plan needed."
+  reason: "User reported: не отправляется. В консоли ошибка: Failed to load resource: the server responded with a status of 500 (Internal Server Error) — before platform key configuration took effect"
+  severity: blocker
+  test: 4
+  root_cause: "placeholder PLATFORM_SENDGRID_API_KEY in local .env (operator config)"
+  artifacts: []
+  missing: []
+  debug_session: ""
