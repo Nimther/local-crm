@@ -10,6 +10,7 @@
     "packages/*"
   ],
   "scripts": {
+    "predev": "node scripts/check-env.mjs",
     "dev": "concurrently -n api,web -c blue,green \"npm run dev -w apps/api\" \"npm run dev -w apps/web\"",
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
