@@ -37,7 +37,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. A user can paste a SendGrid API key and see it validated on connect (accepted if valid, rejected with a clear error if not); the stored key is encrypted at rest.
   5. A user in one workspace cannot see or access any contact, event, campaign, or statistic belonging to another workspace.
 
-**Plans**: 5/5 plans complete
+**Plans**: 6 plans (5 complete + 1 gap-closure pending)
 **UI hint**: yes
 
 Plans:
@@ -60,6 +60,10 @@ Plans:
 **Wave 5** *(blocked on Wave 4 completion)*
 
 - [x] 01-05-PLAN.md — SendGrid key connect: validate + KMS envelope encryption + masked status UI + role/verify gates + onboarding checklist finalize (TENANT-03, TENANT-04)
+
+**Wave 6** *(gap closure — verification blocker + same-surface warnings)*
+
+- [ ] 01-06-PLAN.md — Close CR-01 (unauthenticated GET sendgrid-key cross-tenant disclosure), WR-02 (Member invite-token leak), CR-02 (invite-email HTML injection), CR-03 (missing pg Pool error handler) (TENANT-05, TENANT-04)
 
 ### Phase 2: Contacts & Event Ingestion
 
