@@ -4,17 +4,17 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 01
 current_phase_name: workspace-foundation-team-access
-status: executing
-stopped_at: Completed 01-04-PLAN.md (Task 4 human-verify deferred to phase UAT)
-last_updated: "2026-07-03T11:13:45.638Z"
+status: verifying
+stopped_at: Completed 01-05-PLAN.md (Task 4 human-verify deferred to phase UAT) -- Phase 01 all 5 plans done, ready for phase-level UAT/verification
+last_updated: "2026-07-03T11:30:54.375Z"
 last_activity: 2026-07-03
-last_activity_desc: Phase 01 execution started
+last_activity_desc: Completed 01-04-PLAN.md (Task 4 human-verify deferred to phase UAT)
 progress:
   total_phases: 7
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 5
-  completed_plans: 4
-  percent: 0
+  completed_plans: 5
+  percent: 14
 ---
 
 # Project State
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-07-03)
 
 Phase: 01 (workspace-foundation-team-access) — EXECUTING
 Plan: 5 of 5
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-07-03 — Completed 01-04-PLAN.md (Task 4 human-verify deferred to phase UAT)
 
 Progress: [████████░░] 80%
@@ -59,6 +59,7 @@ Progress: [████████░░] 80%
 | Phase 01 P02 | 25min | 4 tasks | 41 files |
 | Phase 01 P03 | 8min | 3 tasks | 18 files |
 | Phase 01 P04 | 7min | 3 tasks | 28 files |
+| Phase 01 P05 | 7min | 3 tasks | 19 files |
 
 ## Accumulated Context
 
@@ -81,6 +82,9 @@ Recent decisions affecting current work:
 - [Phase 01]: 01-04: Owner-only branch layered on top of requirePermission for Admin-role assignment and ownership transfer -- the org plugin's default admin permission set alone is insufficient for D-18
 - [Phase 01]: 01-04: Web reads workspace membership via /api/workspaces (already deleted_at-filtered) instead of better-auth's organization.list, so a soft-deleted workspace can never reappear in RootRedirect or WorkspaceSwitcher (D-20)
 - [Phase 01]: 01-04: Task 4 (live-browser invite/role/delete verification) deferred to phase-level UAT -- user unavailable at checkpoint, automated coverage (21/21 vitest, clean builds) accepted as sufficient to unblock plan completion -- 7 manual checks remain tracked for phase UAT
+- [Phase 01]: 01-05: env.ts superRefine (not just local-provider.ts's own check) is the primary boot guard refusing KMS_PROVIDER=local under NODE_ENV=production
+- [Phase 01]: 01-05: recheck route gated by the same requirePermission('sendgridKey','update') as connect, since it also decrypts and re-validates the live key
+- [Phase 01]: 01-05: Task 4 (live SendGrid + browser human verification) deferred to phase-level UAT -- user unavailable at checkpoint, automated coverage (32/32 vitest, clean builds) accepted as sufficient to unblock plan completion, following the same precedent as 01-03/01-04
 
 ### Pending Todos
 
@@ -96,6 +100,7 @@ Research flags to carry into planning:
 - Phase 6: define quiet-hours timezone source and once-per-N-days re-entry semantics; simulate late-stage flow edits mid-execution.
 - 01-03: 3 manual phase-UAT checks outstanding — password-reset email delivery via platform key, verification banner + resend email delivery, profile display-name/password-change flow in a real browser (Task 4 deferred, not passed)
 - 01-04: 7 manual phase-UAT checks outstanding -- invite email delivery + copyable link, register-from-invite in incognito, join-with-existing-account, expired/revoked messaging, Member control hiding, Owner-only Admin-assignment/ownership-transfer, type-name delete removing workspace from switcher (Task 4 deferred, not passed)
+- 01-05: 7 manual phase-UAT checks outstanding -- empty state, invalid/missing-scope key copy, valid-key connect + verified senders + recheck, unverified-email gate, Member control hiding, onboarding checklist done-detection, plaintext-at-rest DB spot check (Task 4 deferred, not passed)
 
 ## Deferred Items
 
@@ -107,6 +112,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-03T11:13:45.606Z
-Stopped at: Completed 01-04-PLAN.md (Task 4 human-verify deferred to phase UAT)
+Last session: 2026-07-03T11:30:54.095Z
+Stopped at: Completed 01-05-PLAN.md (Task 4 human-verify deferred to phase UAT) -- Phase 01 all 5 plans done, ready for phase-level UAT/verification
 Resume file: None

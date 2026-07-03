@@ -13,7 +13,7 @@ Mega CRM is a Klaviyo-class, multi-tenant email marketing automation platform de
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Workspace Foundation & Team Access** - Multi-tenant workspaces, team invites, roles, and a validated encrypted SendGrid key
+- [x] **Phase 1: Workspace Foundation & Team Access** - Multi-tenant workspaces, team invites, roles, and a validated encrypted SendGrid key (completed 2026-07-03)
 - [ ] **Phase 2: Contacts & Event Ingestion** - Contact base via UI/CSV/API plus an async server-side event stream that upserts contacts
 - [ ] **Phase 3: Segmentation Engine** - Dynamic profile + behavioral segments with live preview, on one shared evaluation engine
 - [ ] **Phase 4: Broadcast Campaigns & Send Pipeline** - First complete send loop: throttled, idempotent, suppression-aware broadcasts via SendGrid
@@ -37,7 +37,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. A user can paste a SendGrid API key and see it validated on connect (accepted if valid, rejected with a clear error if not); the stored key is encrypted at rest.
   5. A user in one workspace cannot see or access any contact, event, campaign, or statistic belonging to another workspace.
 
-**Plans**: 4/5 plans executed
+**Plans**: 5/5 plans complete
 **UI hint**: yes
 
 Plans:
@@ -59,7 +59,7 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 01-05-PLAN.md — SendGrid key connect: validate + KMS envelope encryption + masked status UI + role/verify gates + onboarding checklist finalize (TENANT-03, TENANT-04)
+- [x] 01-05-PLAN.md — SendGrid key connect: validate + KMS envelope encryption + masked status UI + role/verify gates + onboarding checklist finalize (TENANT-03, TENANT-04)
 
 ### Phase 2: Contacts & Event Ingestion
 
@@ -212,7 +212,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Workspace Foundation & Team Access | 4/5 | In Progress|  |
+| 1. Workspace Foundation & Team Access | 5/5 | Complete   | 2026-07-03 |
 | 2. Contacts & Event Ingestion | 0/5 | Not started | - |
 | 3. Segmentation Engine | 0/4 | Not started | - |
 | 4. Broadcast Campaigns & Send Pipeline | 0/6 | Not started | - |
