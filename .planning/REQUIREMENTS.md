@@ -12,7 +12,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **TENANT-01**: Пользователь может зарегистрироваться и создать воркспейс (тенант)
 - [ ] **TENANT-02**: Пользователь может пригласить коллег в воркспейс по email
 - [ ] **TENANT-03**: Роли Owner/Admin/Member различают права: запуск кампаний/цепочек и смена SendGrid-ключа доступны только Owner/Admin
-- [ ] **TENANT-04**: Пользователь может подключить SendGrid API key воркспейса; ключ хранится зашифрованным и валидируется при подключении
+- [x] **TENANT-04**: Пользователь может подключить SendGrid API key воркспейса; ключ хранится зашифрованным и валидируется при подключении
 - [x] **TENANT-05**: Все данные (контакты, события, цепочки, кампании, статистика) изолированы по воркспейсу — пользователь не может увидеть данные чужого тенанта
 
 ### Contacts
@@ -130,7 +130,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TENANT-01 | Phase 1 | Complete |
 | TENANT-02 | Phase 1 | Pending |
 | TENANT-03 | Phase 1 | Pending |
-| TENANT-04 | Phase 1 | Pending |
+| TENANT-04 | Phase 1 | Complete |
 | TENANT-05 | Phase 1 | Complete |
 | CONT-01 | Phase 2 | Pending |
 | CONT-02 | Phase 2 | Pending |

@@ -207,3 +207,7 @@ These were already specified in the plan's `user_setup` block and are unchanged;
 ---
 *Phase: 01-workspace-foundation-team-access*
 *Completed: 2026-07-03*
+
+## Self-Check: PASSED
+- FOUND: .planning/phases/01-workspace-foundation-team-access/01-03-SUMMARY.md
+- FOUND: 324260b, 9bfa18c, 68ff004, 1b87fe3

@@ -5,16 +5,16 @@ milestone_name: milestone
 current_phase: 01
 current_phase_name: workspace-foundation-team-access
 status: executing
-stopped_at: Completed 01-02-PLAN.md
-last_updated: "2026-07-03T09:56:04.723Z"
+stopped_at: Completed 01-03-PLAN.md (Task 4 human-verify deferred to phase UAT)
+last_updated: "2026-07-03T10:31:02.726Z"
 last_activity: 2026-07-03
 last_activity_desc: Phase 01 execution started
 progress:
   total_phases: 7
   completed_phases: 0
   total_plans: 5
-  completed_plans: 2
-  percent: 40
+  completed_plans: 3
+  percent: 0
 ---
 
 # Project State
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-07-03)
 ## Current Position
 
 Phase: 01 (workspace-foundation-team-access) — EXECUTING
-Plan: 3 of 5
+Plan: 4 of 5
 Status: Ready to execute
 Last activity: 2026-07-03 — Phase 01 execution started
 
-Progress: [████░░░░░░] 40%
+Progress: [██████░░░░] 60%
 
 ## Performance Metrics
 
@@ -57,6 +57,7 @@ Progress: [████░░░░░░] 40%
 *Updated after each plan completion*
 | Phase 01 P01 | 45min | 3 tasks | 37 files |
 | Phase 01 P02 | 25min | 4 tasks | 41 files |
+| Phase 01 P03 | 8min | 3 tasks | 18 files |
 
 ## Accumulated Context
 
@@ -74,6 +75,8 @@ Recent decisions affecting current work:
 - [Phase 01]: 01-02: /api/workspaces POST/GET now returns role, needed for WorkspaceHome's live Owner-role requirement
 - [Phase 01]: 01-02: authClient baseURL resolved from window.location.origin at runtime (better-auth client rejects a bare relative path)
 - [Phase 01]: 01-02: root npm run dev fixed to run API + web concurrently, matching SKELETON.md's documented local-run contract
+- [Phase 01]: 01-03: Task 4 (live-email human verification) deferred to phase-level UAT — user unavailable at checkpoint, automated coverage (11/11 vitest, clean builds) accepted as sufficient to unblock plan completion — Avoids stalling downstream 01-04/01-05 plans on a checkpoint the user could not attend; 3 manual checks (reset delivery, verification banner/resend, profile browser flow) remain tracked for phase UAT
+- [Phase 01]: 01-03: reset/verify links built explicitly from the token by our own better-auth callbacks (not better-auth's default url/redirectTo) to guarantee correct routing to our web pages
 
 ### Pending Todos
 
@@ -87,6 +90,7 @@ Research flags to carry into planning:
 - Phase 4: load-test triggered-vs-broadcast priority under a large broadcast (target: triggered sends within minutes).
 - Phase 5: integration test that replays a real signed SendGrid payload through the full HTTP stack (raw-body verification).
 - Phase 6: define quiet-hours timezone source and once-per-N-days re-entry semantics; simulate late-stage flow edits mid-execution.
+- 01-03: 3 manual phase-UAT checks outstanding — password-reset email delivery via platform key, verification banner + resend email delivery, profile display-name/password-change flow in a real browser (Task 4 deferred, not passed)
 
 ## Deferred Items
 
@@ -98,6 +102,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-03T09:55:10.927Z
-Stopped at: Completed 01-02-PLAN.md
+Last session: 2026-07-03T10:30:25.332Z
+Stopped at: Completed 01-03-PLAN.md (Task 4 human-verify deferred to phase UAT)
 Resume file: None

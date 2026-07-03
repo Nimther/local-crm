@@ -37,7 +37,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. A user can paste a SendGrid API key and see it validated on connect (accepted if valid, rejected with a clear error if not); the stored key is encrypted at rest.
   5. A user in one workspace cannot see or access any contact, event, campaign, or statistic belonging to another workspace.
 
-**Plans**: 2/5 plans executed
+**Plans**: 3/5 plans executed
 **UI hint**: yes
 
 Plans:
@@ -51,7 +51,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 01-03-PLAN.md — Platform system email + password reset + soft email verification + profile (TENANT-01, TENANT-04)
+- [x] 01-03-PLAN.md — Platform system email + password reset + soft email verification + profile (TENANT-01, TENANT-04)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
@@ -212,7 +212,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Workspace Foundation & Team Access | 2/5 | In Progress|  |
+| 1. Workspace Foundation & Team Access | 3/5 | In Progress|  |
 | 2. Contacts & Event Ingestion | 0/5 | Not started | - |
 | 3. Segmentation Engine | 0/4 | Not started | - |
 | 4. Broadcast Campaigns & Send Pipeline | 0/6 | Not started | - |
