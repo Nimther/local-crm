@@ -7,9 +7,12 @@ import { organizationClient } from "better-auth/client/plugins";
  * HttpOnly session cookie is sent automatically for same-origin requests.
  * `credentials: "include"` is set explicitly so the cookie is always sent
  * even if the proxy target is ever swapped for a cross-origin API URL.
+ *
+ * better-auth's client requires an absolute base URL (it rejects a bare
+ * path), so the current origin is resolved at runtime rather than hardcoded.
  */
 export const authClient = createAuthClient({
-  baseURL: "/api/auth",
+  baseURL: `${window.location.origin}/api/auth`,
   fetchOptions: {
     credentials: "include",
   },

@@ -53,6 +53,7 @@ describe("workspace creation (TENANT-01)", () => {
     const workspace = createRes.json();
     expect(workspace.slug).toBeTruthy();
     expect(workspace.name).toBe("Acme Marketing");
+    expect(workspace.role).toBe("owner");
 
     const getRes = await app.inject({
       method: "GET",
@@ -61,6 +62,7 @@ describe("workspace creation (TENANT-01)", () => {
     });
     expect(getRes.statusCode).toBe(200);
     expect(getRes.json().slug).toBe(workspace.slug);
+    expect(getRes.json().role).toBe("owner");
   });
 
   it("generates distinct slugs for two workspaces created with the same name", async () => {

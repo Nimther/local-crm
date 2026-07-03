@@ -1,18 +1,60 @@
-import { QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router";
+import { QueryClientProvider, useQuery } from "@tanstack/react-query";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router";
+
 import { queryClient } from "@/lib/queryClient";
+import { authClient, useSession } from "@/lib/authClient";
 import { Toaster } from "@/components/ui/sonner";
+import RegisterPage from "@/routes/register";
+import LoginPage from "@/routes/login";
+import CreateWorkspacePage from "@/routes/create-workspace";
+import { AppShell } from "@/features/app-shell/AppShell";
+import { WorkspaceHome } from "@/features/workspace-home/WorkspaceHome";
 
 /**
- * Wave-0 scaffold: router + TanStack Query provider only. Auth pages land
- * in Task 2, the create-workspace/app-shell/home routes in Task 3.
+ * Resolves "/" for a signed-in user: no workspace yet -> /create-workspace
+ * (D-14); has a workspace -> the first one at /w/{slug}. Signed-out users
+ * fall through to /login.
  */
+function RootRedirect() {
+  const { data: session, isPending: sessionPending } = useSession();
+
+  const { data: workspaces, isPending: workspacesPending } = useQuery({
+    queryKey: ["workspaces"],
+    queryFn: async () => {
+      const { data, error } = await authClient.organization.list();
+      if (error) throw error;
+      return data ?? [];
+    },
+    enabled: Boolean(session),
+  });
+
+  if (sessionPending || (session && workspacesPending)) {
+    return null;
+  }
+
+  if (!session) {
+    return <Navigate to="/login" replace />;
+  }
+
+  if (!workspaces || workspaces.length === 0) {
+    return <Navigate to="/create-workspace" replace />;
+  }
+
+  return <Navigate to={`/w/${workspaces[0].slug}`} replace />;
+}
+
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={null} />
+          <Route path="/" element={<RootRedirect />} />
+          <Route path="/register" element={<RegisterPage />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/create-workspace" element={<CreateWorkspacePage />} />
+          <Route path="/w/:slug" element={<AppShell />}>
+            <Route index element={<WorkspaceHome />} />
+          </Route>
         </Routes>
       </BrowserRouter>
       <Toaster />

@@ -11,5 +11,6 @@ export const workspaceResponseSchema = z.object({
   name: z.string(),
   slug: z.string(),
   createdAt: z.string(),
+  role: z.string(),
 });
 export type WorkspaceResponse = z.infer<typeof workspaceResponseSchema>;

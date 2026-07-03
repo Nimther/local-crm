@@ -34,17 +34,21 @@ export async function createUniqueWorkspaceSlug(name: string): Promise<string> {
   return candidate;
 }
 
-function toWorkspaceResponse(org: {
-  id: string;
-  name: string;
-  slug: string;
-  createdAt: Date | string;
-}) {
+function toWorkspaceResponse(
+  org: {
+    id: string;
+    name: string;
+    slug: string;
+    createdAt: Date | string;
+  },
+  role: string
+) {
   return workspaceResponseSchema.parse({
     id: org.id,
     name: org.name,
     slug: org.slug,
     createdAt: org.createdAt instanceof Date ? org.createdAt.toISOString() : org.createdAt,
+    role,
   });
 }
 
@@ -75,7 +79,9 @@ export async function registerWorkspaceRoutes(fastify: FastifyInstance): Promise
         return reply.code(500).send({ error: "Failed to create workspace" });
       }
 
-      return reply.send(toWorkspaceResponse(org));
+      // The creator always becomes "owner" (better-auth's default
+      // creatorRole) — no extra round-trip needed here.
+      return reply.send(toWorkspaceResponse(org, "owner"));
     } catch (err) {
       if (err instanceof APIError) {
         return reply.code(err.statusCode ?? 400).send({ error: err.message });
@@ -86,10 +92,11 @@ export async function registerWorkspaceRoutes(fastify: FastifyInstance): Promise
 
   fastify.get("/api/workspaces/:slug", async (request, reply) => {
     const { slug } = request.params as { slug: string };
+    const headers = toFetchHeaders(request);
 
     try {
       const org = await auth.api.getFullOrganization({
-        headers: toFetchHeaders(request),
+        headers,
         query: { organizationSlug: slug },
       });
 
@@ -97,7 +104,12 @@ export async function registerWorkspaceRoutes(fastify: FastifyInstance): Promise
         return reply.code(404).send({ error: "Workspace not found" });
       }
 
-      return reply.send(toWorkspaceResponse(org));
+      const { role } = await auth.api.getActiveMemberRole({
+        headers,
+        query: { organizationSlug: slug },
+      });
+
+      return reply.send(toWorkspaceResponse(org, Array.isArray(role) ? role[0] : role));
     } catch (err) {
       if (err instanceof APIError) {
         return reply.code(err.statusCode ?? 404).send({ error: err.message });
