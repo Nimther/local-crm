@@ -173,3 +173,7 @@ Each task was committed atomically:
 ---
 *Phase: 01-workspace-foundation-team-access*
 *Completed: 2026-07-03*
+
+## Self-Check: PASSED
+
+All created/modified files confirmed present on disk (scripts/check-env.mjs, apps/api/src/env.ts, .env.example, this SUMMARY.md); all task commits (7572608, f039ebe, 5a93c99) and the SUMMARY commit (7fe9375) confirmed in git log.
