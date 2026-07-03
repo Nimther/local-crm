@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 01
 current_phase_name: workspace-foundation-team-access
 status: executing
-stopped_at: Completed 01-05-PLAN.md (Task 4 human-verify deferred to phase UAT) -- Phase 01 all 5 plans done, ready for phase-level UAT/verification
-last_updated: "2026-07-03T12:40:15.983Z"
+stopped_at: "Completed 01-06-PLAN.md (gap-closure: CR-01 blocker + WR-02/CR-02/CR-03 closed) -- Phase 01 ready for re-verification"
+last_updated: "2026-07-03T12:56:22.243Z"
 last_activity: 2026-07-03
-last_activity_desc: Completed 01-04-PLAN.md (Task 4 human-verify deferred to phase UAT)
+last_activity_desc: Phase 01 execution started
 progress:
   total_phases: 7
   completed_phases: 1
-  total_plans: 5
-  completed_plans: 5
+  total_plans: 6
+  completed_plans: 6
   percent: 14
 ---
 
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-07-03)
 ## Current Position
 
 Phase: 01 (workspace-foundation-team-access) — EXECUTING
-Plan: 5 of 5
+Plan: 2 of 6
 Status: Ready to execute
-Last activity: 2026-07-03 — Completed 01-04-PLAN.md (Task 4 human-verify deferred to phase UAT)
+Last activity: 2026-07-03 — Phase 01 execution started
 
 Progress: [████████░░] 80%
 
@@ -60,6 +60,7 @@ Progress: [████████░░] 80%
 | Phase 01 P03 | 8min | 3 tasks | 18 files |
 | Phase 01 P04 | 7min | 3 tasks | 28 files |
 | Phase 01 P05 | 7min | 3 tasks | 19 files |
+| Phase 01 P06 | 2min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -85,6 +86,9 @@ Recent decisions affecting current work:
 - [Phase 01]: 01-05: env.ts superRefine (not just local-provider.ts's own check) is the primary boot guard refusing KMS_PROVIDER=local under NODE_ENV=production
 - [Phase 01]: 01-05: recheck route gated by the same requirePermission('sendgridKey','update') as connect, since it also decrypts and re-validates the live key
 - [Phase 01]: 01-05: Task 4 (live SendGrid + browser human verification) deferred to phase-level UAT -- user unavailable at checkpoint, automated coverage (32/32 vitest, clean builds) accepted as sufficient to unblock plan completion, following the same precedent as 01-03/01-04
+- [Phase 01]: 01-06: GET sendgrid-key uses a try/catch around getCallerRoles (not requirePermission) to close the enumeration oracle while remaining readable by any member — requirePermission would 403 non-members and over-restrict Members; the route needs uniform 404 for unauth/non-member instead
+- [Phase 01]: 01-06: GET /invites reuses the invitation:create permission (matching sibling POST create route) rather than a new permission — Owner/Admin already hold invitation:create per D-17; Member correctly lacks it
+- [Phase 01]: 01-06: invite email subject line left unescaped by design — subject is a JSON field rendered as plain text by mail clients, not an HTML sink -- escaping it would only surface literal entity codes
 
 ### Pending Todos
 
@@ -112,6 +116,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-03T11:30:54.095Z
-Stopped at: Completed 01-05-PLAN.md (Task 4 human-verify deferred to phase UAT) -- Phase 01 all 5 plans done, ready for phase-level UAT/verification
+Last session: 2026-07-03T12:56:22.216Z
+Stopped at: Completed 01-06-PLAN.md (gap-closure: CR-01 blocker + WR-02/CR-02/CR-03 closed) -- Phase 01 ready for re-verification
 Resume file: None

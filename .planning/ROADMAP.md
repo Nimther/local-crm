@@ -37,7 +37,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. A user can paste a SendGrid API key and see it validated on connect (accepted if valid, rejected with a clear error if not); the stored key is encrypted at rest.
   5. A user in one workspace cannot see or access any contact, event, campaign, or statistic belonging to another workspace.
 
-**Plans**: 6 plans (5 complete + 1 gap-closure pending)
+**Plans**: 6/6 plans complete
 **UI hint**: yes
 
 Plans:
@@ -63,7 +63,7 @@ Plans:
 
 **Wave 6** *(gap closure — verification blocker + same-surface warnings)*
 
-- [ ] 01-06-PLAN.md — Close CR-01 (unauthenticated GET sendgrid-key cross-tenant disclosure), WR-02 (Member invite-token leak), CR-02 (invite-email HTML injection), CR-03 (missing pg Pool error handler) (TENANT-05, TENANT-04)
+- [x] 01-06-PLAN.md — Close CR-01 (unauthenticated GET sendgrid-key cross-tenant disclosure), WR-02 (Member invite-token leak), CR-02 (invite-email HTML injection), CR-03 (missing pg Pool error handler) (TENANT-05, TENANT-04)
 
 ### Phase 2: Contacts & Event Ingestion
 
@@ -216,7 +216,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Workspace Foundation & Team Access | 5/5 | Complete   | 2026-07-03 |
+| 1. Workspace Foundation & Team Access | 6/6 | Complete   | 2026-07-03 |
 | 2. Contacts & Event Ingestion | 0/5 | Not started | - |
 | 3. Segmentation Engine | 0/4 | Not started | - |
 | 4. Broadcast Campaigns & Send Pipeline | 0/6 | Not started | - |
