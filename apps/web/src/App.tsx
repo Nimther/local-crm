@@ -11,6 +11,7 @@ import ResetRequestPage from "@/routes/reset-request";
 import ResetPasswordPage from "@/routes/reset-password";
 import { AppShell } from "@/features/app-shell/AppShell";
 import { WorkspaceHome } from "@/features/workspace-home/WorkspaceHome";
+import ProfilePage from "@/features/profile/ProfilePage";
 
 /**
  * Resolves "/" for a signed-in user: no workspace yet -> /create-workspace
@@ -58,6 +59,7 @@ export default function App() {
           <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/w/:slug" element={<AppShell />}>
             <Route index element={<WorkspaceHome />} />
+            <Route path="profile" element={<ProfilePage />} />
           </Route>
         </Routes>
       </BrowserRouter>

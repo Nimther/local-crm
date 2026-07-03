@@ -8,8 +8,9 @@ import { logger } from "./logger.js";
 import { env } from "./env.js";
 import { authPlugin } from "./modules/auth/plugin.js";
 import { registerWorkspaceRoutes } from "./modules/tenancy/workspaces.js";
+import { registerProfileRoutes } from "./modules/tenancy/profile.js";
 
-/** Assembles the Fastify app: zod type provider, better-auth handler, workspace routes. */
+/** Assembles the Fastify app: zod type provider, better-auth handler, workspace + profile routes. */
 export async function buildServer() {
   const app = Fastify({ loggerInstance: logger }).withTypeProvider<ZodTypeProvider>();
 
@@ -18,6 +19,7 @@ export async function buildServer() {
 
   await app.register(authPlugin);
   await app.register(registerWorkspaceRoutes);
+  await app.register(registerProfileRoutes);
 
   return app;
 }
