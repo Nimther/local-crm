@@ -33,6 +33,12 @@ export default defineConfig({
       PLATFORM_SENDGRID_API_KEY:
         process.env.PLATFORM_SENDGRID_API_KEY ?? "SG.test_platform_key_0000000000000000",
       PLATFORM_MAIL_FROM: process.env.PLATFORM_MAIL_FROM ?? "noreply@megacrm.test",
+      // Test-safe local-KMS envelope-encryption config (01-05, RESEARCH.md
+      // Pitfall 3) -- a static, test-only KEK, never used past this test
+      // suite. KMS_PROVIDER defaults to "local" so envelope.test.ts and
+      // sendgrid-key-connect.test.ts never require real AWS credentials.
+      KMS_PROVIDER: process.env.KMS_PROVIDER ?? "local",
+      KMS_LOCAL_KEK: process.env.KMS_LOCAL_KEK ?? "grdVCb1fxmhPzylKEPqafcPW4xOMaynE0UwaFUo2OUE=",
     },
   },
 });
