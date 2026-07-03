@@ -1,8 +1,8 @@
 ---
 phase: 01-workspace-foundation-team-access
-reviewed: 2026-07-03T13:09:31Z
+reviewed: 2026-07-03T14:29:09Z
 depth: standard
-files_reviewed: 71
+files_reviewed: 69
 files_reviewed_list:
   - apps/api/package.json
   - apps/api/src/db.ts
@@ -72,101 +72,177 @@ files_reviewed_list:
   - packages/shared-schemas/src/index.ts
   - packages/shared-schemas/src/invite.ts
   - packages/shared-schemas/src/sendgrid-key.ts
+  - scripts/check-env.mjs
 findings:
   critical: 0
-  warning: 5
+  warning: 4
   info: 4
-  total: 9
+  total: 8
 status: issues_found
 ---
 
-# Phase 01: Code Review Report
+# Phase 1: Code Review Report
 
-**Reviewed:** 2026-07-03T13:09:31Z
+**Reviewed:** 2026-07-03T14:29:09Z
 **Depth:** standard
-**Files Reviewed:** 71
+**Files Reviewed:** 69
 **Status:** issues_found
 
 ## Summary
 
-Phase 01 (workspace foundation, team access, invite lifecycle, RLS-isolated tenant SendGrid key + KMS envelope encryption) is a well-structured, defensively-commented implementation. The multi-tenancy substrate (AsyncLocalStorage tenant context + `SET LOCAL` + Postgres RLS with `FORCE ROW LEVEL SECURITY`), the two-key separation (platform vs. tenant SendGrid), and the envelope-encryption scheme are correctly built and directly test-covered.
+Reviewed the workspace-foundation / team-access phase: env + boot config (the 01-07
+gap-closure surface), the KMS envelope-encryption client, tenant-context/RLS plumbing,
+better-auth-backed workspace/member/invite/sendgrid-key routes, and the full React
+front end.
 
-**The four prior blockers are confirmed fixed and hold:**
-- **CR-01** (unauthenticated GET sendgrid-key): the GET route now calls `getCallerRoles`, which throws for unauthenticated/non-member/unknown-slug alike and maps every throw to the same 404 — no keyMask leak, no enumeration oracle. Verified by `sendgrid-key-connect.test.ts` ("GET returns 404 for an unauthenticated caller" and the non-member/nonexistent parity test).
-- **CR-02** (orgName HTML injection in invite email): `escapeHtml` entity-escapes `orgName` in `templates/invite.ts` before interpolation; `platform-mail.test.ts` locks it in with a `<script>` payload assertion.
-- **CR-03** (missing pg Pool error handler): `pool.on("error", ...)` added in `db.ts`.
-- **WR-02** (Members reading invite accept tokens): `GET /invites` now sits behind `requirePermission("invitation", "create")`; `invite-flow.test.ts` asserts a plain Member is 403'd while the Owner gets 200.
+The code is careful and defensive. I independently confirmed the four prior findings
+are still fixed in current code:
+- **CR-01** (unauthenticated sendgrid-key GET): `GET /sendgrid-key` calls
+  `getCallerRoles` and maps *any* throw to the same 404 as a nonexistent workspace;
+  verified `getActiveMemberRole` throws `FORBIDDEN` for non-members/unauthenticated in
+  better-auth's dist source. Enumeration-oracle test present. **Holds.**
+- **CR-02** (orgName HTML injection): `templates/invite.ts` entity-escapes `orgName`
+  before interpolation; test asserts `<script>` is neutralised. **Holds.**
+- **CR-03** (missing pg Pool error handler): `db.ts` registers `pool.on("error", ...)`.
+  **Holds.**
+- **WR-02** (invite-token leak to Members): `GET /invites` is gated by
+  `requirePermission("invitation","create")`; test asserts a plain Member is 403'd.
+  **Holds.**
 
-No new BLOCKER-severity defects were found. The findings below are robustness, defense-in-depth, and consistency issues (WARNING) plus minor quality notes (INFO).
+No Critical issues found. Four Warnings concern robustness/consistency (an asymmetric
+env guard that lets the API boot into a runtime crash, an orphaned-account path in
+register-from-invite, unguarded SendGrid response parsing, and stale active-org state
+after soft-delete). Info items are minor consistency nits.
+
+## Narrative Findings (AI reviewer)
 
 ## Warnings
 
-### WR-01: Invite `resend` route bypasses the Owner-only gate for admin-role invitations
+### WR-01: Env schema requires `KMS_KEK_ID` for `aws` but does NOT require `KMS_LOCAL_KEK` for `local` — API boots then crashes at first key-connect
 
-**File:** `apps/api/src/modules/tenancy/invites.ts:137-176`
-**Issue:** The invite-**create** route explicitly enforces D-18 ("only the Owner may invite someone directly as Admin") by checking `parsed.data.role === "admin"` and requiring the caller be an owner. The **resend** route (`/invites/:invitationId/resend`, gated only by `requirePermission("invitation", "create")`, which Admins hold) re-creates the invitation with `existing.role` and `resend: true` with **no** equivalent owner check. An Admin can therefore refresh/re-issue a pending *admin* invitation (extending its 7-day expiry and re-sending the email), which D-18 intends to keep exclusively in the Owner's hands. This is not a fresh privilege grant (the admin invite was originally authorized by an Owner), so severity is limited to a defense-in-depth / policy-consistency gap rather than direct escalation.
-**Fix:** Mirror the create-route guard in resend:
+**File:** `apps/api/src/env.ts:18-42`
+**Issue:** The `superRefine` enforces `KMS_KEK_ID` when `KMS_PROVIDER=aws`, but there is
+no matching guard requiring `KMS_LOCAL_KEK` when `KMS_PROVIDER=local` (the default).
+`KMS_LOCAL_KEK` is declared `z.string().optional()`, so the schema `safeParse` succeeds
+with the `local` provider and no KEK. The missing-KEK error is deferred to runtime inside
+`kms/local-provider.ts:getLocalKek()` (`throw new Error("KMS_LOCAL_KEK must be set...")`),
+which surfaces as a 500 the first time a tenant connects a SendGrid key.
+`scripts/check-env.mjs` catches this in dev, but only when `npm run dev` is launched from
+the repo root (the `predev` hook). Launching the API directly (`npm run dev -w apps/api`,
+or any staging/test path that sets `KMS_PROVIDER=local`) bypasses the checker and boots a
+process that is guaranteed to fail on first use — precisely the "boot succeeds, breaks
+later" masquerade class 01-07 set out to eliminate. The env schema, not the wrapper
+script, should be the authoritative guarantee.
+**Fix:** Add a symmetric guard in the `superRefine`:
 ```ts
-if ((existing.role ?? "member") === "admin") {
-  const callerRoles = await getCallerRoles(headers, slug);
-  if (!callerRoles.includes("owner")) {
-    return reply.code(403).send({ error: "Только владелец может назначать роль администратора" });
-  }
+if (val.KMS_PROVIDER === "local" && !val.KMS_LOCAL_KEK) {
+  ctx.addIssue({
+    code: z.ZodIssueCode.custom,
+    message: "KMS_LOCAL_KEK is required when KMS_PROVIDER=local (dev: `openssl rand -base64 32`)",
+    path: ["KMS_LOCAL_KEK"],
+  });
 }
 ```
 
-### WR-02: register-from-invite orphans a created account when `acceptInvitation` fails
+### WR-02: `register-from-invite` can leave an orphaned account that can never complete the invite
 
-**File:** `apps/api/src/modules/tenancy/invites.ts:287-313`
-**Issue:** The D-12 flow calls `auth.api.signUpEmail` (creating the user account) and then, in a *separate* `auth.api.acceptInvitation` call, joins the workspace. If `acceptInvitation` throws (invite raced to canceled/expired between the earlier validity check and here, or any transient better-auth error), the newly-created account persists but is not attached to any workspace, and the response is an error. The user cannot retry register-from-invite (the `existingUser` check now returns 409) and is left with a dangling account they must separately log into. There is no compensating rollback/delete of the just-created user.
-**Fix:** Either wrap account creation + accept so a failed accept deletes the just-created user, or detect this state on the accept path (user exists, not yet a member of the invite's org) and re-run accept using the current session rather than returning a hard error. At minimum, return a more actionable error directing the user to log in and accept.
+**File:** `apps/api/src/modules/tenancy/invites.ts:287-319`
+**Issue:** The handler creates the account (`auth.api.signUpEmail`) and *then* accepts the
+invitation in a second, non-atomic step. If `acceptInvitation` fails (APIError → early
+return, or any other throw → 500), the user record already exists but the invitation is
+not accepted and no session cookie is returned to the browser. On retry, the
+`existingUser` check at lines 278-285 returns 409 ("account already exists — log in to
+accept"), stranding the user: the account exists, the invite may still be pending, and the
+UI's register path can no longer be used to complete it. The two writes should be atomic or
+the failure path should be recoverable.
+**Fix:** On `acceptInvitation` failure after a successful sign-up, forward the sign-up
+`set-cookie` so the user lands signed-in on the invite-accept page (where the
+existing-session accept button can retry), and/or in the 409 branch detect "own account,
+matching email, invite still pending" and attempt the accept instead of hard-rejecting.
 
-### WR-03: `validateTenantSendGridKey` dereferences `scopes` and `results` without shape guards
+### WR-03: `validateTenantSendGridKey` assumes SendGrid response shape and doesn't guard `fetch` rejection — unhandled 500 on malformed/failed responses
 
-**File:** `apps/api/src/modules/tenancy/sendgrid-client.ts:40-53`
-**Issue:** After `scopesRes.ok`, the code does `const { scopes } = await scopesRes.json()` then `scopes.includes("mail.send")`. If SendGrid returns a 200 with an unexpected body (missing `scopes`, or `scopes` not an array — e.g. an API contract drift or a proxy/error page returning 200), `scopes.includes` throws a `TypeError`, which propagates out of the connect route as an unhandled 500 (it is not an `APIError`, so the route's `catch` rethrows). The same applies to `.results.map(...)` on the verified-senders response. This turns a recoverable "treat as invalid" outcome into a crash-shaped 500.
-**Fix:** Validate the parsed shape before use, e.g. `const scopes = Array.isArray(body?.scopes) ? body.scopes : null; if (!scopes) return { valid: false, reason: "invalid" };` and guard `results` similarly (`Array.isArray(body?.results) ? body.results : []`). Parsing the external response with a Zod schema (already the project convention) is the cleanest fix.
+**File:** `apps/api/src/modules/tenancy/sendgrid-client.ts:32-56`
+**Issue:** Two unguarded assumptions:
+1. `const { scopes } = (await scopesRes.json()) as SendGridScopesResponse;` then
+   `scopes.includes("mail.send")`. If `scopesRes.ok` but the body lacks a `scopes` array
+   (proxy/HTML 200, or an API shape change), `scopes` is `undefined` and `.includes`
+   throws `TypeError`. Likewise `(...).results.map(...)` assumes `results` exists whenever
+   `sendersRes.ok`.
+2. A network-level `fetch` rejection (DNS failure, timeout) propagates out of
+   `validateTenantSendGridKey`; the connect route (`sendgrid-key.ts:86`) has no try/catch
+   around it, so it becomes an unhandled 500 rather than the friendly `INVALID_KEY_ERROR`.
+**Fix:** Defensively coerce and wrap:
+```ts
+const body = (await scopesRes.json().catch(() => null)) as SendGridScopesResponse | null;
+if (!body || !Array.isArray(body.scopes)) return { valid: false, reason: "invalid" };
+if (!body.scopes.includes("mail.send")) return { valid: false, reason: "missing_scope" };
+```
+and treat a thrown `fetch` (or a non-array `results`) as `{ valid: false, reason: "invalid" }`
+(or catch at the route and return 422 with `INVALID_KEY_ERROR`).
 
-### WR-04: `withTenantTransaction` error path relies on pg-pool internals, not the documented `release(true)` its own comment claims
+### WR-04: Custom soft-delete leaves stale `activeOrganizationId` that better-auth's own delete clears
 
-**File:** `apps/api/src/middleware/tenant-context.ts:56-66`
-**Issue:** The `catch` block's comment states "releasing below with `destroy=true` handles that case," but the `finally` calls `client.release()` with **no** argument. The connection is only reliably removed from the pool because pg-pool's internal `_release` independently checks `!client._queryable || client._ending` and removes dead clients (confirmed by reading `pg-pool/index.js`) — an undocumented internal, not the public `release(err)` contract. In practice it works, but the code is fragile: it depends on the socket-error having already flipped `_queryable` before `release()` runs; if a dead connection is released before that flag propagates, it can briefly re-enter the pool and fail the next acquirer's first query (a 500, not a cross-tenant leak — `SET LOCAL` on a terminated backend cannot bleed state). Separately, the `ROLLBACK` failure is swallowed with no log.
-**Fix:** Make the intent explicit and correct: on the error path call `client.release(err)` (a truthy arg forces destroy), matching the comment. E.g. release with the captured error inside `catch` before rethrow, or track a `broken` flag and pass it to `release()` in `finally`. Log the swallowed ROLLBACK failure at debug level.
-
-### WR-05: `KMS_LOCAL_KEK` is not validated at boot when `KMS_PROVIDER=local`, deferring failure to first key operation
-
-**File:** `apps/api/src/env.ts:22-42`
-**Issue:** The `superRefine` fails fast for two cases (local+production, and aws-without-KEK_ID) but does **not** require `KMS_LOCAL_KEK` to be present/valid when `KMS_PROVIDER=local`. A misconfigured local/staging deploy therefore boots and serves traffic successfully, then throws at the first SendGrid-key connect/recheck (inside `getLocalKek()` in `local-provider.ts`), surfacing as a runtime 500 on a user action rather than a boot failure. This contradicts the "fail before the server even starts listening" philosophy the file itself documents for the sibling KMS guards.
-**Fix:** Add a `superRefine` branch: when `KMS_PROVIDER === "local"`, require `KMS_LOCAL_KEK` to be set and decode to exactly 32 bytes (hoist the check from `local-provider.ts`), so a bad local KEK is a boot error like the AWS path.
+**File:** `apps/api/src/modules/tenancy/workspaces.ts:159-182`
+**Issue:** The DELETE handler deliberately bypasses better-auth's `organization.delete`
+(to keep the row for soft-delete) and only runs `UPDATE organization SET deletedAt`.
+better-auth's own `deleteOrganization` additionally calls
+`adapter.setActiveOrganization(session.token, null)` (verified in `crud-org.mjs:280-284`).
+Skipping that leaves every member's `session.activeOrganizationId` still pointing at the
+now-deleted workspace. In this phase nothing routes off `activeOrganizationId` (tenant
+context is resolved from the URL slug), so impact is currently cosmetic — but any future
+code that trusts the session's active org, or any better-auth call that falls back to
+`session.activeOrganizationId` when no explicit `organizationId` is passed, will silently
+operate against a deleted workspace.
+**Fix:** In the soft-delete handler also null out active-org state for affected sessions
+(`UPDATE session SET "activeOrganizationId" = NULL WHERE "activeOrganizationId" = $1`), so
+session state matches the deletion.
 
 ## Info
 
-### IN-01: `maskKey` reveals the entire key for pathologically short inputs
+### IN-01: SendGrid recheck route is not gated by `requireVerifiedEmail` (inconsistent with connect)
 
-**File:** `apps/api/src/modules/tenancy/sendgrid-key.ts:22-27`
-**Issue:** `maskKey` takes `slice(0, min(6, len))` as prefix and `slice(-4)` as suffix. For any key ≤ 4 chars the prefix and suffix overlap and the mask reproduces the full key (e.g. a 4-char key → `abcd…abcd`). Real SendGrid keys are ~69 chars and are live-validated before `maskKey` runs, so this is not reachable in practice — but the masking function itself is not self-defending.
-**Fix:** Guard against short inputs, e.g. return a fixed placeholder when `apiKey.length < 12`, or compute the suffix from chars after the prefix so they never overlap.
+**File:** `apps/api/src/modules/tenancy/sendgrid-key.ts:115-118`
+**Issue:** `POST /sendgrid-key` (connect) uses `preHandler: [requirePermission(...),
+requireVerifiedEmail]`, but `POST /sendgrid-key/recheck` uses only `requirePermission`.
+Currently harmless (a key can only exist if an already-verified owner connected it), but
+the asymmetry becomes a gap if verification state can ever be revoked.
+**Fix:** Add `requireVerifiedEmail` to the recheck `preHandler`, or comment why it is
+intentionally omitted.
 
-### IN-02: `GET /members` is an enumeration oracle (403 vs 404), inconsistent with the deliberately-hardened sendgrid-key GET
+### IN-02: `scripts/check-env.mjs` parser diverges from `tsx --env-file` semantics (no quote stripping)
 
-**File:** `apps/api/src/modules/tenancy/members.ts:24-51`
-**Issue:** For a non-member the members list returns 403 (from `listMembers`), while a nonexistent slug returns 404 (from `findActiveWorkspaceBySlug`). The sendgrid-key GET route went out of its way to collapse both cases to an identical 404 to avoid a workspace-existence oracle (T-01-06/07/11); the members route leaves that oracle open. Low impact (slugs are user-chosen, not secret), but the inconsistency is worth noting since the codebase treats this as a real concern elsewhere.
-**Fix:** For parity, resolve the workspace via `findActiveWorkspaceBySlug` first and map a non-member `listMembers` failure to the same 404, matching the sendgrid-key route's pattern.
+**File:** `scripts/check-env.mjs:29-37`
+**Issue:** The hand-rolled `.env` parser takes the raw slice after `=` without stripping
+surrounding quotes or inline comments. It only checks presence/non-emptiness, so its
+notion of "present" can diverge from what `tsx watch --env-file` actually loads for edge
+cases, producing a green check for an env the API then rejects. Dev-only impact.
+**Fix:** Reuse Node's own env parsing (`util.parseEnv` on Node 22) so checker and runtime
+agree, or document that the checker is a presence-only heuristic.
 
-### IN-03: `createUniqueWorkspaceSlug` has a check-then-insert TOCTOU race surfacing as an unhandled 500
+### IN-03: `GET /api/workspaces/:slug` collapses a multi-role member to `role[0]`
 
-**File:** `apps/api/src/modules/tenancy/workspaces.ts:27-41,78-96`
-**Issue:** The slug uniqueness loop `SELECT`s for a free candidate, then `createOrganization` `INSERT`s it later. Two concurrent creates with the same name can both observe the base slug free and both attempt it; the DB `organization_slug_unique` constraint correctly rejects the loser, but that error is a driver error (not `APIError`), so the route rethrows it as a 500 rather than retrying or returning a clean 4xx. Data integrity is preserved (the constraint holds); only the error surface is poor.
-**Fix:** Catch the unique-violation (SQLSTATE `23505`) around `createOrganization` and retry slug generation a bounded number of times, or restructure as insert-with-retry rather than pre-checking.
+**File:** `apps/api/src/modules/tenancy/workspaces.ts:122`
+**Issue:** `Array.isArray(role) ? role[0] : role` returns only the first role and passes a
+possibly comma-joined string (`"owner,admin"`) straight through. Front-end `ROLE_LABELS`
+lookups (`WorkspaceHome.tsx`, `MemberRow.tsx`) then miss and render the raw string. Single
+roles are the norm this phase, so cosmetic — but inconsistent with `members.ts`, which uses
+`normalizeRoles(...).join(",")`.
+**Fix:** Route this through `normalizeRoles` for one canonical representation.
 
-### IN-04: Test-fixture secrets hardcoded in `vitest.config.ts`
+### IN-04: `resend` on a non-pending (canceled) invitation silently creates a brand-new invite
 
-**File:** `apps/api/vitest.config.ts:33-41`
-**Issue:** A static `KMS_LOCAL_KEK` and a fake `PLATFORM_SENDGRID_API_KEY` are hardcoded as fallback defaults. These are clearly labeled test-only, are overridden by env when present, and never touch a real network (nock intercepts). Not a production-secret exposure, but flagged for completeness since a secret-scanner will match the base64 KEK literal.
-**Fix:** No action required for correctness. Optionally source these from a `.env.test` to keep literal key material out of committed source.
+**File:** `apps/api/src/modules/tenancy/invites.ts:137-176`
+**Issue:** The resend route verifies workspace ownership, then calls `createInvitation({
+..., resend: true })`. better-auth only *refreshes* an existing invite when
+`findPendingInvitation` returns a row (`crud-invites.mjs:128-160`); if the original was
+canceled/expired there is no pending row, so it falls through and creates a fresh
+invitation. The caller believes it resent the same invite.
+**Fix:** Guard for `existing.status === "pending"` before resending (return 400/409 for
+canceled invites), or document that resend-of-canceled intentionally issues a new invite.
 
 ---
 
-_Reviewed: 2026-07-03T13:09:31Z_
+_Reviewed: 2026-07-03T14:29:09Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
