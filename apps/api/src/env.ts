@@ -41,5 +41,21 @@ const envSchema = z
     }
   });
 
-export const env = envSchema.parse(process.env);
+const parsed = envSchema.safeParse(process.env);
+
+if (!parsed.success) {
+  const lines = parsed.error.issues.map((issue) => {
+    const path = issue.path.length > 0 ? issue.path.join(".") : "(root)";
+    return `  - ${path}: ${issue.message}`;
+  });
+  throw new Error(
+    [
+      "Invalid environment configuration -- the API cannot start.",
+      "Fix these variables (see .env.example):",
+      ...lines,
+    ].join("\n")
+  );
+}
+
+export const env = parsed.data;
 export type Env = z.infer<typeof envSchema>;
