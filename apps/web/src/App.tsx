@@ -7,6 +7,8 @@ import { Toaster } from "@/components/ui/sonner";
 import RegisterPage from "@/routes/register";
 import LoginPage from "@/routes/login";
 import CreateWorkspacePage from "@/routes/create-workspace";
+import ResetRequestPage from "@/routes/reset-request";
+import ResetPasswordPage from "@/routes/reset-password";
 import { AppShell } from "@/features/app-shell/AppShell";
 import { WorkspaceHome } from "@/features/workspace-home/WorkspaceHome";
 
@@ -52,6 +54,8 @@ export default function App() {
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/create-workspace" element={<CreateWorkspacePage />} />
+          <Route path="/reset" element={<ResetRequestPage />} />
+          <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/w/:slug" element={<AppShell />}>
             <Route index element={<WorkspaceHome />} />
           </Route>
