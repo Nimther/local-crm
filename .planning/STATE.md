@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 1
-current_phase_name: Workspace Foundation & Team Access
+current_phase: 01
+current_phase_name: workspace-foundation-team-access
 status: executing
 stopped_at: Phase 1 UI-SPEC approved
-last_updated: "2026-07-03T07:25:15.619Z"
+last_updated: "2026-07-03T09:23:30.116Z"
 last_activity: 2026-07-03
-last_activity_desc: Roadmap created (7 phases, 49 requirements mapped)
+last_activity_desc: Phase 01 execution started
 progress:
   total_phases: 7
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_plans: 5
+  completed_plans: 1
   percent: 0
 ---
 
@@ -24,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-03)
 
 **Core value:** Маркетолог настраивает триггерную цепочку или кампанию — и письма надёжно и вовремя доходят до нужных контактов, со сквозным отслеживанием статусов (delivered/opened/clicked/bounced).
-**Current focus:** Phase 1 — Workspace Foundation & Team Access
+**Current focus:** Phase 01 — workspace-foundation-team-access
 
 ## Current Position
 
-Phase: 1 of 7 (Workspace Foundation & Team Access)
-Plan: 0 of TBD in current phase
+Phase: 01 (workspace-foundation-team-access) — EXECUTING
+Plan: 2 of 5
 Status: Ready to execute
-Last activity: 2026-07-03 — Roadmap created (7 phases, 49 requirements mapped)
+Last activity: 2026-07-03 — Phase 01 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -55,6 +55,7 @@ Progress: [░░░░░░░░░░] 0%
 - Trend: —
 
 *Updated after each plan completion*
+| Phase 01 P01 | 45min | 3 tasks | 37 files |
 
 ## Accumulated Context
 
@@ -66,6 +67,9 @@ Recent decisions affecting current work:
 - Multi-tenancy and send-queue isolation are foundational (Phase 1), not deferred optimizations.
 - Broadcast-first send loop: campaigns (Phase 4) prove the send pipeline before flows (Phase 6) reuse it; webhook tracking (Phase 5) closes the loop right after the first real send.
 - One shared segment-evaluation engine (Phase 3) serves both campaigns and flows.
+- [Phase 01]: IDs across better-auth's schema are native Postgres uuid (gen_random_uuid()) with advanced.database.generateId:false, matching the ::uuid cast every RLS policy uses
+- [Phase 01]: FORCE ROW LEVEL SECURITY required on workspace_sendgrid_keys -- Postgres exempts the table owner from RLS by default, and the app role owns its own tables
+- [Phase 01]: better-auth's own tables (user/session/account/verification/organization/member/invitation) are deliberately outside RLS -- scoped by session/active-organization membership instead
 
 ### Pending Todos
 
@@ -90,6 +94,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-03T06:53:17.826Z
+Last session: 2026-07-03T09:22:38.544Z
 Stopped at: Phase 1 UI-SPEC approved
 Resume file: .planning/phases/01-workspace-foundation-team-access/01-UI-SPEC.md
