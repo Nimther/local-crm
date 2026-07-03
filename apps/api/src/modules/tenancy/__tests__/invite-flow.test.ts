@@ -3,7 +3,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { buildServer } from "../../../server.js";
 import { ensureTestDbMigrated, getTestDatabaseUrl } from "../../../test/db-fixture.js";
-import { db, invitation } from "@mega-crm/db";
+import { db, invitation, member } from "@mega-crm/db";
 
 interface CapturedMailBody {
   content: Array<{ type: string; value: string }>;
@@ -44,7 +44,7 @@ describe("invite lifecycle (TENANT-02)", () => {
     if (!sessionCookie) {
       throw new Error("sign-up response did not set a session cookie");
     }
-    return { cookie: `${sessionCookie.name}=${sessionCookie.value}` };
+    return { cookie: `${sessionCookie.name}=${sessionCookie.value}`, userId: res.json().user.id as string };
   }
 
   async function signIn(email: string, password: string) {
@@ -250,6 +250,33 @@ describe("invite lifecycle (TENANT-02)", () => {
       payload: { email: inviteEmail, role: "member" },
     });
     expect(secondInviteRes.statusCode, `re-invite after revoke failed: ${secondInviteRes.body}`).toBe(200);
+  });
+
+  it("a plain Member is 403'd from GET /invites (cannot read pending invites or accept tokens); the Owner still gets 200 (WR-02)", async () => {
+    const owner = await signUp(`owner-list-${Date.now()}@example.com`, "correct horse battery staple 42", "Owner");
+    const workspace = await createWorkspace(owner.cookie, "List Co");
+
+    const memberAccount = await signUp(
+      `list-member-${Date.now()}@example.com`,
+      "correct horse battery staple 42",
+      "List Member"
+    );
+    await db.insert(member).values({ organizationId: workspace.id, userId: memberAccount.userId, role: "member" });
+
+    const memberRes = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/invites`,
+      headers: { cookie: memberAccount.cookie },
+    });
+    expect(memberRes.statusCode).toBe(403);
+
+    const ownerRes = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/invites`,
+      headers: { cookie: owner.cookie },
+    });
+    expect(ownerRes.statusCode, `owner GET /invites failed: ${ownerRes.body}`).toBe(200);
+    expect(Array.isArray(ownerRes.json())).toBe(true);
   });
 
   it("resend issues a fresh invite with a refreshed expiry", async () => {

@@ -84,31 +84,35 @@ export async function registerInviteRoutes(fastify: FastifyInstance): Promise<vo
     }
   );
 
-  fastify.get("/api/workspaces/:slug/invites", async (request, reply) => {
-    const { slug } = request.params as { slug: string };
-    const workspace = await findActiveWorkspaceBySlug(slug);
-    if (!workspace) {
-      return reply.code(404).send({ error: "Workspace not found" });
-    }
-
-    try {
-      const invitations = await auth.api.listInvitations({
-        headers: toFetchHeaders(request),
-        query: { organizationId: workspace.id },
-      });
-      // Every non-pending invitation (accepted/canceled/rejected) is either
-      // already reflected in the member list or no longer actionable --
-      // pending ones (including silently expired-but-still-"pending" rows)
-      // are what the team page's badge + revoke/resend actions operate on.
-      const pending = invitations.filter((inv) => inv.status === "pending");
-      return reply.send(pending.map((inv) => toInviteResponse(inv)));
-    } catch (err) {
-      if (err instanceof APIError) {
-        return reply.code(err.statusCode ?? 403).send({ error: err.message });
+  fastify.get(
+    "/api/workspaces/:slug/invites",
+    { preHandler: requirePermission("invitation", "create") },
+    async (request, reply) => {
+      const { slug } = request.params as { slug: string };
+      const workspace = await findActiveWorkspaceBySlug(slug);
+      if (!workspace) {
+        return reply.code(404).send({ error: "Workspace not found" });
       }
-      throw err;
+
+      try {
+        const invitations = await auth.api.listInvitations({
+          headers: toFetchHeaders(request),
+          query: { organizationId: workspace.id },
+        });
+        // Every non-pending invitation (accepted/canceled/rejected) is either
+        // already reflected in the member list or no longer actionable --
+        // pending ones (including silently expired-but-still-"pending" rows)
+        // are what the team page's badge + revoke/resend actions operate on.
+        const pending = invitations.filter((inv) => inv.status === "pending");
+        return reply.send(pending.map((inv) => toInviteResponse(inv)));
+      } catch (err) {
+        if (err instanceof APIError) {
+          return reply.code(err.statusCode ?? 403).send({ error: err.message });
+        }
+        throw err;
+      }
     }
-  });
+  );
 
   fastify.post(
     "/api/workspaces/:slug/invites/:invitationId/revoke",
