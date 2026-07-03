@@ -27,6 +27,12 @@ export default defineConfig({
       // Route every test run at the isolated test database, never the dev
       // DATABASE_URL, so tests can never touch real dev data.
       DATABASE_URL: process.env.TEST_DATABASE_URL ?? "",
+      // Test-safe platform-mail credentials (never real SendGrid values) --
+      // outbound requests are always intercepted by `nock` in tests that
+      // exercise platformMail, so these never touch the real network.
+      PLATFORM_SENDGRID_API_KEY:
+        process.env.PLATFORM_SENDGRID_API_KEY ?? "SG.test_platform_key_0000000000000000",
+      PLATFORM_MAIL_FROM: process.env.PLATFORM_MAIL_FROM ?? "noreply@megacrm.test",
     },
   },
 });
