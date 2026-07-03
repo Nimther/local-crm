@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 2
-current_phase_name: Contacts & Event Ingestion
-status: executing
-stopped_at: "Completed 01-06-PLAN.md (gap-closure: CR-01 blocker + WR-02/CR-02/CR-03 closed) -- Phase 01 ready for re-verification"
-last_updated: "2026-07-03T13:19:35.197Z"
+current_phase: 01
+current_phase_name: workspace-foundation-team-access
+status: verifying
+stopped_at: "Completed 01-07-PLAN.md (gap-closure: cold-start env drift / UAT Test 2 blocker closed) -- Phase 01 fully re-verified at plan level, ready for phase-level UAT re-run"
+last_updated: "2026-07-03T14:15:06.690Z"
 last_activity: 2026-07-03
-last_activity_desc: Phase 01 complete, transitioned to Phase 2
+last_activity_desc: Phase 01 execution started
 progress:
   total_phases: 7
   completed_phases: 1
-  total_plans: 6
-  completed_plans: 6
+  total_plans: 7
+  completed_plans: 7
   percent: 14
 ---
 
@@ -28,10 +28,10 @@ See: .planning/PROJECT.md (updated 2026-07-03)
 
 ## Current Position
 
-Phase: 2 — Contacts & Event Ingestion
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-07-03 — Phase 01 complete, transitioned to Phase 2
+Phase: 01 (workspace-foundation-team-access) — EXECUTING
+Plan: 7 of 7
+Status: Phase complete — ready for verification
+Last activity: 2026-07-03 — Phase 01 execution started
 
 Progress: [████████░░] 80%
 
@@ -61,6 +61,7 @@ Progress: [████████░░] 80%
 | Phase 01 P04 | 7min | 3 tasks | 28 files |
 | Phase 01 P05 | 7min | 3 tasks | 19 files |
 | Phase 01 P06 | 2min | 3 tasks | 7 files |
+| Phase 01 P07 | 10min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -89,6 +90,9 @@ Recent decisions affecting current work:
 - [Phase 01]: 01-06: GET sendgrid-key uses a try/catch around getCallerRoles (not requirePermission) to close the enumeration oracle while remaining readable by any member — requirePermission would 403 non-members and over-restrict Members; the route needs uniform 404 for unauth/non-member instead
 - [Phase 01]: 01-06: GET /invites reuses the invitation:create permission (matching sibling POST create route) rather than a new permission — Owner/Admin already hold invitation:create per D-17; Member correctly lacks it
 - [Phase 01]: 01-06: invite email subject line left unescaped by design — subject is a JSON field rendered as plain text by mail clients, not an HTML sink -- escaping it would only surface literal entity codes
+- [Phase 01]: 01-07: env.ts boot-error header pinned to literal substring 'Invalid environment' (case-sensitive) to satisfy automated verify while staying readable — Plan's automated check does a case-sensitive grep; wording chosen to satisfy both the check and human readability
+- [Phase 01]: 01-07: check-env.mjs mirrors env.ts's KMS superRefine conditional-requirement logic as a standalone dependency-free parser rather than importing the zod schema — Keeps the pre-dev checker usable without relying on the API workspace's node_modules being installed
+- [Phase 01]: 01-07: local .env's PLATFORM_SENDGRID_API_KEY/PLATFORM_MAIL_FROM are clearly-labeled placeholders, not real platform SendGrid credentials — No real platform SendGrid account available in this session; placeholders satisfy the schema to unblock boot/registration but must be replaced before live-email UAT Tests 4/5/7
 
 ### Pending Todos
 
@@ -105,6 +109,7 @@ Research flags to carry into planning:
 - 01-03: 3 manual phase-UAT checks outstanding — password-reset email delivery via platform key, verification banner + resend email delivery, profile display-name/password-change flow in a real browser (Task 4 deferred, not passed)
 - 01-04: 7 manual phase-UAT checks outstanding -- invite email delivery + copyable link, register-from-invite in incognito, join-with-existing-account, expired/revoked messaging, Member control hiding, Owner-only Admin-assignment/ownership-transfer, type-name delete removing workspace from switcher (Task 4 deferred, not passed)
 - 01-05: 7 manual phase-UAT checks outstanding -- empty state, invalid/missing-scope key copy, valid-key connect + verified senders + recheck, unverified-email gate, Member control hiding, onboarding checklist done-detection, plaintext-at-rest DB spot check (Task 4 deferred, not passed)
+- 01-07: full cold-start acceptance (docker-compose Postgres + npm run dev + browser /register submission, UAT Test 2 re-run) not executable in this session -- no docker binary or browser available. Env-schema/boot-error/predev-checker mechanics fully verified via automated checks; end-to-end re-run deferred to phase-level UAT with real infrastructure.
 
 ## Deferred Items
 
@@ -116,6 +121,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-03T12:56:22.216Z
-Stopped at: Completed 01-06-PLAN.md (gap-closure: CR-01 blocker + WR-02/CR-02/CR-03 closed) -- Phase 01 ready for re-verification
+Last session: 2026-07-03T14:13:30.335Z
+Stopped at: Completed 01-07-PLAN.md (gap-closure: cold-start env drift / UAT Test 2 blocker closed) -- Phase 01 fully re-verified at plan level, ready for phase-level UAT re-run
 Resume file: None

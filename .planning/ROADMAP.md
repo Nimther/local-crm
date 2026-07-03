@@ -37,7 +37,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. A user can paste a SendGrid API key and see it validated on connect (accepted if valid, rejected with a clear error if not); the stored key is encrypted at rest.
   5. A user in one workspace cannot see or access any contact, event, campaign, or statistic belonging to another workspace.
 
-**Plans**: 6/6 complete + 01-07 gap closure (pending re-verification)
+**Plans**: 7/7 plans complete
 **UI hint**: yes
 
 Plans:
@@ -67,7 +67,7 @@ Plans:
 
 **Wave 7** *(gap closure — UAT Test 2 blocker: cold-start env drift)*
 
-- [ ] 01-07-PLAN.md — Fix cold-start env drift (missing PLATFORM_SENDGRID_API_KEY / PLATFORM_MAIL_FROM / KMS_LOCAL_KEK crashing the API before listen → registration ECONNREFUSED): complete .env/.env.example, human-readable boot error in env.ts, loud pre-dev env check (TENANT-01, TENANT-04, TENANT-05)
+- [x] 01-07-PLAN.md — Fix cold-start env drift (missing PLATFORM_SENDGRID_API_KEY / PLATFORM_MAIL_FROM / KMS_LOCAL_KEK crashing the API before listen → registration ECONNREFUSED): complete .env/.env.example, human-readable boot error in env.ts, loud pre-dev env check (TENANT-01, TENANT-04, TENANT-05)
 
 ### Phase 2: Contacts & Event Ingestion
 
@@ -220,7 +220,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Workspace Foundation & Team Access | 6/6 | Complete    | 2026-07-03 |
+| 1. Workspace Foundation & Team Access | 7/7 | Complete   | 2026-07-03 |
 | 2. Contacts & Event Ingestion | 0/5 | Not started | - |
 | 3. Segmentation Engine | 0/4 | Not started | - |
 | 4. Broadcast Campaigns & Send Pipeline | 0/6 | Not started | - |
