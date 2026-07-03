@@ -1,11 +1,11 @@
 ---
-status: partial
+status: diagnosed
 phase: 01-workspace-foundation-team-access
 source: [01-01-SUMMARY.md, 01-02-SUMMARY.md, 01-03-SUMMARY.md, 01-04-SUMMARY.md, 01-05-SUMMARY.md, 01-06-SUMMARY.md]
 mode: mvp
 user_story: "As a marketer, I want to create a workspace, bring my team in with the right permissions, and connect my SendGrid account, so that my company's email marketing runs on data fully isolated from every other workspace from day one."
 started: 2026-07-03T13:38:11Z
-updated: 2026-07-03T13:44:07Z
+updated: 2026-07-03T13:51:15Z
 ---
 
 ## Current Test
@@ -216,5 +216,17 @@ blocked: 0
   reason: "User reported: generic failure toast on submit; vite dev-server console shows http proxy error for /api/auth/sign-up/email — AggregateError ECONNREFUSED (API server unreachable from the web dev proxy)"
   severity: blocker
   test: 2
-  artifacts: []  # Filled by diagnosis
-  missing: []    # Filled by diagnosis
+  root_cause: "Cold-start env drift: plans 01-03/01-05 added required env vars (PLATFORM_SENDGRID_API_KEY, PLATFORM_MAIL_FROM) to apps/api/src/env.ts but .env and .env.example were never updated. envSchema.parse throws a ZodError at import (env.ts:44), the API exits before listen(); tsx watch keeps the process tree alive so the stack looks up while nothing listens on :4000 — vite proxy gets ECONNREFUSED. Latent: KMS_LOCAL_KEK also missing (lazily validated — will break SendGrid key connect, UAT Test 9)."
+  artifacts:
+    - path: ".env"
+      issue: "missing PLATFORM_SENDGRID_API_KEY, PLATFORM_MAIL_FROM (and KMS_PROVIDER/KMS_LOCAL_KEK)"
+    - path: ".env.example"
+      issue: "stale — never updated when 01-03/01-05 added required env vars; gives no hint on cold start"
+    - path: "apps/api/src/env.ts"
+      issue: "throws raw ZodError at import; crash is invisible under tsx watch (dev stack masquerades as healthy)"
+  missing:
+    - "Add PLATFORM_SENDGRID_API_KEY, PLATFORM_MAIL_FROM, KMS_PROVIDER=local, KMS_LOCAL_KEK to .env"
+    - "Document all required env vars (incl. KMS_KEK_ID for aws) in .env.example"
+    - "Human-readable missing-env boot error in env.ts instead of raw Zod stack"
+    - "Dev script should fail loudly when the API cannot boot (no silent crash under tsx watch)"
+  debug_session: .planning/debug/registration-api-econnrefused.md
