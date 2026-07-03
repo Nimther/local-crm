@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 01
-current_phase_name: workspace-foundation-team-access
-status: verifying
-stopped_at: "Completed 01-07-PLAN.md (gap-closure: cold-start env drift / UAT Test 2 blocker closed) -- Phase 01 fully re-verified at plan level, ready for phase-level UAT re-run"
-last_updated: "2026-07-03T14:15:06.690Z"
+current_phase: 2
+current_phase_name: Contacts & Event Ingestion
+status: ready_to_plan
+stopped_at: Phase 01 complete (UAT 34/34 passed, security verified), ready to plan Phase 2
+last_updated: "2026-07-03T20:43:26.544Z"
 last_activity: 2026-07-03
-last_activity_desc: Phase 01 execution started
+last_activity_desc: Phase 01 complete, transitioned to Phase 2
 progress:
   total_phases: 7
   completed_phases: 1
@@ -21,25 +21,25 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-07-03)
+See: .planning/PROJECT.md (updated 2026-07-04)
 
 **Core value:** Маркетолог настраивает триггерную цепочку или кампанию — и письма надёжно и вовремя доходят до нужных контактов, со сквозным отслеживанием статусов (delivered/opened/clicked/bounced).
-**Current focus:** Phase 01 — workspace-foundation-team-access
+**Current focus:** Phase 2 — Contacts & Event Ingestion
 
 ## Current Position
 
-Phase: 01 (workspace-foundation-team-access) — EXECUTING
-Plan: 7 of 7
-Status: Phase complete — ready for verification
-Last activity: 2026-07-03 — Phase 01 execution started
+Phase: 2 — Contacts & Event Ingestion
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-07-04 — Phase 01 complete (UAT 34/34, security verified), transitioned to Phase 2
 
-Progress: [████████░░] 80%
+Progress: [████████████████████] 7/7 plans (100%)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 6
+- Total plans completed: 7
 - Average duration: — min
 - Total execution time: 0 hours
 
@@ -47,7 +47,7 @@ Progress: [████████░░] 80%
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 01 | 6 | - | - |
+| 01 | 7 | - | - |
 
 **Recent Trend:**
 
@@ -106,10 +106,7 @@ Research flags to carry into planning:
 - Phase 4: load-test triggered-vs-broadcast priority under a large broadcast (target: triggered sends within minutes).
 - Phase 5: integration test that replays a real signed SendGrid payload through the full HTTP stack (raw-body verification).
 - Phase 6: define quiet-hours timezone source and once-per-N-days re-entry semantics; simulate late-stage flow edits mid-execution.
-- 01-03: 3 manual phase-UAT checks outstanding — password-reset email delivery via platform key, verification banner + resend email delivery, profile display-name/password-change flow in a real browser (Task 4 deferred, not passed)
-- 01-04: 7 manual phase-UAT checks outstanding -- invite email delivery + copyable link, register-from-invite in incognito, join-with-existing-account, expired/revoked messaging, Member control hiding, Owner-only Admin-assignment/ownership-transfer, type-name delete removing workspace from switcher (Task 4 deferred, not passed)
-- 01-05: 7 manual phase-UAT checks outstanding -- empty state, invalid/missing-scope key copy, valid-key connect + verified senders + recheck, unverified-email gate, Member control hiding, onboarding checklist done-detection, plaintext-at-rest DB spot check (Task 4 deferred, not passed)
-- 01-07: full cold-start acceptance (docker-compose Postgres + npm run dev + browser /register submission, UAT Test 2 re-run) not executable in this session -- no docker binary or browser available. Env-schema/boot-error/predev-checker mechanics fully verified via automated checks; end-to-end re-run deferred to phase-level UAT with real infrastructure.
+- Operational prerequisite (any fresh environment): PLATFORM_SENDGRID_API_KEY / PLATFORM_MAIL_FROM in .env must be a real SendGrid key + verified sender before verification/reset/invite emails work — placeholders cause a 500 on resend (hit and resolved during Phase 1 UAT; all 01-03/01-04/01-05/01-07 deferred manual checks now passed in phase UAT 2026-07-04).
 
 ## Deferred Items
 
@@ -121,6 +118,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-03T14:13:30.335Z
-Stopped at: Completed 01-07-PLAN.md (gap-closure: cold-start env drift / UAT Test 2 blocker closed) -- Phase 01 fully re-verified at plan level, ready for phase-level UAT re-run
+Last session: 2026-07-04
+Stopped at: Phase 01 complete (UAT 34/34 passed, 0 issues; SECURITY.md verified, threats_open: 0), ready to plan Phase 2
 Resume file: None

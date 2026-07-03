@@ -1,7 +1,7 @@
 ---
 phase: 01-workspace-foundation-team-access
 verified: 2026-07-03T19:45:00Z
-status: human_needed
+status: passed
 score: 5/5 must-haves verified
 behavior_unverified: 0
 overrides_applied: 0
@@ -10,20 +10,25 @@ re_verification:
   previous_status: passed (2026-07-03T18:20:00Z verification), then UAT (01-UAT.md) found a blocker not caught by that verification
   previous_score: 5/5 (verification) / 25 passed, 1 issue, 8 pending (UAT)
   gaps_closed:
+
     - "Cold-start env drift: apps/api threw a raw ZodError at import (missing PLATFORM_SENDGRID_API_KEY/PLATFORM_MAIL_FROM/KMS_LOCAL_KEK in .env), crashing the API before listen() while tsx watch kept the process tree alive -- vite proxy returned ECONNREFUSED for /api/auth/sign-up/email (UAT Test 2, filed as a blocker gap). Closed by plan 01-07."
   gaps_remaining: []
   regressions: []
 deferred:
+
   - truth: "Member is blocked from launching campaigns/flows (second half of Success Criterion 3 / TENANT-03)"
     addressed_in: "Phase 4 (Broadcast Campaigns & Send Pipeline) / Phase 6 (Flows)"
     evidence: "No campaign/flow entity exists yet in this codebase; action names are pre-declared in access-control.ts's statement for those phases to enforce."
 human_verification:
+
   - test: "Real-browser cold start: docker-compose (or local Postgres) up, npm run dev, open /register in an actual browser, submit the form"
     expected: "No generic failure toast, no vite proxy ECONNREFUSED; user is signed in and routed to /create-workspace (UAT Test 2 re-run, visual/UX confirmation)"
     why_human: "Browser rendering, toast/error-copy legibility, and real vite-dev-server-to-browser wiring cannot be asserted by grep or curl. This verifier independently booted the real API process (via a locally running Postgres, since no docker binary is available in this sandbox) against the actual repo .env and exercised the identical HTTP endpoint (POST /api/auth/sign-up/email) that previously returned ECONNREFUSED -- it now returns 200 with a session cookie, and the follow-on POST /api/workspaces call returns 200 with role: owner. The vite.config.ts proxy target (http://localhost:4000) matches the port the API actually listens on. This is strong evidence the root cause is closed, but final visual/browser sign-off is still required per policy."
+
   - test: "Live email delivery for password reset, verification, and invite (UAT Tests 4, 5, 7)"
     expected: "Real emails are delivered from the platform's own SendGrid account/verified sender"
     why_human: ".env's PLATFORM_SENDGRID_API_KEY / PLATFORM_MAIL_FROM are still clearly-labeled placeholders (01-07-SUMMARY.md, User Setup Required section) -- they satisfy the env schema (unblocking boot) but cannot send real mail. The user must supply a real platform SendGrid key + verified sender before these three UAT tests can pass; this is external-service configuration, not a code gap."
+
   - test: "16 previously-deferred human-check items from plans 01-03/01-04/01-05 (profile changes, verification banner, invite email rendering in a real inbox, expired/revoked invite messaging, member-control hiding, delete-workspace confirmation UX, SendGrid connect empty/invalid/valid states, unverified-email gate copy, onboarding checklist done-detection, plaintext-at-rest DB spot check)"
     expected: "Each behaves as specified in its originating plan's <human-check> block"
     why_human: "Visual/UX/browser-session behaviors that cannot be asserted by static analysis; unaffected by 01-07 (which touched only env.ts, .env(.example), check-env.mjs, package.json at the boot-config layer, no UI surface). Carried forward unchanged from the prior verification cycle."
