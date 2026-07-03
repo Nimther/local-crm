@@ -22,6 +22,12 @@ export function AppShell() {
             Команда
           </Link>
           <Link
+            to={`/w/${slug}/settings/sendgrid`}
+            className="rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            SendGrid
+          </Link>
+          <Link
             to={`/w/${slug}/profile`}
             className="rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
           >

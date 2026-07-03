@@ -16,6 +16,7 @@ import { AppShell } from "@/features/app-shell/AppShell";
 import { WorkspaceHome } from "@/features/workspace-home/WorkspaceHome";
 import ProfilePage from "@/features/profile/ProfilePage";
 import TeamPage from "@/features/team/TeamPage";
+import SendGridKeySettings from "@/features/sendgrid-key/SendGridKeySettings";
 
 /**
  * Resolves "/" for a signed-in user: no workspace yet -> /create-workspace
@@ -64,6 +65,7 @@ export default function App() {
             <Route index element={<WorkspaceHome />} />
             <Route path="team" element={<TeamPage />} />
             <Route path="profile" element={<ProfilePage />} />
+            <Route path="settings/sendgrid" element={<SendGridKeySettings />} />
           </Route>
         </Routes>
       </BrowserRouter>

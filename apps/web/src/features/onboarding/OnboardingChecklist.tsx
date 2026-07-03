@@ -1,8 +1,15 @@
 import { Link } from "react-router";
+import { useQuery } from "@tanstack/react-query";
 import { Circle, CircleCheck } from "lucide-react";
 
+import type { SendgridKeyStatus } from "@mega-crm/shared-schemas";
+import { apiGet } from "@/lib/api";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+
+interface MemberListItem {
+  id: string;
+}
 
 export interface OnboardingItem {
   id: string;
@@ -12,30 +19,51 @@ export interface OnboardingItem {
 }
 
 /**
- * D-23: extensible onboarding checklist — items are data, not inline JSX, so
- * later phases (contacts, campaigns) append entries without restructuring.
- * Done-detection for SendGrid/invites is wired in 01-05; both items default
- * to pending here.
+ * D-23: extensible onboarding checklist -- items are data, not inline JSX,
+ * so later phases (contacts, campaigns) append entries without
+ * restructuring. Done-detection is wired here: «Подключите SendGrid» reads
+ * the live GET status (01-05), «Пригласите команду» reads the live member
+ * count (01-04) -- neither is hardcoded.
  */
-function buildItems(slug: string): OnboardingItem[] {
+function buildItems(
+  slug: string,
+  sendgridConnected: boolean,
+  hasSecondMember: boolean
+): OnboardingItem[] {
   return [
     {
       id: "sendgrid",
       label: "Подключите SendGrid",
       href: `/w/${slug}/settings/sendgrid`,
-      done: false,
+      done: sendgridConnected,
     },
     {
       id: "invite-team",
       label: "Пригласите команду",
       href: `/w/${slug}/team`,
-      done: false,
+      done: hasSecondMember,
     },
   ];
 }
 
 export function OnboardingChecklist({ slug }: { slug: string }) {
-  const items = buildItems(slug);
+  const sendgridQuery = useQuery({
+    queryKey: ["workspace", slug, "sendgrid-key"],
+    queryFn: () => apiGet<SendgridKeyStatus>(`/api/workspaces/${slug}/sendgrid-key`),
+    enabled: Boolean(slug),
+  });
+
+  const membersQuery = useQuery({
+    queryKey: ["workspace", slug, "members"],
+    queryFn: () => apiGet<MemberListItem[]>(`/api/workspaces/${slug}/members`),
+    enabled: Boolean(slug),
+  });
+
+  const items = buildItems(
+    slug,
+    Boolean(sendgridQuery.data?.connected),
+    (membersQuery.data?.length ?? 0) > 1
+  );
 
   return (
     <Card>
