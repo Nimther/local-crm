@@ -16,6 +16,12 @@ export function AppShell() {
           <WorkspaceSwitcher activeSlug={slug} />
           <Separator className="my-4" />
           <Link
+            to={`/w/${slug}/team`}
+            className="rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            Команда
+          </Link>
+          <Link
             to={`/w/${slug}/profile`}
             className="rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
           >

@@ -2,16 +2,20 @@ import { QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router";
 
 import { queryClient } from "@/lib/queryClient";
-import { authClient, useSession } from "@/lib/authClient";
+import { useSession } from "@/lib/authClient";
+import { apiGet } from "@/lib/api";
+import type { WorkspaceListItem } from "@mega-crm/shared-schemas";
 import { Toaster } from "@/components/ui/sonner";
 import RegisterPage from "@/routes/register";
 import LoginPage from "@/routes/login";
 import CreateWorkspacePage from "@/routes/create-workspace";
 import ResetRequestPage from "@/routes/reset-request";
 import ResetPasswordPage from "@/routes/reset-password";
+import InviteAcceptPage from "@/routes/invite-accept";
 import { AppShell } from "@/features/app-shell/AppShell";
 import { WorkspaceHome } from "@/features/workspace-home/WorkspaceHome";
 import ProfilePage from "@/features/profile/ProfilePage";
+import TeamPage from "@/features/team/TeamPage";
 
 /**
  * Resolves "/" for a signed-in user: no workspace yet -> /create-workspace
@@ -23,11 +27,9 @@ function RootRedirect() {
 
   const { data: workspaces, isPending: workspacesPending } = useQuery({
     queryKey: ["workspaces"],
-    queryFn: async () => {
-      const { data, error } = await authClient.organization.list();
-      if (error) throw error;
-      return data ?? [];
-    },
+    // D-20: /api/workspaces (not better-auth's own organization.list) so a
+    // soft-deleted workspace never gets redirected into.
+    queryFn: () => apiGet<WorkspaceListItem[]>("/api/workspaces"),
     enabled: Boolean(session),
   });
 
@@ -57,8 +59,10 @@ export default function App() {
           <Route path="/create-workspace" element={<CreateWorkspacePage />} />
           <Route path="/reset" element={<ResetRequestPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
+          <Route path="/invite/:invitationId" element={<InviteAcceptPage />} />
           <Route path="/w/:slug" element={<AppShell />}>
             <Route index element={<WorkspaceHome />} />
+            <Route path="team" element={<TeamPage />} />
             <Route path="profile" element={<ProfilePage />} />
           </Route>
         </Routes>

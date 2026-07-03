@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router";
 import { Building2, ChevronsUpDown, Plus } from "lucide-react";
 
-import { authClient } from "@/lib/authClient";
+import { apiGet } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -27,11 +27,9 @@ export function WorkspaceSwitcher({ activeSlug }: { activeSlug: string }) {
 
   const { data: workspaces = [] } = useQuery({
     queryKey: ["workspaces"],
-    queryFn: async () => {
-      const { data, error } = await authClient.organization.list();
-      if (error) throw error;
-      return (data ?? []) as WorkspaceSummary[];
-    },
+    // D-20: /api/workspaces (not better-auth's own organization.list) so a
+    // soft-deleted workspace never reappears in the switcher.
+    queryFn: () => apiGet<WorkspaceSummary[]>("/api/workspaces"),
   });
 
   const active = workspaces.find((w) => w.slug === activeSlug);
