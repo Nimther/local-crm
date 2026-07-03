@@ -127,13 +127,63 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (populated during roadmap creation) | | |
+| TENANT-01 | Phase 1 | Pending |
+| TENANT-02 | Phase 1 | Pending |
+| TENANT-03 | Phase 1 | Pending |
+| TENANT-04 | Phase 1 | Pending |
+| TENANT-05 | Phase 1 | Pending |
+| CONT-01 | Phase 2 | Pending |
+| CONT-02 | Phase 2 | Pending |
+| CONT-03 | Phase 2 | Pending |
+| CONT-04 | Phase 2 | Pending |
+| CONT-05 | Phase 2 | Pending |
+| EVNT-01 | Phase 2 | Pending |
+| EVNT-02 | Phase 2 | Pending |
+| EVNT-03 | Phase 2 | Pending |
+| SUBS-01 | Phase 2 | Pending |
+| SEGM-01 | Phase 3 | Pending |
+| SEGM-02 | Phase 3 | Pending |
+| SEGM-03 | Phase 3 | Pending |
+| SEGM-04 | Phase 3 | Pending |
+| CAMP-01 | Phase 4 | Pending |
+| CAMP-02 | Phase 4 | Pending |
+| CAMP-03 | Phase 4 | Pending |
+| CAMP-04 | Phase 4 | Pending |
+| CAMP-05 | Phase 4 | Pending |
+| SEND-01 | Phase 4 | Pending |
+| SEND-02 | Phase 4 | Pending |
+| SEND-03 | Phase 4 | Pending |
+| SEND-04 | Phase 4 | Pending |
+| SEND-05 | Phase 4 | Pending |
+| SEND-06 | Phase 4 | Pending |
+| SEND-07 | Phase 4 | Pending |
+| SUBS-03 | Phase 4 | Pending |
+| SUBS-04 | Phase 4 | Pending |
+| WBHK-01 | Phase 5 | Pending |
+| WBHK-02 | Phase 5 | Pending |
+| WBHK-03 | Phase 5 | Pending |
+| WBHK-04 | Phase 5 | Pending |
+| SUBS-02 | Phase 5 | Pending |
+| FLOW-01 | Phase 6 | Pending |
+| FLOW-02 | Phase 6 | Pending |
+| FLOW-03 | Phase 6 | Pending |
+| FLOW-04 | Phase 6 | Pending |
+| FLOW-05 | Phase 6 | Pending |
+| FLOW-06 | Phase 6 | Pending |
+| FLOW-07 | Phase 6 | Pending |
+| ANLT-01 | Phase 7 | Pending |
+| ANLT-02 | Phase 7 | Pending |
+| ANLT-03 | Phase 7 | Pending |
+| ANLT-04 | Phase 7 | Pending |
+| ANLT-05 | Phase 7 | Pending |
 
 **Coverage:**
-- v1 requirements: 41 total
-- Mapped to phases: 0
-- Unmapped: 41 ⚠️
+- v1 requirements: 49 total
+- Mapped to phases: 49
+- Unmapped: 0 ✓
+
+> Note: an earlier draft of this file recorded "41 total"; the actual v1 requirement-ID count is 49. Count corrected during roadmap creation.
 
 ---
 *Requirements defined: 2026-07-03*
-*Last updated: 2026-07-03 after initial definition*
+*Last updated: 2026-07-03 after roadmap creation (traceability populated, 49/49 mapped)*

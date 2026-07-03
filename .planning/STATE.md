@@ -1,8 +1,8 @@
 ---
-gsd_state_version: '1.0'
+gsd_state_version: '1.0'  # placeholder; syncStateFrontmatter overwrites on first state.* call
 status: planning
 progress:
-  total_phases: 5
+  total_phases: 7
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -13,17 +13,17 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-07-02)
+See: .planning/PROJECT.md (updated 2026-07-03)
 
-**Core value:** A reminder tied to a real future date goes out on time, exactly once, only to eligible non-suppressed recipients — and an accidental mass send is structurally impossible.
-**Current focus:** Phase 1 — Scope Decisions & Data Foundations
+**Core value:** Маркетолог настраивает триггерную цепочку или кампанию — и письма надёжно и вовремя доходят до нужных контактов, со сквозным отслеживанием статусов (delivered/opened/clicked/bounced).
+**Current focus:** Phase 1 — Workspace Foundation & Team Access
 
 ## Current Position
 
-Phase: 1 of 5 (Scope Decisions & Data Foundations)
+Phase: 1 of 7 (Workspace Foundation & Team Access)
 Plan: 0 of TBD in current phase
 Status: Ready to plan
-Last activity: 2026-07-02 — Project initialized from ingest (PROJECT.md, REQUIREMENTS.md, ROADMAP.md created; 39/39 v1 requirements mapped)
+Last activity: 2026-07-03 — Roadmap created (7 phases, 49 requirements mapped)
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -31,8 +31,8 @@ Progress: [░░░░░░░░░░] 0%
 
 **Velocity:**
 - Total plans completed: 0
-- Average duration: -
-- Total execution time: -
+- Average duration: — min
+- Total execution time: 0 hours
 
 **By Phase:**
 
@@ -41,8 +41,8 @@ Progress: [░░░░░░░░░░] 0%
 | - | - | - | - |
 
 **Recent Trend:**
-- Last 5 plans: -
-- Trend: -
+- Last 5 plans: —
+- Trend: —
 
 *Updated after each plan completion*
 
@@ -50,12 +50,12 @@ Progress: [░░░░░░░░░░] 0%
 
 ### Decisions
 
-Decisions are logged in PROJECT.md Key Decisions table (10 locked 2026-07-02: stack, D-01–D-08 research-proposed + owner-confirmed, Q2 consent posture).
+Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
-- Q1 resolved: tracked entity is an OWNED ENTITY with its own date, in an entity table; the trigger enrolls the entity, not the person
-- Q2 resolved: TRANSACTIONAL consent posture — no marketing opt-in gate, but full suppression + RFC 8058 one-click unsubscribe + full CAN-SPAM commercial bar
-- SendGrid sole v1 provider behind one narrow send seam; platform owns scheduling and the durable send log (SendGrid 72h/30d limits)
+- Multi-tenancy and send-queue isolation are foundational (Phase 1), not deferred optimizations.
+- Broadcast-first send loop: campaigns (Phase 4) prove the send pipeline before flows (Phase 6) reuse it; webhook tracking (Phase 5) closes the loop right after the first real send.
+- One shared segment-evaluation engine (Phase 3) serves both campaigns and flows.
 
 ### Pending Todos
 
@@ -63,8 +63,11 @@ None yet.
 
 ### Blockers/Concerns
 
-- Q3–Q9 remain open (see PROJECT.md Open Questions) — Phase 1 resolves them in docs/decisions/mvp-scope-decisions.md; Q4 (yearly recurrence) and Q5 (backfill rule) directly shape Phase 2 design
-- R9: two load-bearing Customer.io claims (late-attribute cutoff; monthly clamping) are medium-confidence — re-verify during design if they influence decisions
+Research flags to carry into planning:
+- Phase 2/3: benchmark behavioral segment queries at target scale (100k–1M contacts) before committing to the materialized-membership approach.
+- Phase 4: load-test triggered-vs-broadcast priority under a large broadcast (target: triggered sends within minutes).
+- Phase 5: integration test that replays a real signed SendGrid payload through the full HTTP stack (raw-body verification).
+- Phase 6: define quiet-hours timezone source and once-per-N-days re-entry semantics; simulate late-stage flow edits mid-execution.
 
 ## Deferred Items
 
@@ -76,6 +79,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-02
-Stopped at: Roadmap created from ingest; Phase 1 ready to plan
+Last session: 2026-07-03
+Stopped at: ROADMAP.md and STATE.md created; REQUIREMENTS.md traceability updated (49/49 mapped)
 Resume file: None
