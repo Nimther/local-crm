@@ -33,14 +33,15 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. A Member is blocked from changing the SendGrid key and from launching campaigns/flows, while Owner/Admin can do both.
   4. A user can paste a SendGrid API key and see it validated on connect (accepted if valid, rejected with a clear error if not); the stored key is encrypted at rest.
   5. A user in one workspace cannot see or access any contact, event, campaign, or statistic belonging to another workspace.
-**Plans**: TBD
+**Plans**: 5 plans
 **UI hint**: yes
 
 Plans:
-- [ ] 01-01: Multi-tenant DB schema, RLS policies, request-scoped tenant context + connection-pool isolation safety
-- [ ] 01-02: Auth, registration, workspace creation, membership, and role model (Owner/Admin/Member)
-- [ ] 01-03: Team invites by email + role assignment UI
-- [ ] 01-04: SendGrid key connect flow — validation on connect + envelope encryption (KMS-backed)
+- [ ] 01-01-PLAN.md — Walking-skeleton backend: monorepo scaffold + Drizzle/RLS schema + better-auth org backbone + tenant context + register→create-workspace→Owner API + migration (TENANT-01, TENANT-05)
+- [ ] 01-02-PLAN.md — Walking-skeleton UI: register/login, create-workspace onboarding, app shell + workspace switcher + home + onboarding checklist, wired to the API (TENANT-01, TENANT-05)
+- [ ] 01-03-PLAN.md — Platform system email + password reset + soft email verification + profile (TENANT-01, TENANT-04)
+- [ ] 01-04-PLAN.md — Team invites by email + membership/role management UI + delete workspace (TENANT-02, TENANT-03)
+- [ ] 01-05-PLAN.md — SendGrid key connect: validate + KMS envelope encryption + masked status UI + role/verify gates + onboarding checklist finalize (TENANT-03, TENANT-04)
 
 ### Phase 2: Contacts & Event Ingestion
 **Goal**: A marketer can build and maintain their contact base (UI, CSV, API) while their backend streams freeform behavioral events that create and enrich contacts in real time.
@@ -169,7 +170,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Workspace Foundation & Team Access | 0/4 | Not started | - |
+| 1. Workspace Foundation & Team Access | 0/5 | Not started | - |
 | 2. Contacts & Event Ingestion | 0/5 | Not started | - |
 | 3. Segmentation Engine | 0/4 | Not started | - |
 | 4. Broadcast Campaigns & Send Pipeline | 0/6 | Not started | - |
