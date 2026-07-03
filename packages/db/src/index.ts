@@ -1,0 +1,25 @@
+import { drizzle } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
+import * as authSchema from "./schema/auth.js";
+import * as sendgridKeysSchema from "./schema/sendgrid-keys.js";
+
+const schema = { ...authSchema, ...sendgridKeysSchema };
+
+const databaseUrl = process.env.DATABASE_URL;
+if (!databaseUrl) {
+  throw new Error("DATABASE_URL must be set to construct the Drizzle client (@mega-crm/db)");
+}
+
+const pool = new Pool({ connectionString: databaseUrl });
+
+/**
+ * Drizzle client used for better-auth's drizzleAdapter and any non-tenant
+ * query (e.g. workspace-slug uniqueness lookups). This client is NOT the
+ * tenant-scoped RLS pool — see apps/api/src/db.ts + middleware/tenant-context.ts
+ * for the pool that runs `SET LOCAL app.current_workspace_id` per transaction.
+ */
+export const db = drizzle(pool, { schema });
+
+export * from "./schema/auth.js";
+export * from "./schema/sendgrid-keys.js";
+export { TENANT_GUC_KEY } from "./rls.js";

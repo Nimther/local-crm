@@ -1,5 +1,4 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { FastifyInstance } from "fastify";
 import { buildServer } from "../../../server.js";
 import { ensureTestDbMigrated, getTestDatabaseUrl } from "../../../test/db-fixture.js";
 
@@ -9,7 +8,7 @@ import { ensureTestDbMigrated, getTestDatabaseUrl } from "../../../test/db-fixtu
  * needed) against the better-auth sign-up route and the workspaces routes.
  */
 describe("workspace creation (TENANT-01)", () => {
-  let app: FastifyInstance;
+  let app: Awaited<ReturnType<typeof buildServer>>;
 
   beforeAll(async () => {
     await ensureTestDbMigrated();
