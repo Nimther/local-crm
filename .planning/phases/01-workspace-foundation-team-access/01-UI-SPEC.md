@@ -2,7 +2,7 @@
 phase: 1
 slug: workspace-foundation-team-access
 status: draft
-shadcn_initialized: false
+shadcn_initialized: true
 preset: "new-york + neutral (to be initialized by executor during Wave 0 scaffold)"
 created: 2026-07-03
 ---
