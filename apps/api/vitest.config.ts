@@ -1,5 +1,5 @@
 import path from "node:path";
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
 // Load the repo-root .env for local dev/test runs (Node >=20.6 native loader).
 // Optional — CI/shell-exported env vars take precedence when no .env exists.
@@ -18,6 +18,11 @@ export default defineConfig({
     environment: "node",
     testTimeout: 20_000,
     hookTimeout: 20_000,
+    // `npm run build`'s tsc output (dist/**) mirrors src/**/*.test.ts as
+    // compiled .test.js — without this exclude, vitest's default glob picks
+    // up BOTH the source and the compiled copy and silently runs every test
+    // twice per `vitest run` (with no path filter).
+    exclude: [...configDefaults.exclude, "dist/**"],
     env: {
       // Route every test run at the isolated test database, never the dev
       // DATABASE_URL, so tests can never touch real dev data.

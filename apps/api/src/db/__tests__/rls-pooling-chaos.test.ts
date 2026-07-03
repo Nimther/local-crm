@@ -22,6 +22,16 @@ describe("RLS pooled-connection isolation chaos test (TENANT-05)", () => {
     await ensureTestDbMigrated();
     process.env.DATABASE_URL = getTestDatabaseUrl();
 
+    // A pool-level safety net: node-postgres requires a listener on
+    // Pool#error for any client-connection error that doesn't have its own
+    // handler in time, or Node treats it as an uncaught exception. This
+    // chaos test deliberately kills a connection (see below), so a
+    // pool-wide swallow is the correct, permanent guard — not a per-test
+    // workaround.
+    pool.on("error", () => {
+      // Expected: this test intentionally terminates a pooled connection.
+    });
+
     workspaceAId = randomUUID();
     workspaceBId = randomUUID();
 
@@ -70,6 +80,13 @@ describe("RLS pooled-connection isolation chaos test (TENANT-05)", () => {
     //    a client directly, set workspace A's GUC, then have Postgres
     //    itself terminate that backend before COMMIT/ROLLBACK ever runs.
     const doomed = await pool.connect();
+    // node-postgres emits 'error' on the client itself when Postgres closes
+    // the socket out from under it — expected here since we're about to
+    // pg_terminate_backend it on purpose. Without a listener this is an
+    // unhandled 'error' event and crashes the process.
+    doomed.on("error", () => {
+      // expected: this connection is being intentionally killed below
+    });
     const {
       rows: [{ pid }],
     } = await doomed.query<{ pid: number }>("SELECT pg_backend_pid() as pid");
@@ -82,6 +99,14 @@ describe("RLS pooled-connection isolation chaos test (TENANT-05)", () => {
     } finally {
       admin.release();
     }
+
+    // Give the server-initiated termination time to actually reach this
+    // process as a socket-level event (asynchronous relative to
+    // pg_terminate_backend returning) so it fires while our listener above
+    // is still attached, rather than racing with the next assertion.
+    await new Promise((resolve) => {
+      setTimeout(resolve, 100);
+    });
 
     // The doomed client's underlying socket is now dead — releasing it must
     // destroy it (never return a poisoned connection to the pool).
