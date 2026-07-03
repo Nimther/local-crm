@@ -137,6 +137,23 @@ describe("platformMail (platform-key-only dispatch)", () => {
     expect(html).not.toMatch(/template_id/i);
   });
 
+  it("renderInviteHtml HTML-escapes an attacker-controlled orgName (CR-02)", async () => {
+    const { renderInviteHtml } = await import("../templates/invite.js");
+
+    const tagName = "script";
+    const payload = `Acme<${tagName}>alert(1)</${tagName}>`;
+    const html = renderInviteHtml({ inviteUrl: "https://app.megacrm.test/invite/tok", orgName: payload });
+
+    expect(html).toContain("&lt;");
+    expect(html).toContain("&gt;");
+    expect(html).not.toContain(`<${tagName}>`);
+    expect(html).not.toContain(`</${tagName}>`);
+
+    const plain = renderInviteHtml({ inviteUrl: "https://app.megacrm.test/invite/tok", orgName: "Acme" });
+    expect(plain).toContain("Acme");
+    expect(plain).toContain("MEGA_CRM_INVITE_TEMPLATE");
+  });
+
   it("does not import the tenant sendgrid-key/KMS module (two-key separation, RESEARCH Pitfall 4)", () => {
     const source = readFileSync(path.resolve(__dirname, "../client.ts"), "utf8");
     expect(source).not.toMatch(/sendgrid-key\.repository/);

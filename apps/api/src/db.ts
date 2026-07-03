@@ -1,5 +1,6 @@
 import { Pool } from "pg";
 import { env } from "./env.js";
+import { logger } from "./logger.js";
 
 /**
  * The tenant-scoped pg Pool — used exclusively by
@@ -11,3 +12,8 @@ import { env } from "./env.js";
  * database via the same DATABASE_URL.
  */
 export const pool = new Pool({ connectionString: env.DATABASE_URL });
+
+// CR-03: without this listener, an idle-connection termination (Postgres
+// restart/failover/idle timeout) surfaces as an uncaught 'error' event and
+// crashes the API process. Log it instead so the pool recovers on its own.
+pool.on("error", (err) => logger.error({ err }, "idle pg pool client error (connection dropped)"));
