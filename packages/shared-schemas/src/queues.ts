@@ -11,13 +11,23 @@ export const EVENTS_INGEST_QUEUE = "events:ingest";
 export const IMPORTS_CSV_QUEUE = "imports:csv";
 
 /**
- * Placeholder job payload schemas — finalized in 02-06 (event ingestion)
- * and 02-07 (CSV import) once those plans define the real producer/consumer
- * contract. Kept here now so apps/worker's connection scaffolding has a
- * concrete import to typecheck against.
+ * events:ingest job payload (EVNT-02/EVNT-03, finalized in 02-06): the
+ * SOLE context the worker trusts (Pattern 2) -- `workspaceId` is re-derived
+ * from this payload inside the worker (never ambient state), `eventId` is
+ * the deterministic idempotency key (BullMQ jobId AND the `events` table's
+ * primary-key component), and `occurredAt` is resolved ONCE at ingestion
+ * time (apps/api's /v1/events route, before enqueue) so it stays identical
+ * across BullMQ redeliveries -- required for `ON CONFLICT (id, occurred_at)
+ * DO NOTHING` (Pitfall 1) to actually dedupe.
  */
 export const eventsIngestJobSchema = z.object({
   workspaceId: z.string().uuid(),
+  eventId: z.string().uuid(),
+  occurredAt: z.string().datetime(),
+  name: z.string().min(1),
+  properties: z.record(z.string(), z.unknown()),
+  externalId: z.string().optional(),
+  email: z.string().optional(),
 });
 export type EventsIngestJob = z.infer<typeof eventsIngestJobSchema>;
 

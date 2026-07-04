@@ -50,6 +50,13 @@
       "when": 1783153500000,
       "tag": "0006_api_keys_rls_policies",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1783153600000,
+      "tag": "0007_events_partitioned",
+      "breakpoints": true
     }
   ]
 }
