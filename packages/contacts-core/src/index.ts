@@ -9,9 +9,11 @@ export {
   RESERVED_CONTACT_PROPERTY_KEYS,
   isEmailSuppressed,
   isEmailTaken,
+  findContactIdByIdentity,
   upsertContactByIdentity,
   type ContactRow,
   type SubscriptionStatus,
   type UpsertContactIdentityInput,
   type UpsertContactIdentityResult,
 } from "./contact-repository.js";
+export { applyCsvRowMapping, type CsvMappingResult } from "./csv-mapping.js";

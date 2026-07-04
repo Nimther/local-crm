@@ -1,6 +1,7 @@
 import type { Worker } from "bullmq";
 import { buildRedisConnectionOptions, createRedisConnection } from "./queues/connection.js";
 import { createEventsIngestWorker } from "./queues/events-ingest.worker.js";
+import { createImportsCsvWorker } from "./queues/imports-csv.worker.js";
 
 /**
  * The worker process's runtime handle: a standalone shared ioredis
@@ -29,9 +30,9 @@ export interface WorkerRuntime {
 
 /**
  * Assembles the worker runtime: one shared Redis connection plus the
- * events:ingest BullMQ Worker (EVNT-02/EVNT-03) — 02-07 registers the
- * imports:csv worker here too once its job processor exists. No HTTP
- * listener; this is a long-running background process, not a server.
+ * events:ingest (EVNT-02/EVNT-03) and imports:csv (CONT-02) BullMQ Workers.
+ * No HTTP listener; this is a long-running background process, not a
+ * server.
  */
 export async function buildWorker(): Promise<WorkerRuntime> {
   const redisUrl = process.env.REDIS_URL;
@@ -40,7 +41,10 @@ export async function buildWorker(): Promise<WorkerRuntime> {
   }
 
   const connection = createRedisConnection(redisUrl);
-  const workers: Worker[] = [createEventsIngestWorker(buildRedisConnectionOptions(redisUrl))];
+  const workers: Worker[] = [
+    createEventsIngestWorker(buildRedisConnectionOptions(redisUrl)),
+    createImportsCsvWorker(buildRedisConnectionOptions(redisUrl)),
+  ];
 
   const close = async (): Promise<void> => {
     await Promise.all(workers.map((worker) => worker.close()));
@@ -70,7 +74,9 @@ async function main(): Promise<void> {
   process.on("SIGTERM", shutdown);
 
   // eslint-disable-next-line no-console
-  console.log(`apps/worker started (${runtime.workers.length} BullMQ worker(s) registered: events:ingest)`);
+  console.log(
+    `apps/worker started (${runtime.workers.length} BullMQ worker(s) registered: events:ingest, imports:csv)`
+  );
 }
 
 const isDirectRun = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;

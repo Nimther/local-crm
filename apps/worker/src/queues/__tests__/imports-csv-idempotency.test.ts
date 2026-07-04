@@ -51,28 +51,40 @@ describe("imports:csv worker (CONT-02, D-15/D-16, Pitfall 1)", () => {
     return rows[0].id;
   }
 
+  // csv_imports/csv_import_rows carry ENABLE + FORCE ROW LEVEL SECURITY --
+  // unlike `organization` (a better-auth table, not RLS-scoped), these
+  // fixture inserts MUST run inside withTenant/withTenantTransaction or the
+  // WITH CHECK clause rejects them outright.
   async function createCsvImport(
     workspaceId: string,
     input: { duplicatePolicy: "update" | "skip"; totalRows: number }
   ): Promise<string> {
-    const { rows } = await pool.query<{ id: string }>(
-      `INSERT INTO csv_imports (workspace_id, file_name, created_by_user_id, mapping, duplicate_policy, total_rows, status)
-       VALUES ($1, 'fixture.csv', 'test-user', $2, $3, $4, 'ready')
-       RETURNING id`,
-      [workspaceId, MAPPING, input.duplicatePolicy, input.totalRows]
+    return withTenant(workspaceId, () =>
+      withTenantTransaction(async (client) => {
+        const { rows } = await client.query<{ id: string }>(
+          `INSERT INTO csv_imports (workspace_id, file_name, created_by_user_id, mapping, duplicate_policy, total_rows, status)
+           VALUES ($1, 'fixture.csv', 'test-user', $2, $3, $4, 'ready')
+           RETURNING id`,
+          [workspaceId, MAPPING, input.duplicatePolicy, input.totalRows]
+        );
+        return rows[0].id;
+      })
     );
-    return rows[0].id;
   }
 
   async function stageRows(workspaceId: string, csvImportId: string, rows: Array<Record<string, string>>): Promise<void> {
-    let rowNumber = 1;
-    for (const raw of rows) {
-      await pool.query(
-        `INSERT INTO csv_import_rows (csv_import_id, workspace_id, row_number, raw) VALUES ($1, $2, $3, $4)`,
-        [csvImportId, workspaceId, rowNumber, raw]
-      );
-      rowNumber += 1;
-    }
+    await withTenant(workspaceId, () =>
+      withTenantTransaction(async (client) => {
+        let rowNumber = 1;
+        for (const raw of rows) {
+          await client.query(
+            `INSERT INTO csv_import_rows (csv_import_id, workspace_id, row_number, raw) VALUES ($1, $2, $3, $4)`,
+            [csvImportId, workspaceId, rowNumber, raw]
+          );
+          rowNumber += 1;
+        }
+      })
+    );
   }
 
   async function getRowStatuses(workspaceId: string, csvImportId: string): Promise<CsvImportRowStatus[]> {

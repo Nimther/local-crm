@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Pool } from "pg";
+import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { buildServer } from "../../../server.js";
 import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool } from "../../../test/db-fixture.js";
 
@@ -114,10 +115,20 @@ describe("CSV contact import (CONT-02, D-15..D-20)", () => {
     expect(upload.previewRows).toHaveLength(4);
     expect(upload.previewRows[0].email).toBe("upload-alice@example.com");
 
-    const { rows } = await pool.query(`SELECT count(*) FROM csv_import_rows WHERE csv_import_id = $1`, [
-      upload.importId,
-    ]);
-    expect(Number(rows[0].count)).toBe(4);
+    // csv_import_rows carries ENABLE + FORCE ROW LEVEL SECURITY -- a plain
+    // pool.query without the tenant GUC set is silently filtered to zero
+    // rows (not an error), so this read must run inside withTenant/
+    // withTenantTransaction like every other RLS-scoped table.
+    const rowCount = await withTenant(workspace.id, () =>
+      withTenantTransaction(async (client) => {
+        const { rows } = await client.query<{ count: string }>(
+          `SELECT count(*) FROM csv_import_rows WHERE csv_import_id = $1`,
+          [upload.importId]
+        );
+        return Number(rows[0].count);
+      })
+    );
+    expect(rowCount).toBe(4);
   });
 
   it("D-17: dry-run validates the WHOLE file and reports willCreate/willUpdate/errorCount WITHOUT writing any contact", async () => {
@@ -136,8 +147,10 @@ describe("CSV contact import (CONT-02, D-15..D-20)", () => {
     expect(summary.errorCount).toBe(2); // invalid email row + missing-both-identifiers row
     expect(summary.willUpdate).toBe(0);
 
-    const { rows: contactRows } = await pool.query(`SELECT 1 FROM contacts WHERE workspace_id = $1`, [workspace.id]);
-    expect(contactRows).toHaveLength(0);
+    const contactRows = await withTenant(workspace.id, () =>
+      withTenantTransaction((client) => client.query(`SELECT 1 FROM contacts WHERE workspace_id = $1`, [workspace.id]))
+    );
+    expect(contactRows.rows).toHaveLength(0);
   });
 
   it("D-17: dry-run counts a pre-existing identity match as willUpdate, not willCreate", async () => {

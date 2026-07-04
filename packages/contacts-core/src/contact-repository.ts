@@ -90,6 +90,38 @@ function isUniqueViolation(err: unknown): boolean {
   return Boolean(err && typeof err === "object" && (err as { code?: string }).code === "23505");
 }
 
+/**
+ * Read-only identity-priority lookup (external_id first, then email) --
+ * shares the exact same D-01..D-03 priority rule `upsertContactByIdentity`
+ * matches against, WITHOUT locking or writing. Added for 02-07 (CSV import):
+ * the D-15 "skip existing" duplicate policy needs to know whether a row's
+ * identity already exists before deciding to skip it (never calling the
+ * upsert at all) or create a new contact -- both apps/api's dry-run counter
+ * and apps/worker's apply worker call this SAME function so neither process
+ * can disagree about "does this identity already exist."
+ */
+export async function findContactIdByIdentity(
+  client: PoolClient,
+  workspaceId: string,
+  input: { externalId?: string; email?: string }
+): Promise<string | null> {
+  if (input.externalId) {
+    const { rows } = await client.query<{ id: string }>(
+      `SELECT id FROM contacts WHERE workspace_id = $1 AND external_id = $2`,
+      [workspaceId, input.externalId]
+    );
+    if (rows[0]) return rows[0].id;
+  }
+  if (input.email) {
+    const { rows } = await client.query<{ id: string }>(
+      `SELECT id FROM contacts WHERE workspace_id = $1 AND email = $2`,
+      [workspaceId, input.email]
+    );
+    if (rows[0]) return rows[0].id;
+  }
+  return null;
+}
+
 export interface UpsertContactIdentityInput {
   externalId?: string;
   email?: string;
@@ -109,6 +141,15 @@ export interface UpsertContactIdentityResult {
   attached?: boolean;
   /** D-04/D-05: true when an incoming email collided with a DIFFERENT contact and the change was skipped. */
   emailChangeSkipped?: boolean;
+  /**
+   * True only for the brand-new-contact (Branch E) path. Added for 02-07
+   * (CSV import): the imports:csv worker needs to record accurate
+   * created/updated row counts for the completion report (D-18) without
+   * duplicating this function's identity-match logic just to tell the two
+   * cases apart -- optional field, so every pre-existing caller (the
+   * Contacts API route, events:ingest worker) that ignores it is unaffected.
+   */
+  created?: boolean;
 }
 
 /**
@@ -211,7 +252,7 @@ export async function upsertContactByIdentity(
         ]
       );
       await registerObservedProperties(client, workspaceId, safeProperties);
-      return { contactId: rows[0].id };
+      return { contactId: rows[0].id, created: true };
     } catch (err) {
       if (!_isRetry && isUniqueViolation(err)) {
         // A concurrent insert raced us between the SELECTs above and this
