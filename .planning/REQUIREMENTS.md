@@ -20,13 +20,13 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **CONT-01**: Пользователь может создавать, просматривать, редактировать и удалять контакты в UI
 - [ ] **CONT-02**: Пользователь может импортировать контакты из CSV с маппингом колонок на атрибуты, превью перед применением и отчётом об ошибках/дубликатах
 - [x] **CONT-03**: Разработчик тенанта может создавать/обновлять контакты через Contacts CRUD API
-- [ ] **CONT-04**: Контакт идентифицируется по external_id (основной ключ) с email как запасным; события и API выполняют upsert по этой паре
+- [x] **CONT-04**: Контакт идентифицируется по external_id (основной ключ) с email как запасным; события и API выполняют upsert по этой паре
 - [x] **CONT-05**: Контакт хранит произвольные кастомные свойства профиля, доступные в сегментации
 
 ### Event Ingestion
 
 - [x] **EVNT-01**: Бэкенд тенанта может отправлять события через HTTP API с API-ключом: произвольное имя события + JSON-свойства, без предварительной регистрации типов
-- [ ] **EVNT-02**: Событие для несуществующего контакта создаёт его автоматически (upsert по external_id/email)
+- [x] **EVNT-02**: Событие для несуществующего контакта создаёт его автоматически (upsert по external_id/email)
 - [x] **EVNT-03**: Event API отвечает быстро (2xx сразу), обработка события асинхронная через очередь
 
 ### Segmentation
@@ -135,10 +135,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CONT-01 | Phase 2 | Complete |
 | CONT-02 | Phase 2 | Pending |
 | CONT-03 | Phase 2 | Complete |
-| CONT-04 | Phase 2 | Pending |
+| CONT-04 | Phase 2 | Complete |
 | CONT-05 | Phase 2 | Complete |
 | EVNT-01 | Phase 2 | Complete |
-| EVNT-02 | Phase 2 | Pending |
+| EVNT-02 | Phase 2 | Complete |
 | EVNT-03 | Phase 2 | Complete |
 | SUBS-01 | Phase 2 | Complete |
 | SEGM-01 | Phase 3 | Pending |

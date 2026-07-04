@@ -83,7 +83,7 @@ Plans:
   4. An event for an unknown contact automatically creates it via external_id/email upsert, and a later email change still resolves to the same contact.
   5. Every contact carries a 3-state subscription status (subscribed / unsubscribed / suppressed).
 
-**Plans**: 3/8 plans executed
+**Plans**: 4/8 plans executed
 **UI hint**: yes
 
 Plans:
@@ -99,7 +99,7 @@ Plans:
 **Wave 3** *(parallel)*
 
 - [ ] 02-02-PLAN.md — Contact CRUD UI: list (search/filter/sort/pagination), form + custom-property editor, tabbed detail (CONT-01, CONT-05, SUBS-01)
-- [ ] 02-04-PLAN.md — Contacts integration API + prioritized two-key upsert (external_id→email, attach/conflict) (CONT-03, CONT-04, EVNT-02)
+- [x] 02-04-PLAN.md — Contacts integration API + prioritized two-key upsert (external_id→email, attach/conflict) (CONT-03, CONT-04, EVNT-02)
 
 **Wave 4**
 
@@ -240,7 +240,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Workspace Foundation & Team Access | 7/7 | Complete    | 2026-07-03 |
-| 2. Contacts & Event Ingestion | 3/8 | In Progress|  |
+| 2. Contacts & Event Ingestion | 4/8 | In Progress|  |
 | 3. Segmentation Engine | 0/4 | Not started | - |
 | 4. Broadcast Campaigns & Send Pipeline | 0/6 | Not started | - |
 | 5. Webhook Processing & Delivery Tracking | 0/3 | Not started | - |
