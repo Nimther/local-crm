@@ -83,16 +83,35 @@ Plans:
   4. An event for an unknown contact automatically creates it via external_id/email upsert, and a later email change still resolves to the same contact.
   5. Every contact carries a 3-state subscription status (subscribed / unsubscribed / suppressed).
 
-**Plans**: TBD
+**Plans**: 8 plans
 **UI hint**: yes
 
 Plans:
+**Wave 1**
 
-- [ ] 02-01: Contact data model (external_id/email identity, custom properties) + CRUD UI
-- [ ] 02-02: Contacts CRUD API with upsert semantics
-- [ ] 02-03: CSV import — column mapping, preview, error/duplicate report
-- [ ] 02-04: Event ingestion API (fast 2xx) + async queue processor + upsert-from-event
-- [ ] 02-05: 3-state subscription status model + partition-ready events schema
+- [ ] 02-01-PLAN.md — Contact model + suppression + property registry schema + session-authed CRUD API (CONT-01, CONT-05, SUBS-01)
+
+**Wave 2** *(parallel)*
+
+- [ ] 02-03-PLAN.md — Workspace API keys: schema, crypto, Owner/Admin management routes/UI + runtime apiKeyAuth hook (CONT-03, EVNT-01)
+- [ ] 02-05-PLAN.md — Queue foundation: Redis + BullMQ, tenant-context extraction to a shared package, apps/worker scaffold (EVNT-03) — includes blocking package-legitimacy checkpoint
+
+**Wave 3** *(parallel)*
+
+- [ ] 02-02-PLAN.md — Contact CRUD UI: list (search/filter/sort/pagination), form + custom-property editor, tabbed detail (CONT-01, CONT-05, SUBS-01)
+- [ ] 02-04-PLAN.md — Contacts integration API + prioritized two-key upsert (external_id→email, attach/conflict) (CONT-03, CONT-04, EVNT-02)
+
+**Wave 4**
+
+- [ ] 02-06-PLAN.md — Event ingestion: partitioned events schema, fast-2xx /v1/events, idempotent async worker upsert-from-event (EVNT-01, EVNT-02, EVNT-03)
+
+**Wave 5**
+
+- [ ] 02-07-PLAN.md — CSV import backend: staging, streamed upload, dry-run, background apply worker, error report (CONT-02)
+
+**Wave 6**
+
+- [ ] 02-08-PLAN.md — CSV import wizard UI + history + live contact event feed (CONT-02, EVNT-01/D-14)
 
 ### Phase 3: Segmentation Engine
 
@@ -221,7 +240,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Workspace Foundation & Team Access | 7/7 | Complete    | 2026-07-03 |
-| 2. Contacts & Event Ingestion | 0/5 | Not started | - |
+| 2. Contacts & Event Ingestion | 0/8 | Not started | - |
 | 3. Segmentation Engine | 0/4 | Not started | - |
 | 4. Broadcast Campaigns & Send Pipeline | 0/6 | Not started | - |
 | 5. Webhook Processing & Delivery Tracking | 0/3 | Not started | - |
