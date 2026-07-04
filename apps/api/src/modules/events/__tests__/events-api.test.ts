@@ -1,0 +1,223 @@
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { buildServer } from "../../../server.js";
+import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool } from "../../../test/db-fixture.js";
+import { eventsIngestQueue } from "../events-queue.js";
+import type { Pool } from "pg";
+
+/**
+ * POST /v1/events (EVNT-01/EVNT-03, D-24): API-key-authed, fast-2xx event
+ * ingestion. This is the SYNCHRONOUS half of the contract only -- the route
+ * must authenticate, shape-validate the envelope, and enqueue, never
+ * perform the contact upsert/event write inline (proven below by reading
+ * the DB immediately after the 202 and finding nothing yet, since no worker
+ * is running in this test process to drain the queue).
+ */
+describe("Event ingestion API (EVNT-01/EVNT-03, D-24)", () => {
+  let app: Awaited<ReturnType<typeof buildServer>>;
+  let pool: Pool;
+
+  beforeAll(async () => {
+    await ensureTestDbMigrated();
+    process.env.DATABASE_URL = getTestDatabaseUrl();
+    app = await buildServer();
+    await app.ready();
+    pool = createTestPool();
+  });
+
+  afterAll(async () => {
+    await app.close();
+    await pool.end();
+    await eventsIngestQueue.obliterate({ force: true }).catch(() => undefined);
+    await eventsIngestQueue.close();
+  });
+
+  async function signUp(email: string, password: string, name: string) {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/auth/sign-up/email",
+      payload: { email, password, name },
+    });
+    expect(res.statusCode, `sign-up failed: ${res.body}`).toBe(200);
+    const sessionCookie = res.cookies.find((c) => c.name.toLowerCase().includes("session"));
+    if (!sessionCookie) {
+      throw new Error("sign-up response did not set a session cookie");
+    }
+    return { cookie: `${sessionCookie.name}=${sessionCookie.value}` };
+  }
+
+  async function createWorkspace(cookie: string, name: string) {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/workspaces",
+      headers: { cookie },
+      payload: { name },
+    });
+    expect(res.statusCode, `create workspace failed: ${res.body}`).toBe(200);
+    return res.json() as { id: string; slug: string; name: string };
+  }
+
+  async function mintApiKey(cookie: string, slug: string, name: string): Promise<string> {
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/workspaces/${slug}/api-keys`,
+      headers: { cookie },
+      payload: { name },
+    });
+    expect(res.statusCode, `create api key failed: ${res.body}`).toBe(200);
+    return (res.json() as { fullKey: string }).fullKey;
+  }
+
+  async function ownerWithKey(nameSeed: string) {
+    const email = `${nameSeed}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
+    const account = await signUp(email, "correct horse battery staple 42", nameSeed);
+    const workspace = await createWorkspace(account.cookie, `${nameSeed} Co`);
+    const fullKey = await mintApiKey(account.cookie, workspace.slug, "prod backend");
+    return { ...account, workspace, fullKey };
+  }
+
+  it("missing Authorization header -> 401", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/events",
+      payload: { name: "order_placed", externalId: "cust-1" },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("invalid API key -> 401", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/events",
+      headers: {
+        authorization: "Bearer mcrm_0000000000000000.invalidsecretvaluexxxxxxxxxxxxxxxxxxxxxxxxx",
+      },
+      payload: { name: "order_placed", externalId: "cust-1" },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("valid key: single event -> 202 with a per-item accepted status, and the contact/event are NOT written synchronously", async () => {
+    const { fullKey, workspace } = await ownerWithKey("v1-events-single");
+    const externalId = `single-${Date.now()}`;
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/events",
+      headers: { authorization: `Bearer ${fullKey}` },
+      payload: { name: "order_placed", externalId, properties: { orderId: "o-1", total: 42.5 } },
+    });
+
+    expect(res.statusCode, `POST /v1/events failed: ${res.body}`).toBe(202);
+    const body = res.json() as { results: Array<{ eventId: string; status: string }> };
+    expect(body.results).toHaveLength(1);
+    expect(body.results[0].status).toBe("accepted");
+    expect(body.results[0].eventId).toBeTruthy();
+
+    // Fast-path proof (EVNT-03/D-24 Anti-Pattern): nothing processes this
+    // queued job in this test process (no worker is running here), so an
+    // immediate DB read must find NO contact yet.
+    const { rows } = await pool.query(`SELECT 1 FROM contacts WHERE workspace_id = $1 AND external_id = $2`, [
+      workspace.id,
+      externalId,
+    ]);
+    expect(rows).toHaveLength(0);
+  });
+
+  it("valid key: batch of events -> 202 with one result per item", async () => {
+    const { fullKey } = await ownerWithKey("v1-events-batch");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/events",
+      headers: { authorization: `Bearer ${fullKey}` },
+      payload: [
+        { name: "page_viewed", externalId: "batch-cust-1", properties: { path: "/pricing" } },
+        { name: "signed_up", email: "batch2@example.com", properties: {} },
+        { name: "order_placed", externalId: "batch-cust-3", properties: { total: 10 } },
+      ],
+    });
+
+    expect(res.statusCode, `batch POST /v1/events failed: ${res.body}`).toBe(202);
+    const body = res.json() as { results: Array<{ eventId: string; status: string }> };
+    expect(body.results).toHaveLength(3);
+    for (const item of body.results) {
+      expect(item.status).toBe("accepted");
+      expect(item.eventId).toBeTruthy();
+    }
+  });
+
+  it("D-24: a batch of more than 1000 events is rejected", async () => {
+    const { fullKey } = await ownerWithKey("v1-events-overflow");
+    const items = Array.from({ length: 1001 }, (_, i) => ({
+      name: "stress_event",
+      externalId: `overflow-${i}`,
+    }));
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/events",
+      headers: { authorization: `Bearer ${fullKey}` },
+      payload: items,
+    });
+
+    expect([400, 422]).toContain(res.statusCode);
+  });
+
+  it("envelope validation: missing/blank name is rejected per-item, without failing the whole batch", async () => {
+    const { fullKey } = await ownerWithKey("v1-events-envelope");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/events",
+      headers: { authorization: `Bearer ${fullKey}` },
+      payload: [
+        { name: "valid_event", externalId: "envelope-valid-1" },
+        { name: "", externalId: "envelope-blank-name" },
+      ],
+    });
+
+    expect(res.statusCode, `POST /v1/events failed: ${res.body}`).toBe(202);
+    const body = res.json() as { results: Array<{ status: string }> };
+    expect(body.results).toHaveLength(2);
+    expect(body.results[0].status).toBe("accepted");
+    expect(body.results[1].status).toBe("rejected");
+  });
+
+  it("envelope validation: non-object properties is rejected", async () => {
+    const { fullKey } = await ownerWithKey("v1-events-badprops");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/events",
+      headers: { authorization: `Bearer ${fullKey}` },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      payload: { name: "bad_properties", externalId: "bad-props-1", properties: "not-an-object" as any },
+    });
+
+    expect(res.statusCode, `POST /v1/events failed: ${res.body}`).toBe(202);
+    const body = res.json() as { results: Array<{ status: string }> };
+    expect(body.results[0].status).toBe("rejected");
+  });
+
+  it("freeform: arbitrary nested properties are accepted without schema enforcement", async () => {
+    const { fullKey } = await ownerWithKey("v1-events-freeform");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/v1/events",
+      headers: { authorization: `Bearer ${fullKey}` },
+      payload: {
+        name: "cart_updated",
+        externalId: "freeform-1",
+        properties: {
+          items: [{ sku: "abc", qty: 2, meta: { color: "red", nested: { deep: true } } }],
+          arbitraryTopLevelKey: "anything goes",
+        },
+      },
+    });
+
+    expect(res.statusCode, `POST /v1/events failed: ${res.body}`).toBe(202);
+    const body = res.json() as { results: Array<{ status: string }> };
+    expect(body.results[0].status).toBe("accepted");
+  });
+});
