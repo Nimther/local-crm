@@ -27,7 +27,7 @@ Requirements for initial release. Each maps to roadmap phases.
 
 - [x] **EVNT-01**: Бэкенд тенанта может отправлять события через HTTP API с API-ключом: произвольное имя события + JSON-свойства, без предварительной регистрации типов
 - [ ] **EVNT-02**: Событие для несуществующего контакта создаёт его автоматически (upsert по external_id/email)
-- [ ] **EVNT-03**: Event API отвечает быстро (2xx сразу), обработка события асинхронная через очередь
+- [x] **EVNT-03**: Event API отвечает быстро (2xx сразу), обработка события асинхронная через очередь
 
 ### Segmentation
 
@@ -139,7 +139,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CONT-05 | Phase 2 | Complete |
 | EVNT-01 | Phase 2 | Complete |
 | EVNT-02 | Phase 2 | Pending |
-| EVNT-03 | Phase 2 | Pending |
+| EVNT-03 | Phase 2 | Complete |
 | SUBS-01 | Phase 2 | Complete |
 | SEGM-01 | Phase 3 | Pending |
 | SEGM-02 | Phase 3 | Pending |

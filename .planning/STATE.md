@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 02
 current_phase_name: contacts-event-ingestion
 status: executing
-stopped_at: Completed 02-01-PLAN.md
-last_updated: "2026-07-04T08:32:01.579Z"
+stopped_at: Completed 02-05-PLAN.md
+last_updated: "2026-07-04T08:49:30.353Z"
 last_activity: 2026-07-04
 last_activity_desc: Phase 02 execution started
 progress:
   total_phases: 7
   completed_phases: 1
   total_plans: 15
-  completed_plans: 9
+  completed_plans: 10
   percent: 14
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-07-04)
 ## Current Position
 
 Phase: 02 (contacts-event-ingestion) — EXECUTING
-Plan: 3 of 8
+Plan: 4 of 8
 Status: Ready to execute
 Last activity: 2026-07-04 — Phase 02 execution started
 
@@ -64,6 +64,7 @@ Progress: [████████████████████] 7/7 pla
 | Phase 01 P07 | 10min | 3 tasks | 5 files |
 | Phase 02 P01 | 45min | 3 tasks | 16 files |
 | Phase 02 P03 | 16min | 3 tasks | 19 files |
+| Phase 02 P05 | 20min | 3 tasks | 21 files |
 
 ## Accumulated Context
 
@@ -101,6 +102,9 @@ Recent decisions affecting current work:
 - [Phase 02]: 02-01: added a build (tsc --noEmit) script + tsconfig.json to packages/db -- previously had none, needed to satisfy the plan's verification step
 - [Phase 02]: 02-03: workspace_api_keys carries a second SELECT-only RLS policy (api_key_runtime_lookup) scoped to a single primary-key id via app.api_key_lookup_id, letting apiKeyAuth resolve workspace_id before any tenant context exists without weakening workspace_isolation
 - [Phase 02]: 02-03: workspace_isolation on workspace_api_keys uses NULLIF(current_setting(...), '')::uuid, not a bare cast -- lookupApiKeyById is the first read outside withTenantTransaction and a pooled connection's leftover '' GUC value throws an invalid-uuid-cast 500 without the guard
+- [Phase 02]: 02-05: package-legitimacy checkpoint (bullmq/ioredis) approved via live npm registry verification while user was away from keyboard, per Phase-1 precedent (01-03/01-04/01-05); flagged for user re-confirmation at phase-level UAT — Avoids stalling downstream 02-06/02-07 plans on a checkpoint the user could not attend
+- [Phase 02]: 02-05: packages/tenant-context constructs its pg Pool from process.env.DATABASE_URL directly, not apps/api's env.ts, to avoid a backward dependency — apps/api and apps/worker both depend on the shared package; the shared package must not depend back on apps/api
+- [Phase 02]: 02-05: .env.example/.env could not be edited by this executor -- harness Read(.env.*) permission deny blocks both Read and Write's prior-read requirement — User must manually add REDIS_URL=redis://localhost:6379 to .env.example and .env before npm run dev boots
 
 ### Pending Todos
 
@@ -115,6 +119,7 @@ Research flags to carry into planning:
 - Phase 5: integration test that replays a real signed SendGrid payload through the full HTTP stack (raw-body verification).
 - Phase 6: define quiet-hours timezone source and once-per-N-days re-entry semantics; simulate late-stage flow edits mid-execution.
 - Operational prerequisite (any fresh environment): PLATFORM_SENDGRID_API_KEY / PLATFORM_MAIL_FROM in .env must be a real SendGrid key + verified sender before verification/reset/invite emails work — placeholders cause a 500 on resend (hit and resolved during Phase 1 UAT; all 01-03/01-04/01-05/01-07 deferred manual checks now passed in phase UAT 2026-07-04).
+- 02-05: .env.example and .env need REDIS_URL=redis://localhost:6379 added manually (executor's Read/Write tools are hard-denied on any .env* path) before npm run dev boots api+worker
 
 ## Deferred Items
 
@@ -126,6 +131,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-04T08:32:01.553Z
-Stopped at: Completed 02-01-PLAN.md
-Resume file: .planning/phases/02-contacts-event-ingestion/02-UI-SPEC.md
+Last session: 2026-07-04T08:49:30.328Z
+Stopped at: Completed 02-05-PLAN.md
+Resume file: .planning/phases/02-contacts-event-ingestion/02-06-PLAN.md

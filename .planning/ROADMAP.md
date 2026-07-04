@@ -83,7 +83,7 @@ Plans:
   4. An event for an unknown contact automatically creates it via external_id/email upsert, and a later email change still resolves to the same contact.
   5. Every contact carries a 3-state subscription status (subscribed / unsubscribed / suppressed).
 
-**Plans**: 2/8 plans executed
+**Plans**: 3/8 plans executed
 **UI hint**: yes
 
 Plans:
@@ -94,7 +94,7 @@ Plans:
 **Wave 2** *(parallel)*
 
 - [x] 02-03-PLAN.md — Workspace API keys: schema, crypto, Owner/Admin management routes/UI + runtime apiKeyAuth hook (CONT-03, EVNT-01)
-- [ ] 02-05-PLAN.md — Queue foundation: Redis + BullMQ, tenant-context extraction to a shared package, apps/worker scaffold (EVNT-03) — includes blocking package-legitimacy checkpoint
+- [x] 02-05-PLAN.md — Queue foundation: Redis + BullMQ, tenant-context extraction to a shared package, apps/worker scaffold (EVNT-03) — includes blocking package-legitimacy checkpoint
 
 **Wave 3** *(parallel)*
 
@@ -240,7 +240,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Workspace Foundation & Team Access | 7/7 | Complete    | 2026-07-03 |
-| 2. Contacts & Event Ingestion | 2/8 | In Progress|  |
+| 2. Contacts & Event Ingestion | 3/8 | In Progress|  |
 | 3. Segmentation Engine | 0/4 | Not started | - |
 | 4. Broadcast Campaigns & Send Pipeline | 0/6 | Not started | - |
 | 5. Webhook Processing & Delivery Tracking | 0/3 | Not started | - |
