@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { buildServer } from "../../../server.js";
 import { ensureTestDbMigrated, getTestDatabaseUrl } from "../../../test/db-fixture.js";
 import { withTenant, withTenantTransaction } from "../../../middleware/tenant-context.js";
-import { logger } from "../../../logger.js";
+import { logger } from "@mega-crm/contacts-core";
 import { createContact, getContact, upsertContactByIdentity } from "../contact.repository.js";
 
 /**
