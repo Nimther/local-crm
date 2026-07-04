@@ -18,7 +18,7 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Contacts
 
 - [x] **CONT-01**: Пользователь может создавать, просматривать, редактировать и удалять контакты в UI
-- [ ] **CONT-02**: Пользователь может импортировать контакты из CSV с маппингом колонок на атрибуты, превью перед применением и отчётом об ошибках/дубликатах
+- [x] **CONT-02**: Пользователь может импортировать контакты из CSV с маппингом колонок на атрибуты, превью перед применением и отчётом об ошибках/дубликатах
 - [x] **CONT-03**: Разработчик тенанта может создавать/обновлять контакты через Contacts CRUD API
 - [x] **CONT-04**: Контакт идентифицируется по external_id (основной ключ) с email как запасным; события и API выполняют upsert по этой паре
 - [x] **CONT-05**: Контакт хранит произвольные кастомные свойства профиля, доступные в сегментации
@@ -133,7 +133,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TENANT-04 | Phase 1 | Complete |
 | TENANT-05 | Phase 1 | Complete |
 | CONT-01 | Phase 2 | Complete |
-| CONT-02 | Phase 2 | Pending |
+| CONT-02 | Phase 2 | Complete |
 | CONT-03 | Phase 2 | Complete |
 | CONT-04 | Phase 2 | Complete |
 | CONT-05 | Phase 2 | Complete |

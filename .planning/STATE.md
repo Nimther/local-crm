@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 02
 current_phase_name: contacts-event-ingestion
 status: executing
-stopped_at: Completed 02-02-PLAN.md (checkpoint deferred to phase UAT)
-last_updated: "2026-07-04T09:52:17.692Z"
+stopped_at: Completed 02-07-PLAN.md
+last_updated: "2026-07-04T10:22:50.671Z"
 last_activity: 2026-07-04
 last_activity_desc: Phase 02 execution started
 progress:
   total_phases: 7
   completed_phases: 1
   total_plans: 15
-  completed_plans: 13
+  completed_plans: 14
   percent: 14
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-07-04)
 ## Current Position
 
 Phase: 02 (contacts-event-ingestion) — EXECUTING
-Plan: 7 of 8
+Plan: 8 of 8
 Status: Ready to execute
 Last activity: 2026-07-04 — Phase 02 execution started
 
@@ -68,6 +68,7 @@ Progress: [████████████████████] 7/7 pla
 | Phase 02 P04 | 20min | 2 tasks | 6 files |
 | Phase 02 P02 | 10min | 3 tasks | 21 files |
 | Phase 02 P06 | 30min | 3 tasks | 24 files |
+| Phase 02 P07 | 13min | 3 tasks | 19 files |
 
 ## Accumulated Context
 
@@ -115,6 +116,9 @@ Recent decisions affecting current work:
 - [Phase 02]: 02-06: BullMQ 5.79.1 rejects colons in queue names -- renamed EVENTS_INGEST_QUEUE/IMPORTS_CSV_QUEUE from events:ingest/imports:csv to events-ingest/imports-csv
 - [Phase 02]: 02-06: BullMQ bundles its own ioredis internally at a version distinct from the workspace's own ioredis dependency -- both the producer and consumer pass plain ConnectionOptions (parsed from REDIS_URL), never a constructed ioredis client instance, to sidestep the resulting TypeScript nominal-type mismatch
 - [Phase 02]: 02-06: event properties ARE forwarded into upsertContactByIdentity's properties input (not identity-only externalId/email), matching RESEARCH.md Pattern 2 and making the T-02-06-03 reserved-key stripping mitigation meaningful
+- [Phase 02]: 02-07: dry-run persists per-row error status/reason immediately (not just aggregate counts) so the D-18 error-report CSV is usable right after dry-run, before apply ever runs
+- [Phase 02]: 02-07: added findContactIdByIdentity (read-only, same external_id-then-email priority) to @mega-crm/contacts-core so the D-15 skip-policy precheck and dry-run's willUpdate classification share one matcher
+- [Phase 02]: 02-07: UpsertContactIdentityResult gained an optional created flag (backward compatible) so the CSV worker can report accurate created/updated counts without re-deriving identity-match state
 
 ### Pending Todos
 
@@ -141,6 +145,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-04T09:51:36.047Z
-Stopped at: Completed 02-02-PLAN.md (checkpoint deferred to phase UAT)
-Resume file: .planning/phases/02-contacts-event-ingestion/02-06-PLAN.md
+Last session: 2026-07-04T10:22:50.648Z
+Stopped at: Completed 02-07-PLAN.md
+Resume file: None
