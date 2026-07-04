@@ -17,9 +17,10 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ContactEventFeed } from "@/features/contacts/ContactEventFeed";
 import { ContactForm } from "@/features/contacts/ContactForm";
 import { CustomPropertyEditor } from "@/features/contacts/CustomPropertyEditor";
 import { SubscriptionStatusBadge } from "@/features/contacts/SubscriptionStatusBadge";
@@ -118,28 +119,10 @@ function PropertiesTab({ slug, contact }: { slug: string; contact: ContactRespon
   );
 }
 
-/** События tab placeholder -- the live feed is populated in 02-06 (D-14). */
-function EventsTabPlaceholder({ slug }: { slug: string }) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Событий пока нет</CardTitle>
-        <CardDescription>
-          Как только ваш бэкенд отправит первое событие через Event API, оно появится здесь. См.{" "}
-          <a href={`/w/${slug}/settings/api-keys`} className="text-primary underline underline-offset-4">
-            документацию по API-ключам
-          </a>
-          .
-        </CardDescription>
-      </CardHeader>
-    </Card>
-  );
-}
-
 /**
  * Contact detail (CONT-01/CONT-05/SUBS-01): tabbed Overview (edit form,
- * no properties) / Свойства (CustomPropertyEditor) / События (D-14
- * placeholder, live feed in 02-06) + delete confirmation (D-08).
+ * no properties) / Свойства (CustomPropertyEditor) / События (D-14 live
+ * feed, ContactEventFeed) + delete confirmation (D-08).
  */
 export function ContactDetailPage() {
   const { slug = "", id = "" } = useParams<{ slug: string; id: string }>();
@@ -201,7 +184,7 @@ export function ContactDetailPage() {
           <PropertiesTab slug={slug} contact={contact} />
         </TabsContent>
         <TabsContent value="events">
-          <EventsTabPlaceholder slug={slug} />
+          <ContactEventFeed slug={slug} contactId={contact.id} />
         </TabsContent>
       </Tabs>
     </div>

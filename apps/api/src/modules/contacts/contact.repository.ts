@@ -57,6 +57,42 @@ export interface ListContactsResult {
   pageSize: number;
 }
 
+export interface ContactEventRow {
+  id: string;
+  name: string;
+  properties: Record<string, unknown>;
+  occurredAt: Date;
+  receivedAt: Date;
+}
+
+const CONTACT_EVENTS_PAGE_SIZE = 50;
+
+/**
+ * D-14/EVNT-01: the contact-card live event feed's read path. Newest-first,
+ * paginated (T-02-08-02 -- unbounded reads are a DoS risk at this table's
+ * write volume), scoped by BOTH workspace_id and contact_id -- RLS on the
+ * partitioned `events` parent table (0007_events_partitioned.sql) is the
+ * defense-in-depth layer underneath this explicit filter (T-02-08-01).
+ */
+export async function listContactEvents(
+  contactId: string,
+  options: { page: number } = { page: 1 }
+): Promise<ContactEventRow[]> {
+  return withTenantTransaction(async (client) => {
+    const workspaceId = getWorkspaceId();
+    const page = Math.max(1, options.page);
+    const { rows } = await client.query<ContactEventRow>(
+      `SELECT id, name, properties, occurred_at as "occurredAt", received_at as "receivedAt"
+       FROM events
+       WHERE workspace_id = $1 AND contact_id = $2
+       ORDER BY occurred_at DESC
+       LIMIT $3 OFFSET $4`,
+      [workspaceId, contactId, CONTACT_EVENTS_PAGE_SIZE, (page - 1) * CONTACT_EVENTS_PAGE_SIZE]
+    );
+    return rows;
+  });
+}
+
 /**
  * Thrown for the D-01/D-07 email-uniqueness rule and the D-12
  * suppressed/subscription-status transition rules -- contacts.routes.ts

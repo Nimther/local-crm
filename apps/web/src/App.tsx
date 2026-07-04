@@ -20,6 +20,8 @@ import SendGridKeySettings from "@/features/sendgrid-key/SendGridKeySettings";
 import ApiKeysSettings from "@/features/api-keys/ApiKeysSettings";
 import ContactsListPage from "@/features/contacts/ContactsListPage";
 import ContactDetailPage from "@/features/contacts/ContactDetailPage";
+import CsvImportWizard from "@/features/contacts/CsvImportWizard";
+import CsvImportHistory from "@/features/contacts/CsvImportHistory";
 
 /**
  * Resolves "/" for a signed-in user: no workspace yet -> /create-workspace
@@ -67,6 +69,9 @@ export default function App() {
           <Route path="/w/:slug" element={<AppShell />}>
             <Route index element={<WorkspaceHome />} />
             <Route path="contacts" element={<ContactsListPage />} />
+            <Route path="contacts/imports" element={<CsvImportHistory />} />
+            <Route path="contacts/import" element={<CsvImportWizard />} />
+            <Route path="contacts/import/:id" element={<CsvImportWizard />} />
             <Route path="contacts/:id" element={<ContactDetailPage />} />
             <Route path="team" element={<TeamPage />} />
             <Route path="profile" element={<ProfilePage />} />

@@ -50,6 +50,12 @@ function buildItems(
       href: `/w/${slug}/contacts`,
       done: hasContacts,
     },
+    {
+      id: "import-contacts",
+      label: "Импортируйте контакты",
+      href: `/w/${slug}/contacts/import`,
+      done: hasContacts,
+    },
   ];
 }
 

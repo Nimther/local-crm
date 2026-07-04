@@ -38,3 +38,17 @@ export const eventIngestResultItemSchema = z.union([
   z.object({ eventId: z.string().uuid().optional(), status: z.literal("rejected"), error: z.string() }),
 ]);
 export type EventIngestResultItem = z.infer<typeof eventIngestResultItemSchema>;
+
+/**
+ * GET /api/workspaces/:slug/contacts/:id/events (D-14, 02-08) -- one row of
+ * the contact-card live event feed: icon + name + relative timestamp +
+ * expandable JSON payload. Newest-first, paginated server-side.
+ */
+export const contactEventSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  properties: z.record(z.string(), z.unknown()),
+  occurredAt: z.string(),
+  receivedAt: z.string(),
+});
+export type ContactEvent = z.infer<typeof contactEventSchema>;

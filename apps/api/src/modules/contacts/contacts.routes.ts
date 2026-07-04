@@ -10,10 +10,22 @@ import {
   deleteContact,
   getContact,
   listContacts,
+  listContactEvents,
   updateContact,
+  type ContactEventRow,
   type ContactRow,
 } from "./contact.repository.js";
 import { listPropertyRegistry } from "./property-registry.js";
+
+function toContactEventResponse(row: ContactEventRow) {
+  return {
+    id: row.id,
+    name: row.name,
+    properties: row.properties,
+    occurredAt: row.occurredAt.toISOString(),
+    receivedAt: row.receivedAt.toISOString(),
+  };
+}
 
 function toContactResponse(row: ContactRow) {
   return {
@@ -118,6 +130,28 @@ export async function registerContactsRoutes(fastify: FastifyInstance): Promise<
       return reply.code(404).send({ error: "Contact not found" });
     }
     return reply.send(toContactResponse(contact));
+  });
+
+  // D-14/EVNT-01: the contact-card live event feed's read route -- ordinary
+  // membership, same access level as the rest of this module. Newest-first,
+  // paginated (T-02-08-02); workspace isolation is enforced BOTH by this
+  // explicit contact-existence check (404 if the contact isn't in this
+  // workspace) AND by RLS on the `events` table underneath (T-02-08-01).
+  fastify.get("/api/workspaces/:slug/contacts/:id/events", async (request, reply) => {
+    const { slug, id } = request.params as { slug: string; id: string };
+    const query = request.query as { page?: string };
+    const page = query.page ? Math.max(1, Number(query.page) || 1) : 1;
+
+    const workspace = await resolveWorkspaceMember(request, reply, slug);
+    if (!workspace) return;
+
+    const contact = await withTenant(workspace.id, () => getContact(id));
+    if (!contact) {
+      return reply.code(404).send({ error: "Contact not found" });
+    }
+
+    const events = await withTenant(workspace.id, () => listContactEvents(id, { page }));
+    return reply.send(events.map(toContactEventResponse));
   });
 
   fastify.patch("/api/workspaces/:slug/contacts/:id", async (request, reply) => {

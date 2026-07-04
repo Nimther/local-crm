@@ -56,6 +56,11 @@ export const csvImportStatusSchema = z.object({
   id: z.string().uuid(),
   status: z.enum(["uploaded", "validating", "ready", "applying", "done", "failed"]),
   fileName: z.string(),
+  // D-20: import history displays the uploading member's name -- the web
+  // client resolves this id against GET /members (same shape every other
+  // team-facing list already uses), rather than duplicating a name lookup
+  // in this read-only status route.
+  createdByUserId: z.string(),
   duplicatePolicy: duplicatePolicySchema,
   totalRows: z.number(),
   processedRows: z.number(),

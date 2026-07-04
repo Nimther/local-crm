@@ -57,6 +57,9 @@ function toStatusResponse(row: CsvImportRow) {
     id: row.id,
     status: row.status,
     fileName: row.fileName,
+    // D-20: exposed so the import-history list can resolve the uploading
+    // member's display name against GET /members client-side.
+    createdByUserId: row.createdByUserId,
     duplicatePolicy: row.duplicatePolicy,
     totalRows: row.totalRows,
     processedRows: row.processedRows,
