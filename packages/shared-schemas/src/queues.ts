@@ -35,7 +35,21 @@ export const eventsIngestJobSchema = z.object({
 });
 export type EventsIngestJob = z.infer<typeof eventsIngestJobSchema>;
 
+/**
+ * imports:csv job payload (CONT-02, finalized in 02-07): mirrors
+ * events:ingest's Pattern 2 contract exactly -- `workspaceId` is re-derived
+ * from this payload inside the worker (never ambient state), and
+ * `csvImportId` is the sole pointer into the already-staged
+ * `csv_import_rows` table (the worker re-reads persisted rows rather than
+ * re-parsing the original upload, since apps/worker is a separate process
+ * with no access to the request's file stream -- see 02-07-PLAN.md's
+ * "Decision surfaced"). Idempotency under BullMQ's at-least-once redelivery
+ * is achieved via each row's own persisted `status` (Pitfall 1), not via
+ * `jobId` alone -- a single import's apply job may itself be long-running
+ * (100k+ rows) and is safe to redeliver in full.
+ */
 export const importsCsvJobSchema = z.object({
   workspaceId: z.string().uuid(),
+  csvImportId: z.string().uuid(),
 });
 export type ImportsCsvJob = z.infer<typeof importsCsvJobSchema>;

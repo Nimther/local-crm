@@ -57,6 +57,20 @@
       "when": 1783153600000,
       "tag": "0007_events_partitioned",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1783159804439,
+      "tag": "0008_exotic_skullbuster",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1783159804440,
+      "tag": "0009_csv_imports_rls_policies",
+      "breakpoints": true
     }
   ]
 }
