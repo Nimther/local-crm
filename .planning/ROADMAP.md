@@ -14,7 +14,7 @@ Mega CRM is a Klaviyo-class, multi-tenant email marketing automation platform de
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Workspace Foundation & Team Access** - Multi-tenant workspaces, team invites, roles, and a validated encrypted SendGrid key (completed 2026-07-03)
-- [ ] **Phase 2: Contacts & Event Ingestion** - Contact base via UI/CSV/API plus an async server-side event stream that upserts contacts
+- [x] **Phase 2: Contacts & Event Ingestion** - Contact base via UI/CSV/API plus an async server-side event stream that upserts contacts (completed 2026-07-04)
 - [ ] **Phase 3: Segmentation Engine** - Dynamic profile + behavioral segments with live preview, on one shared evaluation engine
 - [ ] **Phase 4: Broadcast Campaigns & Send Pipeline** - First complete send loop: throttled, idempotent, suppression-aware broadcasts via SendGrid
 - [ ] **Phase 5: Webhook Processing & Delivery Tracking** - Verified, deduplicated delivery events that update message status and auto-suppress contacts
@@ -83,7 +83,7 @@ Plans:
   4. An event for an unknown contact automatically creates it via external_id/email upsert, and a later email change still resolves to the same contact.
   5. Every contact carries a 3-state subscription status (subscribed / unsubscribed / suppressed).
 
-**Plans**: 7/8 plans executed
+**Plans**: 8/8 plans complete
 **UI hint**: yes
 
 Plans:
@@ -111,7 +111,7 @@ Plans:
 
 **Wave 6**
 
-- [ ] 02-08-PLAN.md — CSV import wizard UI + history + live contact event feed (CONT-02, EVNT-01/D-14)
+- [x] 02-08-PLAN.md — CSV import wizard UI + history + live contact event feed (CONT-02, EVNT-01/D-14)
 
 ### Phase 3: Segmentation Engine
 
@@ -240,7 +240,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Workspace Foundation & Team Access | 7/7 | Complete    | 2026-07-03 |
-| 2. Contacts & Event Ingestion | 7/8 | In Progress|  |
+| 2. Contacts & Event Ingestion | 8/8 | Complete   | 2026-07-04 |
 | 3. Segmentation Engine | 0/4 | Not started | - |
 | 4. Broadcast Campaigns & Send Pipeline | 0/6 | Not started | - |
 | 5. Webhook Processing & Delivery Tracking | 0/3 | Not started | - |

@@ -4,17 +4,17 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 02
 current_phase_name: contacts-event-ingestion
-status: executing
-stopped_at: Completed 02-07-PLAN.md
-last_updated: "2026-07-04T10:22:50.671Z"
+status: verifying
+stopped_at: Completed 02-08-PLAN.md (final plan of Phase 02) -- ready for phase-level verification
+last_updated: "2026-07-04T10:38:50.166Z"
 last_activity: 2026-07-04
 last_activity_desc: Phase 02 execution started
 progress:
   total_phases: 7
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 15
-  completed_plans: 14
-  percent: 14
+  completed_plans: 15
+  percent: 29
 ---
 
 # Project State
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-07-04)
 
 Phase: 02 (contacts-event-ingestion) — EXECUTING
 Plan: 8 of 8
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-07-04 — Phase 02 execution started
 
 Progress: [████████████████████] 7/7 plans (100%)
@@ -69,6 +69,7 @@ Progress: [████████████████████] 7/7 pla
 | Phase 02 P02 | 10min | 3 tasks | 21 files |
 | Phase 02 P06 | 30min | 3 tasks | 24 files |
 | Phase 02 P07 | 13min | 3 tasks | 19 files |
+| Phase 02 P08 | 25min | 2 tasks | 13 files |
 
 ## Accumulated Context
 
@@ -119,6 +120,10 @@ Recent decisions affecting current work:
 - [Phase 02]: 02-07: dry-run persists per-row error status/reason immediately (not just aggregate counts) so the D-18 error-report CSV is usable right after dry-run, before apply ever runs
 - [Phase 02]: 02-07: added findContactIdByIdentity (read-only, same external_id-then-email priority) to @mega-crm/contacts-core so the D-15 skip-policy precheck and dry-run's willUpdate classification share one matcher
 - [Phase 02]: 02-07: UpsertContactIdentityResult gained an optional created flag (backward compatible) so the CSV worker can report accurate created/updated counts without re-deriving identity-match state
+- [Phase 02]: 02-08: csv_imports status response/schema now also exposes createdByUserId so CsvImportHistory can resolve the uploading member's name against GET /members -- D-20 requires an author column the read route didn't surface yet
+- [Phase 02]: 02-08: listContactEvents enforces workspace isolation twice -- an explicit getContact(id) 404 check in the route AND RLS on the events parent table (T-02-08-01)
+- [Phase 02]: 02-08: CsvImportWizard's :id re-entry route only ever resolves to the progress/report view (applying/done/failed) -- mapping/preview replay is out of scope since the status route never returns headers/previewRows
+- [Phase 02]: 02-08: Task 3 (CSV import + event feed human verification) deferred to phase-level UAT per human_verify_mode: end-of-phase and Phase 1/Phase 2 precedent -- 8 manual checks carried forward
 
 ### Pending Todos
 
@@ -145,6 +150,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-04T10:22:50.648Z
-Stopped at: Completed 02-07-PLAN.md
+Last session: 2026-07-04T10:38:50.142Z
+Stopped at: Completed 02-08-PLAN.md (final plan of Phase 02) -- ready for phase-level verification
 Resume file: None
