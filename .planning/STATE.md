@@ -6,14 +6,14 @@ current_phase: 02
 current_phase_name: contacts-event-ingestion
 status: executing
 stopped_at: Completed 02-01-PLAN.md
-last_updated: "2026-07-04T08:12:56.049Z"
+last_updated: "2026-07-04T08:32:01.579Z"
 last_activity: 2026-07-04
 last_activity_desc: Phase 02 execution started
 progress:
   total_phases: 7
   completed_phases: 1
   total_plans: 15
-  completed_plans: 8
+  completed_plans: 9
   percent: 14
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-07-04)
 ## Current Position
 
 Phase: 02 (contacts-event-ingestion) — EXECUTING
-Plan: 2 of 8
+Plan: 3 of 8
 Status: Ready to execute
 Last activity: 2026-07-04 — Phase 02 execution started
 
@@ -63,6 +63,7 @@ Progress: [████████████████████] 7/7 pla
 | Phase 01 P06 | 2min | 3 tasks | 7 files |
 | Phase 01 P07 | 10min | 3 tasks | 5 files |
 | Phase 02 P01 | 45min | 3 tasks | 16 files |
+| Phase 02 P03 | 16min | 3 tasks | 19 files |
 
 ## Accumulated Context
 
@@ -98,6 +99,8 @@ Recent decisions affecting current work:
 - [Phase 02]: 02-01: external_id change attempts against an already-set value are silently ignored (200, unchanged), not an error (D-06)
 - [Phase 02]: 02-01: update path also rejects any direct set of subscription_status=suppressed, not just suppressed->subscribed, closing T-02-01-02 from both directions
 - [Phase 02]: 02-01: added a build (tsc --noEmit) script + tsconfig.json to packages/db -- previously had none, needed to satisfy the plan's verification step
+- [Phase 02]: 02-03: workspace_api_keys carries a second SELECT-only RLS policy (api_key_runtime_lookup) scoped to a single primary-key id via app.api_key_lookup_id, letting apiKeyAuth resolve workspace_id before any tenant context exists without weakening workspace_isolation
+- [Phase 02]: 02-03: workspace_isolation on workspace_api_keys uses NULLIF(current_setting(...), '')::uuid, not a bare cast -- lookupApiKeyById is the first read outside withTenantTransaction and a pooled connection's leftover '' GUC value throws an invalid-uuid-cast 500 without the guard
 
 ### Pending Todos
 
@@ -123,6 +126,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-04T08:12:56.021Z
+Last session: 2026-07-04T08:32:01.553Z
 Stopped at: Completed 02-01-PLAN.md
 Resume file: .planning/phases/02-contacts-event-ingestion/02-UI-SPEC.md
