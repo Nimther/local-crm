@@ -18,6 +18,7 @@ import ProfilePage from "@/features/profile/ProfilePage";
 import TeamPage from "@/features/team/TeamPage";
 import SendGridKeySettings from "@/features/sendgrid-key/SendGridKeySettings";
 import ApiKeysSettings from "@/features/api-keys/ApiKeysSettings";
+import ContactsListPage from "@/features/contacts/ContactsListPage";
 
 /**
  * Resolves "/" for a signed-in user: no workspace yet -> /create-workspace
@@ -64,6 +65,7 @@ export default function App() {
           <Route path="/invite/:invitationId" element={<InviteAcceptPage />} />
           <Route path="/w/:slug" element={<AppShell />}>
             <Route index element={<WorkspaceHome />} />
+            <Route path="contacts" element={<ContactsListPage />} />
             <Route path="team" element={<TeamPage />} />
             <Route path="profile" element={<ProfilePage />} />
             <Route path="settings/sendgrid" element={<SendGridKeySettings />} />
