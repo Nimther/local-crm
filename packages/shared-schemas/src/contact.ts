@@ -87,3 +87,34 @@ export const contactListResponseSchema = z.object({
   pageSize: z.number(),
 });
 export type ContactListResponse = z.infer<typeof contactListResponseSchema>;
+
+/**
+ * POST /v1/contacts (CONT-03, API-key-authed integration surface) -- same
+ * D-02 "at least one identifier" rule as the session-authed create schema.
+ * Accepts either a single contact or a batch (an integration that already
+ * batches its own event traffic can batch contact upserts the same way).
+ */
+const upsertContactApiItemSchema = z
+  .object({
+    externalId: z.string().trim().min(1).max(255).optional(),
+    email: z.string().trim().toLowerCase().email().optional(),
+    firstName: z.string().trim().max(255).optional(),
+    lastName: z.string().trim().max(255).optional(),
+    phone: z.string().trim().max(50).optional(),
+    city: z.string().trim().max(255).optional(),
+    country: z.string().trim().max(255).optional(),
+    tags: z.array(z.string().trim().min(1)).optional(),
+    properties: propertiesSchema.optional(),
+    subscriptionStatus: subscriptionStatusSchema.optional(),
+  })
+  .refine((v) => Boolean(v.email || v.externalId), {
+    message: "At least one of email or externalId is required",
+    path: ["email"],
+  });
+
+export const upsertContactApiSchema = z.union([
+  upsertContactApiItemSchema,
+  z.array(upsertContactApiItemSchema).min(1).max(1000),
+]);
+export type UpsertContactApiItem = z.infer<typeof upsertContactApiItemSchema>;
+export type UpsertContactApiInput = z.infer<typeof upsertContactApiSchema>;
