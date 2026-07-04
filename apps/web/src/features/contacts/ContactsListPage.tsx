@@ -26,6 +26,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { CreateContactDialog } from "@/features/contacts/ContactForm";
 import { SubscriptionStatusBadge } from "@/features/contacts/SubscriptionStatusBadge";
 
 const STATUS_OPTIONS: { value: SubscriptionStatus; label: string }[] = [
@@ -190,7 +191,7 @@ export function ContactsListPage() {
           <h1 className="text-display font-semibold">Контакты</h1>
           <p className="text-sm text-muted-foreground">База контактов воркспейса.</p>
         </div>
-        <Button>Добавить контакт</Button>
+        <CreateContactDialog slug={slug} />
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -260,7 +261,7 @@ export function ContactsListPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Button>Добавить контакт</Button>
+            <CreateContactDialog slug={slug} />
           </CardContent>
         </Card>
       ) : total === 0 && hasActiveFilters ? (

@@ -13,6 +13,7 @@ import {
   updateContact,
   type ContactRow,
 } from "./contact.repository.js";
+import { listPropertyRegistry } from "./property-registry.js";
 
 function toContactResponse(row: ContactRow) {
   return {
@@ -101,7 +102,7 @@ export async function registerContactsRoutes(fastify: FastifyInstance): Promise<
       return reply.code(201).send(toContactResponse(created));
     } catch (err) {
       if (err instanceof ContactConflictError) {
-        return reply.code(409).send({ error: err.message });
+        return reply.code(409).send({ error: err.message, code: err.code });
       }
       throw err;
     }
@@ -137,10 +138,21 @@ export async function registerContactsRoutes(fastify: FastifyInstance): Promise<
       return reply.send(toContactResponse(updated));
     } catch (err) {
       if (err instanceof ContactConflictError) {
-        return reply.code(409).send({ error: err.message });
+        return reply.code(409).send({ error: err.message, code: err.code });
       }
       throw err;
     }
+  });
+
+  // D-10/D-19: read-only registry of auto-discovered custom-property keys,
+  // powering the contact-form property editor's key autocomplete.
+  fastify.get("/api/workspaces/:slug/property-registry", async (request, reply) => {
+    const { slug } = request.params as { slug: string };
+    const workspace = await resolveWorkspaceMember(request, reply, slug);
+    if (!workspace) return;
+
+    const items = await withTenant(workspace.id, () => listPropertyRegistry());
+    return reply.send(items);
   });
 
   fastify.delete("/api/workspaces/:slug/contacts/:id", async (request, reply) => {

@@ -89,6 +89,18 @@ export const contactListResponseSchema = z.object({
 export type ContactListResponse = z.infer<typeof contactListResponseSchema>;
 
 /**
+ * GET /api/workspaces/:slug/property-registry -- D-10/D-19: auto-discovered
+ * custom-property keys with their observed type, used for the contact-form
+ * custom-property editor's key autocomplete (suggestions only, no schema
+ * enforcement).
+ */
+export const propertyRegistryItemSchema = z.object({
+  key: z.string(),
+  observedType: z.enum(["string", "number", "bool", "date"]),
+});
+export type PropertyRegistryItem = z.infer<typeof propertyRegistryItemSchema>;
+
+/**
  * POST /v1/contacts (CONT-03, API-key-authed integration surface) -- same
  * D-02 "at least one identifier" rule as the session-authed create schema.
  * Accepts either a single contact or a batch (an integration that already
