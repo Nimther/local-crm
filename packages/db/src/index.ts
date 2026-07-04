@@ -5,6 +5,7 @@ import * as sendgridKeysSchema from "./schema/sendgrid-keys.js";
 import * as contactsSchema from "./schema/contacts.js";
 import * as suppressionsSchema from "./schema/suppressions.js";
 import * as propertyRegistrySchema from "./schema/property-registry.js";
+import * as apiKeysSchema from "./schema/api-keys.js";
 
 const schema = {
   ...authSchema,
@@ -12,6 +13,7 @@ const schema = {
   ...contactsSchema,
   ...suppressionsSchema,
   ...propertyRegistrySchema,
+  ...apiKeysSchema,
 };
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -34,4 +36,5 @@ export * from "./schema/sendgrid-keys.js";
 export * from "./schema/contacts.js";
 export * from "./schema/suppressions.js";
 export * from "./schema/property-registry.js";
+export * from "./schema/api-keys.js";
 export { TENANT_GUC_KEY } from "./rls.js";

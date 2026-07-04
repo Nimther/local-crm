@@ -36,6 +36,20 @@
       "when": 1783152300000,
       "tag": "0004_contacts_rls_policies",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1783153438501,
+      "tag": "0005_open_lord_hawal",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1783153500000,
+      "tag": "0006_api_keys_rls_policies",
+      "breakpoints": true
     }
   ]
 }

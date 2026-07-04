@@ -3,3 +3,4 @@ export * from "./auth.js";
 export * from "./invite.js";
 export * from "./sendgrid-key.js";
 export * from "./contact.js";
+export * from "./api-key.js";

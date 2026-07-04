@@ -25,6 +25,9 @@ export const statement = {
   sendgridKey: ["update"],
   campaign: ["launch"],
   flow: ["publish"],
+  // D-21: Owner/Admin create and revoke workspace API keys independently;
+  // Member has neither (02-03).
+  apiKeys: ["create", "revoke"],
 } as const;
 
 export const ac = createAccessControl(statement);
@@ -41,6 +44,7 @@ export const member = ac.newRole({
   sendgridKey: [],
   campaign: [],
   flow: [],
+  apiKeys: [],
 });
 
 /**
@@ -60,6 +64,7 @@ export const admin = ac.newRole({
   sendgridKey: ["update"],
   campaign: ["launch"],
   flow: ["publish"],
+  apiKeys: ["create", "revoke"],
 });
 
 /** D-18/D-19/D-20: Owner has every gated permission, including organization delete. */
@@ -70,4 +75,5 @@ export const owner = ac.newRole({
   sendgridKey: ["update"],
   campaign: ["launch"],
   flow: ["publish"],
+  apiKeys: ["create", "revoke"],
 });
