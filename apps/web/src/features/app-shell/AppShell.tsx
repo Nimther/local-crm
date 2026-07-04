@@ -28,6 +28,12 @@ export function AppShell() {
             SendGrid
           </Link>
           <Link
+            to={`/w/${slug}/settings/api-keys`}
+            className="rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            API-ключи
+          </Link>
+          <Link
             to={`/w/${slug}/profile`}
             className="rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
           >

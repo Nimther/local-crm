@@ -17,6 +17,7 @@ import { WorkspaceHome } from "@/features/workspace-home/WorkspaceHome";
 import ProfilePage from "@/features/profile/ProfilePage";
 import TeamPage from "@/features/team/TeamPage";
 import SendGridKeySettings from "@/features/sendgrid-key/SendGridKeySettings";
+import ApiKeysSettings from "@/features/api-keys/ApiKeysSettings";
 
 /**
  * Resolves "/" for a signed-in user: no workspace yet -> /create-workspace
@@ -66,6 +67,7 @@ export default function App() {
             <Route path="team" element={<TeamPage />} />
             <Route path="profile" element={<ProfilePage />} />
             <Route path="settings/sendgrid" element={<SendGridKeySettings />} />
+            <Route path="settings/api-keys" element={<ApiKeysSettings />} />
           </Route>
         </Routes>
       </BrowserRouter>
