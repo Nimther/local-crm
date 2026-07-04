@@ -83,7 +83,7 @@ Plans:
   4. An event for an unknown contact automatically creates it via external_id/email upsert, and a later email change still resolves to the same contact.
   5. Every contact carries a 3-state subscription status (subscribed / unsubscribed / suppressed).
 
-**Plans**: 8/8 plans complete
+**Plans**: 8/8 complete + 4 gap-closure plans (02-09..02-12, verification gaps_found)
 **UI hint**: yes
 
 Plans:
@@ -112,6 +112,13 @@ Plans:
 **Wave 6**
 
 - [x] 02-08-PLAN.md — CSV import wizard UI + history + live contact event feed (CONT-02, EVNT-01/D-14)
+
+**Wave 7** *(gap closure — verification gaps_found, 3/5)*
+
+- [ ] 02-09-PLAN.md — Contact edit: property deletion + standard-field clearing (CR-04) (CONT-01, CONT-05)
+- [ ] 02-10-PLAN.md — Event ingestion: workspace-scoped idempotency PK/jobId + DEFAULT partition + queue retries (CR-01, CR-03, WR-01) (EVNT-01, EVNT-03)
+- [ ] 02-11-PLAN.md — Shared upsert robustness: SAVEPOINT race retry + status-on-update + dead-connection release (CR-02, WR-06, WR-09)
+- [ ] 02-12-PLAN.md — CSV import robustness: validated status mapping + failed-upload path + no silent stuck-applying (WR-05, WR-04, WR-03)
 
 ### Phase 3: Segmentation Engine
 
