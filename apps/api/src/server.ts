@@ -16,6 +16,7 @@ import { registerSendgridKeyRoutes } from "./modules/tenancy/sendgrid-key.js";
 import { registerContactsRoutes } from "./modules/contacts/contacts.routes.js";
 import { registerContactsApiRoutes } from "./modules/contacts/contacts-api.routes.js";
 import { registerApiKeyRoutes } from "./modules/api-keys/api-keys.routes.js";
+import { registerEventsApiRoutes } from "./modules/events/events-api.routes.js";
 
 /** Assembles the Fastify app: zod type provider, better-auth handler, workspace/profile/invite/member routes. */
 export async function buildServer() {
@@ -38,6 +39,7 @@ export async function buildServer() {
   await app.register(registerContactsRoutes);
   await app.register(registerContactsApiRoutes);
   await app.register(registerApiKeyRoutes);
+  await app.register(registerEventsApiRoutes);
 
   return app;
 }

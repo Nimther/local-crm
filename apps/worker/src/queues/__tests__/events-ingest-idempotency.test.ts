@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Pool } from "pg";
+import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool } from "../../test/db-fixture.js";
 import { processEventIngestJob } from "../events-ingest.worker.js";
 
@@ -11,7 +12,11 @@ import { processEventIngestJob } from "../events-ingest.worker.js";
  * standalone precisely so this test can call it in isolation (Pattern 2).
  * Uses a raw pool insert into `organization` (rather than spinning up
  * apps/api's full auth/session stack) to get a real workspace_id satisfying
- * the FK on `contacts`/`events`.
+ * the FK on `contacts`/`events`. Verification reads against `contacts`/
+ * `events` MUST run inside `withTenant`/`withTenantTransaction` -- both
+ * tables carry ENABLE + FORCE ROW LEVEL SECURITY, so a bare `pool.query`
+ * that never sets `app.current_workspace_id` silently returns zero rows
+ * (RLS filtering, not an error) rather than the actually-written data.
  */
 describe("events:ingest worker (EVNT-02/EVNT-03, Pitfall 1/4)", () => {
   let pool: Pool;
@@ -28,6 +33,7 @@ describe("events:ingest worker (EVNT-02/EVNT-03, Pitfall 1/4)", () => {
 
   async function freshWorkspaceId(nameSeed: string): Promise<string> {
     const slug = `${nameSeed}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    // organization is a better-auth table, NOT RLS-scoped (0001_rls_policies.sql) -- a plain pool insert is fine here.
     const { rows } = await pool.query<{ id: string }>(
       `INSERT INTO organization (name, slug) VALUES ($1, $2) RETURNING id`,
       [`${nameSeed} Co`, slug]
@@ -50,13 +56,18 @@ describe("events:ingest worker (EVNT-02/EVNT-03, Pitfall 1/4)", () => {
       externalId,
     });
 
-    const { rows: contactRows } = await pool.query(
-      `SELECT id FROM contacts WHERE workspace_id = $1 AND external_id = $2`,
-      [workspaceId, externalId]
+    const { contactRows, eventRows } = await withTenant(workspaceId, () =>
+      withTenantTransaction(async (client) => {
+        const contactRows = await client.query(
+          `SELECT id FROM contacts WHERE workspace_id = $1 AND external_id = $2`,
+          [workspaceId, externalId]
+        );
+        const eventRows = await client.query(`SELECT id FROM events WHERE id = $1`, [eventId]);
+        return { contactRows: contactRows.rows, eventRows: eventRows.rows };
+      })
     );
-    expect(contactRows).toHaveLength(1);
 
-    const { rows: eventRows } = await pool.query(`SELECT id FROM events WHERE id = $1`, [eventId]);
+    expect(contactRows).toHaveLength(1);
     expect(eventRows).toHaveLength(1);
   });
 
@@ -78,10 +89,15 @@ describe("events:ingest worker (EVNT-02/EVNT-03, Pitfall 1/4)", () => {
     await processEventIngestJob(payload);
     await processEventIngestJob(payload); // simulated BullMQ redelivery
 
-    const { rows } = await pool.query(`SELECT id FROM events WHERE id = $1 AND occurred_at = $2`, [
-      eventId,
-      occurredAt,
-    ]);
+    const rows = await withTenant(workspaceId, () =>
+      withTenantTransaction(async (client) => {
+        const { rows } = await client.query(`SELECT id FROM events WHERE id = $1 AND occurred_at = $2`, [
+          eventId,
+          occurredAt,
+        ]);
+        return rows;
+      })
+    );
     expect(rows).toHaveLength(1);
   });
 
@@ -111,9 +127,14 @@ describe("events:ingest worker (EVNT-02/EVNT-03, Pitfall 1/4)", () => {
       email: secondEmail,
     });
 
-    const { rows } = await pool.query<{ id: string; email: string }>(
-      `SELECT id, email FROM contacts WHERE workspace_id = $1 AND external_id = $2`,
-      [workspaceId, externalId]
+    const rows = await withTenant(workspaceId, () =>
+      withTenantTransaction(async (client) => {
+        const { rows } = await client.query<{ id: string; email: string }>(
+          `SELECT id, email FROM contacts WHERE workspace_id = $1 AND external_id = $2`,
+          [workspaceId, externalId]
+        );
+        return rows;
+      })
     );
     expect(rows).toHaveLength(1);
     expect(rows[0].email).toBe(secondEmail);
@@ -132,9 +153,14 @@ describe("events:ingest worker (EVNT-02/EVNT-03, Pitfall 1/4)", () => {
       externalId,
     });
 
-    const { rows } = await pool.query<{ subscriptionStatus: string; properties: Record<string, unknown> }>(
-      `SELECT subscription_status as "subscriptionStatus", properties FROM contacts WHERE workspace_id = $1 AND external_id = $2`,
-      [workspaceId, externalId]
+    const rows = await withTenant(workspaceId, () =>
+      withTenantTransaction(async (client) => {
+        const { rows } = await client.query<{ subscriptionStatus: string; properties: Record<string, unknown> }>(
+          `SELECT subscription_status as "subscriptionStatus", properties FROM contacts WHERE workspace_id = $1 AND external_id = $2`,
+          [workspaceId, externalId]
+        );
+        return rows;
+      })
     );
     expect(rows).toHaveLength(1);
     expect(rows[0].subscriptionStatus).toBe("subscribed");

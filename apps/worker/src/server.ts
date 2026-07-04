@@ -1,12 +1,25 @@
 import type { Worker } from "bullmq";
-import { createRedisConnection } from "./queues/connection.js";
+import { buildRedisConnectionOptions, createRedisConnection } from "./queues/connection.js";
+import { createEventsIngestWorker } from "./queues/events-ingest.worker.js";
 
 /**
- * The worker process's runtime handle: the shared ioredis connection plus
- * every registered BullMQ Worker. 02-06 (event ingestion) and 02-07 (CSV
- * import) each push their Worker into `workers` here — this file stays the
- * single place that owns process-level startup/shutdown, so neither slice
- * plan needs to re-derive graceful-shutdown wiring.
+ * The worker process's runtime handle: a standalone shared ioredis
+ * connection (kept for process-level shutdown/inspection, e.g. a future
+ * @bull-board wiring) plus every registered BullMQ Worker. 02-06 (event
+ * ingestion) registers events:ingest below; 02-07 (CSV import) pushes its
+ * Worker into `workers` here too — this file stays the single place that
+ * owns process-level startup/shutdown, so neither slice plan needs to
+ * re-derive graceful-shutdown wiring.
+ *
+ * Each Worker gets its OWN internal connection built from plain
+ * `buildRedisConnectionOptions(...)` (not this shared `connection`
+ * instance) -- BullMQ bundles its own internal `ioredis` copy at a
+ * different version than this workspace's, so passing a constructed
+ * `Redis` client instance across that boundary is a TypeScript nominal-type
+ * mismatch (see events-ingest.worker.ts's `createEventsIngestWorker` doc
+ * comment); a plain options object has no such class identity and works
+ * regardless. `worker.close()` (called below) already closes each Worker's
+ * own BullMQ-managed connection.
  */
 export interface WorkerRuntime {
   connection: ReturnType<typeof createRedisConnection>;
@@ -15,9 +28,9 @@ export interface WorkerRuntime {
 }
 
 /**
- * Assembles the worker runtime: one shared Redis connection, and (so far)
- * zero BullMQ Workers — 02-06/02-07 register the events:ingest and
- * imports:csv workers here once their job processors exist. No HTTP
+ * Assembles the worker runtime: one shared Redis connection plus the
+ * events:ingest BullMQ Worker (EVNT-02/EVNT-03) — 02-07 registers the
+ * imports:csv worker here too once its job processor exists. No HTTP
  * listener; this is a long-running background process, not a server.
  */
 export async function buildWorker(): Promise<WorkerRuntime> {
@@ -27,7 +40,7 @@ export async function buildWorker(): Promise<WorkerRuntime> {
   }
 
   const connection = createRedisConnection(redisUrl);
-  const workers: Worker[] = [];
+  const workers: Worker[] = [createEventsIngestWorker(buildRedisConnectionOptions(redisUrl))];
 
   const close = async (): Promise<void> => {
     await Promise.all(workers.map((worker) => worker.close()));
@@ -57,7 +70,7 @@ async function main(): Promise<void> {
   process.on("SIGTERM", shutdown);
 
   // eslint-disable-next-line no-console
-  console.log("apps/worker started (no BullMQ workers registered yet — see 02-06/02-07)");
+  console.log(`apps/worker started (${runtime.workers.length} BullMQ worker(s) registered: events:ingest)`);
 }
 
 const isDirectRun = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;

@@ -7,8 +7,12 @@ import { z } from "zod";
  * flooded broadcast queue can never starve triggered sends — see
  * STACK.md's Queue & Send Pipeline rationale.
  */
-export const EVENTS_INGEST_QUEUE = "events:ingest";
-export const IMPORTS_CSV_QUEUE = "imports:csv";
+// BullMQ rejects queue names containing ":" (it reserves the colon as its
+// own Redis-key separator -- see QueueBase's own validation, confirmed
+// against bullmq@5.79.1) -- these use "-" instead of the "events:ingest"/
+// "imports:csv" notation used in prose/comments elsewhere in this project.
+export const EVENTS_INGEST_QUEUE = "events-ingest";
+export const IMPORTS_CSV_QUEUE = "imports-csv";
 
 /**
  * events:ingest job payload (EVNT-02/EVNT-03, finalized in 02-06): the
