@@ -3,6 +3,9 @@ import { z } from "zod";
 const envSchema = z
   .object({
     DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
+    // 02-05: BullMQ queue backend (event ingestion + CSV import); the API
+    // refuses to boot without a configured Redis, same pattern as DATABASE_URL.
+    REDIS_URL: z.string().min(1, "REDIS_URL is required"),
     BETTER_AUTH_SECRET: z.string().min(16, "BETTER_AUTH_SECRET must be at least 16 characters"),
     BETTER_AUTH_URL: z.string().url(),
     WEB_URL: z.string().url(),

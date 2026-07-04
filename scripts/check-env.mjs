@@ -47,6 +47,7 @@ const baseRequired = [
   "WEB_URL",
   "PLATFORM_SENDGRID_API_KEY",
   "PLATFORM_MAIL_FROM",
+  "REDIS_URL",
 ];
 
 const required = [...baseRequired];

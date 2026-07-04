@@ -27,6 +27,10 @@ export default defineConfig({
       // Route every test run at the isolated test database, never the dev
       // DATABASE_URL, so tests can never touch real dev data.
       DATABASE_URL: process.env.TEST_DATABASE_URL ?? "",
+      // 02-05: REDIS_URL is boot-required by env.ts; tests never open a real
+      // Redis connection (no test in apps/api exercises BullMQ/ioredis
+      // directly), so a placeholder value just satisfies the Zod schema.
+      REDIS_URL: process.env.TEST_REDIS_URL ?? "redis://localhost:6379/1",
       // Test-safe platform-mail credentials (never real SendGrid values) --
       // outbound requests are always intercepted by `nock` in tests that
       // exercise platformMail, so these never touch the real network.

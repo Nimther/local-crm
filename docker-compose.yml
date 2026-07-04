@@ -17,5 +17,21 @@ services:
       timeout: 5s
       retries: 10
 
+  # 02-05: BullMQ queue backend for async event ingestion (EVNT-03) and CSV
+  # import; reused by the Phase 4 send pipeline.
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - mega_crm_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
 volumes:
   mega_crm_db_data:
+  mega_crm_redis_data:
