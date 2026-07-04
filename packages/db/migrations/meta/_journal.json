@@ -22,6 +22,20 @@
       "when": 1783075859811,
       "tag": "0002_invitation_created_at",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1783152294304,
+      "tag": "0003_eminent_meltdown",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1783152300000,
+      "tag": "0004_contacts_rls_policies",
+      "breakpoints": true
     }
   ]
 }

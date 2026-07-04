@@ -2,8 +2,17 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import * as authSchema from "./schema/auth.js";
 import * as sendgridKeysSchema from "./schema/sendgrid-keys.js";
+import * as contactsSchema from "./schema/contacts.js";
+import * as suppressionsSchema from "./schema/suppressions.js";
+import * as propertyRegistrySchema from "./schema/property-registry.js";
 
-const schema = { ...authSchema, ...sendgridKeysSchema };
+const schema = {
+  ...authSchema,
+  ...sendgridKeysSchema,
+  ...contactsSchema,
+  ...suppressionsSchema,
+  ...propertyRegistrySchema,
+};
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -22,4 +31,7 @@ export const db = drizzle(pool, { schema });
 
 export * from "./schema/auth.js";
 export * from "./schema/sendgrid-keys.js";
+export * from "./schema/contacts.js";
+export * from "./schema/suppressions.js";
+export * from "./schema/property-registry.js";
 export { TENANT_GUC_KEY } from "./rls.js";
