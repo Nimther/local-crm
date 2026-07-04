@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 2
-current_phase_name: Contacts & Event Ingestion
-status: "Phase 01 shipped — PR #1"
-stopped_at: Phase 2 UI-SPEC approved
-last_updated: "2026-07-04T07:45:43.508Z"
+current_phase: 02
+current_phase_name: contacts-event-ingestion
+status: executing
+stopped_at: Completed 02-01-PLAN.md
+last_updated: "2026-07-04T08:12:56.049Z"
 last_activity: 2026-07-04
-last_activity_desc: Phase 02 planning complete
+last_activity_desc: Phase 02 execution started
 progress:
   total_phases: 7
   completed_phases: 1
-  total_plans: 7
-  completed_plans: 7
+  total_plans: 15
+  completed_plans: 8
   percent: 14
 ---
 
@@ -24,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-04)
 
 **Core value:** Маркетолог настраивает триггерную цепочку или кампанию — и письма надёжно и вовремя доходят до нужных контактов, со сквозным отслеживанием статусов (delivered/opened/clicked/bounced).
-**Current focus:** Phase 2 — Contacts & Event Ingestion
+**Current focus:** Phase 02 — contacts-event-ingestion
 
 ## Current Position
 
-Phase: 2 — Contacts & Event Ingestion
-Plan: Not started
-Status: Phase 01 shipped — PR #1
-Last activity: 2026-07-04 — Phase 02 planning complete
+Phase: 02 (contacts-event-ingestion) — EXECUTING
+Plan: 2 of 8
+Status: Ready to execute
+Last activity: 2026-07-04 — Phase 02 execution started
 
 Progress: [████████████████████] 7/7 plans (100%)
 
@@ -62,6 +62,7 @@ Progress: [████████████████████] 7/7 pla
 | Phase 01 P05 | 7min | 3 tasks | 19 files |
 | Phase 01 P06 | 2min | 3 tasks | 7 files |
 | Phase 01 P07 | 10min | 3 tasks | 5 files |
+| Phase 02 P01 | 45min | 3 tasks | 16 files |
 
 ## Accumulated Context
 
@@ -93,6 +94,10 @@ Recent decisions affecting current work:
 - [Phase 01]: 01-07: env.ts boot-error header pinned to literal substring 'Invalid environment' (case-sensitive) to satisfy automated verify while staying readable — Plan's automated check does a case-sensitive grep; wording chosen to satisfy both the check and human readability
 - [Phase 01]: 01-07: check-env.mjs mirrors env.ts's KMS superRefine conditional-requirement logic as a standalone dependency-free parser rather than importing the zod schema — Keeps the pre-dev checker usable without relying on the API workspace's node_modules being installed
 - [Phase 01]: 01-07: local .env's PLATFORM_SENDGRID_API_KEY/PLATFORM_MAIL_FROM are clearly-labeled placeholders, not real platform SendGrid credentials — No real platform SendGrid account available in this session; placeholders satisfy the schema to unblock boot/registration but must be replaced before live-email UAT Tests 4/5/7
+- [Phase 02]: 02-01: suppression-list check on create overrides ANY requested subscription_status, not just the subscribed default (strictest reading of D-08)
+- [Phase 02]: 02-01: external_id change attempts against an already-set value are silently ignored (200, unchanged), not an error (D-06)
+- [Phase 02]: 02-01: update path also rejects any direct set of subscription_status=suppressed, not just suppressed->subscribed, closing T-02-01-02 from both directions
+- [Phase 02]: 02-01: added a build (tsc --noEmit) script + tsconfig.json to packages/db -- previously had none, needed to satisfy the plan's verification step
 
 ### Pending Todos
 
@@ -118,6 +123,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-04T07:08:06.592Z
-Stopped at: Phase 2 UI-SPEC approved
+Last session: 2026-07-04T08:12:56.021Z
+Stopped at: Completed 02-01-PLAN.md
 Resume file: .planning/phases/02-contacts-event-ingestion/02-UI-SPEC.md

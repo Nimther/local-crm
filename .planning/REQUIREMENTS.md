@@ -17,11 +17,11 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Contacts
 
-- [ ] **CONT-01**: Пользователь может создавать, просматривать, редактировать и удалять контакты в UI
+- [x] **CONT-01**: Пользователь может создавать, просматривать, редактировать и удалять контакты в UI
 - [ ] **CONT-02**: Пользователь может импортировать контакты из CSV с маппингом колонок на атрибуты, превью перед применением и отчётом об ошибках/дубликатах
 - [ ] **CONT-03**: Разработчик тенанта может создавать/обновлять контакты через Contacts CRUD API
 - [ ] **CONT-04**: Контакт идентифицируется по external_id (основной ключ) с email как запасным; события и API выполняют upsert по этой паре
-- [ ] **CONT-05**: Контакт хранит произвольные кастомные свойства профиля, доступные в сегментации
+- [x] **CONT-05**: Контакт хранит произвольные кастомные свойства профиля, доступные в сегментации
 
 ### Event Ingestion
 
@@ -38,7 +38,7 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Subscription & Suppression
 
-- [ ] **SUBS-01**: Каждый контакт имеет 3-state статус: subscribed / unsubscribed / suppressed (bounce, spam complaint) — с разной семантикой повторной подписки
+- [x] **SUBS-01**: Каждый контакт имеет 3-state статус: subscribed / unsubscribed / suppressed (bounce, spam complaint) — с разной семантикой повторной подписки
 - [ ] **SUBS-02**: Unsubscribe/bounce/spam-события из SendGrid webhook автоматически обновляют статус контакта
 - [ ] **SUBS-03**: Перед каждой отправкой (цепочка или кампания) применяется pre-send фильтр по статусу подписки и suppression — недоставляемым и отписанным письма не отправляются
 - [ ] **SUBS-04**: Каждое отправляемое письмо содержит one-click List-Unsubscribe header (требование Gmail/Yahoo для bulk-senders)
@@ -132,15 +132,15 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TENANT-03 | Phase 1 | Complete |
 | TENANT-04 | Phase 1 | Complete |
 | TENANT-05 | Phase 1 | Complete |
-| CONT-01 | Phase 2 | Pending |
+| CONT-01 | Phase 2 | Complete |
 | CONT-02 | Phase 2 | Pending |
 | CONT-03 | Phase 2 | Pending |
 | CONT-04 | Phase 2 | Pending |
-| CONT-05 | Phase 2 | Pending |
+| CONT-05 | Phase 2 | Complete |
 | EVNT-01 | Phase 2 | Pending |
 | EVNT-02 | Phase 2 | Pending |
 | EVNT-03 | Phase 2 | Pending |
-| SUBS-01 | Phase 2 | Pending |
+| SUBS-01 | Phase 2 | Complete |
 | SEGM-01 | Phase 3 | Pending |
 | SEGM-02 | Phase 3 | Pending |
 | SEGM-03 | Phase 3 | Pending |
