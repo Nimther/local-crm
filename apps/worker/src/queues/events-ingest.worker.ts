@@ -9,9 +9,12 @@ import { EVENTS_INGEST_QUEUE, eventsIngestJobSchema, type EventsIngestJob } from
  * separate from the one that enqueued the job), upserts the contact via the
  * SAME `upsertContactByIdentity` the Contacts API route uses (no D-01..D-08
  * drift risk between call sites), then writes the event row idempotently
- * keyed on the job's deterministic `(id, occurred_at)` -- `ON CONFLICT (id,
- * occurred_at) DO NOTHING` is the DB-level safety net for BullMQ's
- * at-least-once redelivery guarantee (Pitfall 1). Event properties are
+ * keyed on the job's deterministic `(workspace_id, id, occurred_at)` --
+ * `ON CONFLICT (workspace_id, id, occurred_at) DO NOTHING` is the DB-level
+ * safety net for BullMQ's at-least-once redelivery guarantee (Pitfall 1),
+ * AND (as of migration 0010, CR-01) scopes dedupe per-tenant so a
+ * client-supplied eventId from one workspace can never suppress another
+ * workspace's event sharing the same id. Event properties are
  * forwarded into `upsertContactByIdentity`'s `properties` input too (D-10:
  * custom properties are auto-discovered from events as well as the API/CSV/
  * UI) -- `upsertContactByIdentity` strips reserved keys (Pitfall 4) before
@@ -37,7 +40,7 @@ export async function processEventIngestJob(data: EventsIngestJob): Promise<void
       await client.query(
         `INSERT INTO events (id, workspace_id, contact_id, name, properties, occurred_at, received_at)
          VALUES ($1, $2, $3, $4, $5, $6, now())
-         ON CONFLICT (id, occurred_at) DO NOTHING`,
+         ON CONFLICT (workspace_id, id, occurred_at) DO NOTHING`,
         [eventId, workspaceId, contactId, name, properties, occurredAt]
       );
     })

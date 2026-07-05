@@ -71,6 +71,13 @@
       "when": 1783159804440,
       "tag": "0009_csv_imports_rls_policies",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1783159804441,
+      "tag": "0010_events_workspace_scoped_pk",
+      "breakpoints": true
     }
   ]
 }
