@@ -20,6 +20,15 @@ const STANDARD_FIELDS = new Set([
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/**
+ * WR-05: only these two values may ever be SET from a CSV cell.
+ * `suppressed` is deliberately excluded even though it is otherwise a valid
+ * subscriptionStatus enum value elsewhere in the app -- suppression is
+ * reserved for automated bounce/spam handling (D-12), never a marketer's
+ * CSV upload.
+ */
+const CSV_SETTABLE_SUBSCRIPTION_STATUSES = new Set(["subscribed", "unsubscribed"]);
+
 export interface CsvMappingResult {
   input: UpsertContactIdentityInput;
   error?: string;
@@ -56,11 +65,27 @@ export function applyCsvRowMapping(
         .split(",")
         .map((t) => t.trim())
         .filter(Boolean);
+    } else if (field === "subscriptionStatus") {
+      // WR-05: validated below (after the loop) so both "invalid value"
+      // and "missing identity" errors go through the same
+      // { input, error } return shape -- the raw normalized value is
+      // stashed here and checked once the whole row has been mapped.
+      target[field] = value.trim().toLowerCase();
     } else if (STANDARD_FIELDS.has(field)) {
       target[field] = field === "email" ? value.trim().toLowerCase() : value;
     } else {
       input.properties![field] = value;
     }
+  }
+
+  if (
+    input.subscriptionStatus !== undefined &&
+    !CSV_SETTABLE_SUBSCRIPTION_STATUSES.has(input.subscriptionStatus)
+  ) {
+    // Covers both a nonsense value ("yes") and a deliberate attempt to set
+    // "suppressed" via CSV (D-12) -- neither may pass dry-run OR apply, so
+    // this is the SAME mapper both call, keeping them in agreement.
+    return { input, error: "Invalid subscription status" };
   }
 
   if (!input.externalId && !input.email) {
