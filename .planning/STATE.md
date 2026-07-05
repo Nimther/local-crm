@@ -6,14 +6,14 @@ current_phase: 02
 current_phase_name: contacts-event-ingestion
 status: executing
 stopped_at: "Completed 02-11-PLAN.md (gap-closure: CR-02 SAVEPOINT race retry, WR-06 subscriptionStatus-on-update, WR-09 dead-connection destruction)"
-last_updated: "2026-07-05T04:37:36.562Z"
+last_updated: "2026-07-05T04:49:09.385Z"
 last_activity: 2026-07-05
 last_activity_desc: Phase 02 execution started
 progress:
   total_phases: 7
   completed_phases: 1
   total_plans: 19
-  completed_plans: 17
+  completed_plans: 18
   percent: 14
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-07-04)
 ## Current Position
 
 Phase: 02 (contacts-event-ingestion) — EXECUTING
-Plan: 3 of 12
+Plan: 4 of 12
 Status: Ready to execute
 Last activity: 2026-07-05 — Phase 02 execution started
 
@@ -72,6 +72,7 @@ Progress: [████████████████████] 7/7 pla
 | Phase 02 P08 | 25min | 2 tasks | 13 files |
 | Phase 02 P09 | 3min | 3 tasks | 4 files |
 | Phase 02 P11 | 15 | 3 tasks | 4 files |
+| Phase 02 P10 | 6min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -129,6 +130,9 @@ Recent decisions affecting current work:
 - [Phase 02]: 02-09: updateContact's properties field is now full-replacement (patch.properties ?? existing.properties), not a merge -- a removed custom property stays removed — CR-04: the prior merge-based approach silently re-added any key omitted from the PATCH body, defeating the CustomPropertyEditor's remove action
 - [Phase 02]: 02-09: updateContactSchema's firstName/lastName/phone/city/country accept null as an explicit clear signal; ContactForm's cleanPayload sends null for these fields only in edit mode — CR-04: an emptied field was previously omitted from the PATCH body entirely, so the repository's keep-existing fallback preserved the stale value forever while the UI reported success
 - [Phase ?]: [Phase 02]: 02-11: invalid subscriptionStatus transitions on upsertContactByIdentity's update branch are logged and silently skipped (not thrown) -- shared upsert has unattended callers with no response cycle to surface a 409 through
+- [Phase ?]: [Phase 02]: 02-10: events PK widened to (workspace_id, id, occurred_at) closing CR-01 cross-tenant idempotency collision; events_default DEFAULT partition added closing CR-03 out-of-window durability gap
+- [Phase ?]: [Phase 02]: 02-10: BullMQ jobId separator is '-' not ':' -- BullMQ rejects a Custom Id containing a colon; per-tenant jobId is ${workspaceId}-${eventId}
+- [Phase ?]: [Phase 02]: 02-10: events-ingest and imports-csv queues now configure defaultJobOptions (attempts: 5, exponential backoff, removeOnFail: false) closing WR-01
 
 ### Pending Todos
 
@@ -155,6 +159,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-05T04:37:36.536Z
+Last session: 2026-07-05T04:48:44.897Z
 Stopped at: Completed 02-11-PLAN.md (gap-closure: CR-02 SAVEPOINT race retry, WR-06 subscriptionStatus-on-update, WR-09 dead-connection destruction)
 Resume file: None

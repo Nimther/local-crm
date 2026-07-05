@@ -83,7 +83,7 @@ Plans:
   4. An event for an unknown contact automatically creates it via external_id/email upsert, and a later email change still resolves to the same contact.
   5. Every contact carries a 3-state subscription status (subscribed / unsubscribed / suppressed).
 
-**Plans**: 10/12 plans executed
+**Plans**: 11/12 plans executed
 **UI hint**: yes
 
 Plans:
@@ -116,7 +116,7 @@ Plans:
 **Wave 7** *(gap closure — verification gaps_found, 3/5)*
 
 - [x] 02-09-PLAN.md — Contact edit: property deletion + standard-field clearing (CR-04) (CONT-01, CONT-05)
-- [ ] 02-10-PLAN.md — Event ingestion: workspace-scoped idempotency PK/jobId + DEFAULT partition + queue retries (CR-01, CR-03, WR-01) (EVNT-01, EVNT-03)
+- [x] 02-10-PLAN.md — Event ingestion: workspace-scoped idempotency PK/jobId + DEFAULT partition + queue retries (CR-01, CR-03, WR-01) (EVNT-01, EVNT-03)
 - [x] 02-11-PLAN.md — Shared upsert robustness: SAVEPOINT race retry + status-on-update + dead-connection release (CR-02, WR-06, WR-09)
 - [ ] 02-12-PLAN.md — CSV import robustness: validated status mapping + failed-upload path + no silent stuck-applying (WR-05, WR-04, WR-03)
 
@@ -247,7 +247,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Workspace Foundation & Team Access | 7/7 | Complete    | 2026-07-03 |
-| 2. Contacts & Event Ingestion | 10/12 | In Progress|  |
+| 2. Contacts & Event Ingestion | 11/12 | In Progress|  |
 | 3. Segmentation Engine | 0/4 | Not started | - |
 | 4. Broadcast Campaigns & Send Pipeline | 0/6 | Not started | - |
 | 5. Webhook Processing & Delivery Tracking | 0/3 | Not started | - |
