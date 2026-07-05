@@ -4,6 +4,7 @@ import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { applyCsvRowMapping } from "@mega-crm/contacts-core";
 import { buildServer } from "../../../server.js";
 import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool } from "../../../test/db-fixture.js";
+import { markCsvImportFailed } from "../csv-import.repository.js";
 
 /**
  * WR-05a (gap-closure 02-12): applyCsvRowMapping is a pure function, so its
@@ -362,5 +363,74 @@ describe("CSV contact import (CONT-02, D-15..D-20)", () => {
       headers: { cookie: cookieB },
     });
     expect(crossRes.statusCode).toBe(404);
+  });
+
+  it("WR-04: a truncated upload sets status 'failed' and returns 413", async () => {
+    const { cookie, workspace } = await owner("csv-truncated");
+
+    // Real >50MB payload: rows put a huge padding value in the LAST column so
+    // the 50MB multipart cut lands mid-value, keeping every parsed record at
+    // the full column count (csv-parse would otherwise reject a short row
+    // with Invalid Record Length and the route would 422 instead of 413).
+    const pad = "x".repeat(1024 * 1024 - 64);
+    const rows = ["external_id,email,notes"];
+    for (let i = 0; i < 52; i++) {
+      rows.push(`trunc-${i},trunc-${i}@example.com,${pad}`);
+    }
+    const { body, headers } = buildMultipartCsvBody("truncated.csv", rows.join("\n"));
+
+    const uploadRes = await app.inject({
+      method: "POST",
+      url: `/api/workspaces/${workspace.slug}/imports`,
+      headers: { cookie, ...headers },
+      payload: body,
+    });
+    expect(uploadRes.statusCode).toBe(413);
+
+    // The import row created before parsing must be marked 'failed', not
+    // left dangling at 'uploaded' (WR-04's silent-truncation failure mode).
+    const historyRes = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/imports`,
+      headers: { cookie },
+    });
+    expect(historyRes.statusCode).toBe(200);
+    const items = historyRes.json() as Array<{ fileName: string; status: string }>;
+    const createdImport = items.find((i) => i.fileName === "truncated.csv");
+    expect(createdImport?.status).toBe("failed");
+  });
+
+  it("WR-04: markCsvImportFailed sets import status to 'failed'", async () => {
+    const { cookie, workspace } = await owner("csv-failed-mark");
+
+    // Direct test of the markCsvImportFailed repository function, which is
+    // called by the truncation handler (lines 209-211 of csv-import.routes.ts).
+    // This ensures the status-update logic is sound.
+
+    const csvContent = "external_id,email\nfail-1,test@example.com\n";
+    const { body, headers } = buildMultipartCsvBody("will-fail.csv", csvContent);
+
+    const uploadRes = await app.inject({
+      method: "POST",
+      url: `/api/workspaces/${workspace.slug}/imports`,
+      headers: { cookie, ...headers },
+      payload: body,
+    });
+    expect(uploadRes.statusCode).toBe(200);
+    const uploadData = uploadRes.json() as { importId: string };
+
+    // Simulate what the truncation handler does: call markCsvImportFailed
+    // directly and verify the status changes to 'failed'.
+    await withTenant(workspace.id, () => markCsvImportFailed(uploadData.importId));
+
+    // Verify the import status is now 'failed'
+    const statusRes = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/imports/${uploadData.importId}`,
+      headers: { cookie },
+    });
+    expect(statusRes.statusCode).toBe(200);
+    const status = statusRes.json() as { status: string };
+    expect(status.status).toBe("failed");
   });
 });
