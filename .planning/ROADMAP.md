@@ -83,7 +83,7 @@ Plans:
   4. An event for an unknown contact automatically creates it via external_id/email upsert, and a later email change still resolves to the same contact.
   5. Every contact carries a 3-state subscription status (subscribed / unsubscribed / suppressed).
 
-**Plans**: 12/12 plans complete
+**Plans**: 12/14 plans complete
 **UI hint**: yes
 
 Plans:
@@ -119,6 +119,11 @@ Plans:
 - [x] 02-10-PLAN.md — Event ingestion: workspace-scoped idempotency PK/jobId + DEFAULT partition + queue retries (CR-01, CR-03, WR-01) (EVNT-01, EVNT-03)
 - [x] 02-11-PLAN.md — Shared upsert robustness: SAVEPOINT race retry + status-on-update + dead-connection release (CR-02, WR-06, WR-09)
 - [x] 02-12-PLAN.md — CSV import robustness: validated status mapping + failed-upload path + no silent stuck-applying (WR-05, WR-04, WR-03)
+
+**Wave 8** *(gap closure — re-verification: UAT Test 2 + WR-09 follow-up; parallel)*
+
+- [ ] 02-13-PLAN.md — Contact list search focus fix: keepPreviousData + toolbar-always-mounted + results-scoped skeleton + Playwright regression (UAT Test 2, CONT-01/D-13 hardening)
+- [ ] 02-14-PLAN.md — WR-09 fault-injection test: terminate a pooled connection mid-transaction, assert withTenantTransaction destroys it and the pool recovers (UAT Test 11 follow-up, EVNT-03/CONT-04 hardening)
 
 ### Phase 3: Segmentation Engine
 
@@ -247,7 +252,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Workspace Foundation & Team Access | 7/7 | Complete    | 2026-07-03 |
-| 2. Contacts & Event Ingestion | 12/12 | Complete   | 2026-07-05 |
+| 2. Contacts & Event Ingestion | 12/14 | Gap closure | 2026-07-05 |
 | 3. Segmentation Engine | 0/4 | Not started | - |
 | 4. Broadcast Campaigns & Send Pipeline | 0/6 | Not started | - |
 | 5. Webhook Processing & Delivery Tracking | 0/3 | Not started | - |
