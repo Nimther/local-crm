@@ -9,7 +9,5 @@ export type {
   CompiledSegment,
 } from "./types.js";
 
-// operators.ts / compile.ts exports land in Task 2 (compileSegmentDefinition
-// and friends) -- kept as a forward reference so this barrel is already the
-// stable import surface (`@mega-crm/segments-core`) before the compiler
-// itself exists.
+export { STANDARD_FIELD_COLUMNS, compileOperator } from "./operators.js";
+export { compileSegmentDefinition } from "./compile.js";
