@@ -68,6 +68,7 @@ export async function withTenantTransaction<T>(
   }
 
   const client = await pool.connect();
+  let releaseWithError: Error | undefined;
   try {
     await client.query("BEGIN");
     await client.query("SELECT set_config('app.current_workspace_id', $1, true)", [
@@ -79,12 +80,16 @@ export async function withTenantTransaction<T>(
   } catch (err) {
     try {
       await client.query("ROLLBACK");
-    } catch {
-      // connection may already be dead (e.g. terminated mid-transaction) —
-      // releasing below with `destroy=true` handles that case.
+    } catch (rollbackErr) {
+      // The ROLLBACK itself failed -- the connection is dead (e.g.
+      // terminated mid-transaction). Passing the error to `client.release()`
+      // below tells node-postgres to DESTROY this client instead of
+      // returning it to the pool, so the next checkout never inherits a
+      // broken connection (WR-09).
+      releaseWithError = rollbackErr instanceof Error ? rollbackErr : new Error(String(rollbackErr));
     }
     throw err;
   } finally {
-    client.release();
+    client.release(releaseWithError);
   }
 }

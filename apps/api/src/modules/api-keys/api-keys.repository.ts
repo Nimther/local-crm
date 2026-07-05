@@ -92,6 +92,7 @@ export async function revokeApiKey(id: string): Promise<boolean> {
  */
 export async function lookupApiKeyById(id: string): Promise<ApiKeyLookupRow | null> {
   const client = await pool.connect();
+  let releaseWithError: Error | undefined;
   try {
     await client.query("BEGIN");
     await client.query("SELECT set_config('app.api_key_lookup_id', $1, true)", [id]);
@@ -105,11 +106,16 @@ export async function lookupApiKeyById(id: string): Promise<ApiKeyLookupRow | nu
   } catch (err) {
     try {
       await client.query("ROLLBACK");
-    } catch {
-      // connection may already be dead -- release() below handles cleanup.
+    } catch (rollbackErr) {
+      // The ROLLBACK itself failed -- the connection is dead. Passing the
+      // error to `client.release()` below tells node-postgres to DESTROY
+      // this client instead of returning it to the pool, so the next
+      // checkout on this hot auth-lookup path never inherits a broken
+      // connection (WR-09).
+      releaseWithError = rollbackErr instanceof Error ? rollbackErr : new Error(String(rollbackErr));
     }
     throw err;
   } finally {
-    client.release();
+    client.release(releaseWithError);
   }
 }
