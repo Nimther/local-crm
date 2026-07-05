@@ -244,6 +244,116 @@ describe("Contact CRUD (CONT-01, CONT-05)", () => {
     expect(getRes.statusCode).toBe(404);
   });
 
+  it("CR-04/CONT-05: removing a custom property (PATCH with the remaining-only object) persists -- the deleted key is gone, not re-merged", async () => {
+    const { cookie, workspace } = await owner("crud-prop-delete");
+    const created = (
+      await app.inject({
+        method: "POST",
+        url: contactsUrl(workspace.slug),
+        headers: { cookie },
+        payload: {
+          email: `prop-delete-${Date.now()}@example.com`,
+          properties: { favoriteColor: "teal", loyaltyTier: 3 },
+        },
+      })
+    ).json();
+    expect(created.properties).toEqual({ favoriteColor: "teal", loyaltyTier: 3 });
+
+    // Mirrors CustomPropertyEditor's remove action: it sends the full
+    // remaining object (loyaltyTier omitted), not a delete marker.
+    const patchRes = await app.inject({
+      method: "PATCH",
+      url: contactsUrl(workspace.slug, created.id),
+      headers: { cookie },
+      payload: { properties: { favoriteColor: "teal" } },
+    });
+    expect(patchRes.statusCode, `patch failed: ${patchRes.body}`).toBe(200);
+
+    const getRes = await app.inject({
+      method: "GET",
+      url: contactsUrl(workspace.slug, created.id),
+      headers: { cookie },
+    });
+    expect(getRes.statusCode).toBe(200);
+    expect(getRes.json().properties).toEqual({ favoriteColor: "teal" });
+    expect(Object.keys(getRes.json().properties)).not.toContain("loyaltyTier");
+  });
+
+  it("CR-04/CONT-01: clearing a standard field (firstName/phone) to null persists -- untouched fields (city) are unaffected", async () => {
+    const { cookie, workspace } = await owner("crud-field-clear");
+    const created = (
+      await app.inject({
+        method: "POST",
+        url: contactsUrl(workspace.slug),
+        headers: { cookie },
+        payload: {
+          email: `field-clear-${Date.now()}@example.com`,
+          firstName: "Ada",
+          phone: "555",
+          city: "Paris",
+        },
+      })
+    ).json();
+    expect(created.firstName).toBe("Ada");
+    expect(created.phone).toBe("555");
+    expect(created.city).toBe("Paris");
+
+    const patchRes = await app.inject({
+      method: "PATCH",
+      url: contactsUrl(workspace.slug, created.id),
+      headers: { cookie },
+      payload: { firstName: null, phone: null },
+    });
+    expect(patchRes.statusCode, `patch failed: ${patchRes.body}`).toBe(200);
+
+    const getRes = await app.inject({
+      method: "GET",
+      url: contactsUrl(workspace.slug, created.id),
+      headers: { cookie },
+    });
+    expect(getRes.statusCode).toBe(200);
+    const fetched = getRes.json();
+    expect(fetched.firstName).toBeNull();
+    expect(fetched.phone).toBeNull();
+    expect(fetched.city).toBe("Paris");
+  });
+
+  it("CR-04: an Overview-tab edit (PATCH with no properties key) never wipes existing custom properties", async () => {
+    const { cookie, workspace } = await owner("crud-no-wipe");
+    const created = (
+      await app.inject({
+        method: "POST",
+        url: contactsUrl(workspace.slug),
+        headers: { cookie },
+        payload: {
+          email: `no-wipe-${Date.now()}@example.com`,
+          lastName: "Byron",
+          properties: { plan: "pro" },
+        },
+      })
+    ).json();
+    expect(created.properties).toEqual({ plan: "pro" });
+
+    // No `properties` key in the body at all -- the Overview tab's payload shape.
+    const patchRes = await app.inject({
+      method: "PATCH",
+      url: contactsUrl(workspace.slug, created.id),
+      headers: { cookie },
+      payload: { lastName: "Lovelace" },
+    });
+    expect(patchRes.statusCode, `patch failed: ${patchRes.body}`).toBe(200);
+
+    const getRes = await app.inject({
+      method: "GET",
+      url: contactsUrl(workspace.slug, created.id),
+      headers: { cookie },
+    });
+    expect(getRes.statusCode).toBe(200);
+    const fetched = getRes.json();
+    expect(fetched.lastName).toBe("Lovelace");
+    expect(fetched.properties).toEqual({ plan: "pro" });
+  });
+
   it("tenant isolation: a contact created in workspace A is not returned by workspace B's list route", async () => {
     const { cookie: cookieA, workspace: workspaceA } = await owner("crud-isolation-a");
     const { cookie: cookieB, workspace: workspaceB } = await owner("crud-isolation-b");
