@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import type { PoolClient } from "pg";
 import { buildServer } from "../../../server.js";
-import { ensureTestDbMigrated, getTestDatabaseUrl } from "../../../test/db-fixture.js";
+import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool } from "../../../test/db-fixture.js";
 import { withTenant, withTenantTransaction } from "../../../middleware/tenant-context.js";
 import { logger } from "@mega-crm/contacts-core";
 import { createContact, getContact, upsertContactByIdentity } from "../contact.repository.js";
@@ -197,5 +198,142 @@ describe("upsertContactByIdentity (CONT-04, D-03/D-04/D-06/A1)", () => {
     );
     expect(registryRows).toHaveLength(1);
     expect(registryRows[0].observedType).toBe("number");
+  });
+
+  /**
+   * CR-02 (02-11 gap closure): the unique-violation retry at the bottom of
+   * Branch E currently recurses on the SAME client without first issuing
+   * `ROLLBACK TO SAVEPOINT` -- the connection's transaction is already
+   * aborted after the failed INSERT, so the retry's first statement (the
+   * SELECT) throws 25P02 instead of resolving to the winning row. This test
+   * drives a REAL concurrent double-insert (two independent pooled
+   * connections racing the exact same brand-new identity) rather than
+   * mocking the interleave, so it exercises the genuine 23505 Postgres
+   * raises when both connections' SELECTs miss and both INSERTs collide.
+   */
+  it("CR-02 (Test A): a concurrent double-insert on a brand-new identity resolves to a single contact without surfacing 25P02", async () => {
+    const workspaceId = await freshWorkspaceId("upsert-race");
+    const email = `race-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
+
+    const racePool = createTestPool();
+    try {
+      const clientA = await racePool.connect();
+      const clientB = await racePool.connect();
+
+      await clientA.query("BEGIN");
+      await clientA.query("SELECT set_config('app.current_workspace_id', $1, true)", [workspaceId]);
+      await clientB.query("BEGIN");
+      await clientB.query("SELECT set_config('app.current_workspace_id', $1, true)", [workspaceId]);
+
+      async function raceUpsert(client: PoolClient) {
+        try {
+          const result = await upsertContactByIdentity(client, workspaceId, { email });
+          await client.query("COMMIT");
+          return result;
+        } catch (err) {
+          try {
+            await client.query("ROLLBACK");
+          } catch {
+            // connection may already be dead/aborted beyond recovery -- release() below handles cleanup
+          }
+          throw err;
+        } finally {
+          client.release();
+        }
+      }
+
+      // Both connections race the SAME brand-new identity: neither's
+      // internal SELECT can see the other's row yet, so both fall into
+      // Branch E and both attempt the INSERT -- exactly the 23505 race the
+      // SAVEPOINT retry is meant to defend against.
+      const [outcomeA, outcomeB] = await Promise.allSettled([raceUpsert(clientA), raceUpsert(clientB)]);
+
+      expect(
+        outcomeA.status,
+        `client A's upsertContactByIdentity should resolve, not throw: ${
+          outcomeA.status === "rejected" ? outcomeA.reason : ""
+        }`
+      ).toBe("fulfilled");
+      expect(
+        outcomeB.status,
+        `client B's upsertContactByIdentity should resolve, not throw: ${
+          outcomeB.status === "rejected" ? outcomeB.reason : ""
+        }`
+      ).toBe("fulfilled");
+
+      const contactIdA = outcomeA.status === "fulfilled" ? outcomeA.value.contactId : undefined;
+      const contactIdB = outcomeB.status === "fulfilled" ? outcomeB.value.contactId : undefined;
+      expect(contactIdA).toBeTruthy();
+      expect(contactIdA).toBe(contactIdB);
+
+      const rows = await withTenant(workspaceId, () =>
+        withTenantTransaction(async (client) => {
+          const { rows } = await client.query("SELECT id FROM contacts WHERE workspace_id = $1 AND email = $2", [
+            workspaceId,
+            email,
+          ]);
+          return rows;
+        })
+      );
+      expect(rows).toHaveLength(1);
+    } finally {
+      await racePool.end();
+    }
+  });
+
+  /**
+   * WR-06 (02-11 gap closure): `upsertContactApiSchema` accepts
+   * `subscriptionStatus` on every item, but the update branch of
+   * `upsertContactByIdentity` currently never writes `subscription_status` --
+   * an integrator gets a 200 with no state change. Test B proves a valid
+   * subscribed<->unsubscribed transition is applied on the update branch.
+   */
+  it("WR-06 (Test B): subscriptionStatus on the update branch applies a valid subscribed->unsubscribed transition", async () => {
+    const workspaceId = await freshWorkspaceId("upsert-status-update");
+    const email = `status-b-${Date.now()}@example.com`;
+
+    const created = await withTenant(workspaceId, () =>
+      withTenantTransaction((client) =>
+        upsertContactByIdentity(client, workspaceId, { email, subscriptionStatus: "subscribed" })
+      )
+    );
+
+    await withTenant(workspaceId, () =>
+      withTenantTransaction((client) =>
+        upsertContactByIdentity(client, workspaceId, { email, subscriptionStatus: "unsubscribed" })
+      )
+    );
+
+    const updated = await withTenant(workspaceId, () => getContact(created.contactId));
+    expect(updated?.subscriptionStatus).toBe("unsubscribed");
+  });
+
+  /**
+   * WR-06/D-12 (02-11 gap closure): mirrors updateContact's D-12 guard --
+   * a direct set to `suppressed` via the update branch must never be
+   * applied, matching "cannot set suppressed directly". Documented as
+   * possibly already passing pre-fix (the update branch currently ignores
+   * subscriptionStatus entirely, which trivially satisfies this assertion) --
+   * the plan only requires A and B to fail RED; this case guards the D-12
+   * rule stays true once WR-06 makes the field live.
+   */
+  it("WR-06/D-12 (Test C): a direct set to suppressed on the update branch is refused, not applied", async () => {
+    const workspaceId = await freshWorkspaceId("upsert-status-suppressed-guard");
+    const email = `status-c-${Date.now()}@example.com`;
+
+    const created = await withTenant(workspaceId, () =>
+      withTenantTransaction((client) =>
+        upsertContactByIdentity(client, workspaceId, { email, subscriptionStatus: "subscribed" })
+      )
+    );
+
+    await withTenant(workspaceId, () =>
+      withTenantTransaction((client) =>
+        upsertContactByIdentity(client, workspaceId, { email, subscriptionStatus: "suppressed" })
+      )
+    );
+
+    const updated = await withTenant(workspaceId, () => getContact(created.contactId));
+    expect(updated?.subscriptionStatus).toBe("subscribed");
   });
 });
