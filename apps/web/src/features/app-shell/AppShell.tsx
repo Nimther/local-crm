@@ -22,6 +22,12 @@ export function AppShell() {
             Контакты
           </Link>
           <Link
+            to={`/w/${slug}/segments`}
+            className="rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            Сегменты
+          </Link>
+          <Link
             to={`/w/${slug}/contacts/imports`}
             className="rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
           >
