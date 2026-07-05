@@ -224,10 +224,11 @@ describe("Event ingestion API (EVNT-01/EVNT-03, D-24)", () => {
 
     // Against pre-fix code (jobId = raw eventId), only ONE global job exists
     // for this eventId -- these workspace-scoped lookups are the assertion
-    // that closes CR-01 at the BullMQ layer.
+    // that closes CR-01 at the BullMQ layer. Separator is "-" not ":" --
+    // BullMQ rejects a Custom Id containing a colon.
     const [jobA, jobB] = await Promise.all([
-      eventsIngestQueue.getJob(`${a.workspace.id}:${sharedEventId}`),
-      eventsIngestQueue.getJob(`${b.workspace.id}:${sharedEventId}`),
+      eventsIngestQueue.getJob(`${a.workspace.id}-${sharedEventId}`),
+      eventsIngestQueue.getJob(`${b.workspace.id}-${sharedEventId}`),
     ]);
     expect(jobA, "workspace A's job must exist under its own workspace-scoped jobId").toBeTruthy();
     expect(jobB, "workspace B's job must exist under its own workspace-scoped jobId").toBeTruthy();

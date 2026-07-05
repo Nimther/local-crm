@@ -34,7 +34,18 @@ function buildRedisConnectionOptions(redisUrl: string): ConnectionOptions {
 /**
  * Producer-side BullMQ Queue for EVENTS_INGEST_QUEUE (EVNT-03) -- the
  * consumer is apps/worker/src/queues/events-ingest.worker.ts's Worker.
+ *
+ * WR-01: `defaultJobOptions` retries a transient failure (DB restart, pool
+ * exhaustion, deadlock) instead of dropping an already-accepted (202) job
+ * on the first error -- the redelivery premise the ON CONFLICT idempotency
+ * machinery (0010, events-ingest.worker.ts) was built for.
  */
 export const eventsIngestQueue = new Queue<EventsIngestJob>(EVENTS_INGEST_QUEUE, {
   connection: buildRedisConnectionOptions(env.REDIS_URL),
+  defaultJobOptions: {
+    attempts: 5,
+    backoff: { type: "exponential", delay: 2000 },
+    removeOnComplete: { age: 86400 },
+    removeOnFail: false,
+  },
 });

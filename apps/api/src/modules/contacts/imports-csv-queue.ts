@@ -31,7 +31,17 @@ function buildRedisConnectionOptions(redisUrl: string): ConnectionOptions {
 /**
  * Producer-side BullMQ Queue for IMPORTS_CSV_QUEUE (CONT-02, D-16) -- the
  * consumer is apps/worker/src/queues/imports-csv.worker.ts's Worker.
+ *
+ * WR-01: `defaultJobOptions` retries a transient failure instead of
+ * dropping an already-accepted import job on the first error -- same
+ * durability fix applied to events-queue.ts.
  */
 export const importsCsvQueue = new Queue<ImportsCsvJob>(IMPORTS_CSV_QUEUE, {
   connection: buildRedisConnectionOptions(env.REDIS_URL),
+  defaultJobOptions: {
+    attempts: 5,
+    backoff: { type: "exponential", delay: 2000 },
+    removeOnComplete: { age: 86400 },
+    removeOnFail: false,
+  },
 });

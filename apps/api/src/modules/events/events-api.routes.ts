@@ -88,7 +88,15 @@ export async function registerEventsApiRoutes(fastify: FastifyInstance): Promise
                 externalId: item.externalId,
                 email: item.email,
               },
-              { jobId: eventId }
+              // CR-01: jobId is a BullMQ-global-per-queue namespace -- scope
+              // it to the workspace so a client-supplied eventId from one
+              // tenant can never squat another tenant's job and suppress
+              // their event. Separator is "-" not ":" -- BullMQ rejects a
+              // Custom Id containing a colon (same restriction as queue
+              // names, see events-queue.ts's queue-name comment / 02-06
+              // precedent). The response contract is unchanged: the
+              // per-item result below still returns the bare `eventId`.
+              { jobId: `${workspaceId}-${eventId}` }
             );
 
             return { eventId, status: "accepted" };
