@@ -188,16 +188,32 @@ function toDefaultValues(contact?: ContactResponse): FormValues {
   };
 }
 
-/** Strips empty-string optional fields so they don't fail email()/min() refinements meant for "unset". */
-function cleanPayload(values: FormValues): Record<string, unknown> {
+/**
+ * Strips empty-string optional fields so they don't fail email()/min()
+ * refinements meant for "unset". CR-04: in edit mode (isEdit=true), an
+ * emptied clearable standard field (firstName/lastName/phone/city/country)
+ * sends explicit `null` instead of being omitted -- omitting it would leave
+ * the server's keep-existing fallback silently discarding the clear. email/
+ * externalId are identity anchors and are never cleared through this form,
+ * so they stay send-only-when-present in both modes. In create mode there
+ * is no existing value to clear, so empties are still simply omitted (the
+ * create schema does not accept null for these fields).
+ */
+function cleanPayload(values: FormValues, isEdit: boolean): Record<string, unknown> {
   const payload: Record<string, unknown> = {};
   if (values.email.trim()) payload.email = values.email.trim();
   if (values.externalId.trim()) payload.externalId = values.externalId.trim();
-  if (values.firstName.trim()) payload.firstName = values.firstName.trim();
-  if (values.lastName.trim()) payload.lastName = values.lastName.trim();
-  if (values.phone.trim()) payload.phone = values.phone.trim();
-  if (values.city.trim()) payload.city = values.city.trim();
-  if (values.country.trim()) payload.country = values.country.trim();
+
+  const clearableFields = ["firstName", "lastName", "phone", "city", "country"] as const;
+  for (const field of clearableFields) {
+    const trimmed = values[field].trim();
+    if (trimmed) {
+      payload[field] = trimmed;
+    } else if (isEdit) {
+      payload[field] = null;
+    }
+  }
+
   return payload;
 }
 
@@ -248,7 +264,7 @@ export function ContactForm({ slug, contact, showProperties = true, onSuccess }:
   });
 
   async function onSubmit(values: FormValues) {
-    const basePayload = cleanPayload(values);
+    const basePayload = cleanPayload(values, Boolean(contact));
     const payload = {
       ...basePayload,
       tags,
