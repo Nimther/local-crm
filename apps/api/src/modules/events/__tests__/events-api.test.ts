@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildServer } from "../../../server.js";
 import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool } from "../../../test/db-fixture.js";
@@ -197,6 +198,45 @@ describe("Event ingestion API (EVNT-01/EVNT-03, D-24)", () => {
     expect(res.statusCode, `POST /v1/events failed: ${res.body}`).toBe(202);
     const body = res.json() as { results: Array<{ status: string }> };
     expect(body.results[0].status).toBe("rejected");
+  });
+
+  it("CR-01: two workspaces posting the SAME client-supplied eventId both get their own BullMQ job (no cross-tenant jobId collision)", async () => {
+    const [a, b] = await Promise.all([ownerWithKey("v1-events-tenant-a"), ownerWithKey("v1-events-tenant-b")]);
+    const sharedEventId = randomUUID();
+
+    const [resA, resB] = await Promise.all([
+      app.inject({
+        method: "POST",
+        url: "/v1/events",
+        headers: { authorization: `Bearer ${a.fullKey}` },
+        payload: { name: "order_placed", externalId: "cr01-cust-a", eventId: sharedEventId },
+      }),
+      app.inject({
+        method: "POST",
+        url: "/v1/events",
+        headers: { authorization: `Bearer ${b.fullKey}` },
+        payload: { name: "order_placed", externalId: "cr01-cust-b", eventId: sharedEventId },
+      }),
+    ]);
+
+    expect(resA.statusCode, `workspace A POST failed: ${resA.body}`).toBe(202);
+    expect(resB.statusCode, `workspace B POST failed: ${resB.body}`).toBe(202);
+
+    // Against pre-fix code (jobId = raw eventId), only ONE global job exists
+    // for this eventId -- these workspace-scoped lookups are the assertion
+    // that closes CR-01 at the BullMQ layer.
+    const [jobA, jobB] = await Promise.all([
+      eventsIngestQueue.getJob(`${a.workspace.id}:${sharedEventId}`),
+      eventsIngestQueue.getJob(`${b.workspace.id}:${sharedEventId}`),
+    ]);
+    expect(jobA, "workspace A's job must exist under its own workspace-scoped jobId").toBeTruthy();
+    expect(jobB, "workspace B's job must exist under its own workspace-scoped jobId").toBeTruthy();
+  });
+
+  it("WR-01: eventsIngestQueue is configured with retry (attempts > 1, backoff) so a transient failure doesn't drop an accepted job", () => {
+    expect(eventsIngestQueue.defaultJobOptions?.attempts).toBeTypeOf("number");
+    expect(eventsIngestQueue.defaultJobOptions?.attempts as number).toBeGreaterThan(1);
+    expect(eventsIngestQueue.defaultJobOptions?.backoff).toBeTruthy();
   });
 
   it("freeform: arbitrary nested properties are accepted without schema enforcement", async () => {

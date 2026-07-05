@@ -140,6 +140,77 @@ describe("events:ingest worker (EVNT-02/EVNT-03, Pitfall 1/4)", () => {
     expect(rows[0].email).toBe(secondEmail);
   });
 
+  it("CR-01: two workspaces processing the SAME eventId + occurredAt both get their own events row (no cross-tenant DB dedupe drop)", async () => {
+    const workspaceA = await freshWorkspaceId("worker-cr01-a");
+    const workspaceB = await freshWorkspaceId("worker-cr01-b");
+    const sharedEventId = randomUUID();
+    const sharedOccurredAt = new Date().toISOString();
+
+    await processEventIngestJob({
+      workspaceId: workspaceA,
+      eventId: sharedEventId,
+      occurredAt: sharedOccurredAt,
+      name: "order_placed",
+      properties: {},
+      externalId: `worker-cr01-a-${Date.now()}`,
+    });
+    // Against pre-fix code, this second INSERT hits the global
+    // `ON CONFLICT (id, occurred_at)` from workspace A's row above and is
+    // silently dropped -- workspace B would see 0 rows.
+    await processEventIngestJob({
+      workspaceId: workspaceB,
+      eventId: sharedEventId,
+      occurredAt: sharedOccurredAt,
+      name: "order_placed",
+      properties: {},
+      externalId: `worker-cr01-b-${Date.now()}`,
+    });
+
+    const rowsA = await withTenant(workspaceA, () =>
+      withTenantTransaction(async (client) => {
+        const { rows } = await client.query(`SELECT id FROM events WHERE id = $1`, [sharedEventId]);
+        return rows;
+      })
+    );
+    const rowsB = await withTenant(workspaceB, () =>
+      withTenantTransaction(async (client) => {
+        const { rows } = await client.query(`SELECT id FROM events WHERE id = $1`, [sharedEventId]);
+        return rows;
+      })
+    );
+
+    expect(rowsA, "workspace A must have its own events row for the shared eventId").toHaveLength(1);
+    expect(rowsB, "workspace B must have its own events row for the shared eventId").toHaveLength(1);
+  });
+
+  it("CR-03: an out-of-window occurredAt (outside the pre-created monthly partitions) is accepted and stored, not dropped", async () => {
+    const workspaceId = await freshWorkspaceId("worker-cr03-default-partition");
+    const externalId = `worker-cr03-${Date.now()}`;
+    const eventId = randomUUID();
+    // Well outside the 0007 migration's events_2026_07/events_2026_08
+    // partitions -- against pre-fix code (no DEFAULT partition), this INSERT
+    // throws "no partition of relation events found for row" and
+    // processEventIngestJob rejects.
+    const outOfWindowOccurredAt = "2027-03-01T00:00:00.000Z";
+
+    await processEventIngestJob({
+      workspaceId,
+      eventId,
+      occurredAt: outOfWindowOccurredAt,
+      name: "backfilled_event",
+      properties: {},
+      externalId,
+    });
+
+    const rows = await withTenant(workspaceId, () =>
+      withTenantTransaction(async (client) => {
+        const { rows } = await client.query(`SELECT id FROM events WHERE id = $1`, [eventId]);
+        return rows;
+      })
+    );
+    expect(rows).toHaveLength(1);
+  });
+
   it("Pitfall 4: a subscription_status property on the event cannot flip the contact's real subscription state", async () => {
     const workspaceId = await freshWorkspaceId("worker-reserved-key");
     const externalId = `worker-reserved-${Date.now()}`;
