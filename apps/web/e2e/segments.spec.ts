@@ -63,4 +63,17 @@ test("build, preview, and save a segment from the Сегменты section", asy
   await expect(
     page.getByText("Пока никто не подходит под условия").or(page.getByRole("table"))
   ).toBeVisible();
+
+  // Delete the segment via the row action + confirm dialog (03-04 Task 2):
+  // navigate back to the list first, since the detail page has no delete
+  // action of its own (delete lives on the list row per the plan's scope).
+  await page.getByRole("link", { name: "Сегменты" }).click();
+  await page.waitForURL(`**/w/${slug}/segments`);
+
+  const segmentRow = page.getByRole("row", { name: new RegExp(segmentName) });
+  await segmentRow.getByRole("button", { name: "Действия" }).click();
+  await page.getByRole("menuitem", { name: "Удалить" }).click();
+  await page.getByRole("button", { name: "Удалить сегмент" }).click();
+
+  await expect(page.getByRole("row", { name: new RegExp(segmentName) })).toHaveCount(0);
 });

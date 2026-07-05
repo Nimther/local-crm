@@ -6,7 +6,7 @@ import type {
   SegmentResponse,
   UpdateSegmentInput,
 } from "@mega-crm/shared-schemas";
-import { apiGet, apiPatch, apiPost } from "@/lib/api";
+import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api";
 
 /** D-10/D-11: paginated segment list. */
 export function listSegments(
@@ -50,6 +50,11 @@ export function getSegment(slug: string, id: string): Promise<SegmentResponse> {
 /** PATCH /api/workspaces/:slug/segments/:id -- D-13/D-14: rename and/or redefine (both optional). */
 export function updateSegment(slug: string, id: string, body: UpdateSegmentInput): Promise<SegmentResponse> {
   return apiPatch<SegmentResponse>(`/api/workspaces/${slug}/segments/${id}`, body);
+}
+
+/** DELETE /api/workspaces/:slug/segments/:id -- D-14 free deletion (Phase 3). */
+export function deleteSegment(slug: string, id: string): Promise<{ deleted: boolean }> {
+  return apiDelete<{ deleted: boolean }>(`/api/workspaces/${slug}/segments/${id}`);
 }
 
 /** GET /api/workspaces/:slug/segments/:id/members -- D-12 paginated member list (contacts). */
