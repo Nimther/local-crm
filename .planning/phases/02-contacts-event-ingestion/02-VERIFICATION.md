@@ -1,178 +1,134 @@
 ---
 phase: 02-contacts-event-ingestion
-verified: 2026-07-05T10:20:00Z
+verified: 2026-07-05T15:10:00Z
 status: human_needed
 score: 5/5 must-haves verified
 behavior_unverified: 0
 overrides_applied: 0
 re_verification:
-  previous_status: gaps_found
-  previous_score: 3/5
+  previous_status: human_needed
+  previous_score: 5/5
   gaps_closed:
-    - "A user can create, view, edit, and delete a contact in the UI, including arbitrary custom profile properties. (CR-04: PATCH merge-vs-replace mismatch)"
-    - "A tenant's backend can create/update contacts via the Contacts API and post freeform events (name + JSON) with an API key, getting an immediate 2xx while processing happens asynchronously through a queue. (CR-01 cross-tenant jobId/PK collision, CR-03 events-lost-outside-partition-window)"
+    - "UAT Test 2 (major, failed): contact list search input lost focus and the page flashed a full-page skeleton on every debounced keystroke — closed by 02-13 (placeholderData: keepPreviousData + results-scoped skeleton + dim refetch cue), proven RED→GREEN by a real Playwright regression, independently re-run and passing."
+    - "UAT Test 11 (follow-up-requested): WR-09 dead-pooled-connection-destroy path was proven only by source assertion — closed by 02-14, a fault-injection integration test (pg_terminate_backend mid-transaction) that exercises withTenantTransaction's own catch → ROLLBACK → release(err) branch and proves pool recovery, independently re-run and passing."
   gaps_remaining: []
   regressions: []
 behavior_unverified_items: []
 human_verification:
-  - test: "Create a contact with an email, a tag, and one custom property — confirm toast «Контакт создан» and list appearance."
-    expected: "Contact appears in list with tag and property visible."
-    why_human: "Visual/toast confirmation in a live browser session."
-  - test: "Search by email and by name; apply the status filter and a tag filter; sort a column; page forward/back."
-    expected: "Each interaction filters/sorts/paginates correctly; filtered-empty copy shows when nothing matches."
-    why_human: "Interactive UI behavior, not visible via source grep."
-  - test: "Open a contact; add a custom property, then remove one, then clear the phone field; save. Reload the page."
-    expected: "Removed property stays removed, cleared field stays cleared, untouched fields (e.g. city) are unaffected — confirms CR-04's fix is correct end-to-end through the browser form, not just via direct API PATCH (02-09's D4 coverage item was type-check-only, not a rendered-browser test)."
-    why_human: "cleanPayload's null-emission on an emptied input has no component-level test — only API-level PATCH tests exist."
-  - test: "Attempt to create a second contact with the same email."
-    expected: "Inline «Этот email уже используется другим контактом…» copy (D-07)."
-    why_human: "Exact inline error copy rendering."
-  - test: "Confirm a contact with a set external_id shows it read-only with the D-06 helper text."
-    expected: "external_id field is visibly read-only with helper text."
-    why_human: "Visual/DOM state in rendered browser."
-  - test: "Run a full CSV import: upload a small CSV, map columns (including «Создать новое свойство…»), choose duplicate policy, run dry-run, confirm the three stat cards, apply, watch progress bar, navigate away and back into the import from history."
-    expected: "Dry-run writes nothing; apply progresses and resumes correctly on re-entry (D-16); completion report shows correct counts."
-    why_human: "Multi-step live interaction, including navigate-away/back state resumption."
-  - test: "On a CSV import with errors, download the error CSV and confirm the reason column; confirm import history lists the run (file, date, author, summary)."
-    expected: "Error CSV downloads with correct reason column; history row is accurate."
-    why_human: "File download + visual list confirmation."
-  - test: "Upload a CSV file larger than the 50MB limit."
-    expected: "Import status becomes 'failed' and the upload responds 413, instead of hanging or silently truncating (WR-04's truncation branch, 02-12 D4)."
-    why_human: "No automated test exercises an actual >50MB upload (impractical payload size for the fast unit/integration suite); the code path was implemented and reviewed against @fastify/multipart's source but never executed end-to-end."
-  - test: "Send a test event for a contact via POST /v1/events (API key from 02-03) or seed one; open that contact's card → События tab."
-    expected: "Event appears with name, relative time, and an expandable JSON payload (D-14)."
-    why_human: "Visual confirmation of the live event feed rendering."
-  - test: "Confirm spacing/typography/color and Russian copy match the Phase 2 UI-SPEC across the contact list/form/detail and CSV wizard."
-    expected: "Visual fidelity to UI-SPEC."
-    why_human: "Design/visual review, not verifiable via grep."
-  - test: "Review the WR-09 dead-pooled-connection-destroy reasoning (source assertion only, no fault-injection test exists in this suite) and confirm it's acceptable to ship without a deterministic test that kills a connection mid-ROLLBACK."
-    expected: "Human either accepts the source-assertion-only proof, or requests a follow-up plan to add fault-injection coverage before Phase 4 (send pipeline) depends on this same connection-pool code path at much higher volume."
-    why_human: "No fault-injection tooling exists in this suite to deterministically reproduce a mid-ROLLBACK connection failure; the fix (`client.release(err)`) is proven only by source assertion + a clean full-suite regression run, per 02-11's own documented rationale."
+  - test: "Re-run UAT Test 2 by hand: open the contact list, click the search field, and type an email one character at a time (with natural pauses). Confirm the field keeps focus the whole time and the caret never jumps out (now backed by a passing automated regression — this is a final human sanity confirmation of the plan's own <human-check> step, not a re-test of unverified behavior)."
+    expected: "Input stays focused throughout typing; no page flash; list refreshes in place."
+    why_human: "The e2e spec proves focus/value preservation programmatically, but the plan (02-13) explicitly deferred one item to human judgment."
+  - test: "Confirm the visual quality of the new dim/opacity refetch cue (isPlaceholderData || isFetching, opacity-50 with a 200ms transition) reads as a clear 'updating' signal and not a jarring or confusing flicker, compared to the old full-page skeleton swap."
+    expected: "The dim cue is subtle, does not obscure readability, and clearly communicates an in-flight refetch without a layout jump."
+    why_human: "Subjective rendering/visual-design judgment — explicitly flagged as human_judgment: true in 02-13's own SUMMARY (D2), not verifiable via source inspection."
 ---
 
-# Phase 02: Contacts & Event Ingestion Verification Report (Re-Verification)
+# Phase 02: Contacts & Event Ingestion Verification Report (Re-Verification #2)
 
 **Phase Goal:** A marketer can build and maintain their contact base (UI, CSV, API) while their backend streams freeform behavioral events that create and enrich contacts in real time.
-**Verified:** 2026-07-05T10:20:00Z
+**Verified:** 2026-07-05T15:10:00Z
 **Status:** human_needed
-**Re-verification:** Yes — after gap closure (plans 02-09..02-12)
+**Re-verification:** Yes — after UAT-driven gap closure (plans 02-13, 02-14)
 
 ## Context
 
-The prior verification (2026-07-04T11:24:38Z) found `status: gaps_found`, score 3/5, blocked by four Critical code-review findings (CR-01..CR-04). Gap-closure plans 02-09 (CR-04), 02-10 (CR-01/CR-03/WR-01), 02-11 (CR-02/WR-06/WR-09), and 02-12 (WR-03/WR-04/WR-05) were executed, followed by a fresh full-surface code review (`02-REVIEW.md`, 93 files, `status: issues_found`, 0 critical / 7 warning / 11 info). This re-verification independently re-confirms every prior Critical finding is fixed in the current source (not merely trusting `02-REVIEW.md`'s or the SUMMARYs' claims), re-runs the full automated test suite once, and re-checks the 5 ROADMAP success criteria end to end.
+The prior re-verification (2026-07-05T10:20:00Z) found `status: human_needed`, score 5/5 (all ROADMAP success criteria and all 9 requirement IDs verified), with 11 deferred human-verification items. Those items were run through an actual human UAT session (`02-UAT.md`): 9 passed outright, 1 failed (Test 2 — search input focus loss during debounced refetch), 1 came back `follow-up-requested` (Test 11 — WR-09 dead-connection-destroy sign-off declined as source-assertion-only, human requested a real fault-injection test instead).
+
+Two gap-closure plans were executed in response:
+- **02-13** — root-caused and fixed the search-focus bug (`ContactsListPage.tsx`: added `placeholderData: keepPreviousData`, moved the loading skeleton out of a page-wide early return into the results region only, added a dim refetch cue) with a RED→GREEN Playwright regression (`contact-search-focus.spec.ts`).
+- **02-14** — added a deterministic fault-injection integration test (`withTenantTransaction-dead-connection.test.ts`) that terminates a pooled connection's backend mid-transaction via `pg_terminate_backend`, proving `withTenantTransaction`'s destroy-on-error branch and pool self-healing, converting WR-09 from a source assertion into test-backed proof.
+
+This re-verification independently re-confirms both fixes in the current source and by re-running the actual tests myself (not trusting SUMMARY.md's PASS claims), re-confirms no regressions via a full test-suite run, and re-checks that the 5 ROADMAP success criteria and 9 requirement IDs remain intact.
 
 ## Goal Achievement
 
-### Observable Truths (ROADMAP Success Criteria)
+### Observable Truths (ROADMAP Success Criteria) — unaffected by this round, re-confirmed
 
 | # | Truth | Status | Evidence |
 |---|-------|--------|----------|
-| 1 | A user can create, view, edit, and delete a contact in the UI, including arbitrary custom profile properties. | ✓ VERIFIED | CR-04 confirmed fixed by direct source read: `contact.repository.ts:294` — `const nextProperties = patch.properties ?? existing.properties;` (full replacement, not merge); `packages/shared-schemas/src/contact.ts:47-51` — firstName/lastName/phone/city/country are `.nullable().optional()` on the update schema; `ContactForm.tsx:202-218` `cleanPayload(values, isEdit)` emits explicit `null` for emptied fields in edit mode. Regression tests `contact-crud.test.ts` (property deletion, field clearing, no-wipe invariant) pass in the full suite run below. Create/view/list/delete unaffected and re-confirmed present (`contacts.routes.ts:192` DELETE handler). |
-| 2 | A user can upload a CSV, map columns to attributes, preview the result before applying, and receive a report of errors and duplicates. | ✓ VERIFIED | Unaffected by this round's gap closure except hardening (WR-03/04/05 fixed in 02-12): `applyCsvRowMapping` now validates `subscriptionStatus` (`csv-mapping.ts`); upload route wraps parse in try/catch → `markCsvImportFailed` + 422, and checks `data.file.truncated` → 413 (`csv-import.routes.ts`); worker throws on `stillPending > 0` instead of silently leaving `applying` forever (`imports-csv.worker.ts:163-173`). Core wizard/preview/report flow (`CsvImportWizard.tsx`, `csv-import.routes.ts`) unchanged and still present/wired. |
-| 3 | A tenant's backend can create/update contacts via the Contacts API and post freeform events (name + JSON) with an API key, getting an immediate 2xx while processing happens asynchronously through a queue. | ✓ VERIFIED | CR-01 confirmed fixed by direct source read: `events-api.routes.ts:99` — `{ jobId: \`${workspaceId}-${eventId}\` }` (workspace-scoped, not global); migration `0010_events_workspace_scoped_pk.sql:23-24` — `ALTER TABLE events ADD PRIMARY KEY (workspace_id, id, occurred_at)`; `events-ingest.worker.ts:43` — `ON CONFLICT (workspace_id, id, occurred_at) DO NOTHING` matches. CR-03 confirmed fixed: `0010:36` — `CREATE TABLE events_default PARTITION OF events DEFAULT;`. WR-01 confirmed fixed: `events-queue.ts:45-47` and `imports-csv-queue.ts:41-43` both set `defaultJobOptions: { attempts: 5, backoff: { type: "exponential", delay: 2000 } }`. Migration journaled (`meta/_journal.json` idx 10). |
-| 4 | An event for an unknown contact automatically creates it via external_id/email upsert, and a later email change still resolves to the same contact. | ✓ VERIFIED | `upsertContactByIdentity` unchanged in its identity-priority logic; CR-02 (dead-code retry) confirmed fixed: `contact-repository.ts:242-274` — INSERT wrapped in `SAVEPOINT upsert_insert`, `ROLLBACK TO SAVEPOINT upsert_insert` before retry (not a bare aborted-transaction retry). Proven by a real two-connection concurrent-race test (`upsert-priority.test.ts`, confirmed passing in full suite run). `events-ingest.worker.ts` still reuses the same shared function — no drift. |
-| 5 | Every contact carries a 3-state subscription status (subscribed / unsubscribed / suppressed). | ✓ VERIFIED | Unchanged and unaffected: `subscriptionStatusEnum` (`packages/db/src/schema/contacts.ts:10`), D-12 transition guards in `updateContact`, suppression-list override on create. Additionally hardened this round: `upsertContactByIdentity`'s update branch now also applies `subscriptionStatus` under the same D-12 guards (WR-06, `contact-repository.ts:311-346`), closing a prior silent-no-op gap on the events/CSV write paths. |
+| 1 | A user can create, view, edit, and delete a contact in the UI, including arbitrary custom profile properties. | ✓ VERIFIED | Unaffected by 02-13/02-14. UAT Test 1 (create+tag+property) and Test 3 (edit — remove property, clear field, reload; CR-04 end-to-end) both passed under real human testing (`02-UAT.md`). |
+| 2 | A user can upload a CSV, map columns to attributes, preview the result before applying, and receive a report of errors and duplicates. | ✓ VERIFIED | Unaffected. UAT Tests 6, 7, 8 (full wizard flow, error CSV + history, oversized upload rejection) all passed under real human testing. |
+| 3 | A tenant's backend can create/update contacts via the Contacts API and post freeform events (name + JSON) with an API key, getting an immediate 2xx while processing happens asynchronously through a queue. | ✓ VERIFIED | Unaffected by this round's UI/test-only changes. Re-confirmed green in the full `apps/api`/`apps/worker` suite run below (events-api, events-ingest-idempotency tests still pass). |
+| 4 | An event for an unknown contact automatically creates it via external_id/email upsert, and a later email change still resolves to the same contact. | ✓ VERIFIED | Unaffected. `upsert-priority.test.ts` still passes in the full suite run below. UAT Test 9 (live event feed on contact card) passed under real human testing. |
+| 5 | Every contact carries a 3-state subscription status (subscribed / unsubscribed / suppressed). | ✓ VERIFIED | Unaffected. No code touched by 02-13/02-14 relates to subscription status. |
 
-**Score:** 5/5 truths verified (up from 3/5). All 4 prior Critical findings (CR-01, CR-02, CR-03, CR-04) independently re-confirmed fixed via direct source inspection (not solely via `02-REVIEW.md`'s or SUMMARY.md's claims).
+**Score:** 5/5 truths verified (unchanged from prior re-verification — 02-13/02-14 explicitly HARDEN already-satisfied requirements/criteria per their own plan frontmatter, not re-claim them; `requirements: []` in both plans confirmed by direct read).
 
-### Required Artifacts (delta from prior verification)
+### Gap-Closure Verification (this round's actual focus)
+
+| # | Item | Plan | Status | Evidence |
+|---|------|------|--------|----------|
+| 1 | Search input keeps focus while typing; no full-page skeleton unmount on debounced refetch | 02-13 | ✓ VERIFIED | Source read of `apps/web/src/features/contacts/ContactsListPage.tsx` confirms: `import { keepPreviousData, useQuery } from "@tanstack/react-query"` (line 9); `placeholderData: keepPreviousData` on `contactsQuery` (line 99); `isInitialLoad = contactsQuery.isLoading` (line 184) used to scope the skeleton to the results region only (line 257), with the header + search/filter toolbar (lines 192-255) unconditionally rendered above that conditional — never unmountable by a refetch; `isRefetching = contactsQuery.isPlaceholderData \|\| contactsQuery.isFetching` (line 188) drives an `opacity-50` dim cue (line 262) on the results container only, not the input. Independently re-ran `apps/web/e2e/contact-search-focus.spec.ts` myself (not trusting the SUMMARY's claimed result): **1 passed** — types `"maria@example.com"` char-by-char with 350ms pauses (exceeding the 300ms debounce), asserts focus after every character and the full accumulated value at the end. |
+| 2 | WR-09 dead-pooled-connection-destroy path proven by fault-injection test, not source assertion | 02-14 | ✓ VERIFIED | Source read of `packages/tenant-context/src/index.ts` (lines 62-95) confirms the exact `catch → ROLLBACK (try/catch) → releaseWithError set on rollback failure → finally client.release(releaseWithError)` structure the test targets. Independently re-ran `apps/api/src/db/__tests__/withTenantTransaction-dead-connection.test.ts` myself: **1 passed** — terminates the backend of a connection `withTenantTransaction` itself checked out via `pg_terminate_backend`, asserts the transaction rejects, confirms the backend is absent from `pg_stat_activity` afterward, and runs 6 sequential recovery transactions confirming none ever receive the destroyed pid. |
+
+### Required Artifacts (delta from prior re-verification)
 
 | Artifact | Expected | Status | Details |
 |----------|----------|--------|---------|
-| `apps/api/src/modules/contacts/contact.repository.ts` | tenant-scoped CRUD + upsert, full-replace PATCH semantics | ✓ VERIFIED | Line 294 confirmed full-replacement (`??`, not merge). Previously ⚠️ PARTIAL (CR-04), now clean. |
-| `apps/api/src/modules/events/events-api.routes.ts` | fast-2xx `/v1/events`, tenant-scoped jobId | ✓ VERIFIED | Line 99 confirmed workspace-scoped jobId. Previously ⚠️ PARTIAL (CR-01), now clean. |
-| `packages/db/migrations/0010_events_workspace_scoped_pk.sql` | workspace-scoped PK + DEFAULT partition | ✓ VERIFIED | Both DDL statements present and applied (journaled). Closes the prior ⚠️ HOLLOW artifact status on `0007_events_partitioned.sql`. |
-| `apps/worker/src/queues/events-ingest.worker.ts` | idempotent, tenant-scoped dedupe | ✓ VERIFIED | `ON CONFLICT (workspace_id, id, occurred_at)` matches new PK. |
-| `packages/contacts-core/src/contact-repository.ts` | race-safe upsert with real retry | ✓ VERIFIED | SAVEPOINT/ROLLBACK TO SAVEPOINT confirmed at lines 242-274. Previously dead-code retry (CR-02), now functional and proven by a real concurrent-connection test. |
-| `apps/web/src/features/contacts/{ContactForm,CustomPropertyEditor}.tsx` | edit UI with working deletion/clearing | ✓ VERIFIED | `ContactForm.tsx` `cleanPayload` confirmed emitting `null` for emptied fields in edit mode. |
-| `apps/worker/src/queues/imports-csv.worker.ts` | throws on unresolved rows instead of silent stuck-`applying` | ✓ VERIFIED | Lines 163-173 confirmed: throws when `stillPending > 0`. |
-| `apps/api/src/modules/contacts/csv-import.routes.ts` | upload failure path sets `failed` + non-200 | ✓ VERIFIED | try/catch around parse loop + `data.file.truncated` check confirmed present (truncation branch itself not exercised by an automated test — see human verification). |
-| `packages/contacts-core/src/csv-mapping.ts` | validates `subscriptionStatus`, blocks `suppressed` | ✓ VERIFIED | Shared by dry-run and apply, confirmed by passing WR-05a/WR-05b tests. |
-
-All artifacts previously flagged ⚠️ PARTIAL/HOLLOW in the prior verification are now ✓ VERIFIED.
+| `apps/web/src/features/contacts/ContactsListPage.tsx` | `placeholderData: keepPreviousData`; toolbar always mounted; skeleton scoped to results region; dim refetch cue | ✓ VERIFIED | All four elements confirmed present at the cited line numbers above. |
+| `apps/web/e2e/contact-search-focus.spec.ts` | Playwright regression, char-by-char typing, asserts focus + value preserved across debounced refetches | ✓ VERIFIED | File exists, matches plan's spec exactly (uses `page.keyboard.type`, not `pressSequentially`/`fill`, per its own documented rationale), independently re-run and passing. |
+| `apps/api/src/db/__tests__/withTenantTransaction-dead-connection.test.ts` | Fault-injection test: `pg_terminate_backend` mid-transaction, asserts destroy-not-recycle + pool recovery | ✓ VERIFIED | File exists, matches plan's spec exactly, independently re-run and passing. No production file modified — confirmed by `git status` (clean tree) and by reading `packages/tenant-context/src/index.ts` unchanged from the prior re-verification's citation. |
 
 ### Key Link Verification (delta)
 
 | From | To | Via | Status | Details |
 |------|-----|-----|--------|---------|
-| `events-api.routes.ts` | `events-ingest.worker.ts` | BullMQ jobId `${workspaceId}-${eventId}` | ✓ WIRED (fixed) | Previously "mechanically wired but tenant-unscoped" (CR-01) — now tenant-scoped end to end, confirmed by cross-tenant collision tests in both `events-api.test.ts` and `events-ingest-idempotency.test.ts`. |
-| `contact.repository.ts` (PATCH) | `CustomPropertyEditor.tsx` / `ContactForm.tsx` | full-replace `properties` + explicit `null` for cleared fields | ✓ WIRED (fixed) | Previously broken (CR-04, silent no-op) — now closes end to end through the shared PATCH contract. |
-| `upsertContactByIdentity` | events worker / CSV worker / Contacts API | shared function, race-safe | ✓ WIRED (fixed) | CR-02's retry is no longer dead code; all three callers benefit identically. |
+| `contactsQuery` (`placeholderData: keepPreviousData`) | rendered search `<Input>` | query stays `'success'` on queryKey change → `isLoading` true only on first load → input never behind an unmounting conditional | ✓ WIRED (fixed) | Confirmed by direct source read and by the passing e2e regression, which is the only test in this codebase that actually drives real keystrokes through a real browser against this exact code path. |
+| `withTenantTransaction`'s internal `catch → ROLLBACK throws → releaseWithError` | `client.release(releaseWithError)` → node-postgres destroy | pooled connection killed mid-transaction | ✓ WIRED (fixed, now test-proven) | Confirmed by direct source read (unchanged since 02-11) and by the new fault-injection test, which is the first test in this suite to let `withTenantTransaction` own the killed client (the sibling `rls-pooling-chaos.test.ts` only exercises a manually-released client, not this helper's own branch). |
 
-### Behavioral Spot-Checks / Full Test Run
-
-Ran each workspace's full test suite once (Postgres running, Redis running, confirmed available in this environment) — the only two workspaces with a `test` script:
+### Behavioral Spot-Checks / Test Runs (independently executed, not trusted from SUMMARY.md)
 
 | Suite | Command | Result | Status |
 |-------|---------|--------|--------|
-| `apps/api` | `npm run test -w apps/api` (107 tests, 17 files) | 107/107 passed | ✓ PASS |
-| `apps/worker` | `npm run test -w apps/worker` (14 tests, 3 files) | 14/14 passed | ✓ PASS |
-| all workspaces (build) | `npm run build --workspaces --if-present` | 7/7 packages built clean (tsc + vite) | ✓ PASS |
+| Targeted fault-injection test | `npm run test -w apps/api -- withTenantTransaction-dead-connection` | 1 file, 1 test passed | ✓ PASS |
+| `apps/api` full suite | `npm run test -w apps/api` (18 files) | 110/110 passed | ✓ PASS |
+| `apps/worker` full suite | `npm run test -w apps/worker` (3 files) | 14/14 passed | ✓ PASS |
+| Targeted Playwright regression | `npm run test:e2e -- contact-search-focus` (from `apps/web`) | 1 test passed (7.7s) | ✓ PASS |
+| Full workspace build | `npm run build --workspaces --if-present` | 7/7 packages built clean (tsc --noEmit + vite build for web) | ✓ PASS |
 
-Test counts grew from the prior verification's 94 (api) + 11 (worker) = 105 to 107 + 14 = 121, consistent with the regression tests added across 02-09..02-12 (contact-crud CR-04 x3, events-api/events-ingest CR-01/CR-03/WR-01 x4, upsert-priority CR-02/WR-06 x3, csv-import/imports-csv WR-03/04/05 x4). Specifically confirmed present and passing (by suite membership, not individually re-run in isolation, per the "run full suite once" constraint):
-- `contact-crud.test.ts` — CR-04 property-deletion, field-clearing, no-wipe-invariant tests
-- `events-api.test.ts` — CR-01 cross-tenant jobId test, WR-01 retry-config assertion
-- `events-ingest-idempotency.test.ts` — CR-01 cross-tenant DB-dedupe test, CR-03 out-of-window `occurredAt` test
-- `upsert-priority.test.ts` — CR-02 real two-connection concurrent-insert race test, WR-06 subscriptionStatus-on-update tests
-- `csv-import.test.ts` — WR-05a/WR-05b (subscriptionStatus validation/drift), WR-04 (malformed CSV → failed)
-- `imports-csv-idempotency.test.ts` — WR-03 (stillPending → throw)
-
-No regressions: all previously-passing behaviors (RLS isolation, API-key auth, CSV pipeline core flow, subscription-status guards) remain green alongside the new tests.
+No regressions: 110 (api) + 14 (worker) = 124 tests, up from the prior re-verification's 107+14=121, consistent with the one new fault-injection test added by 02-14 (02-13 added a Playwright e2e spec, which lives outside the vitest count). All previously-passing suites remain green.
 
 ### Requirements Coverage
 
-| Requirement | Source Plan | Description | Status | Evidence |
-|-------------|-------------|-------------|--------|----------|
-| CONT-01 | 02-01, 02-02, 02-09 | Create/view/edit/delete contacts in UI | ✓ SATISFIED | Edit (incl. deletion/clearing) now works correctly end to end (CR-04 fixed). |
-| CONT-02 | 02-07, 02-08, 02-12 | CSV import with mapping/preview/error report | ✓ SATISFIED | Full pipeline present, wired, tested; hardened by WR-03/04/05 fixes. |
-| CONT-03 | 02-01, 02-03, 02-04 | Contacts CRUD API | ✓ SATISFIED | Unaffected by this round; confirmed still correct. |
-| CONT-04 | 02-04, 02-11 | external_id/email prioritized upsert | ✓ SATISFIED | CR-02 race-condition retry now functional and proven under a real concurrent test. |
-| CONT-05 | 02-01, 02-02, 02-09 | Arbitrary custom properties | ✓ SATISFIED | Deletion via update now persists correctly (CR-04 fixed, shared root cause with CONT-01). |
-| EVNT-01 | 02-03, 02-06, 02-10 | Freeform event API with API key | ✓ SATISFIED | CR-01's global jobId scoping fixed — per-tenant guarantee restored. |
-| EVNT-02 | 02-04, 02-06 | Auto-create contact from event | ✓ SATISFIED | Unaffected by this round; confirmed still correct. |
-| EVNT-03 | 02-05, 02-06, 02-10 | Fast 2xx, async queue processing | ✓ SATISFIED | CR-03 (permanent data loss outside partition window) and WR-01 (no retry config) both fixed — accepted events can no longer be silently, permanently lost. |
-| SUBS-01 | 02-01, 02-02, 02-11 | 3-state subscription status | ✓ SATISFIED | Unaffected core logic; additionally hardened via WR-06 (status now honored on the upsert update branch too). |
+| Requirement | Description | Status | Evidence |
+|-------------|-------------|--------|----------|
+| CONT-01 | Create/view/edit/delete contacts in UI | ✓ SATISFIED | Unaffected by this round; UAT Tests 1/3 passed by a human. |
+| CONT-02 | CSV import with mapping/preview/error report | ✓ SATISFIED | Unaffected; UAT Tests 6/7/8 passed by a human. |
+| CONT-03 | Contacts CRUD API | ✓ SATISFIED | Unaffected; full API suite green. |
+| CONT-04 | external_id/email prioritized upsert | ✓ SATISFIED | Unaffected; `upsert-priority.test.ts` green. Hardened indirectly — WR-09's connection-pool code path (shared by `upsertContactByIdentity` via `withTenantTransaction`) is now test-proven, not just source-asserted. |
+| CONT-05 | Arbitrary custom properties | ✓ SATISFIED | Unaffected; UAT Test 3 passed by a human. |
+| EVNT-01 | Freeform event API with API key | ✓ SATISFIED | Unaffected; events-api tests green. |
+| EVNT-02 | Auto-create contact from event | ✓ SATISFIED | Unaffected; UAT Test 9 passed by a human. |
+| EVNT-03 | Fast 2xx, async queue processing | ✓ SATISFIED | Unaffected. Hardened indirectly — WR-09's fault-injection test now proves the shared connection-pool code path this criterion's async worker depends on self-heals under a mid-transaction connection death. |
+| SUBS-01 | 3-state subscription status | ✓ SATISFIED | Unaffected. |
 
-**Orphaned requirements check:** REQUIREMENTS.md's traceability table maps exactly CONT-01..05, EVNT-01..03, SUBS-01 to Phase 2 (all marked `[x]` complete) — identical to the phase's declared requirement-ID list and the plan-frontmatter `requirements` fields observed across 02-01..02-12. No orphaned requirements found.
+**Orphaned requirements check:** Both 02-13 and 02-14 declare `requirements: []` in their PLAN frontmatter, explicitly and correctly — per their own stated rationale (gap-contract rule 5: hardening an already-satisfied requirement is not re-claiming it). REQUIREMENTS.md's traceability table (all 9 IDs, all marked Complete, all mapped to Phase 2) is unchanged and still exactly matches the phase's declared requirement-ID list. No orphaned requirements found.
 
 ### Anti-Patterns Found
 
-No `TBD`/`FIXME`/`XXX`/`TODO`/`HACK`/`PLACEHOLDER` debt markers found in any file touched by the gap-closure commits (`e651ae3^..0360f0d`, 23 files, excluding `.planning/`) — confirmed by direct grep, not solely by `02-REVIEW.md`'s claim.
+No `TBD`/`FIXME`/`XXX`/`TODO`/`HACK`/`PLACEHOLDER` debt markers found in any of the three files touched by this round's gap closure (`ContactsListPage.tsx`, `contact-search-focus.spec.ts`, `withTenantTransaction-dead-connection.test.ts`) — confirmed by direct grep. `git status` shows a clean working tree; all gap-closure commits (`0206f7c`, `685d130`, `d94fc07`, `d8eb0b3`, `46fb9b3`) are present in `git log`.
 
-`02-REVIEW.md` (re-review after gap closure, 93 files, dated 2026-07-05T05:12:30Z) independently confirms 0 Critical findings remain and lists 7 Warnings / 11 Info items. These are real, non-blocking findings that do not prevent any of the 5 success criteria from being true today, but are worth carrying into the phase's backlog / Phase 3-4 hardening:
-
-| File | Finding | Severity | Impact |
-|------|---------|----------|--------|
-| `apps/worker/src/server.ts`, workers, `connection.ts` | No `error`/`failed` listeners on BullMQ Workers/shared Redis connection | ⚠️ Warning (WR-01/carried) | A transient Redis hiccup crashes the worker process; job failures produce no log output. |
-| `apps/worker/src/queues/imports-csv.worker.ts`, `imports-csv-queue.ts`, `CsvImportWizard.tsx` | CSV apply job exhausting all retries has no terminal `failed` transition | ⚠️ Warning (new, residual of WR-03 fix) | Import can still get stuck in `applying` if all 5 retries fail (vs. the common transient-failure case, which now retries and typically recovers). |
-| `apps/api/src/modules/contacts/csv-import.routes.ts` | No status guard on dry-run/apply routes | ⚠️ Warning (carried) | Concurrent re-POST/dry-run-mid-apply races are possible. |
-| `apps/api/src/modules/contacts/contact.repository.ts` | TOCTOU on email-uniqueness check surfaces as 500 not 409 | ⚠️ Warning (carried) | Rare-race UX gap, not a correctness/data-loss issue. |
-| `apps/worker/src/queues/connection.ts`, `events-queue.ts`, `imports-csv-queue.ts` | Redis URL parsing (3 copies) drops TLS for `rediss://` | ⚠️ Warning (carried) | Would only matter switching to a managed TLS Redis; not applicable to current local/dev config. |
-| `ContactDetailPage.tsx` (`PropertiesTab`), `CustomPropertyEditor.tsx` | Stale-tab full-replace can silently drop concurrently-added properties | ⚠️ Warning (new, introduced by CR-04's replace semantics) | Real but narrow lost-update window (marketer has tab open while an event/API write adds a property, then saves stale state). Does not negate CR-04's fix — deletion now works; this is a different, lower-frequency race. Recommend a follow-up plan before Phase 3+ increases concurrent-write volume. |
-| `events-api.routes.ts` | Mid-batch enqueue failure returns whole-request 500 after partial enqueue; client retry can duplicate server-minted eventIds | ⚠️ Warning (new) | Only manifests on a genuine Redis failure mid-batch; does not affect the primary success-criteria-3 happy path (2xx + async queue), which is proven by the passing test suite. |
-
-11 Info-level findings (IN-01..IN-11) also remain — cosmetic/hygiene issues (CSV formula injection in error report, unescaped ILIKE wildcards, stale doc comments, test-Redis-connection hygiene) that do not affect the 5 success criteria. Full detail in `02-REVIEW.md`.
-
-None of the above Warnings or Info items are classified Blocker; none contradict any of the 5 VERIFIED truths above. They are carried forward as backlog items, not phase-blocking gaps.
+No new Warnings or Info findings surfaced by this round beyond what `02-REVIEW.md` already carried forward from the prior re-verification (7 Warnings / 11 Info, none blocking, none contradicting the 5 verified truths) — this round's changes are narrowly scoped (one client-render fix, one new test file) and introduce no new production code paths beyond the already-reviewed `withTenantTransaction` release branch.
 
 ### Human Verification Required
 
-11 items require human sign-off (see frontmatter `human_verification` for full detail):
-- 9 items carried forward from 02-02/02-08's deferred `checkpoint:human-verify` tasks (standard UI/visual/interaction checks: contact CRUD flow, filter/sort/paginate, CSV wizard end-to-end, live event feed rendering, UI-SPEC visual fidelity) — one of these (item 3) is expanded to explicitly re-verify the CR-04 fix through the rendered browser form, since 02-09's own coverage only proved the fix via a type-check, not a rendered-DOM interaction.
-- 1 new item from 02-12: the WR-04 truncated-upload 413 path has implemented code but no automated test (impractical to construct a >50MB payload in the fast test suite) — flagged for manual verification.
-- 1 new item from 02-11: the WR-09 dead-connection-destroy fix has no fault-injection test in this suite; a human should review and accept the source-assertion-only proof, or request follow-up fault-injection coverage before Phase 4's higher-volume send pipeline relies on the same pooled-connection code path.
+2 items remain, both narrowly scoped to residual human-judgment aspects of the 02-13 fix (see frontmatter `human_verification` for full detail). Both are explicitly called out as `human_judgment: true` in 02-13's own SUMMARY (D2) and its plan's own `<human-check>` verification step — not unverified behavior, but subjective/visual confirmation that automated tests cannot substitute for:
+1. A final human sanity re-run of the (now automated-test-backed) focus-preservation behavior.
+2. Visual-quality judgment of the new dim/opacity refetch cue versus the old skeleton swap.
 
-None of these 11 items are FAILED or blocking — they were correctly and explicitly deferred (not silently skipped) per the project's `human_verify_mode: end-of-phase` convention, and none contradict the 5/5 VERIFIED truths above.
+All 9 previously-passed UAT items (contact CRUD, filters/sort/pagination minus the now-fixed focus bug, duplicate-email inline error, external_id read-only display, CSV wizard end-to-end, error CSV + history, oversized-upload rejection, live event feed, UI-SPEC visual fidelity) are **not** re-listed here — they were already confirmed passed by a real human tester in `02-UAT.md`, not merely deferred. The WR-09 item is also **not** re-listed — 02-14 converted it from a human-judgment source-assertion sign-off into a fully automated, independently-passing fault-injection test (`human_judgment: false` on both coverage items in 02-14's SUMMARY), closing it outright.
 
 ### Gaps Summary
 
-**No gaps remain.** All four prior Critical findings (CR-01, CR-02, CR-03, CR-04) are independently confirmed fixed in the current source, each backed by a regression test that fails on pre-fix code and passes on current code — confirmed both by reading the actual diffs/current source directly (not merely trusting `02-REVIEW.md`'s narrative) and by running the full automated test suite once (107/107 `apps/api`, 14/14 `apps/worker`, all green, no regressions vs. the prior verification's 94+11=105). All 5 ROADMAP success criteria are now ✓ VERIFIED, up from 3/5. All 9 Phase 2 requirement IDs (CONT-01..05, EVNT-01..03, SUBS-01) are SATISFIED with no orphans.
+**No gaps remain.** Both UAT-identified issues (Test 2's search-focus failure, Test 11's WR-09 follow-up request) are independently confirmed closed in this re-verification:
+- Test 2: fixed by 02-13, proven by a real Playwright regression that I independently re-ran and confirmed passing (not merely trusting the SUMMARY's claimed RED→GREEN result).
+- Test 11: fixed by 02-14, proven by a real fault-injection integration test that I independently re-ran and confirmed passing, exercising the exact `withTenantTransaction` release-with-error branch confirmed present in current source.
 
-The phase is not `passed` outright because 11 human-verification items remain open — 9 pre-existing deferred UI/visual checks plus 2 new judgment items surfaced by this round's gap-closure work (a browser-level re-check of CR-04, and human sign-off on WR-09's untested fault path). These are standard end-of-phase UAT items, not blockers, and route to `status: human_needed` per the verification decision tree.
+The full `apps/api` (110/110) and `apps/worker` (14/14) test suites remain green with no regressions, and the full workspace build is clean. All 5 ROADMAP success criteria remain ✓ VERIFIED and all 9 requirement IDs remain SATISFIED with no orphans.
 
-7 Warnings and 11 Info findings remain open in `02-REVIEW.md` (2 of the warnings are newly introduced by this round's fixes: WR-06's stale-Свойства-tab lost-update window, and WR-07's mid-batch-enqueue-failure duplicate risk). None negate the verified truths; recommended as backlog items for a future hardening pass, particularly before Phase 4 (send pipeline) increases write concurrency on the same shared code paths (`withTenantTransaction`, `upsertContactByIdentity`, BullMQ workers).
+The phase is not `passed` outright because 2 narrowly-scoped human-judgment items remain open (final sanity re-confirmation of the focus fix, and visual-quality judgment of the new dim refetch cue) — both explicitly flagged as `human_judgment: true` by the executing plan itself, not gaps in coverage. These route to `status: human_needed` per the verification decision tree (any open human-verification item takes precedence over `passed`, even with a clean 5/5 score and zero remaining gaps).
 
 ---
 
-_Verified: 2026-07-05T10:20:00Z_
+_Verified: 2026-07-05T15:10:00Z_
 _Verifier: Claude (gsd-verifier)_
