@@ -21,15 +21,15 @@ Multi-tenant SaaS-платформа marketing automation для B2C-компа�
 
 - [x] Multi-tenant воркспейсы: регистрация, приглашение команды по email, базовые роли (Owner/Admin/Member) — Validated in Phase 1: Workspace Foundation & Team Access
 - [x] Подключение SendGrid (connect-половина): тенант привязывает свой API key, ключ валидируется на подключении и хранится зашифрованным (envelope encryption) — Validated in Phase 1; отправка от имени тенанта остаётся в Active
+- [x] Управление контактами: CRUD в UI, CSV-импорт с маппингом колонок, Contacts CRUD API, автосоздание из событий (upsert) — Validated in Phase 2: UAT 13/13 (CRUD, CSV wizard с dry-run/отчётом об ошибках, upsert из событий)
+- [x] Идентификация контакта: external_id (основной ключ) + email (запасной) — Validated in Phase 2: приоритет external_id→email в shared upsert, external_id иммутабелен после установки (D-06)
+- [x] Event ingestion: server-side HTTP API с API-ключом, свободная схема событий (имя + JSON-свойства, как у Klaviyo) — Validated in Phase 2: POST /v1/events + BullMQ ingest worker, идемпотентность per-tenant, live event feed в карточке контакта
 
 ### Active
 
 - [ ] Отправка через SendGrid от имени тенанта (BYO key) — connect выполнен в Phase 1, send-путь в Phase 4
-- [ ] Управление контактами: CRUD в UI, CSV-импорт с маппингом колонок, Contacts CRUD API, автосоздание из событий (upsert)
-- [ ] Идентификация контакта: external_id (основной ключ) + email (запасной)
-- [ ] Event ingestion: server-side HTTP API с API-ключом, свободная схема событий (имя + JSON-свойства, как у Klaviyo)
 - [ ] Сегментация: динамические сегменты по свойствам профиля И по поведению/событиям («сделал заказ за 30 дней», «не открывал письма»)
-- [ ] Статус подписки: платформа ведёт свой subscription status, обрабатывает unsubscribe из SendGrid webhook, фильтрует перед отправкой
+- [ ] Статус подписки: платформа ведёт свой subscription status (введён в Phase 2: suppression-check на создании, валидация переходов), обрабатывает unsubscribe из SendGrid webhook (Phase 5), фильтрует перед отправкой (Phase 4)
 - [ ] Триггерные цепочки: визуальный canvas-редактор с drag-and-drop (узлы, ветвления, соединения)
 - [ ] Правила цепочек: exit conditions, контроль повторного входа (once ever / once per N days / every time), quiet hours, глобальный frequency cap на контакт
 - [ ] Broadcast-кампании: создание, выбор сегмента, запуск/планирование
@@ -73,8 +73,8 @@ Multi-tenant SaaS-платформа marketing automation для B2C-компа�
 | Multi-tenant SaaS с первого дня | Продукт для многих компаний, не внутренний инструмент | ✓ Phase 1: shared schema + tenant_id + RLS работает; изоляция доказана chaos-тестом пула и UAT-тестом изоляции |
 | BYO SendGrid key у тенанта | Проще для MVP: репутация домена, шаблоны и верификация — в аккаунте тенанта | ✓ Phase 1 (connect-половина): live-валидация ключа + KMS envelope encryption подтверждены UAT с реальными ключами |
 | Canvas drag-and-drop редактор цепочек в v1 | Ключевой дифференциатор UX, как Klaviyo/n8n; принято осознанно несмотря на стоимость | — Pending |
-| Свободная схема событий (имя + JSON) | Минимум трения при интеграции, модель Klaviyo; типы появляются в UI по мере поступления | — Pending |
-| external_id + email, upsert контакта из события | Стабильная идентификация при смене email; событие может создать контакт | — Pending |
+| Свободная схема событий (имя + JSON) | Минимум трения при интеграции, модель Klaviyo; типы появляются в UI по мере поступления | ✓ Phase 2: события с произвольным JSON-payload принимаются, отображаются в feed; reserved-key denylist защищает системные свойства |
+| external_id + email, upsert контакта из события | Стабильная идентификация при смене email; событие может создать контакт | ✓ Phase 2: shared upsert (contacts-core) используется API, CSV-воркером и event-воркером; конфликты email → D-04 hard error |
 | Собственный subscription status + фильтрация перед отправкой | Статус виден в платформе и участвует в сегментации; не полагаемся только на SendGrid suppression | — Pending |
 | Поведенческая сегментация в v1 | Ядро ценности Klaviyo-подобного продукта; без неё триггерные сценарии слабые | — Pending |
 | Очередь + RPS-троттлинг в MVP | Rate limits SendGrid; broadcast не должен блокировать триггерные письма | — Pending |
@@ -99,4 +99,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-04 after Phase 1 transition (UAT passed 34/34, security verified, phase marked complete)*
+*Last updated: 2026-07-05 after Phase 2 transition (UAT passed 13/13, security verified, phase marked complete)*

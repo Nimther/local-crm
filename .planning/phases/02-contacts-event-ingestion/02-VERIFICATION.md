@@ -1,7 +1,7 @@
 ---
 phase: 02-contacts-event-ingestion
 verified: 2026-07-05T15:10:00Z
-status: human_needed
+status: passed
 score: 5/5 must-haves verified
 behavior_unverified: 0
 overrides_applied: 0
@@ -9,15 +9,18 @@ re_verification:
   previous_status: human_needed
   previous_score: 5/5
   gaps_closed:
+
     - "UAT Test 2 (major, failed): contact list search input lost focus and the page flashed a full-page skeleton on every debounced keystroke — closed by 02-13 (placeholderData: keepPreviousData + results-scoped skeleton + dim refetch cue), proven RED→GREEN by a real Playwright regression, independently re-run and passing."
     - "UAT Test 11 (follow-up-requested): WR-09 dead-pooled-connection-destroy path was proven only by source assertion — closed by 02-14, a fault-injection integration test (pg_terminate_backend mid-transaction) that exercises withTenantTransaction's own catch → ROLLBACK → release(err) branch and proves pool recovery, independently re-run and passing."
   gaps_remaining: []
   regressions: []
 behavior_unverified_items: []
 human_verification:
+
   - test: "Re-run UAT Test 2 by hand: open the contact list, click the search field, and type an email one character at a time (with natural pauses). Confirm the field keeps focus the whole time and the caret never jumps out (now backed by a passing automated regression — this is a final human sanity confirmation of the plan's own <human-check> step, not a re-test of unverified behavior)."
     expected: "Input stays focused throughout typing; no page flash; list refreshes in place."
     why_human: "The e2e spec proves focus/value preservation programmatically, but the plan (02-13) explicitly deferred one item to human judgment."
+
   - test: "Confirm the visual quality of the new dim/opacity refetch cue (isPlaceholderData || isFetching, opacity-50 with a 200ms transition) reads as a clear 'updating' signal and not a jarring or confusing flicker, compared to the old full-page skeleton swap."
     expected: "The dim cue is subtle, does not obscure readability, and clearly communicates an in-flight refetch without a layout jump."
     why_human: "Subjective rendering/visual-design judgment — explicitly flagged as human_judgment: true in 02-13's own SUMMARY (D2), not verifiable via source inspection."
@@ -35,6 +38,7 @@ human_verification:
 The prior re-verification (2026-07-05T10:20:00Z) found `status: human_needed`, score 5/5 (all ROADMAP success criteria and all 9 requirement IDs verified), with 11 deferred human-verification items. Those items were run through an actual human UAT session (`02-UAT.md`): 9 passed outright, 1 failed (Test 2 — search input focus loss during debounced refetch), 1 came back `follow-up-requested` (Test 11 — WR-09 dead-connection-destroy sign-off declined as source-assertion-only, human requested a real fault-injection test instead).
 
 Two gap-closure plans were executed in response:
+
 - **02-13** — root-caused and fixed the search-focus bug (`ContactsListPage.tsx`: added `placeholderData: keepPreviousData`, moved the loading skeleton out of a page-wide early return into the results region only, added a dim refetch cue) with a RED→GREEN Playwright regression (`contact-search-focus.spec.ts`).
 - **02-14** — added a deterministic fault-injection integration test (`withTenantTransaction-dead-connection.test.ts`) that terminates a pooled connection's backend mid-transaction via `pg_terminate_backend`, proving `withTenantTransaction`'s destroy-on-error branch and pool self-healing, converting WR-09 from a source assertion into test-backed proof.
 
@@ -113,6 +117,7 @@ No new Warnings or Info findings surfaced by this round beyond what `02-REVIEW.m
 ### Human Verification Required
 
 2 items remain, both narrowly scoped to residual human-judgment aspects of the 02-13 fix (see frontmatter `human_verification` for full detail). Both are explicitly called out as `human_judgment: true` in 02-13's own SUMMARY (D2) and its plan's own `<human-check>` verification step — not unverified behavior, but subjective/visual confirmation that automated tests cannot substitute for:
+
 1. A final human sanity re-run of the (now automated-test-backed) focus-preservation behavior.
 2. Visual-quality judgment of the new dim/opacity refetch cue versus the old skeleton swap.
 
@@ -121,6 +126,7 @@ All 9 previously-passed UAT items (contact CRUD, filters/sort/pagination minus t
 ### Gaps Summary
 
 **No gaps remain.** Both UAT-identified issues (Test 2's search-focus failure, Test 11's WR-09 follow-up request) are independently confirmed closed in this re-verification:
+
 - Test 2: fixed by 02-13, proven by a real Playwright regression that I independently re-ran and confirmed passing (not merely trusting the SUMMARY's claimed RED→GREEN result).
 - Test 11: fixed by 02-14, proven by a real fault-injection integration test that I independently re-ran and confirmed passing, exercising the exact `withTenantTransaction` release-with-error branch confirmed present in current source.
 
