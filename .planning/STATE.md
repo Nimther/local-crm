@@ -6,15 +6,15 @@ current_phase: 02
 current_phase_name: contacts-event-ingestion
 status: executing
 stopped_at: "Completed 02-12-PLAN.md (gap-closure: WR-05 CSV subscriptionStatus validation, WR-04 upload failure/truncation path, WR-03 worker stuck-applying fix) -- Phase 02 (contacts-event-ingestion) all 12 plans complete"
-last_updated: "2026-07-05T05:01:54.656Z"
+last_updated: "2026-07-05T09:50:48.921Z"
 last_activity: 2026-07-05
 last_activity_desc: Phase 02 execution started
 progress:
   total_phases: 7
-  completed_phases: 2
-  total_plans: 19
-  completed_plans: 19
-  percent: 29
+  completed_phases: 1
+  total_plans: 21
+  completed_plans: 20
+  percent: 14
 ---
 
 # Project State
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-07-04)
 ## Current Position
 
 Phase: 02 (contacts-event-ingestion) — EXECUTING
-Plan: 5 of 12
+Plan: 2 of 14
 Status: Ready to execute
 Last activity: 2026-07-05 — Phase 02 execution started
 
@@ -74,6 +74,7 @@ Progress: [████████████████████] 7/7 pla
 | Phase 02 P11 | 15 | 3 tasks | 4 files |
 | Phase 02 P10 | 6min | 3 tasks | 8 files |
 | Phase 02 P12 | 15min | 3 tasks | 6 files |
+| Phase 02 P13 | 13min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -137,6 +138,7 @@ Recent decisions affecting current work:
 - [Phase 02]: 02-12: subscriptionStatus validation lives in the shared applyCsvRowMapping (not either caller) so dry-run and apply structurally agree; suppressed refused unconditionally via CSV (D-12)
 - [Phase 02]: 02-12: worker throws on stillPending>0 at recount (retryable via 02-10 defaultJobOptions) instead of silently completing with status stuck 'applying'
 - [Phase 02]: 02-12: upload route wraps the parse loop in try/catch and checks data.file.truncated -- markCsvImportFailed makes the schema's 'failed' status reachable (closes IN-06)
+- [Phase 02]: 02-13: keepPreviousData + results-scoped skeleton + isPlaceholderData/isFetching dim cue is the standard pattern for paginated/filterable list views -- prevents full-page skeleton early-returns from unmounting toolbars during refetch
 
 ### Pending Todos
 
@@ -163,6 +165,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-05T05:01:54.632Z
+Last session: 2026-07-05T09:50:22.483Z
 Stopped at: Completed 02-12-PLAN.md (gap-closure: WR-05 CSV subscriptionStatus validation, WR-04 upload failure/truncation path, WR-03 worker stuck-applying fix) -- Phase 02 (contacts-event-ingestion) all 12 plans complete
 Resume file: None
