@@ -5,16 +5,16 @@ milestone_name: milestone
 current_phase: 02
 current_phase_name: contacts-event-ingestion
 status: executing
-stopped_at: "Completed 02-11-PLAN.md (gap-closure: CR-02 SAVEPOINT race retry, WR-06 subscriptionStatus-on-update, WR-09 dead-connection destruction)"
-last_updated: "2026-07-05T04:49:09.385Z"
+stopped_at: "Completed 02-12-PLAN.md (gap-closure: WR-05 CSV subscriptionStatus validation, WR-04 upload failure/truncation path, WR-03 worker stuck-applying fix) -- Phase 02 (contacts-event-ingestion) all 12 plans complete"
+last_updated: "2026-07-05T05:01:54.656Z"
 last_activity: 2026-07-05
 last_activity_desc: Phase 02 execution started
 progress:
   total_phases: 7
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 19
-  completed_plans: 18
-  percent: 14
+  completed_plans: 19
+  percent: 29
 ---
 
 # Project State
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-07-04)
 ## Current Position
 
 Phase: 02 (contacts-event-ingestion) — EXECUTING
-Plan: 4 of 12
+Plan: 5 of 12
 Status: Ready to execute
 Last activity: 2026-07-05 — Phase 02 execution started
 
@@ -73,6 +73,7 @@ Progress: [████████████████████] 7/7 pla
 | Phase 02 P09 | 3min | 3 tasks | 4 files |
 | Phase 02 P11 | 15 | 3 tasks | 4 files |
 | Phase 02 P10 | 6min | 3 tasks | 8 files |
+| Phase 02 P12 | 15min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -133,6 +134,9 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 02]: 02-10: events PK widened to (workspace_id, id, occurred_at) closing CR-01 cross-tenant idempotency collision; events_default DEFAULT partition added closing CR-03 out-of-window durability gap
 - [Phase ?]: [Phase 02]: 02-10: BullMQ jobId separator is '-' not ':' -- BullMQ rejects a Custom Id containing a colon; per-tenant jobId is ${workspaceId}-${eventId}
 - [Phase ?]: [Phase 02]: 02-10: events-ingest and imports-csv queues now configure defaultJobOptions (attempts: 5, exponential backoff, removeOnFail: false) closing WR-01
+- [Phase 02]: 02-12: subscriptionStatus validation lives in the shared applyCsvRowMapping (not either caller) so dry-run and apply structurally agree; suppressed refused unconditionally via CSV (D-12)
+- [Phase 02]: 02-12: worker throws on stillPending>0 at recount (retryable via 02-10 defaultJobOptions) instead of silently completing with status stuck 'applying'
+- [Phase 02]: 02-12: upload route wraps the parse loop in try/catch and checks data.file.truncated -- markCsvImportFailed makes the schema's 'failed' status reachable (closes IN-06)
 
 ### Pending Todos
 
@@ -159,6 +163,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-05T04:48:44.897Z
-Stopped at: Completed 02-11-PLAN.md (gap-closure: CR-02 SAVEPOINT race retry, WR-06 subscriptionStatus-on-update, WR-09 dead-connection destruction)
+Last session: 2026-07-05T05:01:54.632Z
+Stopped at: Completed 02-12-PLAN.md (gap-closure: WR-05 CSV subscriptionStatus validation, WR-04 upload failure/truncation path, WR-03 worker stuck-applying fix) -- Phase 02 (contacts-event-ingestion) all 12 plans complete
 Resume file: None
