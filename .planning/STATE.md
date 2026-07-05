@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 03
 current_phase_name: Segmentation Engine
 status: executing
-stopped_at: Completed 03-01-PLAN.md
-last_updated: "2026-07-05T18:47:00.950Z"
+stopped_at: Completed 03-03-PLAN.md
+last_updated: "2026-07-05T19:12:34.643Z"
 last_activity: 2026-07-05
 last_activity_desc: Phase 03 execution started
 progress:
   total_phases: 7
   completed_phases: 2
   total_plans: 25
-  completed_plans: 23
+  completed_plans: 24
   percent: 29
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-07-05)
 ## Current Position
 
 Phase: 03 (Segmentation Engine) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
 Last activity: 2026-07-05 — Phase 03 execution started
 
@@ -79,6 +79,7 @@ Progress: [████████████████████] 21/21 p
 | Phase 02 P14 | 12min | 1 tasks | 1 files |
 | Phase 03 P01 | 20min | 2 tasks | 9 files |
 | Phase 03 P02 | 55min | 3 tasks | 14 files |
+| Phase 03 P03 | 14min | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -148,6 +149,7 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 03]: 03-01: at_least count>1 compiles via GROUP BY e.contact_id HAVING count(*) >= N inside the same EXISTS(...) shape used for count=1, keeping the subquery template uniform
 - [Phase 03]: 03-02: drizzle-kit's auto-generated migration filename renamed to 0011_segments.sql to match plan naming; meta/_journal.json tag updated to match
 - [Phase 03]: 03-02: segment.repository.ts's createSegment/updateSegment pass the definition object directly as a jsonb bind param (no JSON.stringify), matching contact.repository.ts's properties-column convention
+- [Phase 03]: 03-03: role="combobox" on the shadcn Popover trigger button strips the accessible name-from-content, breaking getByRole queries — ARIA naming rules exclude combobox from name-from-content roles -- dropped the role override on FieldCombobox/EventCombobox triggers, kept default button semantics + aria-expanded only
 
 ### Pending Todos
 
@@ -174,6 +176,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-05T18:45:33.012Z
-Stopped at: Completed 03-01-PLAN.md
+Last session: 2026-07-05T19:12:34.617Z
+Stopped at: Completed 03-03-PLAN.md
 Resume file: None

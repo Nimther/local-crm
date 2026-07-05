@@ -138,7 +138,7 @@ Plans:
   3. As the user edits segment conditions, a live count of matching contacts updates.
   4. The same saved segment definition resolves an identical membership set whether queried for a campaign audience or a flow trigger.
 
-**Plans**: 2/4 plans executed
+**Plans**: 3/4 plans executed
 **UI hint**: yes
 
 Plans:
@@ -152,7 +152,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2)*
 
-- [ ] 03-03-PLAN.md — Segment builder UI (attribute + behavioral conditions) + live count + create/save + Segments nav & list (SEGM-01, SEGM-02, SEGM-04)
+- [x] 03-03-PLAN.md — Segment builder UI (attribute + behavioral conditions) + live count + create/save + Segments nav & list (SEGM-01, SEGM-02, SEGM-04)
 
 **Wave 4** *(blocked on Wave 3)*
 
@@ -263,7 +263,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 |-------|----------------|--------|-----------|
 | 1. Workspace Foundation & Team Access | 7/7 | Complete    | 2026-07-03 |
 | 2. Contacts & Event Ingestion | 14/14 | Complete    | 2026-07-05 |
-| 3. Segmentation Engine | 2/4 | In Progress|  |
+| 3. Segmentation Engine | 3/4 | In Progress|  |
 | 4. Broadcast Campaigns & Send Pipeline | 0/6 | Not started | - |
 | 5. Webhook Processing & Delivery Tracking | 0/3 | Not started | - |
 | 6. Flows (Triggered Chains) | 0/5 | Not started | - |
