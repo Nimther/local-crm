@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 3
+current_phase: 03
 current_phase_name: Segmentation Engine
-status: "Phase 02 shipped — PR #2"
-stopped_at: Phase 03 UI-SPEC approved
-last_updated: "2026-07-05T12:02:58.144Z"
+status: executing
+stopped_at: Completed 03-01-PLAN.md
+last_updated: "2026-07-05T18:30:44.167Z"
 last_activity: 2026-07-05
-last_activity_desc: Phase 03 planning complete
+last_activity_desc: Phase 03 execution started
 progress:
   total_phases: 7
   completed_phases: 2
-  total_plans: 21
-  completed_plans: 21
+  total_plans: 25
+  completed_plans: 22
   percent: 29
 ---
 
@@ -24,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-05)
 
 **Core value:** Маркетолог настраивает триггерную цепочку или кампанию — и письма надёжно и вовремя доходят до нужных контактов, со сквозным отслеживанием статусов (delivered/opened/clicked/bounced).
-**Current focus:** Phase 3 — Segmentation Engine
+**Current focus:** Phase 03 — Segmentation Engine
 
 ## Current Position
 
-Phase: 3 — Segmentation Engine
-Plan: Not started
-Status: Phase 02 shipped — PR #2
-Last activity: 2026-07-05 — Phase 03 planning complete
+Phase: 03 (Segmentation Engine) — EXECUTING
+Plan: 2 of 4
+Status: Ready to execute
+Last activity: 2026-07-05 — Phase 03 execution started
 
 Progress: [████████████████████] 21/21 plans (100%)
 
@@ -77,6 +77,7 @@ Progress: [████████████████████] 21/21 p
 | Phase 02 P12 | 15min | 3 tasks | 6 files |
 | Phase 02 P13 | 13min | 2 tasks | 2 files |
 | Phase 02 P14 | 12min | 1 tasks | 1 files |
+| Phase 03 P01 | 20min | 2 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -142,6 +143,8 @@ Recent decisions affecting current work:
 - [Phase 02]: 02-12: upload route wraps the parse loop in try/catch and checks data.file.truncated -- markCsvImportFailed makes the schema's 'failed' status reachable (closes IN-06)
 - [Phase 02]: 02-13: keepPreviousData + results-scoped skeleton + isPlaceholderData/isFetching dim cue is the standard pattern for paginated/filterable list views -- prevents full-page skeleton early-returns from unmounting toolbars during refetch
 - [Phase ?]: [Phase 02] 02-14: WR-09 dead-connection destroy path proven by fault-injection test; client.on('error', ...) required on checked-out clients killed mid-transaction (not just pool-level idle guard)
+- [Phase ?]: [Phase 03]: 03-01: added tags:c.tags to STANDARD_FIELD_COLUMNS allow-list so has_tag/not_has_tag compile through the same fails-closed path as every other attribute condition
+- [Phase ?]: [Phase 03]: 03-01: at_least count>1 compiles via GROUP BY e.contact_id HAVING count(*) >= N inside the same EXISTS(...) shape used for count=1, keeping the subquery template uniform
 
 ### Pending Todos
 
@@ -168,6 +171,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-05T11:26:18.155Z
-Stopped at: Phase 03 UI-SPEC approved
-Resume file: .planning/phases/03-segmentation-engine/03-UI-SPEC.md
+Last session: 2026-07-05T18:30:44.140Z
+Stopped at: Completed 03-01-PLAN.md
+Resume file: None
