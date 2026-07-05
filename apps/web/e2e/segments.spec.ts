@@ -48,4 +48,19 @@ test("build, preview, and save a segment from the Сегменты section", asy
 
   await page.waitForURL(`**/w/${slug}/segments`);
   await expect(page.getByText(segmentName)).toBeVisible();
+
+  // Open the segment detail page (03-04): the definition builder is
+  // prefilled and the «Участники» section renders (member rows or the
+  // D-12 empty state).
+  await page.getByText(segmentName).click();
+  await page.waitForURL(/\/w\/[a-z0-9-]+\/segments\/[^/]+$/);
+
+  await expect(page.getByRole("heading", { name: "Определение сегмента" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Страна" })).toBeVisible();
+  await expect(page.getByPlaceholder("Значение")).toHaveValue("RU");
+
+  await expect(page.getByRole("heading", { name: "Участники" })).toBeVisible();
+  await expect(
+    page.getByText("Пока никто не подходит под условия").or(page.getByRole("table"))
+  ).toBeVisible();
 });

@@ -24,6 +24,7 @@ import CsvImportWizard from "@/features/contacts/CsvImportWizard";
 import CsvImportHistory from "@/features/contacts/CsvImportHistory";
 import SegmentsListPage from "@/features/segments/SegmentsListPage";
 import SegmentCreatePage from "@/features/segments/SegmentCreatePage";
+import SegmentDetailPage from "@/features/segments/SegmentDetailPage";
 
 /**
  * Resolves "/" for a signed-in user: no workspace yet -> /create-workspace
@@ -77,6 +78,7 @@ export default function App() {
             <Route path="contacts/:id" element={<ContactDetailPage />} />
             <Route path="segments" element={<SegmentsListPage />} />
             <Route path="segments/new" element={<SegmentCreatePage />} />
+            <Route path="segments/:id" element={<SegmentDetailPage />} />
             <Route path="team" element={<TeamPage />} />
             <Route path="profile" element={<ProfilePage />} />
             <Route path="settings/sendgrid" element={<SendGridKeySettings />} />

@@ -1,5 +1,12 @@
-import type { CreateSegmentInput, SegmentDefinition, SegmentListResponse, SegmentResponse } from "@mega-crm/shared-schemas";
-import { apiGet, apiPost } from "@/lib/api";
+import type {
+  ContactListResponse,
+  CreateSegmentInput,
+  SegmentDefinition,
+  SegmentListResponse,
+  SegmentResponse,
+  UpdateSegmentInput,
+} from "@mega-crm/shared-schemas";
+import { apiGet, apiPatch, apiPost } from "@/lib/api";
 
 /** D-10/D-11: paginated segment list. */
 export function listSegments(
@@ -33,4 +40,27 @@ export function fetchPreviewCount(slug: string, definition: SegmentDefinition): 
 /** POST /api/workspaces/:slug/segments -- create a named segment (SEGM-01/02). */
 export function createSegment(slug: string, body: CreateSegmentInput): Promise<SegmentResponse> {
   return apiPost<SegmentResponse>(`/api/workspaces/${slug}/segments`, body);
+}
+
+/** GET /api/workspaces/:slug/segments/:id -- D-12 segment detail (definition + metadata). */
+export function getSegment(slug: string, id: string): Promise<SegmentResponse> {
+  return apiGet<SegmentResponse>(`/api/workspaces/${slug}/segments/${id}`);
+}
+
+/** PATCH /api/workspaces/:slug/segments/:id -- D-13/D-14: rename and/or redefine (both optional). */
+export function updateSegment(slug: string, id: string, body: UpdateSegmentInput): Promise<SegmentResponse> {
+  return apiPatch<SegmentResponse>(`/api/workspaces/${slug}/segments/${id}`, body);
+}
+
+/** GET /api/workspaces/:slug/segments/:id/members -- D-12 paginated member list (contacts). */
+export function listSegmentMembers(
+  slug: string,
+  id: string,
+  params: { page?: number; pageSize?: number } = {}
+): Promise<ContactListResponse> {
+  const search = new URLSearchParams();
+  if (params.page) search.set("page", String(params.page));
+  if (params.pageSize) search.set("pageSize", String(params.pageSize));
+  const qs = search.toString();
+  return apiGet<ContactListResponse>(`/api/workspaces/${slug}/segments/${id}/members${qs ? `?${qs}` : ""}`);
 }
