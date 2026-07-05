@@ -29,11 +29,14 @@ export {
 export interface CreateContactInput {
   externalId?: string;
   email?: string;
-  firstName?: string;
-  lastName?: string;
-  phone?: string;
-  city?: string;
-  country?: string;
+  // CR-04: nullable on the update path (Partial<CreateContactInput> below) so
+  // an explicit `null` can clear a previously-set value -- `undefined` (the
+  // field omitted) still means "keep existing" in updateContact.
+  firstName?: string | null;
+  lastName?: string | null;
+  phone?: string | null;
+  city?: string | null;
+  country?: string | null;
   tags?: string[];
   properties?: Record<string, unknown>;
   subscriptionStatus?: SubscriptionStatus;
@@ -283,7 +286,12 @@ export async function updateContact(id: string, patch: UpdateContactInput): Prom
       nextStatus = patch.subscriptionStatus;
     }
 
-    const nextProperties = patch.properties ? { ...existing.properties, ...patch.properties } : existing.properties;
+    // CR-04: full replacement, not a merge -- when the caller sends a
+    // `properties` object (even `{}` after removing the last key) it
+    // replaces the stored value wholesale, so a removed key actually stays
+    // removed. Omitting `properties` entirely (undefined, e.g. the
+    // Overview-tab PATCH) keeps the existing value untouched.
+    const nextProperties = patch.properties ?? existing.properties;
 
     const { rows } = await client.query<ContactRow>(
       `UPDATE contacts SET

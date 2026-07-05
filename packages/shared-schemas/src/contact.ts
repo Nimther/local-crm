@@ -40,11 +40,15 @@ export type CreateContactInput = z.infer<typeof createContactSchema>;
 export const updateContactSchema = z.object({
   email: z.string().trim().toLowerCase().email().optional(),
   externalId: z.string().trim().min(1).max(255).optional(),
-  firstName: z.string().trim().max(255).optional(),
-  lastName: z.string().trim().max(255).optional(),
-  phone: z.string().trim().max(50).optional(),
-  city: z.string().trim().max(255).optional(),
-  country: z.string().trim().max(255).optional(),
+  // CR-04: null is an explicit "clear this field" signal (distinct from
+  // omitted/undefined, which means "keep existing value" -- see
+  // contact.repository.ts's updateContact). email/externalId stay
+  // non-nullable -- they are identity anchors, not clearable via this path.
+  firstName: z.string().trim().max(255).nullable().optional(),
+  lastName: z.string().trim().max(255).nullable().optional(),
+  phone: z.string().trim().max(50).nullable().optional(),
+  city: z.string().trim().max(255).nullable().optional(),
+  country: z.string().trim().max(255).nullable().optional(),
   tags: z.array(z.string().trim().min(1)).optional(),
   properties: propertiesSchema.optional(),
   subscriptionStatus: subscriptionStatusSchema.optional(),
