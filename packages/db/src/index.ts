@@ -8,6 +8,7 @@ import * as propertyRegistrySchema from "./schema/property-registry.js";
 import * as apiKeysSchema from "./schema/api-keys.js";
 import * as eventsSchema from "./schema/events.js";
 import * as csvImportsSchema from "./schema/csv-imports.js";
+import * as segmentsSchema from "./schema/segments.js";
 
 const schema = {
   ...authSchema,
@@ -18,6 +19,7 @@ const schema = {
   ...apiKeysSchema,
   ...eventsSchema,
   ...csvImportsSchema,
+  ...segmentsSchema,
 };
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -43,4 +45,5 @@ export * from "./schema/property-registry.js";
 export * from "./schema/api-keys.js";
 export * from "./schema/events.js";
 export * from "./schema/csv-imports.js";
+export * from "./schema/segments.js";
 export { TENANT_GUC_KEY } from "./rls.js";

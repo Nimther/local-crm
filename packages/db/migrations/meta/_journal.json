@@ -78,6 +78,20 @@
       "when": 1783159804441,
       "tag": "0010_events_workspace_scoped_pk",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1783276531657,
+      "tag": "0011_segments",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1783276531658,
+      "tag": "0012_segments_rls_and_indexes",
+      "breakpoints": true
     }
   ]
 }
