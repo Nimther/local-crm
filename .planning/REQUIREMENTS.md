@@ -34,7 +34,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **SEGM-01**: Пользователь может создать динамический сегмент по свойствам профиля (страна, теги, кастомные атрибуты)
 - [x] **SEGM-02**: Пользователь может добавить поведенческие условия по событиям («сделал заказ за 30 дней», «не открывал письма за 90 дней») с count/timeframe
 - [x] **SEGM-03**: Один и тот же движок оценки сегментов используется цепочками (триггеры входа, exit conditions) и кампаниями (аудитория) — единое определение «кто в сегменте»
-- [ ] **SEGM-04**: При построении сегмента пользователь видит live-превью количества подходящих контактов
+- [x] **SEGM-04**: При построении сегмента пользователь видит live-превью количества подходящих контактов
 
 ### Subscription & Suppression
 
@@ -144,7 +144,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SEGM-01 | Phase 3 | Complete |
 | SEGM-02 | Phase 3 | Complete |
 | SEGM-03 | Phase 3 | Complete |
-| SEGM-04 | Phase 3 | Pending |
+| SEGM-04 | Phase 3 | Complete |
 | CAMP-01 | Phase 4 | Pending |
 | CAMP-02 | Phase 4 | Pending |
 | CAMP-03 | Phase 4 | Pending |
