@@ -138,15 +138,25 @@ Plans:
   3. As the user edits segment conditions, a live count of matching contacts updates.
   4. The same saved segment definition resolves an identical membership set whether queried for a campaign audience or a flow trigger.
 
-**Plans**: TBD
+**Plans**: 4 plans
 **UI hint**: yes
 
 Plans:
+**Wave 1**
 
-- [ ] 03-01: Segment definition model + single unified evaluation engine
-- [ ] 03-02: Profile-attribute conditions
-- [ ] 03-03: Behavioral/event conditions (count/timeframe) + materialized membership at target scale
-- [ ] 03-04: Live preview count in the segment builder
+- [ ] 03-01-PLAN.md — Pure SQL condition compiler (@mega-crm/segments-core) + shared Zod SegmentDefinition contract (SEGM-01, SEGM-02, SEGM-03)
+
+**Wave 2** *(blocked on Wave 1)*
+
+- [ ] 03-02-PLAN.md — segments table + RLS/GIN migrations + evaluation engine (count/list/isMember) + CRUD + preview-count API + event-name picker (SEGM-01, SEGM-02, SEGM-03, SEGM-04)
+
+**Wave 3** *(blocked on Wave 2)*
+
+- [ ] 03-03-PLAN.md — Segment builder UI (attribute + behavioral conditions) + live count + create/save + Segments nav & list (SEGM-01, SEGM-02, SEGM-04)
+
+**Wave 4** *(blocked on Wave 3)*
+
+- [ ] 03-04-PLAN.md — Segment detail (edit + paginated member list) + delete + list enrichment (count/freshness/author) (SEGM-01, SEGM-03)
 
 ### Phase 4: Broadcast Campaigns & Send Pipeline
 
