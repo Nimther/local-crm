@@ -1,6 +1,6 @@
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Plus, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { Loader2, Plus, X } from "lucide-react";
 
 import type {
   AttributeCondition,
@@ -25,7 +25,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { fetchEventNames } from "@/features/segments/api";
+import { fetchEventNames, fetchPreviewCount } from "@/features/segments/api";
+import { useDebouncedValue } from "@/features/segments/useDebouncedValue";
 import { cn } from "@/lib/utils";
 
 /** D-03 field kinds -- drives which operators/value-input a condition row shows. */
@@ -148,6 +149,31 @@ function recapForGroup(group: SegmentGroup, registry: PropertyRegistryItem[]): s
   return group.conditions.map((c) => recapForCondition(c, registry)).join(" или ");
 }
 
+/**
+ * D-08: gates the live-count preview request -- only fires once every group
+ * has at least one condition with its required fields filled in (partial
+ * edits don't spam the preview-count endpoint with an incomplete/invalid
+ * definition on every keystroke).
+ */
+function isConditionReadyForPreview(cond: SegmentCondition): boolean {
+  if (cond.type === "attribute") {
+    if (!cond.field) return false;
+    if (HIDDEN_VALUE_OPERATORS.has(cond.operator)) return true;
+    return cond.value !== undefined && cond.value !== "";
+  }
+  if (!cond.eventName) return false;
+  if (cond.countOperator === "at_least" && !cond.count) return false;
+  if (cond.timeframe.kind === "last_days" && !cond.timeframe.days) return false;
+  return true;
+}
+
+function isDefinitionReadyForPreview(definition: SegmentDefinition): boolean {
+  return (
+    definition.groups.length > 0 &&
+    definition.groups.every((g) => g.conditions.length > 0 && g.conditions.every(isConditionReadyForPreview))
+  );
+}
+
 /** D-01/D-03: field/custom-property combobox (popover + command), free-text fallback. */
 function FieldCombobox({
   cond,
@@ -170,7 +196,7 @@ function FieldCombobox({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button type="button" variant="outline" role="combobox" aria-expanded={open} className="w-48 justify-start">
+        <Button type="button" variant="outline" aria-expanded={open} className="w-48 justify-start">
           {fieldLabel(cond)}
         </Button>
       </PopoverTrigger>
@@ -237,7 +263,7 @@ function EventCombobox({ eventName, eventNames, onSelect }: { eventName: string;
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button type="button" variant="outline" role="combobox" aria-expanded={open} className="w-48 justify-start">
+        <Button type="button" variant="outline" aria-expanded={open} className="w-48 justify-start">
           {eventName || "Выберите событие"}
         </Button>
       </PopoverTrigger>
@@ -488,6 +514,31 @@ export function SegmentBuilder({
   const registry = registryQuery.data ?? [];
   const eventNames = eventNamesQuery.data?.names ?? [];
 
+  // D-08/SEGM-04: debounce the definition, then use the FULL debounced JSON
+  // as the queryKey (Pitfall 6) -- stale/out-of-order responses are handled
+  // by TanStack Query's cache identity, no manual AbortController needed.
+  const debouncedDefinition = useDebouncedValue(value, 300);
+  const canPreview = isDefinitionReadyForPreview(debouncedDefinition);
+
+  const previewQuery = useQuery({
+    // definition is part of the queryKey (Pitfall 6 stale-response guard).
+    queryKey: ["workspace", slug, "segments", "preview-count", debouncedDefinition],
+    queryFn: () => fetchPreviewCount(slug, debouncedDefinition),
+    enabled: Boolean(slug) && canPreview,
+    placeholderData: keepPreviousData,
+  });
+
+  // Keep the last successfully computed exact count around even once a
+  // later response comes back `{ degraded: true }` -- never blanked to zero.
+  const [lastGoodCount, setLastGoodCount] = useState<number | null>(null);
+  useEffect(() => {
+    if (previewQuery.data && "count" in previewQuery.data) {
+      setLastGoodCount(previewQuery.data.count);
+    }
+  }, [previewQuery.data]);
+
+  const isDegraded = Boolean(previewQuery.data && "degraded" in previewQuery.data && previewQuery.data.degraded);
+
   function updateGroup(groupIndex: number, nextGroup: SegmentGroup) {
     onChange({ ...value, groups: value.groups.map((g, i) => (i === groupIndex ? nextGroup : g)) });
   }
@@ -591,6 +642,36 @@ export function SegmentBuilder({
       <Button type="button" variant="outline" onClick={addGroup}>
         Добавить группу (И)
       </Button>
+
+      <Card>
+        <CardContent className="space-y-1 p-6">
+          {!canPreview ? (
+            <p className="text-sm text-muted-foreground">
+              Заполните условия, чтобы увидеть количество подходящих контактов.
+            </p>
+          ) : (
+            <>
+              <p
+                className={cn(
+                  "flex items-center gap-2 text-display font-semibold",
+                  (previewQuery.isFetching || isDegraded) && "opacity-50"
+                )}
+              >
+                {lastGoodCount !== null ? lastGoodCount.toLocaleString("ru-RU") : "—"}
+                {previewQuery.isFetching ? <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /> : null}
+                {isDegraded ? <span className="text-sm font-normal text-amber-800">(устарело)</span> : null}
+              </p>
+              <p className="text-sm text-muted-foreground">контактов подходит</p>
+              {isDegraded ? (
+                <p className="mt-2 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                  Не удалось быстро посчитать при таких сложных условиях. Уберите часть условий, чтобы увидеть точное
+                  число.
+                </p>
+              ) : null}
+            </>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

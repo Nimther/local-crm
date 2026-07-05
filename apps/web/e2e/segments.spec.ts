@@ -1,10 +1,9 @@
 import { test, expect } from "@playwright/test";
 
 /**
- * MVP happy-path RED test for 03-03 (SEGM-01/02/04): register -> create
+ * MVP happy-path test for 03-03 (SEGM-01/02/04): register -> create
  * workspace -> open Сегменты -> build a segment (one attribute condition) ->
  * watch the live count -> name and save -> segment appears in the list.
- * MUST fail until Task 3 wires up the builder's live count + save flow.
  */
 test("build, preview, and save a segment from the Сегменты section", async ({ page }) => {
   const email = `owner-${Date.now()}@example.com`;
@@ -27,14 +26,15 @@ test("build, preview, and save a segment from the Сегменты section", asy
   await page.waitForURL(`**/w/${slug}/segments`);
   await expect(page.getByText("Сегментов пока нет")).toBeVisible();
 
-  await page.getByRole("button", { name: "Создать сегмент" }).click();
+  await page
+    .getByRole("button", { name: "Создать сегмент" })
+    .first()
+    .click();
   await page.waitForURL(`**/w/${slug}/segments/new`);
 
-  // Add one attribute condition: Страна = RU.
-  await page.getByRole("button", { name: "Добавить условие" }).click();
-  await page.getByRole("menuitem", { name: "По свойству" }).click();
-
-  await page.getByRole("button", { name: "Выберите поле" }).click();
+  // The builder opens with one empty attribute condition row -- fill it in:
+  // Страна = RU.
+  await page.getByRole("button", { name: "Выберите поле" }).first().click();
   await page.getByRole("option", { name: "Страна" }).click();
 
   await page.getByPlaceholder("Значение").fill("RU");
