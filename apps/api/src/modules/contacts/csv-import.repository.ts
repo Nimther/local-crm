@@ -176,6 +176,23 @@ export async function markCsvImportApplying(id: string): Promise<void> {
   });
 }
 
+/**
+ * WR-04: makes the schema's `failed` status actually reachable (IN-06). Set
+ * when the upload route's streaming parse loop throws mid-file (e.g. a
+ * malformed CSV) or the uploaded file was silently truncated by the
+ * multipart size limit -- either way, the import must never be left looking
+ * like a pending/successful `uploaded` row.
+ */
+export async function markCsvImportFailed(id: string): Promise<void> {
+  return withTenantTransaction(async (client) => {
+    const workspaceId = getWorkspaceId();
+    await client.query(`UPDATE csv_imports SET status = 'failed', updated_at = now() WHERE id = $1 AND workspace_id = $2`, [
+      id,
+      workspaceId,
+    ]);
+  });
+}
+
 export interface ErrorRow {
   rowNumber: number;
   raw: Record<string, string>;

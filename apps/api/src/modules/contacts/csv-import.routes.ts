@@ -19,6 +19,7 @@ import {
   setStagedRowClassification,
   saveDryRunResult,
   markCsvImportApplying,
+  markCsvImportFailed,
   getErrorRows,
   type CsvImportRow,
 } from "./csv-import.repository.js";
@@ -170,23 +171,45 @@ export async function registerCsvImportRoutes(fastify: FastifyInstance): Promise
       let rowNumber = 0;
       let chunk: Array<{ rowNumber: number; raw: Record<string, string> }> = [];
 
-      await withTenant(workspace.id, async () => {
-        for await (const record of parser as AsyncIterable<Record<string, string>>) {
-          if (headerColumns.length === 0) headerColumns = Object.keys(record);
-          rowNumber += 1;
-          if (previewRows.length < 20) previewRows.push(record);
-          chunk.push({ rowNumber, raw: record });
-          if (chunk.length >= STAGING_CHUNK_SIZE) {
-            const toInsert = chunk;
-            chunk = [];
-            await withTenantTransaction((client) => insertStagingRowsChunk(client, workspace.id, created.id, toInsert));
+      // WR-04: the streaming parse loop has no other failure path -- an
+      // uncaught parser/stream error (e.g. an unclosed CSV quote) would
+      // otherwise reach Fastify's default handler as a bare 500 and leave
+      // the import row (already created above) stuck at its default
+      // 'uploaded' status forever, looking like a pending/successful
+      // upload instead of a failure.
+      try {
+        await withTenant(workspace.id, async () => {
+          for await (const record of parser as AsyncIterable<Record<string, string>>) {
+            if (headerColumns.length === 0) headerColumns = Object.keys(record);
+            rowNumber += 1;
+            if (previewRows.length < 20) previewRows.push(record);
+            chunk.push({ rowNumber, raw: record });
+            if (chunk.length >= STAGING_CHUNK_SIZE) {
+              const toInsert = chunk;
+              chunk = [];
+              await withTenantTransaction((client) => insertStagingRowsChunk(client, workspace.id, created.id, toInsert));
+            }
           }
-        }
-        if (chunk.length > 0) {
-          await withTenantTransaction((client) => insertStagingRowsChunk(client, workspace.id, created.id, chunk));
-        }
-        await updateCsvImportTotalRows(created.id, rowNumber);
-      });
+          if (chunk.length > 0) {
+            await withTenantTransaction((client) => insertStagingRowsChunk(client, workspace.id, created.id, chunk));
+          }
+          await updateCsvImportTotalRows(created.id, rowNumber);
+        });
+      } catch (err) {
+        await withTenant(workspace.id, () => markCsvImportFailed(created.id));
+        const message = err instanceof Error ? err.message : "Failed to parse CSV file";
+        return reply.code(422).send({ error: message });
+      }
+
+      // WR-04: @fastify/multipart silently truncates a file exceeding
+      // UPLOAD_MAX_BYTES rather than throwing through this single-file
+      // request.file() + stream-pipe pattern -- `truncated` is the ONLY
+      // signal, and it's only reliably set once the stream has fully ended
+      // (i.e. after the for-await loop above completes without error).
+      if (data.file.truncated) {
+        await withTenant(workspace.id, () => markCsvImportFailed(created.id));
+        return reply.code(413).send({ error: "Uploaded file exceeds the maximum allowed size" });
+      }
 
       return reply.send({
         importId: created.id,

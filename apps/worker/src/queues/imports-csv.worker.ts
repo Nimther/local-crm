@@ -118,6 +118,15 @@ export async function processImportsCsvJob(data: ImportsCsvJob): Promise<void> {
           // original transaction above was already rolled back, so this
           // update runs in its own fresh transaction.
           const message = err instanceof Error ? err.message : "Unknown error processing row";
+          // WR-03: if EVEN this error-marking UPDATE fails (e.g. a
+          // transient connection error), the row's persisted status stays
+          // 'pending' -- it is intentionally NOT retried again within THIS
+          // same pass (that would risk an unbounded tight retry loop
+          // against a systemic failure). `cursor` moves on for the rest of
+          // this run, but since the row is never marked terminal, the
+          // final recount below observes `stillPending > 0` and throws, so
+          // BullMQ retries the whole job; a fresh invocation resets
+          // `cursor` to 0 and picks this same still-'pending' row back up.
           await withTenantTransaction((client) =>
             client.query(`UPDATE csv_import_rows SET status = 'error', reason = $2 WHERE id = $1`, [row.id, message])
           ).catch(() => undefined);
@@ -125,7 +134,7 @@ export async function processImportsCsvJob(data: ImportsCsvJob): Promise<void> {
       }
     }
 
-    await withTenantTransaction(async (client) => {
+    const stillPending = await withTenantTransaction(async (client) => {
       const { rows: counts } = await client.query<{ status: string; count: string }>(
         `SELECT status, count(*) FROM csv_import_rows WHERE csv_import_id = $1 GROUP BY status`,
         [csvImportId]
@@ -141,13 +150,27 @@ export async function processImportsCsvJob(data: ImportsCsvJob): Promise<void> {
         skipped: byStatus.skipped ?? 0,
         errorCount: byStatus.error ?? 0,
       };
-      const stillPending = byStatus.pending ?? 0;
+      const pendingCount = byStatus.pending ?? 0;
 
       await client.query(
         `UPDATE csv_imports SET processed_rows = $2, summary = $3, status = $4, updated_at = now() WHERE id = $1`,
-        [csvImportId, processedRows, summary, stillPending > 0 ? "applying" : "done"]
+        [csvImportId, processedRows, summary, pendingCount > 0 ? "applying" : "done"]
       );
+
+      return pendingCount;
     });
+
+    if (stillPending > 0) {
+      // WR-03: never let the job resolve successfully while rows remain
+      // unresolved -- that would leave the import silently stuck 'applying'
+      // forever (nothing else re-triggers processing). Throwing here marks
+      // the BullMQ job failed so 02-10's defaultJobOptions retries it; each
+      // row's own idempotency guard (locked re-check of its `pending`
+      // status) makes a re-run safe.
+      throw new Error(
+        `imports:csv job for csvImportId=${csvImportId} left ${stillPending} row(s) unresolved (still 'pending')`
+      );
+    }
   });
 }
 
