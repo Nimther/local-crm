@@ -226,6 +226,37 @@ describe("imports:csv worker (CONT-02, D-15/D-16, Pitfall 1)", () => {
     expect(snapshot.processedRows).toBe(1); // recomputed from row state, never double-counted on retry
   });
 
+  it("WR-03: an apply job that cannot resolve every row THROWS instead of silently leaving the import stuck 'applying'", async () => {
+    const workspaceId = await freshWorkspaceId("worker-csv-stuck");
+    const csvImportId = await createCsvImport(workspaceId, { duplicatePolicy: "update", totalRows: 2 });
+
+    // Row 0 is staged directly at row_number=0, deliberately OUTSIDE the
+    // worker's own paging window (`row_number > cursor`, cursor starts at
+    // 0) -- it can therefore never be selected by the per-row processing
+    // loop and stays 'pending' forever. This is a deterministic, DB-only
+    // way to force `stillPending > 0` at the final recount without needing
+    // to fabricate a genuine mid-transaction failure.
+    await withTenant(workspaceId, () =>
+      withTenantTransaction(async (client) => {
+        await client.query(
+          `INSERT INTO csv_import_rows (csv_import_id, workspace_id, row_number, raw) VALUES ($1, $2, 0, $3)`,
+          [csvImportId, workspaceId, { external_id: "stuck-ext-1", email: "stuck@example.com" }]
+        );
+      })
+    );
+    await stageRows(workspaceId, csvImportId, [
+      { external_id: "stuck-ext-2", email: "resolved@example.com", first_name: "", tags: "" },
+    ]);
+
+    // Pre-fix: processImportsCsvJob resolves successfully (stillPending>0
+    // only sets status='applying', it never throws), so BullMQ would mark
+    // the job done and nothing ever retries the stuck row.
+    await expect(processImportsCsvJob({ workspaceId, csvImportId })).rejects.toThrow();
+
+    const snapshot = await getCsvImportSnapshot(workspaceId, csvImportId);
+    expect(snapshot.status).not.toBe("done");
+  });
+
   it("CONT-02: a malformed row (missing both identifiers) is marked errored and excluded from applied counts", async () => {
     const workspaceId = await freshWorkspaceId("worker-csv-error");
 

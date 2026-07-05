@@ -1,8 +1,38 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Pool } from "pg";
 import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
+import { applyCsvRowMapping } from "@mega-crm/contacts-core";
 import { buildServer } from "../../../server.js";
 import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool } from "../../../test/db-fixture.js";
+
+/**
+ * WR-05a (gap-closure 02-12): applyCsvRowMapping is a pure function, so its
+ * subscriptionStatus validation is exercised directly here rather than via
+ * the HTTP harness below. This is the SAME mapper the dry-run summary
+ * (`computeDryRunSummary` in csv-import.routes.ts) and the apply worker
+ * (`imports-csv.worker.ts`) both call, so fixing it here closes the
+ * dry-run/apply drift and the D-12 "suppressed is automated-only" bypass in
+ * one place.
+ */
+describe("applyCsvRowMapping subscriptionStatus validation (WR-05a)", () => {
+  const mapping = { external_id: "externalId", status: "subscriptionStatus" };
+
+  it("rejects a non-enum value like 'yes' with a mapper error", () => {
+    const result = applyCsvRowMapping({ external_id: "wr05a-1", status: "yes" }, mapping);
+    expect(result.error).toBeTruthy();
+  });
+
+  it("normalizes a valid value's case (e.g. 'SUBSCRIBED' -> 'subscribed')", () => {
+    const result = applyCsvRowMapping({ external_id: "wr05a-2", status: "SUBSCRIBED" }, mapping);
+    expect(result.error).toBeUndefined();
+    expect(result.input.subscriptionStatus).toBe("subscribed");
+  });
+
+  it("refuses 'suppressed' via CSV even though it is otherwise a valid enum value (D-12)", () => {
+    const result = applyCsvRowMapping({ external_id: "wr05a-3", status: "suppressed" }, mapping);
+    expect(result.error).toBeTruthy();
+  });
+});
 
 /**
  * CSV contact import (CONT-02, D-15..D-20): the HTTP-observable half of the
@@ -174,6 +204,70 @@ describe("CSV contact import (CONT-02, D-15..D-20)", () => {
     const summary = dryRunRes.json() as { willCreate: number; willUpdate: number; errorCount: number };
     expect(summary.willUpdate).toBe(1);
     expect(summary.willCreate).toBe(1);
+  });
+
+  it("WR-05b: dry-run reports an invalid subscriptionStatus value as an error, not a create/update (no drift with apply)", async () => {
+    const { cookie, workspace } = await owner("csv-status-drift");
+    const csvContent = ["external_id,email,status", "wr05b-1,wr05b@example.com,yes"].join("\n");
+    const { body, headers } = buildMultipartCsvBody("status.csv", csvContent);
+
+    const uploadRes = await app.inject({
+      method: "POST",
+      url: `/api/workspaces/${workspace.slug}/imports`,
+      headers: { cookie, ...headers },
+      payload: body,
+    });
+    expect(uploadRes.statusCode, `upload failed: ${uploadRes.body}`).toBe(200);
+    const upload = uploadRes.json() as { importId: string };
+
+    const dryRunRes = await app.inject({
+      method: "POST",
+      url: `/api/workspaces/${workspace.slug}/imports/${upload.importId}/dry-run`,
+      headers: { cookie },
+      payload: {
+        mapping: { external_id: "externalId", email: "email", status: "subscriptionStatus" },
+        duplicatePolicy: "update",
+      },
+    });
+    expect(dryRunRes.statusCode, `dry-run failed: ${dryRunRes.body}`).toBe(200);
+    const summary = dryRunRes.json() as { willCreate: number; willUpdate: number; errorCount: number };
+    // Pre-fix: the untyped subscriptionStatus cast lets "yes" through, so
+    // this row is (wrongly) counted in willCreate instead of errorCount --
+    // the exact dry-run/apply drift WR-05 closes.
+    expect(summary.errorCount).toBe(1);
+    expect(summary.willCreate).toBe(0);
+  });
+
+  it("WR-04: a malformed CSV that throws mid-stream sets the import status to 'failed', not stuck 'uploaded'", async () => {
+    const { cookie, workspace } = await owner("csv-malformed");
+    // Unbalanced quote: csv-parse absorbs the rest of the file into the open
+    // quoted field and throws CSV_QUOTE_NOT_CLOSED once the stream ends.
+    const malformedCsv = 'external_id,email\n1,"unterminated quote\n2,valid@example.com\n';
+    const { body, headers } = buildMultipartCsvBody("bad.csv", malformedCsv);
+
+    const uploadRes = await app.inject({
+      method: "POST",
+      url: `/api/workspaces/${workspace.slug}/imports`,
+      headers: { cookie, ...headers },
+      payload: body,
+    });
+    // Pre-fix: the streaming loop has no try/catch, so a parser error
+    // reaches Fastify's default error handler as an unhandled 500 instead
+    // of a controlled failure response.
+    expect(uploadRes.statusCode).not.toBe(200);
+
+    const historyRes = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/imports`,
+      headers: { cookie },
+    });
+    expect(historyRes.statusCode, `history failed: ${historyRes.body}`).toBe(200);
+    const items = historyRes.json() as Array<{ fileName: string; status: string }>;
+    const failedImport = items.find((i) => i.fileName === "bad.csv");
+    // Pre-fix: the import row was created before parsing began and is never
+    // updated on error, so it stays stuck at the default 'uploaded' status
+    // forever instead of surfacing as 'failed'.
+    expect(failedImport?.status).toBe("failed");
   });
 
   it("D-18: the error-report route returns a downloadable CSV of only the errored rows with a reason column", async () => {
