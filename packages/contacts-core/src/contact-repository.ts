@@ -231,6 +231,15 @@ export async function upsertContactByIdentity(
       subscriptionStatus = "suppressed"; // D-08/D-11
     }
 
+    // CR-02: the INSERT is wrapped in a SAVEPOINT so a concurrent-insert
+    // race (23505) can be recovered from WITHOUT aborting the caller's
+    // whole transaction. Without the SAVEPOINT, a failed INSERT leaves the
+    // transaction in the aborted state (Postgres semantics: any error
+    // aborts the transaction unless it happened inside a subtransaction),
+    // so the retry's own first statement below would itself throw 25P02
+    // ("current transaction is aborted") -- the previous "retry" was dead
+    // code that could never actually run.
+    await client.query("SAVEPOINT upsert_insert");
     try {
       const { rows } = await client.query<{ id: string }>(
         `INSERT INTO contacts
@@ -251,12 +260,17 @@ export async function upsertContactByIdentity(
           subscriptionStatus,
         ]
       );
+      await client.query("RELEASE SAVEPOINT upsert_insert");
       await registerObservedProperties(client, workspaceId, safeProperties);
       return { contactId: rows[0].id, created: true };
     } catch (err) {
       if (!_isRetry && isUniqueViolation(err)) {
         // A concurrent insert raced us between the SELECTs above and this
-        // INSERT -- retry once, now resolving against whichever row won.
+        // INSERT -- ROLLBACK TO SAVEPOINT un-aborts the transaction (unlike
+        // a bare ROLLBACK, it discards only the failed INSERT, not the
+        // whole transaction), so the retry's SELECT below can now actually
+        // run and resolve against whichever row won the race.
+        await client.query("ROLLBACK TO SAVEPOINT upsert_insert");
         return upsertContactByIdentity(client, workspaceId, input, true);
       }
       throw err;
@@ -294,6 +308,43 @@ export async function upsertContactByIdentity(
   const nextProperties =
     Object.keys(safeProperties).length > 0 ? { ...existing.properties, ...safeProperties } : existing.properties;
 
+  // WR-06/D-12: mirror updateContact's transition guards exactly -- valid
+  // subscribed<->unsubscribed transitions apply, but suppressed can never
+  // be set directly here nor moved back to subscribed via this path (only
+  // the create-time suppression check, or a future bounce/webhook flow,
+  // may set suppressed). Unlike updateContact, an invalid transition here
+  // does not throw (this is a shared upsert used by unattended ingestion
+  // paths, not a direct user-facing PATCH) -- it is silently skipped and
+  // logged, consistent with this function's existing conflict-logging style.
+  let nextStatus = existing.subscriptionStatus;
+  if (input.subscriptionStatus !== undefined && input.subscriptionStatus !== existing.subscriptionStatus) {
+    if (existing.subscriptionStatus === "suppressed" && input.subscriptionStatus === "subscribed") {
+      logger.warn(
+        {
+          workspaceId,
+          contactId: existing.id,
+          reason: "invalid_status_transition",
+          from: existing.subscriptionStatus,
+          to: input.subscriptionStatus,
+        },
+        "upsertContactByIdentity: a suppressed contact cannot be moved back to subscribed via this path -- ignored (D-12)"
+      );
+    } else if (input.subscriptionStatus === "suppressed") {
+      logger.warn(
+        {
+          workspaceId,
+          contactId: existing.id,
+          reason: "cannot_set_suppressed",
+          from: existing.subscriptionStatus,
+          to: input.subscriptionStatus,
+        },
+        "upsertContactByIdentity: subscription_status cannot be set to suppressed directly via this path -- ignored (D-12)"
+      );
+    } else {
+      nextStatus = input.subscriptionStatus;
+    }
+  }
+
   await client.query(
     `UPDATE contacts SET
        external_id = $3,
@@ -305,6 +356,7 @@ export async function upsertContactByIdentity(
        country = $9,
        tags = $10,
        properties = $11,
+       subscription_status = $12,
        updated_at = now()
      WHERE workspace_id = $1 AND id = $2`,
     [
@@ -319,6 +371,7 @@ export async function upsertContactByIdentity(
       input.country !== undefined ? input.country : existing.country,
       input.tags !== undefined ? input.tags : existing.tags,
       nextProperties,
+      nextStatus,
     ]
   );
 
