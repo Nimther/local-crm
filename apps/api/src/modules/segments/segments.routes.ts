@@ -20,6 +20,7 @@ import {
   listSegmentMembers,
   listSegments,
   updateSegment,
+  SegmentConflictError,
   type SegmentRow,
 } from "./segment.repository.js";
 import { listObservedEventNames } from "./event-names.repository.js";
@@ -280,15 +281,26 @@ export async function registerSegmentsRoutes(fastify: FastifyInstance): Promise<
     }
   });
 
+  // D-03/Phase-3 D-14: deleting a segment still referenced by a non-canceled
+  // campaign is blocked with a 409 + an actionable next step, rather than
+  // the raw FK-violation 500 the DB's ON DELETE RESTRICT backstop would
+  // otherwise surface.
   fastify.delete("/api/workspaces/:slug/segments/:id", async (request, reply) => {
     const { slug, id } = request.params as { slug: string; id: string };
     const workspace = await resolveWorkspaceMember(request, reply, slug);
     if (!workspace) return;
 
-    const deleted = await withTenant(workspace.id, () => deleteSegment(id));
-    if (!deleted) {
-      return reply.code(404).send({ error: "Segment not found" });
+    try {
+      const deleted = await withTenant(workspace.id, () => deleteSegment(id));
+      if (!deleted) {
+        return reply.code(404).send({ error: "Segment not found" });
+      }
+      return reply.send({ deleted: true });
+    } catch (err) {
+      if (err instanceof SegmentConflictError) {
+        return reply.code(409).send({ error: err.message, code: err.code });
+      }
+      throw err;
     }
-    return reply.send({ deleted: true });
   });
 }

@@ -28,9 +28,11 @@ const SEGMENT_COLUMNS = `
 `;
 
 /**
- * D-14/Phase-4/6 readiness: reserved for "segment is referenced by a
- * campaign/flow, cannot delete" once those consumers exist -- unused this
- * phase (deleteSegment is a free delete, D-14), shaped like ContactConflictError.
+ * D-03/D-14 (Phase 4): "segment is referenced by a campaign/flow, cannot
+ * delete" -- `referenced_by_campaign` is thrown by `deleteSegment` below
+ * whenever a non-canceled campaign still points at this segment;
+ * `referenced_by_flow` remains reserved for Phase 6. Shaped like
+ * ContactConflictError.
  */
 export class SegmentConflictError extends Error {
   constructor(
@@ -286,14 +288,51 @@ export async function updateSegment(
   });
 }
 
-/** D-14: free delete this phase -- nothing references segments.id yet. */
+/**
+ * D-03/D-14 (Phase 4): blocks deleting a segment still referenced by a
+ * non-canceled campaign -- pre-checked in the same transaction as the
+ * delete so there is no TOCTOU gap between the check and the DELETE. The
+ * DB's `campaigns.segment_id` FK is ON DELETE RESTRICT as a backstop
+ * (T-04-01-03), but this app-level check produces the actionable
+ * `SegmentConflictError` the route needs to return a clear 409, rather than
+ * surfacing a raw FK-violation 500.
+ */
 export async function deleteSegment(id: string): Promise<boolean> {
   return withTenantTransaction(async (client) => {
     const workspaceId = getWorkspaceId();
-    const { rows } = await client.query(
-      `DELETE FROM segments WHERE workspace_id = $1 AND id = $2 RETURNING id`,
+
+    const { rows: referencing } = await client.query<{ name: string }>(
+      `SELECT name FROM campaigns WHERE workspace_id = $1 AND segment_id = $2 AND status != 'canceled' LIMIT 1`,
       [workspaceId, id]
     );
-    return rows.length > 0;
+    if (referencing.length > 0) {
+      throw new SegmentConflictError(
+        `Segment is referenced by campaign "${referencing[0].name}"`,
+        "referenced_by_campaign"
+      );
+    }
+
+    try {
+      const { rows } = await client.query(
+        `DELETE FROM segments WHERE workspace_id = $1 AND id = $2 RETURNING id`,
+        [workspaceId, id]
+      );
+      return rows.length > 0;
+    } catch (err) {
+      // Rule-1 fix: a CANCELED campaign still carries campaigns.segment_id
+      // (RESTRICT, not SET NULL -- 04-01's T-04-01-03 backstop preserves a
+      // canceled campaign's audience reference for Phase 7 history), so the
+      // pre-check above (which only screens non-canceled references) can
+      // pass while the DELETE below still trips the DB's unconditional FK
+      // constraint. Without this, that case surfaced as a raw 500
+      // (postgres 23503) instead of the same actionable conflict error.
+      if ((err as { code?: string } | undefined)?.code === "23503") {
+        throw new SegmentConflictError(
+          "Segment is referenced by a campaign (including canceled campaigns, which retain their audience reference for history)",
+          "referenced_by_campaign"
+        );
+      }
+      throw err;
+    }
   });
 }
