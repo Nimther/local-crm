@@ -3,8 +3,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
 
-import type { WorkspaceResponse } from "@mega-crm/shared-schemas";
-import { apiGet } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
@@ -12,7 +10,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { createCampaign, getCampaign, updateCampaign } from "@/features/campaigns/api";
 import { listSegments } from "@/features/segments/api";
 import { SenderPicker, TemplatePicker } from "@/features/campaigns/TemplateSenderPickers";
@@ -20,8 +17,6 @@ import { SenderPicker, TemplatePicker } from "@/features/campaigns/TemplateSende
 const GENERIC_ERROR = "Что-то пошло не так. Попробуйте ещё раз — если ошибка повторится, обновите страницу.";
 const MISSING_NAME_COPY = "Укажите название кампании";
 const MISSING_SEGMENT_COPY = "Выберите сегмент-аудиторию";
-const MEMBER_TOOLTIP = "Только Owner или Admin может запускать кампании.";
-const NOT_YET_WIRED_TOOLTIP = "Отправка и планирование появятся на следующем шаге — сейчас доступно сохранение черновика.";
 
 /** D-01/D-05: segment combobox (Phase-3 popover+command pattern), audience section of the builder. */
 function SegmentPicker({
@@ -83,8 +78,13 @@ function SegmentPicker({
  * Campaign builder (create draft + edit draft, CAMP-01): name + Аудитория
  * (segment picker) + Шаблон и отправитель (template/sender pickers) ->
  * «Сохранить черновик». Editing is only legal while status='draft' (D-08);
- * any other status shows a read-only notice, deferring launch/schedule/
- * progress UI to 04-08. Structural analog: SegmentCreatePage.tsx.
+ * any other status shows a read-only notice. Used standalone for
+ * /campaigns/new, and embedded (unmodified) by CampaignDetailPage's draft
+ * view for /campaigns/:id, which renders the real launch/schedule actions +
+ * test-send panel below it (04-08) — this component itself no longer shows
+ * its own placeholder launch/schedule buttons (removed here to avoid a
+ * duplicate, non-functional pair alongside CampaignDetailPage's real ones).
+ * Structural analog: SegmentCreatePage.tsx.
  */
 export function CampaignBuilderPage() {
   const { slug = "", id } = useParams<{ slug: string; id?: string }>();
@@ -99,14 +99,6 @@ export function CampaignBuilderPage() {
   const [nameError, setNameError] = useState<string | null>(null);
   const [segmentError, setSegmentError] = useState<string | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
-
-  const workspaceQuery = useQuery({
-    queryKey: ["workspace", slug],
-    queryFn: () => apiGet<WorkspaceResponse>(`/api/workspaces/${slug}`),
-    enabled: Boolean(slug),
-  });
-  const viewerRole = workspaceQuery.data?.role ?? "member";
-  const canLaunch = viewerRole === "owner" || viewerRole === "admin";
 
   const campaignQuery = useQuery({
     queryKey: ["workspace", slug, "campaigns", id],
@@ -239,36 +231,6 @@ export function CampaignBuilderPage() {
         <Button onClick={handleSave} disabled={saveMutation.isPending || (isEdit && !isDraft)}>
           {saveMutation.isPending ? "Сохраняем…" : "Сохранить черновик"}
         </Button>
-
-        {isEdit && isDraft ? (
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span tabIndex={0} className="inline-flex">
-                  <Button type="button" variant="outline" disabled>
-                    Отправить сейчас
-                  </Button>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>{canLaunch ? NOT_YET_WIRED_TOOLTIP : MEMBER_TOOLTIP}</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        ) : null}
-
-        {isEdit && isDraft ? (
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span tabIndex={0} className="inline-flex">
-                  <Button type="button" variant="outline" disabled>
-                    Запланировать
-                  </Button>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>{canLaunch ? NOT_YET_WIRED_TOOLTIP : MEMBER_TOOLTIP}</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        ) : null}
       </div>
     </div>
   );
