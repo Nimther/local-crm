@@ -33,18 +33,64 @@ export const conditionOperatorSchema = z.enum([
 export type ConditionOperator = z.infer<typeof conditionOperatorSchema>;
 
 /**
- * A profile-attribute condition (SEGM-01). `standard` fields are validated
- * against the segments-core `STANDARD_FIELD_COLUMNS` allow-list at compile
- * time (fails closed on unknown field); `custom` fields are property-registry
- * keys (D-03).
+ * D-04 standard-field allow-list, mirrored EXACTLY (name-for-name) from
+ * segments-core's `STANDARD_FIELD_COLUMNS` (packages/segments-core/src/operators.ts).
+ * This is the Zod-boundary side of the same allow-list -- these two lists
+ * MUST stay in lockstep; a field added to one without the other reopens the
+ * CR-01 gap (an unconstrained field either rejected here but accepted by the
+ * compiler, or vice versa).
  */
-export const attributeConditionSchema = z.object({
-  type: z.literal("attribute"),
-  source: z.enum(["standard", "custom"]),
-  field: z.string(),
-  operator: conditionOperatorSchema,
-  value: z.unknown().optional(),
-});
+export const STANDARD_FIELD_KEYS = [
+  "country",
+  "city",
+  "firstName",
+  "lastName",
+  "phone",
+  "subscriptionStatus",
+  "tags",
+] as const;
+export type StandardField = (typeof STANDARD_FIELD_KEYS)[number];
+const standardFieldSchema = z.enum(STANDARD_FIELD_KEYS);
+
+/**
+ * A profile-attribute condition (SEGM-01). `standard` fields are validated
+ * against the STANDARD_FIELD_KEYS allow-list (mirroring segments-core's
+ * `STANDARD_FIELD_COLUMNS`) via `superRefine` below -- fails closed at the
+ * boundary (400) instead of reaching the compiler's own fail-closed throw
+ * (500), closing CR-01/WR-01's root cause (D-04). `custom` fields are
+ * property-registry keys (D-03) and must be non-empty.
+ *
+ * `field` intentionally stays typed as plain `string` (not narrowed to
+ * `StandardField`/a discriminated union) so the web builder's draft state,
+ * which uses an empty-field sentinel before a field is chosen, continues to
+ * type-check -- the allow-list is enforced at parse time only.
+ */
+export const attributeConditionSchema = z
+  .object({
+    type: z.literal("attribute"),
+    source: z.enum(["standard", "custom"]),
+    field: z.string(),
+    operator: conditionOperatorSchema,
+    value: z.unknown().optional(),
+  })
+  .superRefine((cond, ctx) => {
+    if (cond.source === "standard") {
+      const result = standardFieldSchema.safeParse(cond.field);
+      if (!result.success) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["field"],
+          message: `field must be one of the standard allow-listed fields: ${STANDARD_FIELD_KEYS.join(", ")}`,
+        });
+      }
+    } else if (cond.field.trim().length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["field"],
+        message: "field must be a non-empty string for a custom attribute condition",
+      });
+    }
+  });
 export type AttributeCondition = z.infer<typeof attributeConditionSchema>;
 
 /** A behavioral condition (SEGM-02) -- D-02/D-06 count + timeframe + negation. */
