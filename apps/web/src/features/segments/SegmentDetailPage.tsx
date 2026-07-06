@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { SubscriptionStatusBadge } from "@/features/contacts/SubscriptionStatusBadge";
+import { listCampaigns } from "@/features/campaigns/api";
 import { getSegment, listSegmentMembers, updateSegment } from "@/features/segments/api";
 import { SegmentBuilder } from "@/features/segments/SegmentBuilder";
 import { GENERIC_ERROR, validateDefinition } from "@/features/segments/validateDefinition";
@@ -153,6 +154,20 @@ export function SegmentDetailPage() {
     enabled: Boolean(slug) && Boolean(id),
   });
 
+  // D-03: non-blocking warning when a scheduled campaign still references
+  // this segment -- editing conditions now will change that campaign's
+  // audience at send-start. No dedicated endpoint exists yet, so this reuses
+  // the existing campaigns list, client-side filtered (workspace campaign
+  // counts are small; same read-only, non-blocking scope as the UI-SPEC note).
+  const referencingCampaignsQuery = useQuery({
+    queryKey: ["workspace", slug, "campaigns", "for-segment-warning"],
+    queryFn: () => listCampaigns(slug, { page: 1, pageSize: 200 }),
+    enabled: Boolean(slug) && Boolean(id),
+  });
+  const referencingScheduledCampaign = referencingCampaignsQuery.data?.items.find(
+    (campaign) => campaign.segmentId === id && campaign.status === "scheduled"
+  );
+
   const [name, setName] = useState("");
   const [definition, setDefinition] = useState<SegmentDefinition | null>(null);
   const [nameError, setNameError] = useState<string | null>(null);
@@ -233,6 +248,13 @@ export function SegmentDetailPage() {
       <div>
         <h1 className="text-display font-semibold">{name}</h1>
       </div>
+
+      {referencingScheduledCampaign ? (
+        <p className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          Используется запланированной кампанией «{referencingScheduledCampaign.name}» — изменения повлияют на её
+          аудиторию.
+        </p>
+      ) : null}
 
       <section className="space-y-4">
         <h2 className="text-xl font-semibold">Определение сегмента</h2>

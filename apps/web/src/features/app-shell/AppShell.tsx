@@ -45,6 +45,9 @@ export function AppShell() {
           <NavLink to={`/w/${slug}/settings/sendgrid`} className={navLinkClassName}>
             SendGrid
           </NavLink>
+          <NavLink to={`/w/${slug}/settings/sending`} className={navLinkClassName}>
+            Настройки отправки
+          </NavLink>
           <NavLink to={`/w/${slug}/settings/api-keys`} className={navLinkClassName}>
             API-ключи
           </NavLink>

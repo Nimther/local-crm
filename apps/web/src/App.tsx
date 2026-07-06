@@ -28,6 +28,7 @@ import SegmentDetailPage from "@/features/segments/SegmentDetailPage";
 import CampaignsListPage from "@/features/campaigns/CampaignsListPage";
 import CampaignBuilderPage from "@/features/campaigns/CampaignBuilderPage";
 import CampaignDetailPage from "@/features/campaigns/CampaignDetailPage";
+import SendSettingsPage from "@/features/campaigns/SendSettingsPage";
 
 /**
  * Resolves "/" for a signed-in user: no workspace yet -> /create-workspace
@@ -89,6 +90,7 @@ export default function App() {
             <Route path="profile" element={<ProfilePage />} />
             <Route path="settings/sendgrid" element={<SendGridKeySettings />} />
             <Route path="settings/api-keys" element={<ApiKeysSettings />} />
+            <Route path="settings/sending" element={<SendSettingsPage />} />
           </Route>
         </Routes>
       </BrowserRouter>
