@@ -32,8 +32,26 @@ import { listObservedEventNames } from "./event-names.repository.js";
  */
 const PREVIEW_COUNT_STATEMENT_TIMEOUT_MS = 2000;
 
+/**
+ * WR-03/T-03-04: the same DoS-bounding statement_timeout, extended to
+ * create/update/members -- larger than preview's 2000ms since a save/members
+ * fetch is a deliberate, lower-frequency action than live-preview's
+ * per-keystroke evaluation.
+ */
+const SAVE_EVAL_STATEMENT_TIMEOUT_MS = 15000;
+
 /** Postgres error code for a statement canceled due to statement_timeout. */
 const QUERY_CANCELED_ERROR_CODE = "57014";
+
+/**
+ * WR-03: maps a canceled (57014) segment-evaluation query to a clean 4xx
+ * instead of letting it fall through to Fastify's default 500 -- mirrors the
+ * preview-count route's degraded-state precedent, but save/members paths
+ * reject outright (no partial/degraded persisted state) rather than degrade.
+ */
+function isQueryCanceledError(err: unknown): boolean {
+  return (err as { code?: string } | undefined)?.code === QUERY_CANCELED_ERROR_CODE;
+}
 
 function toContactResponse(row: ContactRow) {
   return {
@@ -137,10 +155,20 @@ export async function registerSegmentsRoutes(fastify: FastifyInstance): Promise<
       return reply.code(401).send({ error: "Not authenticated" });
     }
 
-    const created = await withTenant(workspace.id, () =>
-      createSegment({ name: parsed.data.name, definition: parsed.data.definition, createdByUserId: session.user.id })
-    );
-    return reply.code(201).send(toSegmentResponse(created));
+    try {
+      const created = await withTenant(workspace.id, () =>
+        createSegment(
+          { name: parsed.data.name, definition: parsed.data.definition, createdByUserId: session.user.id },
+          { statementTimeoutMs: SAVE_EVAL_STATEMENT_TIMEOUT_MS }
+        )
+      );
+      return reply.code(201).send(toSegmentResponse(created));
+    } catch (err) {
+      if (isQueryCanceledError(err)) {
+        return reply.code(400).send({ error: "Segment definition is too expensive to evaluate — narrow the conditions" });
+      }
+      throw err;
+    }
   });
 
   fastify.get("/api/workspaces/:slug/segments/event-names", async (request, reply) => {
@@ -171,8 +199,7 @@ export async function registerSegmentsRoutes(fastify: FastifyInstance): Promise<
       );
       return reply.send({ count });
     } catch (err) {
-      const pgCode = (err as { code?: string } | undefined)?.code;
-      if (pgCode === QUERY_CANCELED_ERROR_CODE) {
+      if (isQueryCanceledError(err)) {
         return reply.send({ degraded: true });
       }
       throw err;
@@ -209,15 +236,22 @@ export async function registerSegmentsRoutes(fastify: FastifyInstance): Promise<
     }
 
     const { page, pageSize } = parsed.data;
-    const { items, total } = await withTenant(workspace.id, () =>
-      listSegmentMembers(segment.definition, page, pageSize)
-    );
-    return reply.send({
-      items: items.map(toContactResponse),
-      total,
-      page,
-      pageSize,
-    });
+    try {
+      const { items, total } = await withTenant(workspace.id, () =>
+        listSegmentMembers(segment.definition, page, pageSize, { statementTimeoutMs: SAVE_EVAL_STATEMENT_TIMEOUT_MS })
+      );
+      return reply.send({
+        items: items.map(toContactResponse),
+        total,
+        page,
+        pageSize,
+      });
+    } catch (err) {
+      if (isQueryCanceledError(err)) {
+        return reply.code(400).send({ error: "Segment definition is too expensive to evaluate — narrow the conditions" });
+      }
+      throw err;
+    }
   });
 
   fastify.patch("/api/workspaces/:slug/segments/:id", async (request, reply) => {
@@ -230,11 +264,20 @@ export async function registerSegmentsRoutes(fastify: FastifyInstance): Promise<
     const workspace = await resolveWorkspaceMember(request, reply, slug);
     if (!workspace) return;
 
-    const updated = await withTenant(workspace.id, () => updateSegment(id, parsed.data));
-    if (!updated) {
-      return reply.code(404).send({ error: "Segment not found" });
+    try {
+      const updated = await withTenant(workspace.id, () =>
+        updateSegment(id, parsed.data, { statementTimeoutMs: SAVE_EVAL_STATEMENT_TIMEOUT_MS })
+      );
+      if (!updated) {
+        return reply.code(404).send({ error: "Segment not found" });
+      }
+      return reply.send(toSegmentResponse(updated));
+    } catch (err) {
+      if (isQueryCanceledError(err)) {
+        return reply.code(400).send({ error: "Segment definition is too expensive to evaluate — narrow the conditions" });
+      }
+      throw err;
     }
-    return reply.send(toSegmentResponse(updated));
   });
 
   fastify.delete("/api/workspaces/:slug/segments/:id", async (request, reply) => {

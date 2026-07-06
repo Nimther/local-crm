@@ -73,7 +73,9 @@ export async function countSegmentMembers(
   return withTenantTransaction(async (client) => {
     const workspaceId = getWorkspaceId();
     if (opts?.statementTimeoutMs) {
-      await client.query(`SET LOCAL statement_timeout = ${Number(opts.statementTimeoutMs)}`);
+      await client.query(`SELECT set_config('statement_timeout', $1, true)`, [
+        String(opts.statementTimeoutMs),
+      ]);
     }
     const { whereSql, params } = compileSegmentDefinition(def, workspaceId);
     const { rows } = await client.query<{ count: string }>(
@@ -93,10 +95,16 @@ export async function countSegmentMembers(
 export async function listSegmentMembers(
   def: SegmentDefinition,
   page: number,
-  pageSize: number
+  pageSize: number,
+  opts?: { statementTimeoutMs?: number }
 ): Promise<SegmentMembersResult> {
   return withTenantTransaction(async (client) => {
     const workspaceId = getWorkspaceId();
+    if (opts?.statementTimeoutMs) {
+      await client.query(`SELECT set_config('statement_timeout', $1, true)`, [
+        String(opts.statementTimeoutMs),
+      ]);
+    }
     const { whereSql, params } = compileSegmentDefinition(def, workspaceId);
 
     const { rows: countRows } = await client.query<{ count: string }>(
@@ -141,10 +149,24 @@ export interface CreateSegmentInput {
   createdByUserId: string;
 }
 
-/** D-11: a freshly created segment gets an immediately-computed member_count/member_count_at. */
-export async function createSegment(input: CreateSegmentInput): Promise<SegmentRow> {
+/**
+ * D-11: a freshly created segment gets an immediately-computed
+ * member_count/member_count_at. `statementTimeoutMs`, when set, scopes a
+ * `set_config('statement_timeout', ...)` to this transaction (WR-03/T-03-04:
+ * the same evaluation-DoS bound preview-count already had, extended to
+ * saves).
+ */
+export async function createSegment(
+  input: CreateSegmentInput,
+  opts?: { statementTimeoutMs?: number }
+): Promise<SegmentRow> {
   return withTenantTransaction(async (client) => {
     const workspaceId = getWorkspaceId();
+    if (opts?.statementTimeoutMs) {
+      await client.query(`SELECT set_config('statement_timeout', $1, true)`, [
+        String(opts.statementTimeoutMs),
+      ]);
+    }
     const { rows } = await client.query<SegmentRow>(
       `INSERT INTO segments (workspace_id, name, definition, created_by_user_id)
        VALUES ($1, $2, $3, $4)
@@ -213,10 +235,21 @@ export interface UpdateSegmentInput {
 /**
  * D-13/D-14: rename and/or redefine -- redefining recomputes member_count
  * (D-11) in the same transaction since the membership set changed.
+ * `statementTimeoutMs`, when set, scopes a `set_config('statement_timeout', ...)`
+ * to this transaction (WR-03/T-03-04).
  */
-export async function updateSegment(id: string, patch: UpdateSegmentInput): Promise<SegmentRow | null> {
+export async function updateSegment(
+  id: string,
+  patch: UpdateSegmentInput,
+  opts?: { statementTimeoutMs?: number }
+): Promise<SegmentRow | null> {
   return withTenantTransaction(async (client) => {
     const workspaceId = getWorkspaceId();
+    if (opts?.statementTimeoutMs) {
+      await client.query(`SELECT set_config('statement_timeout', $1, true)`, [
+        String(opts.statementTimeoutMs),
+      ]);
+    }
     const { rows: existingRows } = await client.query<SegmentRow>(
       `SELECT ${SEGMENT_COLUMNS} FROM segments WHERE workspace_id = $1 AND id = $2 FOR UPDATE`,
       [workspaceId, id]
