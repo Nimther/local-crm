@@ -15,10 +15,12 @@ import { processSendJob } from "../send-dispatch.js";
  * (docs.bullmq.io/guide/rate-limiting). `processSendJob` itself never
  * throws for this case (kept unit-testable without a live Worker, per the
  * plan's own testing-architecture note) -- these tests instead prove the
- * DOWNSTREAM effect BullMQ's non-consumed-attempt guarantee depends on: the
- * `sends` row is left `dispatching` (never `failed`), so a subsequent
- * redelivery of the SAME job still finds a row to advance to `sent`, rather
- * than dispatchSendGate silently treating it as already resolved.
+ * DOWNSTREAM effect BullMQ's non-consumed-attempt guarantee depends on:
+ * 04-12 (T-04-12-03) releases the 'dispatching' claim on a 429/5xx (rather
+ * than leaving it stranded), so the `sends` row for the key no longer
+ * exists after the response -- and a subsequent redelivery of the SAME job
+ * re-claims a FRESH row and still ends up `sent`, rather than dispatchSendGate
+ * silently treating a stranded claim as already resolved.
  */
 describe("send-dispatch.ts 429/5xx backoff (SEND-07)", () => {
   let pool: Pool;
@@ -111,7 +113,7 @@ describe("send-dispatch.ts 429/5xx backoff (SEND-07)", () => {
     );
   }
 
-  it("a 429 response yields {outcome:'rate_limited'} and leaves the sends row 'dispatching' (no consumed attempt)", async () => {
+  it("a 429 response yields {outcome:'rate_limited'} and releases the dispatch claim (T-04-12-03, no consumed attempt)", async () => {
     const workspaceId = await freshWorkspaceId("backoff-429");
     await connectFixtureSendgridKey(workspaceId);
     const campaignId = await createFixtureCampaign(workspaceId);
@@ -123,7 +125,10 @@ describe("send-dispatch.ts 429/5xx backoff (SEND-07)", () => {
     );
 
     expect(result).toEqual({ outcome: "rate_limited", rateLimitMs: 3000 });
-    expect(await sendsStatusFor(workspaceId, campaignId, contactId)).toBe("dispatching");
+    expect(
+      await sendsStatusFor(workspaceId, campaignId, contactId),
+      "the claim must be released, not left stranded 'dispatching'"
+    ).toBeUndefined();
   });
 
   it("a 500 response also yields {outcome:'rate_limited'} using the fixed 2s fallback when no rate-limit headers are present", async () => {
