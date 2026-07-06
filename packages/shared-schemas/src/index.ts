@@ -8,3 +8,4 @@ export * from "./event.js";
 export * from "./csv-import.js";
 export * from "./queues.js";
 export * from "./segment.js";
+export * from "./campaign.js";
