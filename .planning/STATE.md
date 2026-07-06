@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 04
 current_phase_name: broadcast-campaigns-send-pipeline
 status: executing
-stopped_at: Completed 04-09-PLAN.md
-last_updated: "2026-07-06T13:38:17.861Z"
+stopped_at: Completed 04-14-PLAN.md
+last_updated: "2026-07-06T14:33:46.383Z"
 last_activity: 2026-07-06
 last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 7
   completed_phases: 4
-  total_plans: 42
-  completed_plans: 42
+  total_plans: 43
+  completed_plans: 43
   percent: 57
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-07-06)
 ## Current Position
 
 Phase: 04 (broadcast-campaigns-send-pipeline) — EXECUTING
-Plan: 6 of 13
+Plan: 2 of 14
 Status: Ready to execute
 Last activity: 2026-07-06 — Phase 04 execution started
 
@@ -99,6 +99,7 @@ Progress: [████████████████████] 29/29 p
 | Phase 04 P11 | 20min | 2 tasks | 4 files |
 | Phase 04 P12 | 20min | 3 tasks | 5 files |
 | Phase 04 P13 | 20min | 3 tasks | 5 files |
+| Phase 04 P14 | 10min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -212,6 +213,7 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 04]: 04-12: releaseDispatchClaim is a guarded DELETE (not a new send_status enum value) called on 429/5xx and rate-limiter denial so a claim is never left stranded (T-04-12-03)
 - [Phase ?]: [Phase 04]: 04-13: incrementCampaignSendCounter/tryCompleteCampaign guarded WHERE status='sending' -- called after every kind='campaign' terminal recordSendResult AND after kickoff's fan-out completion, covering both possible orderings
 - [Phase ?]: [Phase 04]: 04-13: D-05's empty-audience UPDATE in campaign-kickoff.worker.ts guarded WHERE status='sending' (Rule 1 fix) -- closes a residual CR-06 gap where a mid-walk cancel would otherwise be forced back to 'sent'
+- [Phase 04-14]: addContentTypeParser('application/x-www-form-urlencoded') registered inside registerUnsubscribeRoutes, media-type-specific (no catch-all), body discarded via done(null, undefined) since the URL-path token is the sole auth input
 
 ### Pending Todos
 
@@ -238,6 +240,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-06T13:36:55.208Z
-Stopped at: Completed 04-09-PLAN.md
+Last session: 2026-07-06T14:33:46.356Z
+Stopped at: Completed 04-14-PLAN.md
 Resume file: None
