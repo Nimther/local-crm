@@ -185,17 +185,33 @@ Plans:
   4. Every delivered email goes through SendGrid v3 mail/send with a one-click List-Unsubscribe header, no contact exceeds the global frequency cap, and there are no duplicate emails on job retries.
   5. Sends are throttled per that tenant's RPS, ride a queue with a reserved triggered-priority lane, and survive SendGrid 429/5xx with backoff retries without losing emails.
 
-**Plans**: TBD
+**Plans**: 8 plans
 **UI hint**: yes
 
 Plans:
 
-- [ ] 04-01: Send queue infrastructure — triggered vs broadcast priority lanes (triggered reserved floor)
-- [ ] 04-02: Per-tenant RPS token-bucket throttle + 429/5xx backoff + idempotency keys
-- [ ] 04-03: SendGrid dispatch worker (mail/send v3, template_id + dynamic_template_data, List-Unsubscribe)
-- [ ] 04-04: Pre-send suppression/subscription filter + global frequency-cap ledger
-- [ ] 04-05: Campaign model + state machine + segment audience snapshot at send time
-- [ ] 04-06: Campaign UI — create, test send, schedule, live progress
+**Wave 1**
+
+- [ ] 04-01-PLAN.md — Campaign data model: 4 RLS tables (campaigns/campaign_recipients/sends/workspace_send_settings) + migrations + BLOCKING push + shared Zod/queue schemas (CAMP-01, CAMP-03, SEND-04, SEND-06)
+- [ ] 04-02-PLAN.md — Shared @mega-crm/kms package extraction + SendGrid tenant dynamic-template listing (CAMP-01, SEND-05)
+
+**Wave 2** *(blocked on Wave 1)*
+
+- [ ] 04-03-PLAN.md — @mega-crm/delivery-core (HMAC unsubscribe token, mail/send builder, pre-send gate, send ledger, send-settings) + public RFC 8058 unsubscribe endpoint (SUBS-03, SUBS-04, SEND-04)
+
+**Wave 3** *(parallel — worker vs API)*
+
+- [ ] 04-04-PLAN.md — Send dispatch engine: per-tenant token bucket + idempotent send-dispatch (mail/send + List-Unsubscribe + backoff) + broadcast/triggered workers + [SUS] package checkpoint (SEND-01, SEND-02, SEND-03, SEND-05, SEND-06, SEND-07, SUBS-04)
+- [ ] 04-05-PLAN.md — Campaign backend: repository + state machine + routes + test-send + send-settings routes + D-14 segment-delete block (CAMP-01, CAMP-02, CAMP-03, CAMP-04, CAMP-05, SUBS-03)
+
+**Wave 4** *(parallel — worker kickoff vs UI list/builder)*
+
+- [ ] 04-06-PLAN.md — Send kickoff: batched recipient snapshot + campaign-kickoff fan-out + repeatable due-campaign scheduler (CAMP-02, CAMP-05, SEND-01)
+- [ ] 04-07-PLAN.md — Campaigns UI part 1: list + builder + api client + nav (CAMP-01)
+
+**Wave 5** *(blocked on Wave 4)*
+
+- [ ] 04-08-PLAN.md — Campaigns UI part 2: launch/schedule/cancel/test-send dialogs + detail + live progress + send settings + segment warning (CAMP-02, CAMP-03, CAMP-04, CAMP-05)
 
 ### Phase 5: Webhook Processing & Delivery Tracking
 
@@ -277,7 +293,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 1. Workspace Foundation & Team Access | 7/7 | Complete    | 2026-07-03 |
 | 2. Contacts & Event Ingestion | 14/14 | Complete    | 2026-07-05 |
 | 3. Segmentation Engine | 8/8 | Complete    | 2026-07-06 |
-| 4. Broadcast Campaigns & Send Pipeline | 0/6 | Not started | - |
+| 4. Broadcast Campaigns & Send Pipeline | 0/8 | Not started | - |
 | 5. Webhook Processing & Delivery Tracking | 0/3 | Not started | - |
 | 6. Flows (Triggered Chains) | 0/5 | Not started | - |
 | 7. Analytics, Dashboard & Send Log | 0/5 | Not started | - |
