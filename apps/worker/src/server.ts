@@ -44,6 +44,26 @@ export async function buildWorker(): Promise<WorkerRuntime> {
     throw new Error("REDIS_URL is required for apps/worker to start");
   }
 
+  // 04-16 gap closure: the send workers registered below (email-broadcast,
+  // email-triggered) call signUnsubscribeToken/buildListUnsubscribeUrl
+  // (packages/delivery-core/src/unsubscribe-token.ts) on every send --
+  // those throw lazily per-job if unset. Fail fast here, before any Worker
+  // is constructed, so a missing/weak secret dies the process at boot
+  // instead of exhausting BullMQ retries into the failed set (the observed
+  // UAT Test 4/5 failure mode).
+  const unsubscribeTokenSecret = process.env.UNSUBSCRIBE_TOKEN_SECRET;
+  if (!unsubscribeTokenSecret || unsubscribeTokenSecret.length < 32) {
+    throw new Error(
+      "UNSUBSCRIBE_TOKEN_SECRET (>=32 chars) is required for apps/worker to start -- it signs every List-Unsubscribe token"
+    );
+  }
+  const publicAppUrl = process.env.PUBLIC_APP_URL;
+  if (!publicAppUrl) {
+    throw new Error(
+      "PUBLIC_APP_URL is required for apps/worker to start -- it builds the public unsubscribe link"
+    );
+  }
+
   const connection = createRedisConnection(redisUrl);
   const workers: Worker[] = [
     createEventsIngestWorker(buildRedisConnectionOptions(redisUrl)),

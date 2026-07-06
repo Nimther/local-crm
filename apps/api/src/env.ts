@@ -21,6 +21,14 @@ const envSchema = z
     KMS_PROVIDER: z.enum(["local", "aws"]).default("local"),
     KMS_LOCAL_KEK: z.string().optional(),
     KMS_KEK_ID: z.string().optional(),
+    // 04-03/04-16: packages/delivery-core signs/verifies the one-click
+    // List-Unsubscribe token (HMAC secret) and builds its public URL from
+    // these -- the API also hosts GET/POST /unsubscribe/:token, so it fails
+    // fast on the same contract the worker enforces at boot.
+    UNSUBSCRIBE_TOKEN_SECRET: z
+      .string()
+      .min(32, "UNSUBSCRIBE_TOKEN_SECRET must be at least 32 characters"),
+    PUBLIC_APP_URL: z.string().url(),
   })
   .superRefine((val, ctx) => {
     // Boot-time guard (RESEARCH.md Pitfall 3 / Open Question 2): the
