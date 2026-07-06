@@ -50,11 +50,16 @@ export async function recordSendResult(
   sendId: string,
   result: { status: "sent" | "failed"; providerMessageId?: string | null }
 ): Promise<void> {
+  // $2::send_status is cast explicitly at BOTH usages -- without the cast,
+  // Postgres deduces $2's type from its first use (assigned to the
+  // `send_status` enum column) and then rejects the second use (`= 'sent'`
+  // inside the CASE) as an inconsistent parameter type, throwing
+  // "inconsistent types deduced for parameter $2" at query time.
   await client.query(
     `UPDATE sends
-     SET status = $2,
+     SET status = $2::send_status,
          provider_message_id = $3,
-         sent_at = CASE WHEN $2 = 'sent' THEN now() ELSE sent_at END
+         sent_at = CASE WHEN $2::send_status = 'sent' THEN now() ELSE sent_at END
      WHERE id = $1`,
     [sendId, result.status, result.providerMessageId ?? null]
   );

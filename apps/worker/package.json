@@ -13,11 +13,14 @@
   "dependencies": {
     "@mega-crm/contacts-core": "0.1.0",
     "@mega-crm/db": "0.1.0",
+    "@mega-crm/delivery-core": "0.1.0",
+    "@mega-crm/kms": "0.1.0",
     "@mega-crm/shared-schemas": "0.1.0",
     "@mega-crm/tenant-context": "0.1.0",
     "bullmq": "5.79.1",
     "ioredis": "5.11.0",
-    "pg": "8.22.0"
+    "pg": "8.22.0",
+    "rate-limiter-flexible": "11.2.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",

@@ -33,6 +33,16 @@ export default defineConfig({
     env: {
       DATABASE_URL: process.env.TEST_DATABASE_URL ?? "",
       REDIS_URL: process.env.TEST_REDIS_URL ?? "redis://localhost:6379/1",
+      // 04-04: send-dispatch.ts pulls in @mega-crm/kms (decryptTenantSecret)
+      // and @mega-crm/delivery-core (signUnsubscribeToken/buildListUnsubscribeUrl),
+      // both of which read these directly from process.env with no zod
+      // schema -- test-only values, mirroring apps/api/vitest.config.ts's
+      // identical 04-03 defaults so both apps' test suites stay in lockstep.
+      KMS_PROVIDER: process.env.KMS_PROVIDER ?? "local",
+      KMS_LOCAL_KEK: process.env.KMS_LOCAL_KEK ?? "grdVCb1fxmhPzylKEPqafcPW4xOMaynE0UwaFUo2OUE=",
+      UNSUBSCRIBE_TOKEN_SECRET:
+        process.env.UNSUBSCRIBE_TOKEN_SECRET ?? "test-only-unsubscribe-secret-at-least-32-bytes",
+      PUBLIC_APP_URL: process.env.PUBLIC_APP_URL ?? "https://api.test.local",
     },
   },
 });
