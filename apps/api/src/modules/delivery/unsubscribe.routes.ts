@@ -112,6 +112,30 @@ ${PAGE_STYLE}
  *   happened, so the response is byte-identical for all three cases.
  */
 export async function registerUnsubscribeRoutes(fastify: FastifyInstance): Promise<void> {
+  // SUBS-04/CR-01: Fastify's default parser set (application/json +
+  // text/plain) rejects application/x-www-form-urlencoded with 415
+  // FST_ERR_CTP_INVALID_MEDIA_TYPE *before* the route handler runs -- which
+  // blocked both real-world POST shapes that hit this endpoint: a mailbox
+  // provider's RFC 8058 one-click POST and the confirm page's own
+  // <form method="POST"> submit. The body content is deliberately
+  // irrelevant here -- the signed token in the URL path (:token) is the
+  // sole authorization input, and the handler below never reads
+  // request.body -- so the parser just buffers (bounded by bodyLimit,
+  // T-04-14-01) and discards it via done(null, undefined).
+  //
+  // Registered here (media-type-specific, not a catch-all "*") rather than
+  // app-wide: registerUnsubscribeRoutes is a plain async function (not a
+  // fastify-plugin), so this addContentTypeParser is encapsulated to
+  // /unsubscribe/* only and cannot weaken body parsing for any sibling
+  // route (/api/auth/*, campaigns, contacts, segments) -- T-04-14-02.
+  fastify.addContentTypeParser(
+    "application/x-www-form-urlencoded",
+    { parseAs: "buffer", bodyLimit: 1024 },
+    (_request, _payload, done) => {
+      done(null, undefined);
+    }
+  );
+
   fastify.get("/unsubscribe/:token", async (request, reply) => {
     const { token } = request.params as { token: string };
     reply.type("text/html");
