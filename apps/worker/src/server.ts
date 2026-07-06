@@ -4,6 +4,8 @@ import { createEventsIngestWorker } from "./queues/events-ingest.worker.js";
 import { createImportsCsvWorker } from "./queues/imports-csv.worker.js";
 import { createEmailBroadcastWorker } from "./queues/email-broadcast.worker.js";
 import { createEmailTriggeredWorker } from "./queues/email-triggered.worker.js";
+import { createCampaignKickoffWorker } from "./queues/campaign-kickoff.worker.js";
+import { createCampaignSchedulerWorker } from "./queues/campaign-scheduler.worker.js";
 
 /**
  * The worker process's runtime handle: a standalone shared ioredis
@@ -52,6 +54,12 @@ export async function buildWorker(): Promise<WorkerRuntime> {
     // two workers above (never a constructed Redis instance).
     createEmailBroadcastWorker(buildRedisConnectionOptions(redisUrl)),
     createEmailTriggeredWorker(buildRedisConnectionOptions(redisUrl)),
+    // CAMP-02/SEND-01: closes the launch-to-send loop -- the kickoff worker
+    // consumes CAMPAIGN_KICKOFF_QUEUE (produced by both the launch route's
+    // immediate-launch enqueue and the scheduler below); the scheduler scans
+    // due `scheduled` campaigns and produces the same kickoff job.
+    createCampaignKickoffWorker(buildRedisConnectionOptions(redisUrl)),
+    createCampaignSchedulerWorker(buildRedisConnectionOptions(redisUrl)),
   ];
 
   const close = async (): Promise<void> => {
@@ -83,7 +91,7 @@ async function main(): Promise<void> {
 
   // eslint-disable-next-line no-console
   console.log(
-    `apps/worker started (${runtime.workers.length} BullMQ worker(s) registered: events:ingest, imports:csv, email-broadcast, email-triggered)`
+    `apps/worker started (${runtime.workers.length} BullMQ worker(s) registered: events:ingest, imports:csv, email-broadcast, email-triggered, campaign-kickoff, campaign-scheduler)`
   );
 }
 

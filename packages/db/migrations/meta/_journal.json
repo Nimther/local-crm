@@ -127,6 +127,20 @@
       "when": 1783324622287,
       "tag": "0017_campaigns_fan_out_complete",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1783324622288,
+      "tag": "0018_campaigns_scheduler_scan_policy",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1783324622289,
+      "tag": "0019_campaigns_workspace_isolation_nullif_guard",
+      "breakpoints": true
     }
   ]
 }
