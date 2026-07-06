@@ -1,55 +1,33 @@
 ---
 phase: 04-broadcast-campaigns-send-pipeline
-verified: 2026-07-06T10:36:20Z
+verified: 2026-07-06T19:05:00Z
 status: gaps_found
-score: 1/5 must-haves verified
+score: 4/5 must-haves verified
 behavior_unverified: 0
 overrides_applied: 0
+re_verification:
+  previous_status: gaps_found
+  previous_score: 1/5
+  gaps_closed:
+    - "A user can create a campaign and send a test email to their own address with sample dynamic data (CR-02: fromSenderId now resolves to a persisted from_email before launch/schedule/test-send)"
+    - "Campaign state machine (draft → scheduled → sending → sent) works end-to-end and a draft cannot be sent by accident (CR-05: incrementCampaignSendCounter + tryCompleteCampaign wired into every terminal recordSendResult and into kickoff fan-out completion)"
+    - "During sending the user sees live progress (sent / total) (CR-05, same fix as above — sent_count/failed_count now increment live)"
+    - "No duplicate emails on job retries, and no contact bypasses a failed/rejected SendGrid call as 'sent' (CR-03: 4xx now records 'failed'; CR-04: dispatch split into claim/send/record 3-unit transaction with an 'interrupted' backstop; CR-07: recordExcluded can no longer demote a terminal/in-flight sends row)"
+  gaps_remaining:
+    - "Every delivered email goes through SendGrid v3 mail/send with a one-click List-Unsubscribe header [header IS present and correct] BUT the receiving endpoint that RFC 8058/the confirm-page form POST to is broken: POST /unsubscribe/:token has no application/x-www-form-urlencoded content-type parser, so Fastify returns 415 before the route handler runs for both a mailbox provider's real one-click POST and the confirm page's own <form method=\"POST\"> submission — confirmed live against the built server (see Behavioral Spot-Checks)"
+  regressions: []
 gaps:
-  - truth: "A user can create a campaign and send a test email to their own address with sample dynamic data"
+  - truth: "Every delivered email goes through SendGrid v3 mail/send with a one-click List-Unsubscribe header, no contact exceeds the global frequency cap, and there are no duplicate emails on job retries"
     status: failed
-    reason: "The campaign builder UI only ever sets fromSenderId (never fromEmail: apps/web/src/features/campaigns/CampaignBuilderPage.tsx sets/reads only `fromSenderId`, TemplateSenderPickers.tsx has no fromEmail input). The worker's shared dispatch processor unconditionally requires campaign.fromEmail to be non-null before it will send ANYTHING, for both kind='campaign' AND kind='test' (the check happens before the campaign/test branch splits). No code anywhere resolves from_sender_id to a verified-sender email at create, launch, kickoff, or dispatch time (confirmed by exhaustive grep across apps/api, apps/worker, packages/delivery-core)."
+    reason: "mail/send request shape, the List-Unsubscribe header itself, the global frequency cap (CR-07 fixed), and duplicate-send prevention (CR-04 fixed) are all correct and test-covered. However the endpoint the List-Unsubscribe header POINTS TO — POST /unsubscribe/:token — rejects the exact two request shapes real callers send. Fastify only parses application/json and text/plain by default and returns 415 FST_ERR_CTP_INVALID_MEDIA_TYPE for any other Content-Type before the route handler runs. RFC 8058 one-click POSTs (mailbox providers, Content-Type: application/x-www-form-urlencoded, body List-Unsubscribe=One-Click) and the confirm page's own <form method=\"POST\"> (browsers always send urlencoded, even with an empty body) both get 415 and the contact is never unsubscribed. Live-verified against the actual running server with app.inject + an explicit Content-Type header (the existing test suite passes only because app.inject without a Content-Type header takes Fastify's empty-body fast path, never exercising the parser at all)."
     artifacts:
-      - path: "apps/worker/src/queues/send-dispatch.ts"
-        issue: "Line 155: `if (!campaign || !campaign.templateId || !campaign.fromEmail) throw ...` — throws for every UI-created campaign/test-send, regardless of kind"
-      - path: "apps/api/src/modules/campaigns/campaign.repository.ts"
-        issue: "Line 217: launch-readiness check accepts `fromEmail OR fromSenderId` as complete, but nothing downstream ever converts fromSenderId into fromEmail"
-      - path: "apps/web/src/features/campaigns/CampaignBuilderPage.tsx"
-        issue: "SenderPicker only ever writes fromSenderId; there is no UI path that sets fromEmail"
+      - path: "apps/api/src/modules/delivery/unsubscribe.routes.ts"
+        issue: "No fastify.addContentTypeParser for application/x-www-form-urlencoded is registered anywhere in registerUnsubscribeRoutes"
+      - path: "apps/api/src/server.ts"
+        issue: "No app-wide urlencoded content-type parser registered; the only non-default parser (auth/plugin.ts:37, catch-all \"*\") is encapsulated to /api/auth/* only and does not apply to the top-level /unsubscribe/:token route"
     missing:
-      - "Resolve the verified sender's email from fromSenderId at launch time (or add a dispatch-time fallback lookup) and persist/use the resolved from_email before any SendGrid call"
-      - "An integration test that launches/test-sends a campaign configured only via the real UI contract (fromSenderId, no fromEmail) and asserts a send actually occurs — existing tests only pass because fixtures insert from_email directly (apps/api/src/modules/campaigns/__tests__/campaign-state-machine.test.ts:103,136,196,216; apps/worker/src/queues/__tests__/*.test.ts insert from_email directly)"
-  - truth: "Campaign state machine (draft → scheduled → sending → sent) works end-to-end and a draft cannot be sent by accident"
-    status: failed
-    reason: "The draft-cannot-be-sent-by-accident guard is real (illegal_transition errors verified in campaign-state-machine.test.ts), but the sending → sent transition is unreachable for any campaign with a non-empty audience. The ONLY code path that ever writes status='sent' is the kickoff worker's sendableTotal===0 branch (campaign-kickoff.worker.ts:134-151). Grep across apps/worker, apps/api, and packages/delivery-core finds no other status='sent' write. The kickoff worker's own smoke test documents this: `expect(snapshot.status).toBe(\"sending\"); // never transitioned to sent by kickoff itself` (campaign-kickoff.worker.smoke.test.ts:125)."
-    artifacts:
-      - path: "apps/worker/src/queues/campaign-kickoff.worker.ts"
-        issue: "Lines 153-163: after a non-empty fan-out, only sendable_total/excluded_total/fan_out_complete are set — status stays 'sending' forever"
-    missing:
-      - "A completion check (in recordSendResult or a post-dispatch step) that transitions status 'sending' -> 'sent' with terminal_at=now() once (sent_count + failed_count) >= sendable_total AND fan_out_complete, guarded by WHERE status='sending'"
-  - truth: "During sending the user sees live progress (sent / total)"
-    status: failed
-    reason: "campaigns.sent_count and campaigns.failed_count are never incremented anywhere in the codebase after their DEFAULT 0 (grep across apps/api, apps/worker, packages/db/migrations for sent_count/failed_count finds only column declarations and read sites). recordSendResult (send-ledger.ts) updates only the sends table, never the campaigns row. CampaignProgress.tsx and CampaignDetailPage.tsx both render campaign.sentCount/failedCount, which is therefore permanently 0 for every campaign regardless of how many emails actually go out."
-    artifacts:
-      - path: "packages/delivery-core/src/send-ledger.ts"
-        issue: "recordSendResult only writes to the sends table; no counter increment on campaigns"
-      - path: "apps/web/src/features/campaigns/CampaignProgress.tsx"
-        issue: "Renders sentCount/failedCount from the campaign row, which never changes from 0"
-    missing:
-      - "Atomic UPDATE campaigns SET sent_count = sent_count + 1 (or failed_count += 1) alongside every terminal recordSendResult write, or derive progress from a live aggregate over the sends ledger (getCampaignProgress already computes this aggregate but the UI does not use it)"
-  - truth: "No duplicate emails on job retries, and no contact bypasses a failed/rejected SendGrid call as 'sent'"
-    status: failed
-    reason: "Two independently confirmed defects: (1) send-dispatch.ts's processSendJob wraps the dispatchSendGate INSERT, the external SendGrid HTTP call, AND recordSendResult inside a single withTenantTransaction (lines 133-273). A crash/connection-drop after SendGrid accepts the mail but before COMMIT rolls back the 'dispatching' marker along with everything else; the redelivered job finds no sends row and calls SendGrid again -- a genuine duplicate send, defeating SEND-06. (2) The response-handling in the same function has exactly two branches: 429/5xx -> rate_limited, everything else (including SendGrid 400/401/403/413) -> recordSendResult(..., {status:'sent'}) (lines 261-271). recordSendResult is never called anywhere with status:'failed'. A revoked API key, unverified sender, or bad template id is recorded and rendered as a successfully delivered email."
-    artifacts:
-      - path: "apps/worker/src/queues/send-dispatch.ts"
-        issue: "Lines 133-273 (single transaction spans the external call); lines 261-271 (only 2xx should be 'sent', 4xx should be 'failed', but 4xx falls through to 'sent')"
-    missing:
-      - "Split dispatch into 3 units: commit the 'dispatching' claim row in its own transaction, call SendGrid outside any transaction, record the terminal result in a second transaction"
-      - "A `response.status >= 400` branch that records status:'failed' (currently dead code path — failed status and campaigns.failed_count are unreachable)"
-  - truth: "Sends are throttled per tenant's RPS, ride a queue with a reserved triggered-priority lane, and survive SendGrid 429/5xx with backoff retries"
-    status: verified
-    evidence: "Per-tenant token bucket confirmed keyed by workspaceId (apps/worker/src/queues/rate-limiter.ts: consumeTenantToken(redisClient, workspaceId, rps) via RateLimiterRedis, called from send-dispatch.ts before every SendGrid call regardless of source). Two independent BullMQ queues (email-broadcast.worker.ts concurrency:5, email-triggered.worker.ts concurrency:20) share the same processSendJob so gating/throttling never drifts. 429/5xx correctly returns {outcome:'rate_limited', rateLimitMs} computed from Retry-After/X-RateLimit-Reset headers, consumed by Worker.rateLimit()+RateLimitError() without consuming a retry attempt. NOTE (see Warnings): worker.rateLimit() pauses the ENTIRE worker (all tenants), not just the exhausted tenant's jobs, when the per-tenant bucket denies a token (WR-04 in 04-REVIEW.md) — this is a real cross-tenant fairness defect but does not itself violate the letter of this criterion (each tenant's own ceiling is still enforced; it's other tenants' emails that get delayed). Recorded as a warning, not a blocking gap."
-missing_none: true
+      - "Register a application/x-www-form-urlencoded content-type parser scoped to registerUnsubscribeRoutes (parseAs: 'buffer', body content is irrelevant since the token lives in the path) so both real-world POST shapes reach the handler"
+      - "Regression tests that POST with headers: { 'content-type': 'application/x-www-form-urlencoded' } and payload: 'List-Unsubscribe=One-Click' (mailbox-provider shape) and with an empty urlencoded body (confirm-page-form shape), asserting 2xx + the contact flips to 'unsubscribed' — the existing unsubscribe.test.ts/unsubscribe-xss.test.ts suites never send a Content-Type header and so do not catch this"
 deferred: []
 human_verification: []
 ---
@@ -57,116 +35,113 @@ human_verification: []
 # Phase 4: Broadcast Campaigns & Send Pipeline Verification Report
 
 **Phase Goal:** A marketer can send a real broadcast to a segment through a throttled, idempotent, suppression-aware queue — emails reliably reach inboxes via SendGrid Dynamic Templates.
-**Verified:** 2026-07-06T10:36:20Z
+**Verified:** 2026-07-06T19:05:00Z
 **Status:** gaps_found
-**Re-verification:** No — initial verification
+**Re-verification:** Yes — after gap closure (04-09 through 04-13)
 
 ## Goal Achievement
 
-A code review (`04-REVIEW.md`) already identified 7 Critical findings. This verification independently re-derived and confirmed all 7 by reading the actual dispatch/kickoff/ledger/route code directly (not by trusting the review or SUMMARY.md). Every Critical is real and directly breaks one or more of the phase's numbered success criteria. **The phase goal is not achieved**: a campaign configured through the actual product UI cannot deliver a single email (test-send or real send), progress never updates, campaigns never reach a terminal `sent` state, cancel does not stop in-flight sends, and the pipeline can duplicate emails on worker crash.
+The initial verification (2026-07-06T10:36:20Z) found 4 of 5 success criteria FAILED, driven by 7 Critical findings in `04-REVIEW.md`. Gap-closure plans 04-09 through 04-13 were executed and are independently re-confirmed here: CR-02 (sender resolution), CR-03 (4xx recorded as failed), CR-04 (crash-safe 3-unit dispatch), CR-05 (campaign completion + live counters), CR-06 (cancel enforcement), and CR-07 (send-ledger demotion guard) are all genuinely fixed, each backed by a passing integration test that was independently re-run against the actual codebase (not trusted from SUMMARY.md) as part of this verification.
+
+However, the post-gap-closure code review (`04-REVIEW.md`) surfaced a **new** Critical finding (CR-01 in the new review, distinct from the old review's CR-01 XSS which is also fixed): the public `POST /unsubscribe/:token` endpoint returns HTTP 415 for both real-world callers of the one-click unsubscribe mechanism this phase's send pipeline advertises via the `List-Unsubscribe`/`List-Unsubscribe-Post` headers on every email. This verification independently reproduced the defect with a live behavioral probe against the actual running Fastify app (not by trusting the review's narrative) — see Behavioral Spot-Checks below. This is a genuine, unresolved gap: the phase's own success criterion #4 promises a working one-click List-Unsubscribe mechanism, and the mechanism does not work for its only real-world callers.
+
+**The phase goal is NOT fully achieved.** 4 of 5 success criteria are now genuinely met; the 5th (delivery correctness) is met on the sending side but fails on the receiving (unsubscribe) side.
 
 ### Observable Truths
 
 | # | Truth | Status | Evidence |
 |---|-------|--------|----------|
-| 1 | User can create a campaign, choose segment + template, and send a test email with sample dynamic data | ✗ FAILED | `fromEmail` is required by the dispatch worker for BOTH campaign and test sends; UI never sets it (only `fromSenderId`) — see CR-02 below |
-| 2 | Campaign has a working draft → scheduled → sending → sent state machine; draft can't be sent by accident | ✗ FAILED | Draft-guard works, but `sending → sent` is unreachable for any non-empty audience — see CR-05 below |
-| 3 | Live progress (sent/total) shown during sending; suppressed/unsubscribed filtered before send | ✗ FAILED | Pre-send gate correctly filters suppressed/unsubscribed (VERIFIED), but `sent_count`/`failed_count` never increment — progress permanently 0/N — see CR-05 below |
-| 4 | Every send goes through SendGrid v3 mail/send with List-Unsubscribe header, respects global frequency cap, no duplicates on retry | ✗ FAILED | mail/send + List-Unsubscribe header ARE correctly implemented (VERIFIED, `packages/delivery-core/src/send-mail.ts`), but 4xx failures are recorded as `sent` (CR-03) and a crash-during-transaction window can duplicate a send (CR-04) |
-| 5 | Sends throttled per tenant RPS, reserved triggered-priority lane, survive 429/5xx with backoff without losing emails | ✓ VERIFIED | Per-tenant Redis token bucket + two isolated BullMQ queues + correct backoff signal confirmed by direct code read; WR-04 cross-tenant fairness issue noted as a warning, not a blocker |
+| 1 | User can create a campaign, choose segment + template, and send a test email with sample dynamic data | ✓ VERIFIED | `resolveCampaignFromEmail` (apps/api/src/modules/campaigns/sender-resolver.ts) resolves fromSenderId → verified sender email and persists to campaigns.from_email before launch/schedule/test-send enqueue; `sender-resolution.test.ts` (3 tests) passes against the actual code, independently re-run in this verification |
+| 2 | Campaign has a working draft → scheduled → sending → sent state machine; draft can't be sent by accident | ✓ VERIFIED | `tryCompleteCampaign`/`incrementCampaignSendCounter` (packages/delivery-core/src/send-ledger.ts) wired into every terminal `recordSendResult` in send-dispatch.ts AND into campaign-kickoff.worker.ts's fan-out completion (covers both orderings); `campaign-completion.test.ts` (5 cases) independently re-run and passing |
+| 3 | Live progress (sent/total) shown during sending; suppressed/unsubscribed filtered before send | ✓ VERIFIED | Same wiring as #2 — `sent_count`/`failed_count` now increment atomically alongside every terminal send record; `evaluatePreSendGate` (packages/delivery-core/src/pre-send-gate.ts) still correctly filters suppressed/unsubscribed contacts before every send (unchanged from initial verification, re-confirmed) |
+| 4 | Every send goes through SendGrid v3 mail/send with List-Unsubscribe header, respects global frequency cap, no duplicates on retry | ✗ FAILED | mail/send request shape + header ARE correct (`packages/delivery-core/src/send-mail.ts`); frequency cap is correctly enforced and ledger-safe against kickoff redelivery (CR-07 fixed, `send-ledger-integrity.test.ts` 4/4 passing); duplicate-send window closed (CR-04 fixed, `send-dispatch-durability.test.ts` passing) — BUT the endpoint the List-Unsubscribe header points recipients/mail-clients to (`POST /unsubscribe/:token`) returns 415 for both real-world callers (live-verified below), so the "one-click List-Unsubscribe" promise is not actually functional |
+| 5 | Sends throttled per tenant RPS, reserved triggered-priority lane, survive 429/5xx with backoff without losing emails | ✓ VERIFIED | Unchanged from initial verification (already ✓ VERIFIED there) — per-tenant Redis token bucket, two isolated BullMQ queues, correct 429/5xx → rate_limited signal, now additionally hardened by CR-04's claim-release-on-429/5xx (`releaseDispatchClaim`) so a stranded claim never blocks a legitimate retry |
 
-**Score:** 1/5 truths verified
+**Score:** 4/5 truths verified
 
-### Critical Findings Independently Re-Verified (against `04-REVIEW.md`)
+### Behavioral Spot-Checks
 
-| Review ID | Finding | Independently confirmed? | Where verified |
-|-----------|---------|---------------------------|-----------------|
-| CR-01 | Reflected XSS on public unsubscribe confirm page | ✓ CONFIRMED | `apps/api/src/modules/delivery/unsubscribe.routes.ts:39` — raw `${token}` interpolated into `<form action="/unsubscribe/${token}">` with no escaping/validation; `maxParamLength: 1024` (server.ts:35) provides ample payload room; no `@fastify/helmet` registered anywhere in `server.ts` |
-| CR-02 | UI-configured campaigns can never dispatch (fromSenderId never resolved to fromEmail) | ✓ CONFIRMED | `send-dispatch.ts:155` requires `campaign.fromEmail` unconditionally (both kinds); `CampaignBuilderPage.tsx` only ever sets `fromSenderId`; exhaustive grep for `from_sender_id`/`fromSenderId` across apps/api, apps/worker, packages/delivery-core shows zero resolution to an email address anywhere |
-| CR-03 | SendGrid 4xx recorded as `sent`; `failed` status unreachable | ✓ CONFIRMED | `send-dispatch.ts:261-271` — only branches are `429/5xx → rate_limited` and `else → recordSendResult(status:'sent')`; grep confirms `recordSendResult(..., {status:'failed'})` is called nowhere in the codebase |
-| CR-04 | Duplicate-send window: dispatch marker + SendGrid call + result share one transaction | ✓ CONFIRMED | `send-dispatch.ts:133-273` — `withTenantTransaction` wraps `dispatchSendGate`, the `sendMail` HTTP call, and `recordSendResult` together; a crash after SendGrid accepts but before COMMIT rolls back the `dispatching` marker, allowing redelivery to resend |
-| CR-05 | Non-empty-audience campaigns never reach `sent`; progress counters never move | ✓ CONFIRMED | Only `status='sent'` write in the entire codebase is `campaign-kickoff.worker.ts:134-151`'s `sendableTotal===0` branch; `sent_count`/`failed_count` are written nowhere but their `DEFAULT 0`; the worker's OWN smoke test (`campaign-kickoff.worker.smoke.test.ts:125`) asserts status stays `"sending"` with the comment `// never transitioned to sent by kickoff itself` |
-| CR-06 | Canceling a sending campaign does not stop remaining emails | ✓ CONFIRMED | `send-dispatch.ts`'s campaign SELECT (line 149-153) reads only `template_id`/`from_email`, never `status` — a canceled campaign's already-enqueued jobs still dispatch; kickoff's fan-out loop (lines 74-132) checks status once at entry only, not per page |
-| CR-07 | `recordExcluded` clobbers already-`sent` ledger rows on kickoff redelivery | ✓ CONFIRMED | `send-ledger.ts:77-84` — `ON CONFLICT ... DO UPDATE SET status='excluded'` with no `WHERE` guard against demoting a `sent`/`dispatching` row; combined with `pre-send-gate.ts:47-56`'s frequency-cap query counting the contact's own prior `sent` rows for this same campaign, a kickoff re-walk can demote a genuinely-delivered send to `excluded` |
+| Behavior | Command | Result | Status |
+|----------|---------|--------|--------|
+| RFC 8058 one-click POST (`Content-Type: application/x-www-form-urlencoded`, body `List-Unsubscribe=One-Click`) reaches the unsubscribe handler | Built the real Fastify app via `buildServer()` and called `app.inject({ method: "POST", url: "/unsubscribe/garbage.token", headers: { "content-type": "application/x-www-form-urlencoded" }, payload: "List-Unsubscribe=One-Click" })` | `415 {"statusCode":415,"code":"FST_ERR_CTP_INVALID_MEDIA_TYPE","error":"Unsupported Media Type","message":"Unsupported Media Type"}` | ✗ FAIL |
+| Confirm-page browser `<form method="POST">` shape (urlencoded, empty body) reaches the unsubscribe handler | Same app, `app.inject({ method: "POST", url: "/unsubscribe/garbage.token", headers: { "content-type": "application/x-www-form-urlencoded" }, payload: "" })` | `415 {"statusCode":415,"code":"FST_ERR_CTP_INVALID_MEDIA_TYPE", ...}` | ✗ FAIL |
+| Gap-closure regression suites (sender-resolution, campaign-completion, send-dispatch-durability, send-dispatch-idempotency, backoff, campaign-kickoff smoke, send-ledger-integrity, unsubscribe, unsubscribe-xss) all pass | `npx vitest run` (targeted files) in apps/api, apps/worker, packages/delivery-core | All 25 targeted tests pass; full package suites (apps/api 152/152, apps/worker 39/39, packages/delivery-core 25/25) pass with zero regressions | ✓ PASS |
 
-All 7 Criticals are real, independently reproduced by direct code inspection (not by trusting `04-REVIEW.md`'s own narrative). They map directly onto 4 of the 5 phase success criteria as detailed in the Observable Truths table above.
+The two 415 probes were run against a temporary test file added and removed solely for this verification (not part of the shipped test suite) to directly exercise the code path the review's static analysis identified, confirming it is a live, reproducible defect and not merely a theoretical one.
 
 ### Required Artifacts (Level 1-3)
 
 | Artifact | Expected | Status | Details |
 |----------|----------|--------|---------|
-| `packages/db/migrations/0013-0019_*.sql` | Campaign/recipient/sends/settings schema + RLS | ✓ VERIFIED | Present, reviewed in `04-REVIEW.md`'s file list; not independently re-derived line-by-line here (schema correctness not in dispute) |
-| `apps/api/src/modules/campaigns/campaign.repository.ts` | Campaign CRUD + state machine | ⚠️ PARTIAL | CRUD/create/update/cancel/duplicate exist and are wired; launch-readiness check incorrectly treats `fromSenderId` as launch-complete (CR-02) |
-| `apps/worker/src/queues/send-dispatch.ts` | Shared dispatch processor (gate, throttle, send, record) | ✗ STUB-LIKE (functionally) | Exists, is wired into both queues, but is functionally broken for every UI-created campaign (CR-02), miscords 4xx (CR-03), and has a duplicate-send window (CR-04) |
-| `apps/worker/src/queues/campaign-kickoff.worker.ts` | Audience snapshot walk, fan-out, completion | ⚠️ PARTIAL | Snapshot/fan-out/exclusion-breakdown work; completion (`sending→sent`) and cancel-awareness are missing (CR-05, CR-06) |
-| `packages/delivery-core/src/send-ledger.ts` | Idempotent send ledger (dispatch gate, result, exclusion) | ⚠️ PARTIAL | `dispatchSendGate` idempotency design is sound in isolation but undermined by the transaction scope in CR-04; `recordExcluded` has the demotion bug (CR-07) |
-| `packages/delivery-core/src/send-mail.ts` | SendGrid v3 mail/send + List-Unsubscribe header | ✓ VERIFIED | Correct request shape, header present (`send-mail.ts:57-58`), correct endpoint (`v3/mail/send`) |
-| `apps/worker/src/queues/rate-limiter.ts` | Per-tenant RPS token bucket | ✓ VERIFIED | `RateLimiterRedis` keyed by `workspaceId`, correct points/duration semantics |
-| `apps/worker/src/queues/email-broadcast.worker.ts` / `email-triggered.worker.ts` | Two isolated queues, shared processor, backoff | ✓ VERIFIED | Both wired to `processSendJob`; concurrency-isolated (5 vs 20); correct `rateLimit()`/`RateLimitError()` backoff pattern |
-| `apps/api/src/modules/delivery/unsubscribe.routes.ts` | Public one-click unsubscribe | ⚠️ VULNERABLE | Functionally correct (SUBS-04, token verify/mutate logic) but has the CR-01 XSS |
-| `apps/web/src/features/campaigns/CampaignBuilderPage.tsx` | Campaign create/edit UI | ⚠️ PARTIAL | Never sets `fromEmail`, only `fromSenderId` — the UI-side root cause of CR-02 |
-| `apps/web/src/features/campaigns/CampaignProgress.tsx` / `CampaignDetailPage.tsx` | Live send progress display | ✗ HOLLOW | Wired to `sentCount`/`failedCount` fields that are never populated (CR-05) — displays 0/N forever |
+| `apps/api/src/modules/campaigns/sender-resolver.ts` | Resolves fromSenderId → verified email, persists from_email | ✓ VERIFIED | New in 04-09; correct fail-closed behavior (throws `CampaignSenderError` mapped to 422) for unresolvable senders; wired into launch/schedule/test-send in campaigns.routes.ts |
+| `apps/worker/src/queues/send-dispatch.ts` | Shared dispatch processor (gate, throttle, send, record) | ✓ VERIFIED | 3-unit dispatch (claim txn → SendGrid call outside txn → record txn) confirmed by direct read; 4xx→failed branch present (line 333-343); CR-06 cancel-gate present (`claimCampaignSend`'s `status !== "sending"` check) |
+| `apps/worker/src/queues/campaign-kickoff.worker.ts` | Audience snapshot walk, fan-out, completion, cancel-awareness | ✓ VERIFIED | Per-page status re-read stops fan-out on cancel/sent (lines 76-98); `tryCompleteCampaign` called after fan-out completion (line 194); D-05 empty-audience branch now guarded `WHERE status='sending'` |
+| `packages/delivery-core/src/send-ledger.ts` | Idempotent send ledger (dispatch gate, result, exclusion, counters) | ✓ VERIFIED | `recordExcluded`'s `ON CONFLICT` now guarded against demoting `sent`/`dispatching`/`failed` rows; `incrementCampaignSendCounter`/`tryCompleteCampaign` both guarded `WHERE status='sending'`; `dispatchSendGate` distinguishes `interrupted` (prior claim, redelivery) from `skipped` (terminal) |
+| `apps/api/src/modules/delivery/unsubscribe.routes.ts` | Public one-click unsubscribe, no XSS | ⚠️ PARTIAL | Old CR-01 (reflected XSS) is genuinely fixed (format-guard + HTML-attribute escaping, `unsubscribe-xss.test.ts` 5/5 passing) — but the route has no `application/x-www-form-urlencoded` content-type parser, so it 415s both of its two real-world POST callers (new critical, live-verified) |
+| `apps/api/src/server.ts` | App-wide security headers, route registration | ✓ VERIFIED | Single consolidated `@fastify/helmet` registration with explicit script-blocking CSP (old duplicate/permissive registration in `auth/plugin.ts` removed) |
+| `apps/web/src/features/campaigns/CampaignProgress.tsx` / `CampaignDetailPage.tsx` | Live send progress display | ✓ VERIFIED | No UI change was needed (04-13) — already read `sentCount`/`failedCount`/`sendableTotal`; now backed by live-incrementing backend counters instead of frozen zeros |
 
 ### Key Link Verification
 
 | From | To | Via | Status | Details |
 |------|----|----|--------|---------|
-| `CampaignBuilderPage.tsx` (SenderPicker) | `send-dispatch.ts` (fromEmail requirement) | `fromSenderId` field | ✗ NOT_WIRED | No conversion step anywhere; confirmed by exhaustive grep |
-| `campaign-kickoff.worker.ts` fan-out | `campaigns.status` transition to `sent` | completion check after dispatch | ✗ NOT_WIRED | No completion-check code path exists outside the empty-audience branch |
-| `send-ledger.ts` `recordSendResult` | `campaigns.sent_count`/`failed_count` | counter increment | ✗ NOT_WIRED | `recordSendResult` only touches `sends` table |
-| `campaigns.routes.ts` `cancelCampaign` | `send-dispatch.ts` / `campaign-kickoff.worker.ts` | status check before dispatch/fan-out continuation | ✗ NOT_WIRED | Neither reads `campaigns.status` after entry |
-| `send-dispatch.ts` dispatch gate → SendGrid call → result record | atomicity/durability of the idempotency claim | single `withTenantTransaction` | ✗ MISWIRED | All three steps share one transaction, defeating the documented crash-safety contract |
-| `pre-send-gate.ts` frequency-cap query | `send-ledger.ts` `recordExcluded` | ledger consistency during kickoff redelivery | ✗ MISWIRED | Unconditional `ON CONFLICT DO UPDATE` can demote a `sent` row when frequency-cap counts the same campaign's own prior sends |
-| `rate-limiter.ts` `consumeTenantToken` | `email-broadcast.worker.ts`/`email-triggered.worker.ts` `worker.rateLimit()` | per-tenant denial signal → worker-level pause | ⚠️ PARTIAL | Correctly wired for backoff, but the pause is worker-global, not tenant-scoped (WR-04, warning not blocker) |
-| `unsubscribe.routes.ts` GET handler | HTML output | raw token interpolation | ✗ MISWIRED | No escaping/validation before interpolation (CR-01) |
+| `CampaignBuilderPage.tsx` (SenderPicker → `fromSenderId`) | `send-dispatch.ts` (`fromEmail` requirement) | `resolveCampaignFromEmail` at launch/schedule/test-send | ✓ WIRED | Resolution + persistence confirmed by direct code read + passing integration test |
+| `send-dispatch.ts` terminal `recordSendResult` | `campaigns.sent_count`/`failed_count`/`status` | `incrementCampaignSendCounter` + `tryCompleteCampaign`, same transaction | ✓ WIRED | Confirmed at all 3 terminal-record call sites (sent, failed-4xx, failed-interrupted) |
+| `campaign-kickoff.worker.ts` fan-out completion | `campaigns.status` → `sent` | `tryCompleteCampaign` after `fan_out_complete=true` | ✓ WIRED | Covers the ordering where fan-out finishes after all sends already landed |
+| `campaigns.routes.ts` `cancelCampaign` | `send-dispatch.ts` / `campaign-kickoff.worker.ts` | live `status` re-read at claim time / per fan-out page | ✓ WIRED | `claimCampaignSend` checks `status !== "sending"` before claiming; kickoff re-reads status every page |
+| `pre-send-gate.ts` frequency-cap query | `send-ledger.ts` `recordExcluded` | conflict-guarded `ON CONFLICT ... WHERE status NOT IN (...)` | ✓ WIRED | `send-ledger-integrity.test.ts` proves a `sent`/`dispatching` row survives a redelivered exclusion call |
+| Every send's `List-Unsubscribe`/`List-Unsubscribe-Post` header | `POST /unsubscribe/:token` handler | HTTP POST from a mailbox client or the confirm-page form | ✗ NOT_WIRED | 415 rejected before the route handler runs for both real request shapes (no urlencoded content-type parser registered for this route) — live-verified |
 
 ### Requirements Coverage
 
 | Requirement | Description | Status | Evidence |
 |-------------|-------------|--------|----------|
-| CAMP-01 | Create campaign: segment + template | ✓ SATISFIED | Campaign CRUD works, segment/template selection functional |
-| CAMP-02 | Launch immediately or schedule | ⚠️ PARTIAL | Launch/schedule mechanism exists, but for any real (non-empty) audience the campaign never actually completes sending (CR-05) and never dispatches at all for UI-created campaigns (CR-02) |
-| CAMP-03 | State machine draft→scheduled→sending→sent; no accidental send | ✗ BLOCKED | Draft-guard works; `sending→sent` unreachable (CR-05) |
-| CAMP-04 | Test send with sample dynamic data | ✗ BLOCKED | Blocked by the same `fromEmail` requirement as real sends (CR-02) — test-send route never validates/resolves sender before enqueueing |
-| CAMP-05 | Live progress display (sent/total) | ✗ BLOCKED | Counters never increment (CR-05) |
-| SEND-01 | All sends via queue, no direct sends | ✓ SATISFIED | Confirmed — both campaign and test sends are enqueued, never called directly |
-| SEND-02 | Per-tenant RPS throttle | ✓ SATISFIED | Token bucket keyed by workspaceId, verified |
-| SEND-03 | Triggered priority over broadcast | ⚠️ PARTIAL | Structurally satisfied (two isolated queues/concurrency), but WR-04's worker-global pause on rate-limit denial is a latent risk to this guarantee under a large broadcast + throttled tenant |
-| SEND-04 | Global frequency cap via unified ledger | ⚠️ PARTIAL | Cap check itself correct, but CR-07 can corrupt the ledger's accounting of what was actually sent during kickoff redelivery |
-| SEND-05 | mail/send with template_id + dynamic_template_data | ✓ SATISFIED | Verified in `send-mail.ts` |
-| SEND-06 | Idempotent sends, no duplicates on retry | ✗ BLOCKED | CR-04's transaction-scope defect directly breaks this guarantee |
-| SEND-07 | 429/5xx handled with backoff, no lost emails | ⚠️ PARTIAL | Backoff mechanism correct; but CR-03 means non-retryable 4xx failures are recorded as delivered rather than failed (not "lost" but silently misreported) |
-| SUBS-03 | Pre-send filter by subscription/suppression | ✓ SATISFIED | `evaluatePreSendGate` correctly checks suppressed/unsubscribed before every send |
-| SUBS-04 | List-Unsubscribe one-click header | ✓ SATISFIED | Verified in `send-mail.ts`; also functionally present on the receiving end (`unsubscribe.routes.ts`), though that endpoint has the CR-01 XSS |
+| CAMP-01 | Create campaign: segment + template | ✓ SATISFIED | Unchanged, was already satisfied |
+| CAMP-02 | Launch immediately or schedule | ✓ SATISFIED | Sender resolution (04-09) + completion/cancel wiring (04-13) close the prior blockers |
+| CAMP-03 | State machine draft→scheduled→sending→sent; no accidental send | ✓ SATISFIED | `campaign-completion.test.ts` proves both the empty and non-empty audience paths reach `sent`; draft-guard unchanged and still verified |
+| CAMP-04 | Test send with sample dynamic data | ✓ SATISFIED | Sender resolution applies equally to the test-send route; note WR-02 (below) means a 4xx on the *test-send* path is misreported as `outcome:"sent"` in the worker job result — the send is still attempted/enqueued correctly, but a failure (e.g. revoked key) gives no failure signal anywhere. Not blocking (the criterion is about the ability to send a test, not about failure-mode observability), flagged as a warning |
+| CAMP-05 | Live progress display (sent/total) | ✓ SATISFIED | Counters now increment live, confirmed by integration test |
+| SEND-01 | All sends via queue, no direct sends | ✓ SATISFIED | Unchanged |
+| SEND-02 | Per-tenant RPS throttle | ✓ SATISFIED | Unchanged |
+| SEND-03 | Triggered priority over broadcast | ✓ SATISFIED | Unchanged (two isolated queues/concurrency); WR-04 in 04-REVIEW.md notes an unrelated operational risk (scheduler tick-queue growth / unhandled promise rejection) that does not affect this guarantee |
+| SEND-04 | Global frequency cap via unified ledger | ✓ SATISFIED | CR-07 fix (recordExcluded demotion guard) closes the prior corruption path; test-covered |
+| SEND-05 | mail/send with template_id + dynamic_template_data | ✓ SATISFIED | Unchanged |
+| SEND-06 | Idempotent sends, no duplicates on retry | ✓ SATISFIED | CR-04 fix (3-unit dispatch + interrupted-claim handling) closes the prior duplicate-send window; test-covered |
+| SEND-07 | 429/5xx handled with backoff, no lost emails | ✓ SATISFIED | CR-03/CR-04 fixes; claim is released on 429/5xx so a retry re-attempts cleanly without consuming an attempt |
+| SUBS-03 | Pre-send filter by subscription/suppression | ✓ SATISFIED | Unchanged, was already satisfied |
+| SUBS-04 | List-Unsubscribe one-click header | ✗ BLOCKED | The header is correctly emitted, but the endpoint it points to 415s both of its real-world POST callers (RFC 8058 mailbox-client one-click POST and the confirm page's own browser form POST) — the one-click mechanism this requirement exists for does not function. Live-verified against the running server in this pass |
 
-No orphaned requirements — all 14 IDs (CAMP-01..05, SEND-01..07, SUBS-03, SUBS-04) declared in REQUIREMENTS.md as Phase 4 map to phase plans and were checked above. REQUIREMENTS.md marks all 14 `[x]` complete — this verification disputes that status for CAMP-02, CAMP-03, CAMP-04, CAMP-05, SEND-03, SEND-04, SEND-06, SEND-07 pending the gap closures below.
+No orphaned requirements — all 14 IDs (CAMP-01..05, SEND-01..07, SUBS-03, SUBS-04) declared across phase plans map to REQUIREMENTS.md's Phase 4 block and were checked above. REQUIREMENTS.md currently marks all 14 `[x]` complete; this verification disputes that status for **SUBS-04** only (all other 13 are now genuinely satisfied, reversing 8 of the 13 prior disputes from the initial verification).
 
 ### Anti-Patterns Found
 
 | File | Line | Pattern | Severity | Impact |
 |------|------|---------|----------|--------|
-| `apps/api/src/modules/delivery/unsubscribe.routes.ts` | 39 | Unescaped user input interpolated into HTML | 🛑 Blocker | Reflected XSS (CR-01) |
-| `apps/worker/src/queues/send-dispatch.ts` | 133-273 | Overlong transaction spanning an external HTTP call | 🛑 Blocker | Duplicate-send window (CR-04) |
-| `apps/worker/src/queues/send-dispatch.ts` | 261-271 | Missing 4xx branch (only 2 of 3 needed outcomes handled) | 🛑 Blocker | Failures recorded as successes (CR-03) |
-| `apps/worker/src/queues/campaign-kickoff.worker.ts` | 153-163 | Missing completion/transition logic | 🛑 Blocker | Campaigns never reach `sent`; progress frozen (CR-05) |
-| `packages/delivery-core/src/send-ledger.ts` | 77-84 | Unconditional `ON CONFLICT DO UPDATE` with no status guard | 🛑 Blocker | Ledger demotion of sent rows (CR-07) |
-| `apps/worker/src/queues/send-dispatch.ts` / `campaign-kickoff.worker.ts` | throughout | No `status` check against `canceled` | 🛑 Blocker | Cancel does not stop in-flight sends (CR-06) |
-| `apps/worker/src/queues/email-broadcast.worker.ts` / `email-triggered.worker.ts` | 27, 24 | `worker.rateLimit()` pauses whole worker on a per-tenant denial | ⚠️ Warning | Cross-tenant fairness under load (WR-04) |
-| `apps/api/src/server.ts` | 27-63 | `@fastify/helmet`/CORS in package.json but never registered | ⚠️ Warning | No CSP/security headers anywhere, compounds CR-01 |
+| `apps/api/src/modules/delivery/unsubscribe.routes.ts` / `apps/api/src/server.ts` | route registration / server.ts:28-87 | Missing `application/x-www-form-urlencoded` content-type parser for a public POST route that RFC 8058 and an in-repo `<form method="POST">` both target | 🛑 Blocker | One-click unsubscribe never fires for its two real callers — CAN-SPAM/GDPR-adjacent compliance gap and sender-reputation risk (mailbox providers escalate broken one-click to spam-marking) |
+| `apps/worker/src/queues/send-dispatch.ts` | 406-410 | Test-send branch only checks `429 \|\| >=500`; any other non-2xx (400/401/403) falls through to `outcome:"sent"` | ⚠️ Warning | A test send can silently fail (bad template data, revoked key) with no failure signal anywhere in the pipeline (WR-02 in 04-REVIEW.md) |
+| `apps/api/src/modules/campaigns/campaigns.routes.ts` (328-336) / `apps/worker/src/queues/campaign-scheduler.worker.ts` (117-121) | status transition then enqueue, not atomic | ⚠️ Warning | An enqueue failure after the `sending` transition commits can strand a campaign permanently (WR-01 in 04-REVIEW.md); no repair path currently re-enqueues |
+| `apps/worker/src/queues/campaign-kickoff.worker.ts` (69-195) | Redelivery re-walk recomputes totals from live gate state instead of the ledger | ⚠️ Warning | A crash mid-fan-out (before `fan_out_complete`) can desync `sendable_total`/progress from the ledger on redelivery, in rare cases permanently stranding a campaign in `sending` (WR-03) |
+| `apps/worker/src/queues/campaign-scheduler.worker.ts` (102-106) | `tickQueue` has no `removeOnComplete`, and `void tickQueue.add(...)` discards a rejecting promise | ⚠️ Warning | Unbounded Redis key growth (~1,440/day) and a possible unhandled-rejection process crash on Redis hiccup (WR-04) |
+| `apps/api/src/modules/campaigns/campaign.repository.ts` (175-191) | Stale `from_email` can survive a `fromSenderId:null` patch | ⚠️ Warning | Currently unreachable via the shipped UI (no clear-sender affordance); latent API-contract gap (WR-05) |
+| `apps/api/src/modules/campaigns/campaigns.routes.ts` (309-440) | 403 vs 404 inconsistency between read/CRUD routes and launch/schedule/cancel/duplicate | ⚠️ Warning | Authenticated non-members can use launch/cancel to confirm workspace-slug existence, contradicting the rest of the module's anti-enumeration design (WR-06) |
 
-No `TODO`/`FIXME`/`XXX`/`TBD`/`HACK`/`PLACEHOLDER` debt markers found in phase-modified files.
+No `TODO`/`FIXME`/`XXX`/`TBD`/`HACK`/`PLACEHOLDER` debt markers found in the phase's modified files (checked directly, not merely quoted from the review).
 
 ### Human Verification Required
 
-None — all findings above are confirmed by direct code inspection (grep + read), not requiring runtime/visual/UX judgment.
+None — the remaining gap (415 on urlencoded POST) is confirmed by direct, reproducible behavioral evidence against the running application, not requiring runtime/visual/UX judgment.
 
 ### Gaps Summary
 
-The phase's own SUMMARY.md files and REQUIREMENTS.md mark all 14 requirement IDs complete, but the phase goal — "a marketer can send a real broadcast ... emails reliably reach inboxes" — is not achieved. The single most severe defect (CR-02) means **zero emails can be delivered through any campaign configured via the actual product UI**, because the builder only ever sets `fromSenderId` while the dispatch worker hard-requires `fromEmail`, and nothing anywhere resolves one to the other. Even if that were fixed, campaigns would still never reach a terminal `sent` state or show real progress (CR-05), cancel would not stop in-flight sends (CR-06), a crash mid-dispatch could send a duplicate email (CR-04), hard SendGrid failures would be silently recorded as delivered (CR-03), and a kickoff redelivery could erase evidence of an already-sent email from the ledger (CR-07). There is also an unrelated but serious reflected XSS on the public, unauthenticated unsubscribe page (CR-01). All 7 Critical findings from `04-REVIEW.md` were independently reproduced against the live code in this verification pass; none were refuted. The existing automated test suite passes only because its fixtures bypass the exact defects above (inserting `from_email` directly, and the kickoff smoke test explicitly documents — rather than catches — the missing `sent` transition).
+Gap-closure plans 04-09 through 04-13 genuinely close 6 of the 7 Critical findings from the original code review (CR-02 through CR-07), all independently re-verified in this pass by reading the actual current code and re-running the relevant test suites (152/152 apps/api, 39/39 apps/worker, 25/25 packages/delivery-core, zero regressions). The old CR-01 (reflected XSS on the unsubscribe confirm page) is also genuinely fixed and test-covered.
 
-These gaps require a closure plan before the phase can be considered to have achieved its goal. Recommend routing to `/gsd-plan-phase --gaps` grouped as: (A) sender-email resolution (CR-02) — blocks everything else; (B) dispatch transaction/response-handling correctness (CR-03, CR-04); (C) campaign lifecycle completion + cancel enforcement (CR-05, CR-06); (D) ledger integrity under kickoff redelivery (CR-07); (E) public unsubscribe XSS (CR-01, independent of the send pipeline, should not block on it).
+However, the fresh post-fix code review (`04-REVIEW.md`) surfaced a **new** Critical finding this verification independently reproduced with a live behavioral probe: `POST /unsubscribe/:token` has no content-type parser for `application/x-www-form-urlencoded`, so Fastify's default parser set (json + text/plain only) rejects it with 415 before the route handler ever runs. This breaks both of the endpoint's two real-world callers — the RFC 8058 one-click POST that mailbox providers (Gmail, Yahoo) are required to send, and the confirm page's own `<form method="POST">` that this same phase built. The existing test suites (`unsubscribe.test.ts`, `unsubscribe-xss.test.ts`) never catch this because `app.inject` without an explicit `Content-Type` header takes Fastify's empty-body fast path, bypassing the content-type parser entirely.
+
+This is the single remaining blocker to the phase goal: every other piece of "emails reliably reach inboxes... with a one-click List-Unsubscribe header" now works, but the receiving half of that header's contract is non-functional. The fix is small and well-scoped (register one content-type parser inside `registerUnsubscribeRoutes`, add 2 regression tests that set an explicit `Content-Type` header) — recommend routing to `/gsd-plan-phase --gaps` for a single, narrow closure plan before considering Phase 4 complete.
+
+The remaining 6 Warnings from `04-REVIEW.md` (WR-01 through WR-06) do not block the phase goal — each is either a rare-timing edge case (WR-01, WR-03), an operational/observability gap (WR-02, WR-04), or currently unreachable via the shipped UI (WR-05, WR-06) — but are recorded above for visibility and should be considered for a follow-up hardening pass.
 
 ---
 
-_Verified: 2026-07-06T10:36:20Z_
+_Verified: 2026-07-06T19:05:00Z_
 _Verifier: Claude (gsd-verifier)_
