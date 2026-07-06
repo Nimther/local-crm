@@ -6,14 +6,14 @@ current_phase: 04
 current_phase_name: broadcast-campaigns-send-pipeline
 status: executing
 stopped_at: Phase 4 UI-SPEC approved
-last_updated: "2026-07-06T08:11:59.867Z"
+last_updated: "2026-07-06T08:32:58.408Z"
 last_activity: 2026-07-06
 last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 7
   completed_phases: 3
   total_plans: 37
-  completed_plans: 31
+  completed_plans: 32
   percent: 43
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-07-06)
 ## Current Position
 
 Phase: 04 (broadcast-campaigns-send-pipeline) — EXECUTING
-Plan: 3 of 8
+Plan: 4 of 8
 Status: Ready to execute
 Last activity: 2026-07-06 — Phase 04 execution started
 
@@ -88,6 +88,7 @@ Progress: [████████████████████] 29/29 p
 | Phase 03 P08 | 15min | 2 tasks | 2 files |
 | Phase 04 P01 | 20min | 4 tasks | 14 files |
 | Phase 04 P02 | 9min | 2 tasks | 13 files |
+| Phase 04 P03 | 25min | 3 tasks | 17 files |
 
 ## Accumulated Context
 
@@ -171,6 +172,9 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 04]: 04-01: drizzle-kit's single combined generate output was split by hand into 0013-0016 per-table migrations ordered by FK dependency; the auto-generated snapshot renamed 0013_snapshot.json -> 0016_snapshot.json to align with the final migration in the split sequence
 - [Phase 04]: 04-02: apps/api/src/kms/client.ts kept as a thin re-export of @mega-crm/kms; local-provider.ts got the same shim treatment so envelope.test.ts's direct import keeps resolving
 - [Phase 04]: 04-02: packages/kms/src/env.ts reads process.env directly (no zod, mirrors tenant-context) -- apps/api's own env.ts remains the primary KMS_PROVIDER=local/NODE_ENV=production boot guard
+- [Phase ?]: [Phase 04]: 04-03: dispatchSendGate returns 'skipped' | { sendId } (plain union) matching the plan's literal acceptance wording
+- [Phase ?]: [Phase 04]: 04-03: GET /unsubscribe/:token never verifies the token -- always renders the identical static confirm page, guaranteeing both non-mutation and enumeration-oracle safety with zero verification logic
+- [Phase ?]: [Phase 04]: 04-03: Fastify routerOptions.maxParamLength raised 100->1024 app-wide -- find-my-way's default silently 414'd every real ~250-char signed unsubscribe token
 
 ### Pending Todos
 
@@ -197,6 +201,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-06T08:11:03.622Z
+Last session: 2026-07-06T08:31:35.510Z
 Stopped at: Phase 4 UI-SPEC approved
 Resume file: .planning/phases/04-broadcast-campaigns-send-pipeline/04-UI-SPEC.md

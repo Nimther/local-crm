@@ -185,7 +185,7 @@ Plans:
   4. Every delivered email goes through SendGrid v3 mail/send with a one-click List-Unsubscribe header, no contact exceeds the global frequency cap, and there are no duplicate emails on job retries.
   5. Sends are throttled per that tenant's RPS, ride a queue with a reserved triggered-priority lane, and survive SendGrid 429/5xx with backoff retries without losing emails.
 
-**Plans**: 2/8 plans executed
+**Plans**: 3/8 plans executed
 **UI hint**: yes
 
 Plans:
@@ -197,7 +197,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1)*
 
-- [ ] 04-03-PLAN.md — @mega-crm/delivery-core (HMAC unsubscribe token, mail/send builder, pre-send gate, send ledger, send-settings) + public RFC 8058 unsubscribe endpoint (SUBS-03, SUBS-04, SEND-04)
+- [x] 04-03-PLAN.md — @mega-crm/delivery-core (HMAC unsubscribe token, mail/send builder, pre-send gate, send ledger, send-settings) + public RFC 8058 unsubscribe endpoint (SUBS-03, SUBS-04, SEND-04)
 
 **Wave 3** *(parallel — worker vs API)*
 
@@ -293,7 +293,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 1. Workspace Foundation & Team Access | 7/7 | Complete    | 2026-07-03 |
 | 2. Contacts & Event Ingestion | 14/14 | Complete    | 2026-07-05 |
 | 3. Segmentation Engine | 8/8 | Complete    | 2026-07-06 |
-| 4. Broadcast Campaigns & Send Pipeline | 2/8 | In Progress|  |
+| 4. Broadcast Campaigns & Send Pipeline | 3/8 | In Progress|  |
 | 5. Webhook Processing & Delivery Tracking | 0/3 | Not started | - |
 | 6. Flows (Triggered Chains) | 0/5 | Not started | - |
 | 7. Analytics, Dashboard & Send Log | 0/5 | Not started | - |
