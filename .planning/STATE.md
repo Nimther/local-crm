@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 4
-current_phase_name: Broadcast Campaigns & Send Pipeline
+current_phase: 04
+current_phase_name: broadcast-campaigns-send-pipeline
 status: executing
 stopped_at: Phase 4 UI-SPEC approved
-last_updated: "2026-07-06T07:40:15.686Z"
+last_updated: "2026-07-06T08:04:01.961Z"
 last_activity: 2026-07-06
-last_activity_desc: Phase 03 complete, transitioned to Phase 4
+last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 7
   completed_phases: 3
-  total_plans: 29
-  completed_plans: 29
+  total_plans: 37
+  completed_plans: 30
   percent: 43
 ---
 
@@ -24,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-06)
 
 **Core value:** Маркетолог настраивает триггерную цепочку или кампанию — и письма надёжно и вовремя доходят до нужных контактов, со сквозным отслеживанием статусов (delivered/opened/clicked/bounced).
-**Current focus:** Phase 4 — Broadcast Campaigns & Send Pipeline
+**Current focus:** Phase 04 — broadcast-campaigns-send-pipeline
 
 ## Current Position
 
-Phase: 4 — Broadcast Campaigns & Send Pipeline
-Plan: Not started
+Phase: 04 (broadcast-campaigns-send-pipeline) — EXECUTING
+Plan: 2 of 8
 Status: Ready to execute
-Last activity: 2026-07-06 — Phase 03 complete, transitioned to Phase 4
+Last activity: 2026-07-06 — Phase 04 execution started
 
 Progress: [████████████████████] 29/29 plans (100%)
 
@@ -86,6 +86,7 @@ Progress: [████████████████████] 29/29 p
 | Phase 03 P06 | 15min | 2 tasks | 3 files |
 | Phase 03 P07 | 15min | 2 tasks | 5 files |
 | Phase 03 P08 | 15min | 2 tasks | 2 files |
+| Phase 04 P01 | 20min | 4 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -165,6 +166,8 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 03]: 03-07: SegmentDetailPage's header reads local name state instead of segmentQuery.data.name -- avoids a TS possibly-undefined narrowing gap once isError is checked ahead of the skeleton branch (WR-06)
 - [Phase 03]: 03-08: Radix Select-role comboboxes (countOperator/timeframe) are located by DOM-order index via getByRole('combobox').nth(n), not accessible name -- combobox is a name-from-author-only ARIA role — Mirrors the 03-03 STATE finding for the custom Field/Event popover comboboxes, applied here to the framework <Select> layer
 - [Phase 03]: 03-08: SEGM-02 E2E removes the default empty attribute condition before adding the behavioral condition under test, so CR-01's client-side validation doesn't block the save
+- [Phase ?]: [Phase 04]: 04-01: sends.campaign_id is nullable with ON DELETE SET NULL (not cascade) so Phase 6 flow-triggered sends can share this same unified ledger without a campaign reference
+- [Phase ?]: [Phase 04]: 04-01: drizzle-kit's single combined generate output was split by hand into 0013-0016 per-table migrations ordered by FK dependency; the auto-generated snapshot renamed 0013_snapshot.json -> 0016_snapshot.json to align with the final migration in the split sequence
 
 ### Pending Todos
 
@@ -191,6 +194,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-06T06:56:42.308Z
+Last session: 2026-07-06T08:02:04.243Z
 Stopped at: Phase 4 UI-SPEC approved
 Resume file: .planning/phases/04-broadcast-campaigns-send-pipeline/04-UI-SPEC.md

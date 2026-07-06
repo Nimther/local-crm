@@ -55,9 +55,9 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Broadcast Campaigns
 
-- [ ] **CAMP-01**: Пользователь может создать broadcast-кампанию: выбрать сегмент-аудиторию и SendGrid Dynamic Template (template_id + переменные)
+- [x] **CAMP-01**: Пользователь может создать broadcast-кампанию: выбрать сегмент-аудиторию и SendGrid Dynamic Template (template_id + переменные)
 - [ ] **CAMP-02**: Пользователь может запустить кампанию сразу или запланировать на дату/время
-- [ ] **CAMP-03**: Кампания имеет state machine: draft → scheduled → sending → sent; случайный запуск черновика невозможен
+- [x] **CAMP-03**: Кампания имеет state machine: draft → scheduled → sending → sent; случайный запуск черновика невозможен
 - [ ] **CAMP-04**: Пользователь может отправить тестовое письмо кампании на свой адрес с тестовыми dynamic_template_data
 - [ ] **CAMP-05**: Во время отправки пользователь видит прогресс кампании (отправлено/всего)
 
@@ -66,9 +66,9 @@ Requirements for initial release. Each maps to roadmap phases.
 - [ ] **SEND-01**: Все отправки — и триггерные, и broadcast — проходят через очередь; прямых отправок в обход очереди нет
 - [ ] **SEND-02**: Отправка троттлится по RPS отдельно на каждый тенант (под лимиты его SendGrid-плана)
 - [ ] **SEND-03**: Триггерные письма имеют приоритет над broadcast: массовая кампания не задерживает триггерные письма (SLO: триггерное письмо уходит за минуты, не часы)
-- [ ] **SEND-04**: Глобальный frequency cap на контакт применяется поверх всех цепочек и кампаний через единый журнал отправок
+- [x] **SEND-04**: Глобальный frequency cap на контакт применяется поверх всех цепочек и кампаний через единый журнал отправок
 - [ ] **SEND-05**: Письма отправляются через SendGrid v3 mail/send с template_id + dynamic_template_data; платформа не рендерит контент
-- [ ] **SEND-06**: Отправка идемпотентна: ретраи джобов и сбои воркеров не приводят к дублям писем
+- [x] **SEND-06**: Отправка идемпотентна: ретраи джобов и сбои воркеров не приводят к дублям писем
 - [ ] **SEND-07**: Ответы 429/5xx от SendGrid обрабатываются с backoff-ретраями без потери писем
 
 ### Webhook Processing
@@ -145,17 +145,17 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SEGM-02 | Phase 3 | Complete |
 | SEGM-03 | Phase 3 | Complete |
 | SEGM-04 | Phase 3 | Complete |
-| CAMP-01 | Phase 4 | Pending |
+| CAMP-01 | Phase 4 | Complete |
 | CAMP-02 | Phase 4 | Pending |
-| CAMP-03 | Phase 4 | Pending |
+| CAMP-03 | Phase 4 | Complete |
 | CAMP-04 | Phase 4 | Pending |
 | CAMP-05 | Phase 4 | Pending |
 | SEND-01 | Phase 4 | Pending |
 | SEND-02 | Phase 4 | Pending |
 | SEND-03 | Phase 4 | Pending |
-| SEND-04 | Phase 4 | Pending |
+| SEND-04 | Phase 4 | Complete |
 | SEND-05 | Phase 4 | Pending |
-| SEND-06 | Phase 4 | Pending |
+| SEND-06 | Phase 4 | Complete |
 | SEND-07 | Phase 4 | Pending |
 | SUBS-03 | Phase 4 | Pending |
 | SUBS-04 | Phase 4 | Pending |
