@@ -120,6 +120,36 @@ describe("compileSegmentDefinition -- attribute conditions", () => {
     ).toThrow();
   });
 
+  it("fails closed on an inherited Object.prototype field name (WR-01) instead of resolving it truthy via prototype-chain lookup", () => {
+    for (const field of ["constructor", "toString", "hasOwnProperty", "__proto__"]) {
+      expect(() =>
+        compileSegmentDefinition(
+          def([{ conditions: [{ type: "attribute", source: "standard", field, operator: "eq", value: "x" }] }]),
+          WSID
+        )
+      ).toThrow();
+    }
+  });
+
+  it("escapes LIKE wildcard characters (%, _, \\) in contains so membership is correct for wildcard-bearing values (WR-04)", () => {
+    const contains = compileSegmentDefinition(
+      def([{ conditions: [{ type: "attribute", source: "standard", field: "city", operator: "contains", value: "50%_off" }] }]),
+      WSID
+    );
+    expect(contains.whereSql).toContain("c.city ILIKE $2");
+    expect(contains.params).toEqual([WSID, "%50\\%\\_off%"]);
+  });
+
+  it("escapes LIKE wildcard characters in not_contains identically inside its negated ILIKE (WR-04)", () => {
+    const notContains = compileSegmentDefinition(
+      def([{ conditions: [{ type: "attribute", source: "standard", field: "city", operator: "not_contains", value: "50%_off" }] }]),
+      WSID
+    );
+    expect(notContains.whereSql).toContain("NOT (");
+    expect(notContains.whereSql).toContain("c.city ILIKE $2");
+    expect(notContains.params).toEqual([WSID, "%50\\%\\_off%"]);
+  });
+
   it("fails closed on an unknown operator", () => {
     expect(() =>
       compileSegmentDefinition(
