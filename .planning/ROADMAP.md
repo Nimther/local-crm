@@ -138,7 +138,7 @@ Plans:
   3. As the user edits segment conditions, a live count of matching contacts updates.
   4. The same saved segment definition resolves an identical membership set whether queried for a campaign audience or a flow trigger.
 
-**Plans**: 6/8 plans executed
+**Plans**: 7/8 plans executed
 **UI hint**: yes
 
 Plans:
@@ -165,7 +165,7 @@ Plans:
 **Wave 6** *(gap closure — blocked on Wave 5)*
 
 - [x] 03-06-PLAN.md — API hardening: statement_timeout on create/update/members (WR-03) + 57014→4xx mapping + HTTP tests (400 on unknown field, tags round-trip) (SEGM-01, SEGM-04)
-- [ ] 03-07-PLAN.md — Web builder: reachable tags condition + CR-01 client validation/error UI + list pagination (WR-05) + detail not-found (WR-06) (SEGM-01)
+- [x] 03-07-PLAN.md — Web builder: reachable tags condition + CR-01 client validation/error UI + list pagination (WR-05) + detail not-found (WR-06) (SEGM-01)
 
 **Wave 7** *(gap closure — blocked on Wave 6)*
 
@@ -276,7 +276,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 |-------|----------------|--------|-----------|
 | 1. Workspace Foundation & Team Access | 7/7 | Complete    | 2026-07-03 |
 | 2. Contacts & Event Ingestion | 14/14 | Complete    | 2026-07-05 |
-| 3. Segmentation Engine | 6/8 | In Progress|  |
+| 3. Segmentation Engine | 7/8 | In Progress|  |
 | 4. Broadcast Campaigns & Send Pipeline | 0/6 | Not started | - |
 | 5. Webhook Processing & Delivery Tracking | 0/3 | Not started | - |
 | 6. Flows (Triggered Chains) | 0/5 | Not started | - |
