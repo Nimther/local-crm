@@ -185,7 +185,7 @@ Plans:
   4. Every delivered email goes through SendGrid v3 mail/send with a one-click List-Unsubscribe header, no contact exceeds the global frequency cap, and there are no duplicate emails on job retries.
   5. Sends are throttled per that tenant's RPS, ride a queue with a reserved triggered-priority lane, and survive SendGrid 429/5xx with backoff retries without losing emails.
 
-**Plans**: 3/8 plans executed
+**Plans**: 4/8 plans executed
 **UI hint**: yes
 
 Plans:
@@ -201,7 +201,7 @@ Plans:
 
 **Wave 3** *(parallel — worker vs API)*
 
-- [ ] 04-04-PLAN.md — Send dispatch engine: per-tenant token bucket + idempotent send-dispatch (mail/send + List-Unsubscribe + backoff) + broadcast/triggered workers + [SUS] package checkpoint (SEND-01, SEND-02, SEND-03, SEND-05, SEND-06, SEND-07, SUBS-04)
+- [x] 04-04-PLAN.md — Send dispatch engine: per-tenant token bucket + idempotent send-dispatch (mail/send + List-Unsubscribe + backoff) + broadcast/triggered workers + [SUS] package checkpoint (SEND-01, SEND-02, SEND-03, SEND-05, SEND-06, SEND-07, SUBS-04)
 - [ ] 04-05-PLAN.md — Campaign backend: repository + state machine + routes + test-send + send-settings routes + D-14 segment-delete block (CAMP-01, CAMP-02, CAMP-03, CAMP-04, CAMP-05, SUBS-03)
 
 **Wave 4** *(parallel — worker kickoff vs UI list/builder)*
@@ -293,7 +293,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 1. Workspace Foundation & Team Access | 7/7 | Complete    | 2026-07-03 |
 | 2. Contacts & Event Ingestion | 14/14 | Complete    | 2026-07-05 |
 | 3. Segmentation Engine | 8/8 | Complete    | 2026-07-06 |
-| 4. Broadcast Campaigns & Send Pipeline | 3/8 | In Progress|  |
+| 4. Broadcast Campaigns & Send Pipeline | 4/8 | In Progress|  |
 | 5. Webhook Processing & Delivery Tracking | 0/3 | Not started | - |
 | 6. Flows (Triggered Chains) | 0/5 | Not started | - |
 | 7. Analytics, Dashboard & Send Log | 0/5 | Not started | - |

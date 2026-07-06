@@ -63,13 +63,13 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Send Pipeline
 
-- [ ] **SEND-01**: Все отправки — и триггерные, и broadcast — проходят через очередь; прямых отправок в обход очереди нет
-- [ ] **SEND-02**: Отправка троттлится по RPS отдельно на каждый тенант (под лимиты его SendGrid-плана)
-- [ ] **SEND-03**: Триггерные письма имеют приоритет над broadcast: массовая кампания не задерживает триггерные письма (SLO: триггерное письмо уходит за минуты, не часы)
+- [x] **SEND-01**: Все отправки — и триггерные, и broadcast — проходят через очередь; прямых отправок в обход очереди нет
+- [x] **SEND-02**: Отправка троттлится по RPS отдельно на каждый тенант (под лимиты его SendGrid-плана)
+- [x] **SEND-03**: Триггерные письма имеют приоритет над broadcast: массовая кампания не задерживает триггерные письма (SLO: триггерное письмо уходит за минуты, не часы)
 - [x] **SEND-04**: Глобальный frequency cap на контакт применяется поверх всех цепочек и кампаний через единый журнал отправок
 - [x] **SEND-05**: Письма отправляются через SendGrid v3 mail/send с template_id + dynamic_template_data; платформа не рендерит контент
 - [x] **SEND-06**: Отправка идемпотентна: ретраи джобов и сбои воркеров не приводят к дублям писем
-- [ ] **SEND-07**: Ответы 429/5xx от SendGrid обрабатываются с backoff-ретраями без потери писем
+- [x] **SEND-07**: Ответы 429/5xx от SendGrid обрабатываются с backoff-ретраями без потери писем
 
 ### Webhook Processing
 
@@ -150,13 +150,13 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CAMP-03 | Phase 4 | Complete |
 | CAMP-04 | Phase 4 | Pending |
 | CAMP-05 | Phase 4 | Pending |
-| SEND-01 | Phase 4 | Pending |
-| SEND-02 | Phase 4 | Pending |
-| SEND-03 | Phase 4 | Pending |
+| SEND-01 | Phase 4 | Complete |
+| SEND-02 | Phase 4 | Complete |
+| SEND-03 | Phase 4 | Complete |
 | SEND-04 | Phase 4 | Complete |
 | SEND-05 | Phase 4 | Complete |
 | SEND-06 | Phase 4 | Complete |
-| SEND-07 | Phase 4 | Pending |
+| SEND-07 | Phase 4 | Complete |
 | SUBS-03 | Phase 4 | Complete |
 | SUBS-04 | Phase 4 | Complete |
 | WBHK-01 | Phase 5 | Pending |
