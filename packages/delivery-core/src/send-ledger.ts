@@ -125,6 +125,51 @@ export async function recordExcluded(
   );
 }
 
+/**
+ * Atomically advances a campaign's live progress counter (CAMP-05, CR-05)
+ * by 1 -- `sent_count` for a 'sent' terminal record, `failed_count` for a
+ * 'failed' one -- guarded `WHERE status = 'sending'` (T-04-13-02) so a
+ * campaign that has already left 'sending' (canceled, or already
+ * transitioned to 'sent' by a prior call in this same fan-out) has its
+ * counters frozen rather than incremented past a terminal state. The
+ * UPDATE's own row lock serializes concurrent sends against the same
+ * campaign row.
+ */
+export async function incrementCampaignSendCounter(
+  client: PoolClient,
+  campaignId: string,
+  status: "sent" | "failed"
+): Promise<void> {
+  const column = status === "sent" ? "sent_count" : "failed_count";
+  await client.query(
+    `UPDATE campaigns SET ${column} = ${column} + 1, updated_at = now()
+     WHERE id = $1 AND status = 'sending'`,
+    [campaignId]
+  );
+}
+
+/**
+ * Idempotent completion transition (CR-05, T-04-13-03): moves a campaign
+ * from 'sending' to 'sent' once fan-out has finished AND every sendable
+ * recipient has reached a terminal send (sent_count + failed_count >=
+ * sendable_total). Guarded `WHERE status = 'sending'` so it fires at most
+ * once -- a no-op both before completion and after a prior call has already
+ * transitioned the row. Returns whether this call performed the
+ * transition, so callers can distinguish "already terminal" from "just
+ * completed" if ever needed.
+ */
+export async function tryCompleteCampaign(client: PoolClient, campaignId: string): Promise<boolean> {
+  const { rowCount } = await client.query(
+    `UPDATE campaigns SET status = 'sent', terminal_at = now(), updated_at = now()
+     WHERE id = $1
+       AND status = 'sending'
+       AND fan_out_complete = true
+       AND (sent_count + failed_count) >= sendable_total`,
+    [campaignId]
+  );
+  return (rowCount ?? 0) > 0;
+}
+
 export interface AudienceExclusionBreakdown {
   reason: string;
   count: number;

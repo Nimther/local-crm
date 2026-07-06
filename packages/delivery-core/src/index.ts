@@ -32,6 +32,8 @@ export {
   recordSendResult,
   recordExcluded,
   audienceExclusionBreakdown,
+  incrementCampaignSendCounter,
+  tryCompleteCampaign,
   type DispatchSendGateResult,
   type AudienceExclusionBreakdown,
 } from "./send-ledger.js";
