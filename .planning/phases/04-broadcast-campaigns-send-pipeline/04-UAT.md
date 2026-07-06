@@ -1,14 +1,14 @@
 ---
-status: diagnosed
+status: partial
 phase: 04-broadcast-campaigns-send-pipeline
 source: [04-01-SUMMARY.md, 04-02-SUMMARY.md, 04-03-SUMMARY.md, 04-04-SUMMARY.md, 04-05-SUMMARY.md, 04-06-SUMMARY.md, 04-07-SUMMARY.md, 04-08-SUMMARY.md, 04-09-SUMMARY.md, 04-10-SUMMARY.md, 04-11-SUMMARY.md, 04-12-SUMMARY.md, 04-13-SUMMARY.md, 04-14-SUMMARY.md]
 started: 2026-07-06T14:53:14Z
-updated: 2026-07-06T17:52:28Z
+updated: 2026-07-06T18:45:00Z
 ---
 
 ## Current Test
 
-[testing halted — user-flow step 3 failed (MVP mode: technical checks not run)]
+[testing paused — 3 issues found, 3 tests blocked pending fixes]
 
 ## Tests
 
@@ -23,49 +23,60 @@ note: no campaigns existed yet — empty-state branch confirmed; list-with-badge
 
 ### 3. Создать draft-кампанию
 expected: Click create campaign. In the builder, set a name, pick a segment audience, pick a SendGrid Dynamic Template, and pick a sender. Save. The campaign persists as a draft (visible in the list with «Черновик» badge after reload).
-result: issue
-reported: "Не могу выбрать сегмент аудитории — сегменты не отображаются. В консоли ошибка http://localhost:5173/api/workspaces/localrent/segments?page=1&pageSize=200 400 (Bad Request)"
-severity: blocker
+result: pass
+note: re-test after 04-15 fix (segments 400: pageSize=200 over schema max 100) — passed
 
 ### 4. Тестовое письмо себе
 expected: On the draft campaign, open the test-send panel. Sample dynamic_template_data JSON is auto-filled from a real contact in the selected segment and is editable. Send the test to your own address. The email arrives rendered via the SendGrid Dynamic Template.
-result: [pending]
+result: issue
+reported: "dynamic_template_data содержит не тот же имейл, который указан в инпуте выше блока с тестовым письмом. Тестовое письмо показывается, что отправляется, но не доходит до входящих."
+severity: major
 
 ### 5. Запуск кампании (immediate launch)
 expected: Click launch on the draft. A confirm dialog shows the sendable count plus an exclusion breakdown (suppressed/unsubscribed excluded) BEFORE committing. Confirm. The campaign transitions to «Отправляется» (sending).
-result: [pending]
+result: issue
+reported: "Диалог открывается, кампания показывает, что отправляется, но несколько минут висит «0 отправленных». Во входящих у получателей тоже ничего нет."
+severity: blocker
 
 ### 6. Живой прогресс отправки
 expected: During sending, the campaign detail shows a determinate progress bar (sent / total) that updates via ~3s polling, plus a failed-count line. When done, status becomes «Отправлена» (sent).
-result: [pending]
+result: blocked
+blocked_by: other
+reason: "я не вижу динамику прогрессбара, так как отправка зависает на нуле отправленных. (Blocked by test 5 blocker: send pipeline stuck at 0 sent — re-test after fix.)"
 
 ### 7. Письмо дошло до инбокса (outcome)
 expected: The broadcast email arrives in a real inbox, rendered from the SendGrid Dynamic Template with your contact's dynamic data. The message carries a one-click List-Unsubscribe header (visible in raw headers), and the unsubscribe link/POST actually unsubscribes the contact.
-result: [pending]
+result: blocked
+blocked_by: other
+reason: "Письмо не дошло до Инбокса. (Consequence of test 5 blocker: send pipeline stuck at 0 sent, no emails dispatched — re-test List-Unsubscribe/unsubscribe flow after fix.)"
 
 ### 8. Планирование + scheduler worker
 expected: Schedule a second campaign via the datetime-local picker (labelled with your resolved local timezone). It stores UTC and shows status «Запланирована». Within ~60s after the scheduled time, the scheduler worker picks it up and it transitions to sending without manual action.
-result: [pending]
+result: pass
 
 ### 9. State machine защищает от случайной отправки
 expected: A draft with missing template/sender/audience has launch and schedule disabled with inline error copy explaining what is missing. Only draft/canceled campaigns offer delete in the row dropdown; the dropdown also offers duplicate. A sent/sending campaign cannot be deleted or re-launched.
-result: [pending]
+result: pass
 
 ### 10. Ролевой доступ (Member)
 expected: Logged in as a Member (not Owner/Admin): launch/schedule affordances render disabled with a tooltip explaining Owner/Admin is required. The send-settings page shows controls disabled with the same tooltip treatment.
-result: [pending]
+result: pass
 
 ### 11. Настройки отправки (Owner/Admin)
 expected: As Owner/Admin, the send-settings page allows editing the global frequency cap and the optional per-tenant RPS limit; values persist after save and reload.
-result: [pending]
+result: pass
 
 ### 12. Предупреждение в редакторе сегмента
 expected: Open a segment that is referenced by a scheduled campaign and edit it. The editor warns that a scheduled campaign references this segment (D-03) before you save changes.
-result: [pending]
+result: issue
+reported: "предупреждение перед сохранением не появляется"
+severity: major
 
 ### 13. Coverage: suppression-aware queue
 expected: Goal-backward check of the user story's capability clause. After the unsubscribe in test 7, launch another broadcast to the same segment: the exclusion breakdown counts the unsubscribed contact, and no email is delivered to it.
-result: [pending]
+result: blocked
+blocked_by: other
+reason: "заблокировано тестом 7: письмо не приходит и отписаться невозможно от рассылки. (Chain: test 5 blocker → no delivery → no unsubscribe possible → suppression check untestable.)"
 
 ### 14. [04-01] campaigns table supports draft/scheduled/sending/sent/canceled status and references a segment by id with ON DELETE RESTRICT (D-14)
 expected: campaigns table supports draft/scheduled/sending/sent/canceled status and references a segment by id with ON DELETE RESTRICT (D-14)
@@ -388,16 +399,16 @@ coverage_id: D3
 ## Summary
 
 total: 66
-passed: 55
-issues: 1
-pending: 10
+passed: 60
+issues: 3
+pending: 0
 skipped: 0
-blocked: 0
+blocked: 3
 
 ## Gaps
 
 - truth: "Campaign builder lets the user pick a segment audience: segments load and are selectable"
-  status: failed
+  status: closed  # fixed by plan 04-15, re-verified in UAT re-test 2026-07-06
   reason: "User reported: Не могу выбрать сегмент аудитории — сегменты не отображаются. В консоли ошибка http://localhost:5173/api/workspaces/localrent/segments?page=1&pageSize=200 400 (Bad Request)"
   severity: blocker
   test: 3
@@ -416,3 +427,33 @@ blocked: 0
   missing:
     - "Align client pageSize with schema bounds at ALL three call sites (clamp to 100) OR raise both shared-schema maxes to 200 — one consistent pass, not just the picker"
   debug_session: ".planning/debug/campaign-builder-segments-400.md"
+
+- truth: "Test-send panel auto-fills sample dynamic_template_data from a real contact matching the recipient input; sending a test delivers the email to the inbox rendered via the SendGrid Dynamic Template"
+  status: failed
+  reason: "User reported: dynamic_template_data содержит не тот же имейл, который указан в инпуте выше блока с тестовым письмом. Тестовое письмо показывается, что отправляется, но не доходит до входящих."
+  severity: major
+  test: 4
+  root_cause: ""
+  artifacts: []
+  missing: []
+  debug_session: ""
+
+- truth: "Launching a campaign fans out send jobs: sent count advances and recipients receive the broadcast email"
+  status: failed
+  reason: "User reported: Диалог открывается, кампания показывает, что отправляется, но несколько минут висит «0 отправленных». Во входящих у получателей тоже ничего нет."
+  severity: blocker
+  test: 5
+  root_cause: ""
+  artifacts: []
+  missing: []
+  debug_session: ""
+
+- truth: "Segment editor warns that a scheduled campaign references this segment (D-03) before saving changes"
+  status: failed
+  reason: "User reported: предупреждение перед сохранением не появляется"
+  severity: major
+  test: 12
+  root_cause: ""
+  artifacts: []
+  missing: []
+  debug_session: ""
