@@ -5,8 +5,8 @@ milestone_name: milestone
 current_phase: 4
 current_phase_name: Broadcast Campaigns & Send Pipeline
 status: ready_to_plan
-stopped_at: Phase 4 context gathered
-last_updated: "2026-07-06T06:06:07.090Z"
+stopped_at: Phase 4 UI-SPEC approved
+last_updated: "2026-07-06T06:56:42.339Z"
 last_activity: 2026-07-06
 last_activity_desc: Phase 03 complete, transitioned to Phase 4
 progress:
@@ -191,6 +191,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-06T06:06:07.060Z
-Stopped at: Phase 4 context gathered
-Resume file: .planning/phases/04-broadcast-campaigns-send-pipeline/04-CONTEXT.md
+Last session: 2026-07-06T06:56:42.308Z
+Stopped at: Phase 4 UI-SPEC approved
+Resume file: .planning/phases/04-broadcast-campaigns-send-pipeline/04-UI-SPEC.md
