@@ -25,6 +25,8 @@ import CsvImportHistory from "@/features/contacts/CsvImportHistory";
 import SegmentsListPage from "@/features/segments/SegmentsListPage";
 import SegmentCreatePage from "@/features/segments/SegmentCreatePage";
 import SegmentDetailPage from "@/features/segments/SegmentDetailPage";
+import CampaignsListPage from "@/features/campaigns/CampaignsListPage";
+import CampaignBuilderPage from "@/features/campaigns/CampaignBuilderPage";
 
 /**
  * Resolves "/" for a signed-in user: no workspace yet -> /create-workspace
@@ -79,6 +81,10 @@ export default function App() {
             <Route path="segments" element={<SegmentsListPage />} />
             <Route path="segments/new" element={<SegmentCreatePage />} />
             <Route path="segments/:id" element={<SegmentDetailPage />} />
+            <Route path="campaigns" element={<CampaignsListPage />} />
+            <Route path="campaigns/new" element={<CampaignBuilderPage />} />
+            {/* 04-08 replaces this with CampaignDetailPage, splitting detail/progress views from draft-edit. */}
+            <Route path="campaigns/:id" element={<CampaignBuilderPage />} />
             <Route path="team" element={<TeamPage />} />
             <Route path="profile" element={<ProfilePage />} />
             <Route path="settings/sendgrid" element={<SendGridKeySettings />} />
