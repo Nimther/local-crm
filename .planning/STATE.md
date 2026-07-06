@@ -6,14 +6,14 @@ current_phase: 04
 current_phase_name: broadcast-campaigns-send-pipeline
 status: executing
 stopped_at: Phase 4 UI-SPEC approved
-last_updated: "2026-07-06T09:47:52.109Z"
+last_updated: "2026-07-06T10:01:26.204Z"
 last_activity: 2026-07-06
 last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 7
   completed_phases: 3
   total_plans: 37
-  completed_plans: 35
+  completed_plans: 36
   percent: 43
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-07-06)
 ## Current Position
 
 Phase: 04 (broadcast-campaigns-send-pipeline) — EXECUTING
-Plan: 7 of 8
+Plan: 8 of 8
 Status: Ready to execute
 Last activity: 2026-07-06 — Phase 04 execution started
 
@@ -92,6 +92,7 @@ Progress: [████████████████████] 29/29 p
 | Phase 04 P04 | 20min | 3 tasks | 12 files |
 | Phase 04 P05 | 35min | 3 tasks | 8 files |
 | Phase 04 P06 | 22min | 3 tasks | 14 files |
+| Phase 04 P07 | 25min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -188,6 +189,10 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 04]: 04-06: campaign-scheduler's cross-tenant discovery uses a SELECT-only, app.admin_scan-gated permissive RLS policy (migration 0018) mirroring workspace_api_keys' 0006 precedent -- every write re-enters withTenant(workspaceId), never an admin write exception
 - [Phase ?]: [Phase 04]: 04-06: FOR UPDATE SKIP LOCKED lives in the per-tenant transitionToSending step, not the cross-tenant admin scan -- Postgres RLS requires a matching UPDATE-visible policy before a locking SELECT can return a row
 - [Phase ?]: [Phase 04]: 04-06: fixed campaigns.workspace_isolation's bare ::uuid cast with a NULLIF guard (migration 0019) -- adding a second permissive policy meant both are evaluated together, and the bare cast throws instead of filtering once app.current_workspace_id has reverted to '' on a reused pooled connection
+- [Phase ?]: [Phase 04]: 04-07: listCampaignTemplates(slug) takes no id param -- matches the real static GET .../sendgrid/templates route (04-05), not the plan's optional-id description
+- [Phase ?]: [Phase 04]: 04-07: CampaignResponse/CampaignListResponse defined locally in campaigns/api.ts -- no response schema exists in shared-schemas for campaigns (only request schemas)
+- [Phase ?]: [Phase 04]: 04-07: AppShell sidebar links converted Link->NavLink with active-state accent -- closes a Phase 1-3 gap, needed for this plan's Кампании active-accent truth
+- [Phase ?]: [Phase 04]: 04-07: disabled Отправить сейчас/Запланировать affordances with role-aware tooltip added to CampaignBuilderPage for T-04-07-01 (Member elevation-of-privilege mitigation) ahead of 04-08 wiring the actual dialogs
 
 ### Pending Todos
 
@@ -214,6 +219,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-06T09:46:33.012Z
+Last session: 2026-07-06T09:59:38.685Z
 Stopped at: Phase 4 UI-SPEC approved
 Resume file: .planning/phases/04-broadcast-campaigns-send-pipeline/04-UI-SPEC.md
