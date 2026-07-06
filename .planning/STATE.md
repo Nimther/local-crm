@@ -6,14 +6,14 @@ current_phase: 03
 current_phase_name: segmentation-engine
 status: executing
 stopped_at: Phase 03 verification — 2 gaps (tags unreachable in builder UI; silent 500 on default save)
-last_updated: "2026-07-06T04:37:23.483Z"
+last_updated: "2026-07-06T04:46:08.862Z"
 last_activity: 2026-07-06
 last_activity_desc: Phase 03 execution started
 progress:
   total_phases: 7
   completed_phases: 2
   total_plans: 29
-  completed_plans: 26
+  completed_plans: 27
   percent: 29
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-07-05)
 ## Current Position
 
 Phase: 03 (segmentation-engine) — EXECUTING
-Plan: 2 of 8
+Plan: 3 of 8
 Status: Ready to execute
 Last activity: 2026-07-06 — Phase 03 execution started
 
@@ -82,6 +82,7 @@ Progress: [████████████████████] 21/21 p
 | Phase 03 P03 | 14min | 3 tasks | 11 files |
 | Phase 03 P04 | 25min | 2 tasks | 6 files |
 | Phase 03 P05 | 15min | 2 tasks | 6 files |
+| Phase 03 P06 | 15min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -156,6 +157,7 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 03]: 03-04: DeleteSegmentDialog is a controlled component (open/onOpenChange props, no internal AlertDialogTrigger) driven by SegmentsListPage's selected-segment state -- avoids nesting an AlertDialogTrigger inside a DropdownMenuItem (Radix portal/focus conflict)
 - [Phase ?]: 03-05: attributeConditionSchema.field stays plain string (superRefine allow-list, not a discriminated-union narrow) so the web builder's empty-field draft sentinel keeps type-checking
 - [Phase ?]: 03-05: WR-01 fixed via Object.create(null) on STANDARD_FIELD_COLUMNS alone (no compile.ts change needed) -- verified a null-prototype object resolves constructor/toString/hasOwnProperty/__proto__ as undefined
+- [Phase ?]: [Phase 03]: 03-06: SAVE_EVAL_STATEMENT_TIMEOUT_MS set to 15000ms (vs preview-count's 2000ms) -- create/update/members reject with 400 on 57014 rather than degrading like preview-count, since there is no meaningful partial state for a persisted write
 
 ### Pending Todos
 
@@ -182,6 +184,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-06T04:36:03.063Z
+Last session: 2026-07-06T04:45:12.103Z
 Stopped at: Completed 03-03-PLAN.md
 Resume file: None

@@ -133,3 +133,13 @@ None - no external service configuration required.
 ---
 *Phase: 03-segmentation-engine*
 *Completed: 2026-07-06*
+
+## Self-Check: PASSED
+
+- FOUND: apps/api/src/modules/segments/segment.repository.ts
+- FOUND: apps/api/src/modules/segments/segments.routes.ts
+- FOUND: apps/api/src/modules/segments/__tests__/segments-hardening.test.ts
+- FOUND: .planning/phases/03-segmentation-engine/03-06-SUMMARY.md
+- FOUND commit: ed01f99 (Task 1)
+- FOUND commit: 297400a (Task 2)
+- FOUND commit: 79655b3 (SUMMARY docs)
