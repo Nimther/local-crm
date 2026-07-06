@@ -20,6 +20,8 @@ import { registerEventsApiRoutes } from "./modules/events/events-api.routes.js";
 import { registerCsvImportRoutes } from "./modules/contacts/csv-import.routes.js";
 import { registerSegmentsRoutes } from "./modules/segments/segments.routes.js";
 import { registerUnsubscribeRoutes } from "./modules/delivery/unsubscribe.routes.js";
+import { registerCampaignsRoutes } from "./modules/campaigns/campaigns.routes.js";
+import { registerSendSettingsRoutes } from "./modules/campaigns/send-settings.routes.js";
 
 /** Assembles the Fastify app: zod type provider, better-auth handler, workspace/profile/invite/member routes. */
 export async function buildServer() {
@@ -54,6 +56,8 @@ export async function buildServer() {
   await app.register(registerCsvImportRoutes);
   await app.register(registerSegmentsRoutes);
   await app.register(registerUnsubscribeRoutes);
+  await app.register(registerCampaignsRoutes);
+  await app.register(registerSendSettingsRoutes);
 
   return app;
 }

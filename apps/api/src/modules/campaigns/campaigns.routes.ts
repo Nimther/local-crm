@@ -1,0 +1,534 @@
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import {
+  createCampaignSchema,
+  updateCampaignSchema,
+  campaignListQuerySchema,
+  scheduleCampaignSchema,
+  testSendCampaignSchema,
+} from "@mega-crm/shared-schemas";
+import { buildContactTemplateData, audienceExclusionBreakdown } from "@mega-crm/delivery-core";
+import { decryptTenantSecret } from "@mega-crm/kms";
+import { auth } from "../auth/auth.js";
+import { requirePermission, toFetchHeaders } from "../../middleware/role-guard.js";
+import { withTenant, withTenantTransaction } from "../../middleware/tenant-context.js";
+import { findActiveWorkspaceBySlug, type ActiveWorkspace } from "../tenancy/workspace-lookup.js";
+import { getCallerRoles } from "../tenancy/member-roles.js";
+import { getKey } from "../tenancy/sendgrid-key.repository.js";
+import { listTenantSendGridTemplates, validateTenantSendGridKey } from "../tenancy/sendgrid-client.js";
+import { getSegment, countSegmentMembers, listSegmentMembers } from "../segments/segment.repository.js";
+import {
+  CampaignStateError,
+  cancelCampaign,
+  createCampaign,
+  deleteCampaign,
+  duplicateCampaign,
+  getCampaign,
+  getCampaignProgress,
+  launchCampaign,
+  listCampaigns,
+  scheduleCampaign,
+  updateCampaign,
+  type CampaignRow,
+} from "./campaign.repository.js";
+import { campaignKickoffQueue, emailBroadcastQueue } from "./campaign-queues.js";
+
+/**
+ * WR-03/T-03-04-style DoS-bounding statement_timeout, reused here for the
+ * audience-breakdown segment count and the test-sample member lookup --
+ * both re-evaluate a segment definition (compileSegmentDefinition) the same
+ * way segments.routes.ts's save/members paths do.
+ */
+const SEGMENT_EVAL_STATEMENT_TIMEOUT_MS = 15000;
+
+/** Postgres error code for a statement canceled due to statement_timeout. */
+const QUERY_CANCELED_ERROR_CODE = "57014";
+
+function isQueryCanceledError(err: unknown): boolean {
+  return (err as { code?: string } | undefined)?.code === QUERY_CANCELED_ERROR_CODE;
+}
+
+/** D-18/D-19 fallback sample when the campaign's segment has no members yet -- same buildContactTemplateData contract, placeholder values. */
+const TEST_SAMPLE_PLACEHOLDER = buildContactTemplateData({
+  firstName: "Иван",
+  lastName: "Иванов",
+  email: "example@example.com",
+  phone: null,
+  city: "Москва",
+  country: "RU",
+  tags: [],
+  properties: {},
+});
+
+const MISSING_SEGMENT_COPY = "Выберите сегмент-аудиторию";
+const MISSING_TEMPLATE_COPY = "Выберите шаблон письма";
+const MISSING_SENDER_COPY = "Выберите отправителя";
+
+/** Builds the per-field UI-SPEC copy for a launch rejected as 'incomplete'. */
+function launchIncompleteFields(campaign: CampaignRow): Record<string, string> {
+  const fields: Record<string, string> = {};
+  if (!campaign.segmentId) fields.segmentId = MISSING_SEGMENT_COPY;
+  if (!campaign.templateId) fields.templateId = MISSING_TEMPLATE_COPY;
+  if (!campaign.fromEmail && !campaign.fromSenderId) fields.sender = MISSING_SENDER_COPY;
+  return fields;
+}
+
+/**
+ * Maps a CampaignStateError to its HTTP status (D-03/D-08): `not_found`->404,
+ * `illegal_transition`->409 (locked state machine rejected the transition),
+ * `incomplete`->422 (only ever thrown by launchCampaign; callers that need
+ * the launchIncompleteFields breakdown check `err.code === "incomplete"`
+ * BEFORE falling back to this generic mapper). Returns `null` for any other
+ * error so the caller re-throws (never swallows an unrelated bug).
+ */
+function mapCampaignStateError(err: unknown): { code: number; body: Record<string, unknown> } | null {
+  if (!(err instanceof CampaignStateError)) return null;
+  if (err.code === "not_found") {
+    return { code: 404, body: { error: "Campaign not found" } };
+  }
+  if (err.code === "illegal_transition") {
+    return { code: 409, body: { error: err.message } };
+  }
+  return { code: 422, body: { error: err.message } };
+}
+
+function toCampaignResponse(row: CampaignRow) {
+  return {
+    id: row.id,
+    workspaceId: row.workspaceId,
+    name: row.name,
+    status: row.status,
+    segmentId: row.segmentId,
+    templateId: row.templateId,
+    fromSenderId: row.fromSenderId,
+    fromEmail: row.fromEmail,
+    scheduledAt: row.scheduledAt ? row.scheduledAt.toISOString() : null,
+    sendableTotal: row.sendableTotal,
+    sentCount: row.sentCount,
+    failedCount: row.failedCount,
+    excludedTotal: row.excludedTotal,
+    sendingStartedAt: row.sendingStartedAt ? row.sendingStartedAt.toISOString() : null,
+    terminalAt: row.terminalAt ? row.terminalAt.toISOString() : null,
+    createdByUserId: row.createdByUserId,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+/**
+ * Resolves `:slug` to a workspace AND confirms the caller is a member --
+ * ANY throw from getCallerRoles (unauthenticated, unknown slug, non-member)
+ * maps to the SAME 404 a nonexistent workspace returns, so campaign routes
+ * cannot be used as a workspace-enumeration oracle (mirrors
+ * segments.routes.ts's resolveWorkspaceMember exactly).
+ */
+async function resolveWorkspaceMember(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  slug: string
+): Promise<ActiveWorkspace | null> {
+  const workspace = await findActiveWorkspaceBySlug(slug);
+  if (!workspace) {
+    await reply.code(404).send({ error: "Workspace not found" });
+    return null;
+  }
+
+  try {
+    await getCallerRoles(toFetchHeaders(request), slug);
+  } catch {
+    await reply.code(404).send({ error: "Workspace not found" });
+    return null;
+  }
+
+  return workspace;
+}
+
+/**
+ * Campaign lifecycle API (CAMP-01..05, SUBS-03). Ordinary workspace
+ * membership is sufficient for create/edit/delete drafts, test-send, and
+ * every read route (progress/audience-breakdown/test-sample/templates/
+ * senders) -- launch/schedule/cancel/duplicate are Owner/Admin-only (D-19)
+ * via `requirePermission("campaign", "launch")`.
+ */
+export async function registerCampaignsRoutes(fastify: FastifyInstance): Promise<void> {
+  fastify.get("/api/workspaces/:slug/campaigns", async (request, reply) => {
+    const { slug } = request.params as { slug: string };
+    const parsed = campaignListQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: parsed.error.flatten() });
+    }
+
+    const workspace = await resolveWorkspaceMember(request, reply, slug);
+    if (!workspace) return;
+
+    const result = await withTenant(workspace.id, () => listCampaigns(parsed.data));
+    return reply.send({
+      items: result.items.map(toCampaignResponse),
+      total: result.total,
+      page: result.page,
+      pageSize: result.pageSize,
+    });
+  });
+
+  fastify.post("/api/workspaces/:slug/campaigns", async (request, reply) => {
+    const { slug } = request.params as { slug: string };
+    const parsed = createCampaignSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: parsed.error.flatten() });
+    }
+
+    const workspace = await resolveWorkspaceMember(request, reply, slug);
+    if (!workspace) return;
+
+    const session = await auth.api.getSession({ headers: toFetchHeaders(request) });
+    if (!session) {
+      return reply.code(401).send({ error: "Not authenticated" });
+    }
+
+    const created = await withTenant(workspace.id, () =>
+      createCampaign({
+        name: parsed.data.name,
+        segmentId: parsed.data.segmentId,
+        templateId: parsed.data.templateId,
+        fromSenderId: parsed.data.fromSenderId,
+        fromEmail: parsed.data.fromEmail,
+        createdByUserId: session.user.id,
+      })
+    );
+    return reply.code(201).send(toCampaignResponse(created));
+  });
+
+  // Static sub-paths registered ahead of `:id` so find-my-way's static-first
+  // routing never has to disambiguate `sendgrid` from a campaign uuid.
+  fastify.get("/api/workspaces/:slug/campaigns/sendgrid/templates", async (request, reply) => {
+    const { slug } = request.params as { slug: string };
+    const workspace = await resolveWorkspaceMember(request, reply, slug);
+    if (!workspace) return;
+
+    const row = await withTenant(workspace.id, () => getKey());
+    if (!row) {
+      return reply.send({ templates: [] });
+    }
+
+    const plaintext = await decryptTenantSecret(workspace.id, {
+      ciphertext: row.ciphertext,
+      encryptedDek: row.encryptedDek,
+      iv: row.iv,
+      authTag: row.authTag,
+    });
+    const templates = await listTenantSendGridTemplates(plaintext);
+    return reply.send({ templates });
+  });
+
+  fastify.get("/api/workspaces/:slug/campaigns/sendgrid/senders", async (request, reply) => {
+    const { slug } = request.params as { slug: string };
+    const workspace = await resolveWorkspaceMember(request, reply, slug);
+    if (!workspace) return;
+
+    const row = await withTenant(workspace.id, () => getKey());
+    if (!row) {
+      return reply.send({ senders: [] });
+    }
+
+    const plaintext = await decryptTenantSecret(workspace.id, {
+      ciphertext: row.ciphertext,
+      encryptedDek: row.encryptedDek,
+      iv: row.iv,
+      authTag: row.authTag,
+    });
+    const validation = await validateTenantSendGridKey(plaintext);
+    if (!validation.valid) {
+      return reply.send({ senders: [] });
+    }
+    return reply.send({ senders: validation.verifiedSenders });
+  });
+
+  fastify.get("/api/workspaces/:slug/campaigns/:id", async (request, reply) => {
+    const { slug, id } = request.params as { slug: string; id: string };
+    const workspace = await resolveWorkspaceMember(request, reply, slug);
+    if (!workspace) return;
+
+    const campaign = await withTenant(workspace.id, () => getCampaign(id));
+    if (!campaign) {
+      return reply.code(404).send({ error: "Campaign not found" });
+    }
+    return reply.send(toCampaignResponse(campaign));
+  });
+
+  fastify.patch("/api/workspaces/:slug/campaigns/:id", async (request, reply) => {
+    const { slug, id } = request.params as { slug: string; id: string };
+    const parsed = updateCampaignSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: parsed.error.flatten() });
+    }
+
+    const workspace = await resolveWorkspaceMember(request, reply, slug);
+    if (!workspace) return;
+
+    try {
+      const updated = await withTenant(workspace.id, () => updateCampaign(id, parsed.data));
+      return reply.send(toCampaignResponse(updated));
+    } catch (err) {
+      const mapped = mapCampaignStateError(err);
+      if (mapped) return reply.code(mapped.code).send(mapped.body);
+      throw err;
+    }
+  });
+
+  fastify.delete("/api/workspaces/:slug/campaigns/:id", async (request, reply) => {
+    const { slug, id } = request.params as { slug: string; id: string };
+    const workspace = await resolveWorkspaceMember(request, reply, slug);
+    if (!workspace) return;
+
+    try {
+      const deleted = await withTenant(workspace.id, () => deleteCampaign(id));
+      if (!deleted) {
+        return reply.code(404).send({ error: "Campaign not found" });
+      }
+      return reply.send({ deleted: true });
+    } catch (err) {
+      const mapped = mapCampaignStateError(err);
+      if (mapped) return reply.code(mapped.code).send(mapped.body);
+      throw err;
+    }
+  });
+
+  // D-19: launch/schedule/cancel/duplicate are Owner/Admin-only.
+  fastify.post(
+    "/api/workspaces/:slug/campaigns/:id/launch",
+    { preHandler: requirePermission("campaign", "launch") },
+    async (request, reply) => {
+      const { slug, id } = request.params as { slug: string; id: string };
+      const workspace = await findActiveWorkspaceBySlug(slug);
+      if (!workspace) {
+        return reply.code(404).send({ error: "Workspace not found" });
+      }
+
+      try {
+        const launched = await withTenant(workspace.id, () => launchCampaign(id));
+        // SEND-03: the kickoff worker (04-06) re-derives recipients/template/
+        // sender from the campaign row itself -- the job only ever carries ids.
+        await campaignKickoffQueue.add(
+          "kickoff",
+          { workspaceId: workspace.id, campaignId: id },
+          { jobId: id }
+        );
+        return reply.send(toCampaignResponse(launched));
+      } catch (err) {
+        if (err instanceof CampaignStateError && err.code === "incomplete") {
+          const campaign = await withTenant(workspace.id, () => getCampaign(id));
+          return reply.code(422).send({
+            error: err.message,
+            fields: campaign ? launchIncompleteFields(campaign) : {},
+          });
+        }
+        const mapped = mapCampaignStateError(err);
+        if (mapped) return reply.code(mapped.code).send(mapped.body);
+        throw err;
+      }
+    }
+  );
+
+  fastify.post(
+    "/api/workspaces/:slug/campaigns/:id/schedule",
+    { preHandler: requirePermission("campaign", "launch") },
+    async (request, reply) => {
+      const { slug, id } = request.params as { slug: string; id: string };
+      const parsed = scheduleCampaignSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: parsed.error.flatten() });
+      }
+
+      const workspace = await findActiveWorkspaceBySlug(slug);
+      if (!workspace) {
+        return reply.code(404).send({ error: "Workspace not found" });
+      }
+
+      const scheduledAtDate = new Date(parsed.data.scheduledAt);
+      if (Number.isNaN(scheduledAtDate.getTime()) || scheduledAtDate.getTime() <= Date.now()) {
+        return reply.code(422).send({ error: "scheduledAt must be a valid future datetime" });
+      }
+
+      try {
+        const scheduled = await withTenant(workspace.id, () => scheduleCampaign(id, scheduledAtDate));
+        return reply.send(toCampaignResponse(scheduled));
+      } catch (err) {
+        const mapped = mapCampaignStateError(err);
+        if (mapped) return reply.code(mapped.code).send(mapped.body);
+        throw err;
+      }
+    }
+  );
+
+  fastify.post(
+    "/api/workspaces/:slug/campaigns/:id/cancel",
+    { preHandler: requirePermission("campaign", "launch") },
+    async (request, reply) => {
+      const { slug, id } = request.params as { slug: string; id: string };
+      const workspace = await findActiveWorkspaceBySlug(slug);
+      if (!workspace) {
+        return reply.code(404).send({ error: "Workspace not found" });
+      }
+
+      try {
+        const canceled = await withTenant(workspace.id, () => cancelCampaign(id));
+        return reply.send(toCampaignResponse(canceled));
+      } catch (err) {
+        const mapped = mapCampaignStateError(err);
+        if (mapped) return reply.code(mapped.code).send(mapped.body);
+        throw err;
+      }
+    }
+  );
+
+  fastify.post(
+    "/api/workspaces/:slug/campaigns/:id/duplicate",
+    { preHandler: requirePermission("campaign", "launch") },
+    async (request, reply) => {
+      const { slug, id } = request.params as { slug: string; id: string };
+      const workspace = await findActiveWorkspaceBySlug(slug);
+      if (!workspace) {
+        return reply.code(404).send({ error: "Workspace not found" });
+      }
+
+      const session = await auth.api.getSession({ headers: toFetchHeaders(request) });
+      if (!session) {
+        return reply.code(401).send({ error: "Not authenticated" });
+      }
+
+      try {
+        const duplicated = await withTenant(workspace.id, () => duplicateCampaign(id, session.user.id));
+        return reply.code(201).send(toCampaignResponse(duplicated));
+      } catch (err) {
+        const mapped = mapCampaignStateError(err);
+        if (mapped) return reply.code(mapped.code).send(mapped.body);
+        throw err;
+      }
+    }
+  );
+
+  // CAMP-04/D-12: ordinary-member level -- test sends never touch the
+  // frequency cap/ledger and don't affect the state machine. NEVER a direct
+  // SendGrid call here: always enqueued on the same broadcast queue the
+  // 04-04 worker consumes, tagged kind='test'.
+  fastify.post("/api/workspaces/:slug/campaigns/:id/test-send", async (request, reply) => {
+    const { slug, id } = request.params as { slug: string; id: string };
+    const parsed = testSendCampaignSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: parsed.error.flatten() });
+    }
+
+    const workspace = await resolveWorkspaceMember(request, reply, slug);
+    if (!workspace) return;
+
+    const campaign = await withTenant(workspace.id, () => getCampaign(id));
+    if (!campaign) {
+      return reply.code(404).send({ error: "Campaign not found" });
+    }
+
+    const session = await auth.api.getSession({ headers: toFetchHeaders(request) });
+    if (!session) {
+      return reply.code(401).send({ error: "Not authenticated" });
+    }
+
+    const testTo = parsed.data.to ?? session.user.email;
+    const jobId = `${workspace.id}-test-${id}-${Date.now()}`;
+    await emailBroadcastQueue.add(
+      "test",
+      {
+        workspaceId: workspace.id,
+        campaignId: id,
+        kind: "test",
+        testTo,
+        testData: parsed.data.dynamicTemplateData,
+      },
+      { jobId }
+    );
+
+    return reply.code(202).send({ queued: true, to: testTo });
+  });
+
+  // D-18/D-19: the single standardized buildContactTemplateData contract --
+  // never an ad-hoc inline object -- so the test-send editor's prefill can
+  // never drift from what the dispatch worker actually sends.
+  fastify.get("/api/workspaces/:slug/campaigns/:id/test-sample", async (request, reply) => {
+    const { slug, id } = request.params as { slug: string; id: string };
+    const workspace = await resolveWorkspaceMember(request, reply, slug);
+    if (!workspace) return;
+
+    const campaign = await withTenant(workspace.id, () => getCampaign(id));
+    if (!campaign) {
+      return reply.code(404).send({ error: "Campaign not found" });
+    }
+
+    const segment = await withTenant(workspace.id, () => getSegment(campaign.segmentId));
+    if (!segment) {
+      return reply.send({ sample: TEST_SAMPLE_PLACEHOLDER });
+    }
+
+    try {
+      const { items } = await withTenant(workspace.id, () =>
+        listSegmentMembers(segment.definition, 1, 1, { statementTimeoutMs: SEGMENT_EVAL_STATEMENT_TIMEOUT_MS })
+      );
+      const contact = items[0];
+      if (!contact) {
+        return reply.send({ sample: TEST_SAMPLE_PLACEHOLDER });
+      }
+      return reply.send({ sample: buildContactTemplateData(contact) });
+    } catch (err) {
+      if (isQueryCanceledError(err)) {
+        return reply.send({ sample: TEST_SAMPLE_PLACEHOLDER });
+      }
+      throw err;
+    }
+  });
+
+  fastify.get("/api/workspaces/:slug/campaigns/:id/progress", async (request, reply) => {
+    const { slug, id } = request.params as { slug: string; id: string };
+    const workspace = await resolveWorkspaceMember(request, reply, slug);
+    if (!workspace) return;
+
+    const progress = await withTenant(workspace.id, () => getCampaignProgress(id));
+    if (!progress) {
+      return reply.code(404).send({ error: "Campaign not found" });
+    }
+    return reply.send(progress);
+  });
+
+  // D-04/SUBS-03: sendable segment count + the sends-ledger exclusion
+  // breakdown grouped by reason, both statement_timeout-guarded (57014->4xx)
+  // the same way segments.routes.ts's own evaluation paths already are.
+  fastify.get("/api/workspaces/:slug/campaigns/:id/audience-breakdown", async (request, reply) => {
+    const { slug, id } = request.params as { slug: string; id: string };
+    const workspace = await resolveWorkspaceMember(request, reply, slug);
+    if (!workspace) return;
+
+    const campaign = await withTenant(workspace.id, () => getCampaign(id));
+    if (!campaign) {
+      return reply.code(404).send({ error: "Campaign not found" });
+    }
+
+    const segment = await withTenant(workspace.id, () => getSegment(campaign.segmentId));
+    if (!segment) {
+      return reply.code(404).send({ error: "Segment not found" });
+    }
+
+    try {
+      const sendableCount = await withTenant(workspace.id, () =>
+        countSegmentMembers(segment.definition, { statementTimeoutMs: SEGMENT_EVAL_STATEMENT_TIMEOUT_MS })
+      );
+      const breakdown = await withTenant(workspace.id, () =>
+        withTenantTransaction((client) =>
+          audienceExclusionBreakdown(client, { workspaceId: workspace.id, campaignId: id })
+        )
+      );
+      return reply.send({ sendableCount, breakdown });
+    } catch (err) {
+      if (isQueryCanceledError(err)) {
+        return reply
+          .code(400)
+          .send({ error: "Segment definition is too expensive to evaluate — narrow the conditions" });
+      }
+      throw err;
+    }
+  });
+}
