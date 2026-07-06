@@ -235,6 +235,12 @@ _Wave 1:_
 
 - [x] 04-14-PLAN.md — Register application/x-www-form-urlencoded content-type parser scoped to registerUnsubscribeRoutes so RFC 8058 one-click + confirm-form POSTs reach the handler (no more 415) + explicit-Content-Type regression tests (SUBS-04)
 
+**Gap closure round 3** *(from 04-UAT.md 2026-07-06 — Test 3 segment-picker 400 blocker)*
+
+_Wave 1:_
+
+- [ ] 04-15-PLAN.md — Fix pageSize client/server contract mismatch: shared EXHAUSTIVE_LOOKUP_PAGE_SIZE constant caps both segment/campaign list schemas and drives all three exhaustive-lookup call sites (segment picker + campaign-list name lookup + D-03 warning); regression test pins the bound (CAMP-01, CAMP-02)
+
 ### Phase 5: Webhook Processing & Delivery Tracking
 
 **Goal**: A marketer's sent emails show accurate, deduplicated delivery outcomes, and bounces/unsubscribes/spam complaints automatically suppress contacts from future sends.
