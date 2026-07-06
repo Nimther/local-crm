@@ -68,6 +68,17 @@ export async function recordSendResult(
 /**
  * Records a contact as excluded from a campaign's send (D-04's frozen
  * exclusion breakdown) instead of ever calling SendGrid for them.
+ *
+ * CR-07 (SEND-04/SEND-06): the ON CONFLICT ... DO UPDATE is guarded by
+ * `WHERE sends.status NOT IN ('sent', 'dispatching', 'failed')` so an
+ * at-least-once BullMQ kickoff redelivery's exclusion re-walk can never
+ * demote an already-terminal 'sent'/'failed' row or an in-flight
+ * 'dispatching' claim back to 'excluded' -- that would both erase delivery
+ * history and let pre-send-gate's rolling frequency-cap count (which counts
+ * this campaign's own status='sent' rows) undercount, allowing a re-send
+ * past the cap. When the conflicting row's status IS preserved, Postgres
+ * simply skips the update (no error) -- a no-op, not a failure. An existing
+ * 'excluded' row still has its exclusion_reason updated (re-classification).
  */
 export async function recordExcluded(
   client: PoolClient,
@@ -79,7 +90,8 @@ export async function recordExcluded(
      VALUES (gen_random_uuid(), $1, $2, $3, 'excluded', $4, now())
      ON CONFLICT (workspace_id, campaign_id, contact_id) DO UPDATE SET
        status = 'excluded',
-       exclusion_reason = EXCLUDED.exclusion_reason`,
+       exclusion_reason = EXCLUDED.exclusion_reason
+     WHERE sends.status NOT IN ('sent', 'dispatching', 'failed')`,
     [params.workspaceId, params.campaignId, params.contactId, reason]
   );
 }
