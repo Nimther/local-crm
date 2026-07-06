@@ -6,14 +6,14 @@ current_phase: 04
 current_phase_name: broadcast-campaigns-send-pipeline
 status: executing
 stopped_at: Phase 4 UI-SPEC approved
-last_updated: "2026-07-06T09:14:41.539Z"
+last_updated: "2026-07-06T09:47:52.109Z"
 last_activity: 2026-07-06
 last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 7
   completed_phases: 3
   total_plans: 37
-  completed_plans: 34
+  completed_plans: 35
   percent: 43
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-07-06)
 ## Current Position
 
 Phase: 04 (broadcast-campaigns-send-pipeline) — EXECUTING
-Plan: 6 of 8
+Plan: 7 of 8
 Status: Ready to execute
 Last activity: 2026-07-06 — Phase 04 execution started
 
@@ -91,6 +91,7 @@ Progress: [████████████████████] 29/29 p
 | Phase 04 P03 | 25min | 3 tasks | 17 files |
 | Phase 04 P04 | 20min | 3 tasks | 12 files |
 | Phase 04 P05 | 35min | 3 tasks | 8 files |
+| Phase 04 P06 | 22min | 3 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -182,6 +183,11 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 04]: 04-04: Fixed packages/delivery-core/send-ledger.ts's recordSendResult -- $2::send_status cast required to avoid a Postgres 'inconsistent types deduced for parameter' error (pre-existing 04-03 bug surfaced by this plan's first real integration test)
 - [Phase 04]: 04-05: launchCampaign's incomplete check treats fromEmail OR fromSenderId as satisfying the sender requirement
 - [Phase 04]: 04-05: segment.repository.ts's deleteSegment catches the DB's unconditional ON DELETE RESTRICT FK violation (23503) and converts it to SegmentConflictError -- a canceled campaign still carries segment_id (T-04-01-03 history backstop), closing a gap the app-level 'status != canceled' pre-check alone left open
+- [Phase ?]: [Phase 04]: 04-06: materializeCampaignSnapshot(campaignId) re-derives workspaceId via getWorkspaceId() from the caller's ambient tenant context rather than taking it as a parameter, matching the plan's literal signature
+- [Phase ?]: [Phase 04]: 04-06: campaigns.fan_out_complete column added (migration 0017) though not in the plan's files_modified -- Task 2's own action explicitly required it (Rule 2)
+- [Phase ?]: [Phase 04]: 04-06: campaign-scheduler's cross-tenant discovery uses a SELECT-only, app.admin_scan-gated permissive RLS policy (migration 0018) mirroring workspace_api_keys' 0006 precedent -- every write re-enters withTenant(workspaceId), never an admin write exception
+- [Phase ?]: [Phase 04]: 04-06: FOR UPDATE SKIP LOCKED lives in the per-tenant transitionToSending step, not the cross-tenant admin scan -- Postgres RLS requires a matching UPDATE-visible policy before a locking SELECT can return a row
+- [Phase ?]: [Phase 04]: 04-06: fixed campaigns.workspace_isolation's bare ::uuid cast with a NULLIF guard (migration 0019) -- adding a second permissive policy meant both are evaluated together, and the bare cast throws instead of filtering once app.current_workspace_id has reverted to '' on a reused pooled connection
 
 ### Pending Todos
 
@@ -208,6 +214,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-06T09:14:01.714Z
+Last session: 2026-07-06T09:46:33.012Z
 Stopped at: Phase 4 UI-SPEC approved
 Resume file: .planning/phases/04-broadcast-campaigns-send-pipeline/04-UI-SPEC.md

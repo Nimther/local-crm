@@ -185,7 +185,7 @@ Plans:
   4. Every delivered email goes through SendGrid v3 mail/send with a one-click List-Unsubscribe header, no contact exceeds the global frequency cap, and there are no duplicate emails on job retries.
   5. Sends are throttled per that tenant's RPS, ride a queue with a reserved triggered-priority lane, and survive SendGrid 429/5xx with backoff retries without losing emails.
 
-**Plans**: 5/8 plans executed
+**Plans**: 6/8 plans executed
 **UI hint**: yes
 
 Plans:
@@ -206,7 +206,7 @@ Plans:
 
 **Wave 4** *(parallel — worker kickoff vs UI list/builder)*
 
-- [ ] 04-06-PLAN.md — Send kickoff: batched recipient snapshot + campaign-kickoff fan-out + repeatable due-campaign scheduler (CAMP-02, CAMP-05, SEND-01)
+- [x] 04-06-PLAN.md — Send kickoff: batched recipient snapshot + campaign-kickoff fan-out + repeatable due-campaign scheduler (CAMP-02, CAMP-05, SEND-01)
 - [ ] 04-07-PLAN.md — Campaigns UI part 1: list + builder + api client + nav (CAMP-01)
 
 **Wave 5** *(blocked on Wave 4)*
@@ -293,7 +293,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 1. Workspace Foundation & Team Access | 7/7 | Complete    | 2026-07-03 |
 | 2. Contacts & Event Ingestion | 14/14 | Complete    | 2026-07-05 |
 | 3. Segmentation Engine | 8/8 | Complete    | 2026-07-06 |
-| 4. Broadcast Campaigns & Send Pipeline | 5/8 | In Progress|  |
+| 4. Broadcast Campaigns & Send Pipeline | 6/8 | In Progress|  |
 | 5. Webhook Processing & Delivery Tracking | 0/3 | Not started | - |
 | 6. Flows (Triggered Chains) | 0/5 | Not started | - |
 | 7. Analytics, Dashboard & Send Log | 0/5 | Not started | - |
