@@ -120,6 +120,13 @@
       "when": 1783324622286,
       "tag": "0016_workspace_send_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1783324622287,
+      "tag": "0017_campaigns_fan_out_complete",
+      "breakpoints": true
     }
   ]
 }

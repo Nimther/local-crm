@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, integer, pgEnum } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, uuid, integer, boolean, pgEnum } from "drizzle-orm/pg-core";
 import { organization } from "./auth.js";
 import { segments } from "./segments.js";
 
@@ -23,7 +23,10 @@ export const campaignStatusEnum = pgEnum("campaign_status", [
  * bypassed (T-04-01-03). Progress counters (`sentCount`/`failedCount`) plus
  * `sendableTotal`/`excludedTotal` back CAMP-05's progress UI;
  * `snapshotCursor` supports a resumable recipient-snapshot batch job (see
- * recipient-snapshot.ts, a later plan). `sendingStartedAt`/`terminalAt`
+ * recipient-snapshot.ts). `fanOutComplete` (04-06) guards the
+ * campaign-kickoff worker's breakdown+fan-out pass so a redelivered kickoff
+ * job never re-walks `campaign_recipients` or re-enqueues sends once the
+ * pass has already completed (T-04-06-03). `sendingStartedAt`/`terminalAt`
  * timestamp the sending/sent-or-canceled transitions for audit/metrics.
  */
 export const campaigns = pgTable("campaigns", {
@@ -45,6 +48,7 @@ export const campaigns = pgTable("campaigns", {
   failedCount: integer("failed_count").notNull().default(0),
   excludedTotal: integer("excluded_total"),
   snapshotCursor: uuid("snapshot_cursor"),
+  fanOutComplete: boolean("fan_out_complete").notNull().default(false),
   sendingStartedAt: timestamp("sending_started_at", { withTimezone: true }),
   terminalAt: timestamp("terminal_at", { withTimezone: true }),
   createdByUserId: text("created_by_user_id").notNull(),
