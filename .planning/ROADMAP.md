@@ -241,6 +241,14 @@ _Wave 1:_
 
 - [x] 04-15-PLAN.md — Fix pageSize client/server contract mismatch: shared EXHAUSTIVE_LOOKUP_PAGE_SIZE constant caps both segment/campaign list schemas and drives all three exhaustive-lookup call sites (segment picker + campaign-list name lookup + D-03 warning); regression test pins the bound (CAMP-01, CAMP-02)
 
+**Gap closure round 4** *(from 04-UAT.md 2026-07-06 — Tests 4/5 no delivery, Test 12 D-03 warning missing)*
+
+_Wave 1 (parallel):_
+
+- [ ] 04-16-PLAN.md — Send-pipeline fail-fast: validate UNSUBSCRIBE_TOKEN_SECRET + PUBLIC_APP_URL in check-env/api-env/worker-boot + predev migration bootstrap (applies unapplied 0017–0019); user_setup handoff for the two .env values (SEND-05, SUBS-04, CAMP-05)
+- [ ] 04-17-PLAN.md — Test-send 4xx observability: kind='test' branch reports SendGrid 4xx as failed (mirrors campaign branch) + regression test; clarify test-send sample-data copy as as-designed (SEND-07, CAMP-04)
+- [ ] 04-18-PLAN.md — Segment editor save-time D-03 gate: pure save-gate helper + save-time refetch+confirm + isError surfacing + new web vitest unit lane (CAMP-05)
+
 ### Phase 5: Webhook Processing & Delivery Tracking
 
 **Goal**: A marketer's sent emails show accurate, deduplicated delivery outcomes, and bounces/unsubscribes/spam complaints automatically suppress contacts from future sends.
