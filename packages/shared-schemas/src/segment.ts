@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { EXHAUSTIVE_LOOKUP_PAGE_SIZE } from "./pagination.js";
+
 /**
  * D-03 operator registry -- string/number/bool/date/tag operators, including
  * D-02's first-class negations. Exactly 16 operators; no more, no fewer (see
@@ -149,7 +151,7 @@ export type UpdateSegmentInput = z.infer<typeof updateSegmentSchema>;
 /** GET /api/workspaces/:slug/segments -- D-10/D-11 segment list page. */
 export const segmentListQuerySchema = z.object({
   page: z.coerce.number().int().min(1).optional().default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).optional().default(20),
+  pageSize: z.coerce.number().int().min(1).max(EXHAUSTIVE_LOOKUP_PAGE_SIZE).optional().default(20),
 });
 export type SegmentListQuery = z.infer<typeof segmentListQuerySchema>;
 

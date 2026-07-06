@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { EXHAUSTIVE_LOOKUP_PAGE_SIZE } from "./pagination.js";
+
 /**
  * POST /api/workspaces/:slug/campaigns (CAMP-01) -- name + segment are
  * required to create a draft; template/sender/fromEmail can be filled in
@@ -34,7 +36,7 @@ export type UpdateCampaignInput = z.infer<typeof updateCampaignSchema>;
 /** GET /api/workspaces/:slug/campaigns */
 export const campaignListQuerySchema = z.object({
   page: z.coerce.number().int().min(1).optional().default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).optional().default(20),
+  pageSize: z.coerce.number().int().min(1).max(EXHAUSTIVE_LOOKUP_PAGE_SIZE).optional().default(20),
 });
 export type CampaignListQuery = z.infer<typeof campaignListQuerySchema>;
 
