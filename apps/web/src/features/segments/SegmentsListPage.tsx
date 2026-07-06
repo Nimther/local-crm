@@ -36,10 +36,11 @@ export function SegmentsListPage() {
   const navigate = useNavigate();
 
   const [segmentPendingDelete, setSegmentPendingDelete] = useState<SegmentResponse | null>(null);
+  const [page, setPage] = useState(1);
 
   const segmentsQuery = useQuery({
-    queryKey: ["workspace", slug, "segments", 1, PAGE_SIZE],
-    queryFn: () => listSegments(slug, { page: 1, pageSize: PAGE_SIZE }),
+    queryKey: ["workspace", slug, "segments", page, PAGE_SIZE],
+    queryFn: () => listSegments(slug, { page, pageSize: PAGE_SIZE }),
     enabled: Boolean(slug),
     placeholderData: keepPreviousData,
   });
@@ -60,6 +61,8 @@ export function SegmentsListPage() {
 
   const data: SegmentListResponse | undefined = segmentsQuery.data;
   const items = data?.items ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const isInitialLoad = segmentsQuery.isLoading;
   const isRefetching = segmentsQuery.isPlaceholderData || segmentsQuery.isFetching;
 
@@ -156,6 +159,28 @@ export function SegmentsListPage() {
           </CardContent>
         </Card>
       )}
+
+      {!isInitialLoad && items.length > 0 ? (
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-muted-foreground">Всего: {total}</p>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+              Назад
+            </Button>
+            <span className="text-sm text-muted-foreground">
+              Стр. {page} из {totalPages}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={page >= totalPages}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            >
+              Вперёд
+            </Button>
+          </div>
+        </div>
+      ) : null}
 
       {segmentPendingDelete ? (
         <DeleteSegmentDialog
