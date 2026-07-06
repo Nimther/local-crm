@@ -185,7 +185,7 @@ Plans:
   4. Every delivered email goes through SendGrid v3 mail/send with a one-click List-Unsubscribe header, no contact exceeds the global frequency cap, and there are no duplicate emails on job retries.
   5. Sends are throttled per that tenant's RPS, ride a queue with a reserved triggered-priority lane, and survive SendGrid 429/5xx with backoff retries without losing emails.
 
-**Plans**: 13/13 plans complete
+**Plans**: 14 plans (13 complete + 04-14 gap-closure pending — SUBS-04 415 blocker)
 **UI hint**: yes
 
 Plans:
@@ -228,6 +228,12 @@ _Wave 2:_
 _Wave 3:_
 
 - [x] 04-13-PLAN.md — Campaign completion + live progress counters + cancel enforcement (CR-05/CR-06, CAMP-02/03/05)
+
+**Gap closure round 2** *(from 04-VERIFICATION.md 2026-07-06 re-verify — SUBS-04 415 blocker)*
+
+_Wave 1:_
+
+- [ ] 04-14-PLAN.md — Register application/x-www-form-urlencoded content-type parser scoped to registerUnsubscribeRoutes so RFC 8058 one-click + confirm-form POSTs reach the handler (no more 415) + explicit-Content-Type regression tests (SUBS-04)
 
 ### Phase 5: Webhook Processing & Delivery Tracking
 
