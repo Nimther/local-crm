@@ -6,14 +6,14 @@ current_phase: 04
 current_phase_name: broadcast-campaigns-send-pipeline
 status: executing
 stopped_at: Phase 4 UI-SPEC approved
-last_updated: "2026-07-06T08:57:14.795Z"
+last_updated: "2026-07-06T09:14:41.539Z"
 last_activity: 2026-07-06
 last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 7
   completed_phases: 3
   total_plans: 37
-  completed_plans: 33
+  completed_plans: 34
   percent: 43
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-07-06)
 ## Current Position
 
 Phase: 04 (broadcast-campaigns-send-pipeline) — EXECUTING
-Plan: 5 of 8
+Plan: 6 of 8
 Status: Ready to execute
 Last activity: 2026-07-06 — Phase 04 execution started
 
@@ -90,6 +90,7 @@ Progress: [████████████████████] 29/29 p
 | Phase 04 P02 | 9min | 2 tasks | 13 files |
 | Phase 04 P03 | 25min | 3 tasks | 17 files |
 | Phase 04 P04 | 20min | 3 tasks | 12 files |
+| Phase 04 P05 | 35min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -179,6 +180,8 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 04]: 04-04: RateLimiterRedis instances cached per distinct RPS value (Map keyed by rps), not one global instance -- points is fixed at construction, bucket key (consume(workspaceId)) is what scopes throttle per tenant
 - [Phase ?]: [Phase 04]: 04-04: processSendJob(data, deps?) accepts optional sendMail/redisClient overrides purely for test injection -- production callers pass no deps
 - [Phase ?]: [Phase 04]: 04-04: Fixed packages/delivery-core/send-ledger.ts's recordSendResult -- $2::send_status cast required to avoid a Postgres 'inconsistent types deduced for parameter' error (pre-existing 04-03 bug surfaced by this plan's first real integration test)
+- [Phase 04]: 04-05: launchCampaign's incomplete check treats fromEmail OR fromSenderId as satisfying the sender requirement
+- [Phase 04]: 04-05: segment.repository.ts's deleteSegment catches the DB's unconditional ON DELETE RESTRICT FK violation (23503) and converts it to SegmentConflictError -- a canceled campaign still carries segment_id (T-04-01-03 history backstop), closing a gap the app-level 'status != canceled' pre-check alone left open
 
 ### Pending Todos
 
@@ -205,6 +208,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-06T08:55:29.794Z
+Last session: 2026-07-06T09:14:01.714Z
 Stopped at: Phase 4 UI-SPEC approved
 Resume file: .planning/phases/04-broadcast-campaigns-send-pipeline/04-UI-SPEC.md

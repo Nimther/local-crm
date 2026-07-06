@@ -56,10 +56,10 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Broadcast Campaigns
 
 - [x] **CAMP-01**: Пользователь может создать broadcast-кампанию: выбрать сегмент-аудиторию и SendGrid Dynamic Template (template_id + переменные)
-- [ ] **CAMP-02**: Пользователь может запустить кампанию сразу или запланировать на дату/время
+- [x] **CAMP-02**: Пользователь может запустить кампанию сразу или запланировать на дату/время
 - [x] **CAMP-03**: Кампания имеет state machine: draft → scheduled → sending → sent; случайный запуск черновика невозможен
-- [ ] **CAMP-04**: Пользователь может отправить тестовое письмо кампании на свой адрес с тестовыми dynamic_template_data
-- [ ] **CAMP-05**: Во время отправки пользователь видит прогресс кампании (отправлено/всего)
+- [x] **CAMP-04**: Пользователь может отправить тестовое письмо кампании на свой адрес с тестовыми dynamic_template_data
+- [x] **CAMP-05**: Во время отправки пользователь видит прогресс кампании (отправлено/всего)
 
 ### Send Pipeline
 
@@ -146,10 +146,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SEGM-03 | Phase 3 | Complete |
 | SEGM-04 | Phase 3 | Complete |
 | CAMP-01 | Phase 4 | Complete |
-| CAMP-02 | Phase 4 | Pending |
+| CAMP-02 | Phase 4 | Complete |
 | CAMP-03 | Phase 4 | Complete |
-| CAMP-04 | Phase 4 | Pending |
-| CAMP-05 | Phase 4 | Pending |
+| CAMP-04 | Phase 4 | Complete |
+| CAMP-05 | Phase 4 | Complete |
 | SEND-01 | Phase 4 | Complete |
 | SEND-02 | Phase 4 | Complete |
 | SEND-03 | Phase 4 | Complete |
