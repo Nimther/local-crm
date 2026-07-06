@@ -46,7 +46,7 @@ describe("Campaign sender resolution (CR-02, CAMP-01/02/04)", () => {
   const realFetch = globalThis.fetch;
 
   function stubSendGridFetch(): void {
-    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
       const url = typeof input === "string" ? input : input.toString();
 
       if (url.includes("/v3/scopes")) {

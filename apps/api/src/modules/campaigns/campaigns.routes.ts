@@ -31,6 +31,7 @@ import {
   type CampaignRow,
 } from "./campaign.repository.js";
 import { campaignKickoffQueue, emailBroadcastQueue } from "./campaign-queues.js";
+import { CampaignSenderError, resolveCampaignFromEmail } from "./sender-resolver.js";
 
 /**
  * WR-03/T-03-04-style DoS-bounding statement_timeout, reused here for the
@@ -89,6 +90,18 @@ function mapCampaignStateError(err: unknown): { code: number; body: Record<strin
     return { code: 409, body: { error: err.message } };
   }
   return { code: 422, body: { error: err.message } };
+}
+
+/**
+ * CR-02: maps a `CampaignSenderError` (thrown by `resolveCampaignFromEmail`
+ * when a campaign's `fromSenderId` cannot be resolved to a verified email)
+ * to the same 422 + `fields.sender` shape `launchIncompleteFields` already
+ * uses, so the UI's sender-field error rendering handles both cases
+ * identically.
+ */
+function mapCampaignSenderError(err: unknown): { code: number; body: Record<string, unknown> } | null {
+  if (!(err instanceof CampaignSenderError)) return null;
+  return { code: 422, body: { error: err.message, fields: { sender: MISSING_SENDER_COPY } } };
 }
 
 function toCampaignResponse(row: CampaignRow) {
@@ -304,6 +317,14 @@ export async function registerCampaignsRoutes(fastify: FastifyInstance): Promise
       }
 
       try {
+        // CR-02: resolve+persist a verified from_email BEFORE any transition
+        // or enqueue -- a fromSenderId-only campaign must never reach the
+        // kickoff queue with from_email still null.
+        const preLaunch = await withTenant(workspace.id, () => getCampaign(id));
+        if (preLaunch && (preLaunch.fromSenderId || preLaunch.fromEmail)) {
+          await resolveCampaignFromEmail(workspace.id, preLaunch);
+        }
+
         const launched = await withTenant(workspace.id, () => launchCampaign(id));
         // SEND-03: the kickoff worker (04-06) re-derives recipients/template/
         // sender from the campaign row itself -- the job only ever carries ids.
@@ -314,6 +335,8 @@ export async function registerCampaignsRoutes(fastify: FastifyInstance): Promise
         );
         return reply.send(toCampaignResponse(launched));
       } catch (err) {
+        const senderMapped = mapCampaignSenderError(err);
+        if (senderMapped) return reply.code(senderMapped.code).send(senderMapped.body);
         if (err instanceof CampaignStateError && err.code === "incomplete") {
           const campaign = await withTenant(workspace.id, () => getCampaign(id));
           return reply.code(422).send({
@@ -349,9 +372,19 @@ export async function registerCampaignsRoutes(fastify: FastifyInstance): Promise
       }
 
       try {
+        // CR-02: same resolve-before-transition guarantee as launch -- the
+        // 04-06 scheduler worker must find a populated from_email at send
+        // time, never re-resolve at kickoff time itself.
+        const preSchedule = await withTenant(workspace.id, () => getCampaign(id));
+        if (preSchedule && (preSchedule.fromSenderId || preSchedule.fromEmail)) {
+          await resolveCampaignFromEmail(workspace.id, preSchedule);
+        }
+
         const scheduled = await withTenant(workspace.id, () => scheduleCampaign(id, scheduledAtDate));
         return reply.send(toCampaignResponse(scheduled));
       } catch (err) {
+        const senderMapped = mapCampaignSenderError(err);
+        if (senderMapped) return reply.code(senderMapped.code).send(senderMapped.body);
         const mapped = mapCampaignStateError(err);
         if (mapped) return reply.code(mapped.code).send(mapped.body);
         throw err;
@@ -428,6 +461,24 @@ export async function registerCampaignsRoutes(fastify: FastifyInstance): Promise
     const session = await auth.api.getSession({ headers: toFetchHeaders(request) });
     if (!session) {
       return reply.code(401).send({ error: "Not authenticated" });
+    }
+
+    // CR-02: resolve+persist BEFORE enqueuing -- a test send from a
+    // fromSenderId-only campaign must reach SendGrid with a concrete
+    // verified from.email, never rely on the dispatch worker to resolve it.
+    if (campaign.fromSenderId || campaign.fromEmail) {
+      try {
+        await resolveCampaignFromEmail(workspace.id, campaign);
+      } catch (err) {
+        const senderMapped = mapCampaignSenderError(err);
+        if (senderMapped) return reply.code(senderMapped.code).send(senderMapped.body);
+        throw err;
+      }
+    } else {
+      return reply.code(422).send({
+        error: "Campaign has no sender configured",
+        fields: { sender: MISSING_SENDER_COPY },
+      });
     }
 
     const testTo = parsed.data.to ?? session.user.email;
