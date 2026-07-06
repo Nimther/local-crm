@@ -6,14 +6,14 @@ current_phase: 04
 current_phase_name: broadcast-campaigns-send-pipeline
 status: executing
 stopped_at: Phase 4 UI-SPEC approved
-last_updated: "2026-07-06T08:04:01.961Z"
+last_updated: "2026-07-06T08:11:59.867Z"
 last_activity: 2026-07-06
 last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 7
   completed_phases: 3
   total_plans: 37
-  completed_plans: 30
+  completed_plans: 31
   percent: 43
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-07-06)
 ## Current Position
 
 Phase: 04 (broadcast-campaigns-send-pipeline) — EXECUTING
-Plan: 2 of 8
+Plan: 3 of 8
 Status: Ready to execute
 Last activity: 2026-07-06 — Phase 04 execution started
 
@@ -87,6 +87,7 @@ Progress: [████████████████████] 29/29 p
 | Phase 03 P07 | 15min | 2 tasks | 5 files |
 | Phase 03 P08 | 15min | 2 tasks | 2 files |
 | Phase 04 P01 | 20min | 4 tasks | 14 files |
+| Phase 04 P02 | 9min | 2 tasks | 13 files |
 
 ## Accumulated Context
 
@@ -168,6 +169,8 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-08: SEGM-02 E2E removes the default empty attribute condition before adding the behavioral condition under test, so CR-01's client-side validation doesn't block the save
 - [Phase ?]: [Phase 04]: 04-01: sends.campaign_id is nullable with ON DELETE SET NULL (not cascade) so Phase 6 flow-triggered sends can share this same unified ledger without a campaign reference
 - [Phase ?]: [Phase 04]: 04-01: drizzle-kit's single combined generate output was split by hand into 0013-0016 per-table migrations ordered by FK dependency; the auto-generated snapshot renamed 0013_snapshot.json -> 0016_snapshot.json to align with the final migration in the split sequence
+- [Phase 04]: 04-02: apps/api/src/kms/client.ts kept as a thin re-export of @mega-crm/kms; local-provider.ts got the same shim treatment so envelope.test.ts's direct import keeps resolving
+- [Phase 04]: 04-02: packages/kms/src/env.ts reads process.env directly (no zod, mirrors tenant-context) -- apps/api's own env.ts remains the primary KMS_PROVIDER=local/NODE_ENV=production boot guard
 
 ### Pending Todos
 
@@ -194,6 +197,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-06T08:02:04.243Z
+Last session: 2026-07-06T08:11:03.622Z
 Stopped at: Phase 4 UI-SPEC approved
 Resume file: .planning/phases/04-broadcast-campaigns-send-pipeline/04-UI-SPEC.md
