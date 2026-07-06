@@ -15,6 +15,7 @@
     "@mega-crm/db": "0.1.0",
     "@mega-crm/delivery-core": "0.1.0",
     "@mega-crm/kms": "0.1.0",
+    "@mega-crm/segments-core": "0.1.0",
     "@mega-crm/shared-schemas": "0.1.0",
     "@mega-crm/tenant-context": "0.1.0",
     "bullmq": "5.79.1",
