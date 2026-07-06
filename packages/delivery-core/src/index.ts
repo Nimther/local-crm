@@ -18,3 +18,25 @@ export {
   type ContactTemplateData,
   type ContactTemplateDataContact,
 } from "./contact-template-data.js";
+
+export {
+  evaluatePreSendGate,
+  type PreSendDecision,
+  type PreSendSkipReason,
+  type PreSendGateContact,
+} from "./pre-send-gate.js";
+
+export {
+  dispatchSendGate,
+  recordSendResult,
+  recordExcluded,
+  audienceExclusionBreakdown,
+  type DispatchSendGateResult,
+  type AudienceExclusionBreakdown,
+} from "./send-ledger.js";
+
+export {
+  getWorkspaceSendSettings,
+  upsertWorkspaceSendSettings,
+  type WorkspaceSendSettings,
+} from "./send-settings.js";

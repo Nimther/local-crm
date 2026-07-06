@@ -1,0 +1,64 @@
+import type { PoolClient } from "pg";
+
+/** Per-workspace send throttling (D-13, SEND-04). */
+export interface WorkspaceSendSettings {
+  frequencyCap: number;
+  frequencyWindowHours: number;
+  rpsLimit: number | null;
+}
+
+/** Defaults applied when a workspace has no `workspace_send_settings` row yet (D-13). */
+const DEFAULT_SEND_SETTINGS: WorkspaceSendSettings = {
+  frequencyCap: 3,
+  frequencyWindowHours: 24,
+  rpsLimit: null,
+};
+
+interface SendSettingsRow {
+  frequencyCap: number;
+  frequencyWindowHours: number;
+  rpsLimit: number | null;
+}
+
+/** Reads `workspace_send_settings`, returning the 3/24/null defaults when no row exists (D-13). */
+export async function getWorkspaceSendSettings(
+  client: PoolClient,
+  workspaceId: string
+): Promise<WorkspaceSendSettings> {
+  const { rows } = await client.query<SendSettingsRow>(
+    `SELECT
+       frequency_cap as "frequencyCap",
+       frequency_window_hours as "frequencyWindowHours",
+       rps_limit as "rpsLimit"
+     FROM workspace_send_settings
+     WHERE workspace_id = $1`,
+    [workspaceId]
+  );
+  return rows[0] ?? DEFAULT_SEND_SETTINGS;
+}
+
+/** Upserts the workspace's send settings (for the 04-05 send-settings route). Partial patch over current/default values. */
+export async function upsertWorkspaceSendSettings(
+  client: PoolClient,
+  workspaceId: string,
+  patch: Partial<WorkspaceSendSettings>
+): Promise<WorkspaceSendSettings> {
+  const current = await getWorkspaceSendSettings(client, workspaceId);
+  const next: WorkspaceSendSettings = { ...current, ...patch };
+
+  const { rows } = await client.query<SendSettingsRow>(
+    `INSERT INTO workspace_send_settings (workspace_id, frequency_cap, frequency_window_hours, rps_limit)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (workspace_id) DO UPDATE SET
+       frequency_cap = EXCLUDED.frequency_cap,
+       frequency_window_hours = EXCLUDED.frequency_window_hours,
+       rps_limit = EXCLUDED.rps_limit,
+       updated_at = now()
+     RETURNING
+       frequency_cap as "frequencyCap",
+       frequency_window_hours as "frequencyWindowHours",
+       rps_limit as "rpsLimit"`,
+    [workspaceId, next.frequencyCap, next.frequencyWindowHours, next.rpsLimit]
+  );
+  return rows[0] ?? next;
+}
