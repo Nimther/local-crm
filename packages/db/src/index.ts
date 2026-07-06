@@ -9,6 +9,10 @@ import * as apiKeysSchema from "./schema/api-keys.js";
 import * as eventsSchema from "./schema/events.js";
 import * as csvImportsSchema from "./schema/csv-imports.js";
 import * as segmentsSchema from "./schema/segments.js";
+import * as campaignsSchema from "./schema/campaigns.js";
+import * as campaignRecipientsSchema from "./schema/campaign-recipients.js";
+import * as sendsSchema from "./schema/sends.js";
+import * as workspaceSendSettingsSchema from "./schema/workspace-send-settings.js";
 
 const schema = {
   ...authSchema,
@@ -20,6 +24,10 @@ const schema = {
   ...eventsSchema,
   ...csvImportsSchema,
   ...segmentsSchema,
+  ...campaignsSchema,
+  ...campaignRecipientsSchema,
+  ...sendsSchema,
+  ...workspaceSendSettingsSchema,
 };
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -46,4 +54,8 @@ export * from "./schema/api-keys.js";
 export * from "./schema/events.js";
 export * from "./schema/csv-imports.js";
 export * from "./schema/segments.js";
+export * from "./schema/campaigns.js";
+export * from "./schema/campaign-recipients.js";
+export * from "./schema/sends.js";
+export * from "./schema/workspace-send-settings.js";
 export { TENANT_GUC_KEY } from "./rls.js";
