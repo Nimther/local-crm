@@ -30,7 +30,7 @@ import { useDebouncedValue } from "@/features/segments/useDebouncedValue";
 import { cn } from "@/lib/utils";
 
 /** D-03 field kinds -- drives which operators/value-input a condition row shows. */
-type FieldKind = "string" | "number" | "bool" | "date" | "subscriptionStatus";
+type FieldKind = "string" | "number" | "bool" | "date" | "subscriptionStatus" | "tags";
 
 interface StandardFieldMeta {
   field: string;
@@ -46,6 +46,7 @@ const STANDARD_FIELDS: StandardFieldMeta[] = [
   { field: "lastName", label: "Фамилия", kind: "string" },
   { field: "phone", label: "Телефон", kind: "string" },
   { field: "subscriptionStatus", label: "Статус подписки", kind: "subscriptionStatus" },
+  { field: "tags", label: "Теги", kind: "tags" },
 ];
 
 const SUBSCRIPTION_STATUS_OPTIONS = [
@@ -82,6 +83,10 @@ const OPERATORS_BY_KIND: Record<FieldKind, { value: ConditionOperator; label: st
   subscriptionStatus: [
     { value: "eq", label: "равно" },
     { value: "neq", label: "не равно" },
+  ],
+  tags: [
+    { value: "has_tag", label: "есть тег" },
+    { value: "not_has_tag", label: "нет тега" },
   ],
 };
 

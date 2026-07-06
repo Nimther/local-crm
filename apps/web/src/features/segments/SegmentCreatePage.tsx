@@ -9,30 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { createSegment } from "@/features/segments/api";
 import { createEmptySegmentDefinition, SegmentBuilder } from "@/features/segments/SegmentBuilder";
-
-/**
- * Save-time validation (UI-SPEC copy contract) -- client-side only, the
- * server (03-02 Zod schemas + segments-core compiler) is the authority (see
- * plan's threat_model T-03-07). Returns the first violation found, or null.
- */
-function validateDefinition(definition: SegmentDefinition): string | null {
-  for (const group of definition.groups) {
-    if (group.conditions.length === 0) {
-      return "Добавьте хотя бы одно условие в каждую группу";
-    }
-    for (const cond of group.conditions) {
-      if (cond.type === "behavioral") {
-        if (cond.countOperator === "at_least" && !cond.count) {
-          return "Укажите количество";
-        }
-        if (cond.timeframe.kind === "last_days" && !cond.timeframe.days) {
-          return "Укажите количество дней";
-        }
-      }
-    }
-  }
-  return null;
-}
+import { GENERIC_ERROR, validateDefinition } from "@/features/segments/validateDefinition";
 
 /**
  * New-segment page (SEGM-01/02/04): name field + SegmentBuilder + live count
@@ -48,13 +25,18 @@ export function SegmentCreatePage() {
   const [definition, setDefinition] = useState<SegmentDefinition>(() => createEmptySegmentDefinition());
   const [nameError, setNameError] = useState<string | null>(null);
   const [definitionError, setDefinitionError] = useState<string | null>(null);
+  const [serverError, setServerError] = useState<string | null>(null);
 
   const mutation = useMutation({
     mutationFn: () => createSegment(slug, { name: name.trim(), definition }),
     onSuccess: () => {
+      setServerError(null);
       void queryClient.invalidateQueries({ queryKey: ["workspace", slug, "segments"] });
       toast.success("Сегмент создан");
       navigate(`/w/${slug}/segments`);
+    },
+    onError: () => {
+      setServerError(GENERIC_ERROR);
     },
   });
 
@@ -72,6 +54,7 @@ export function SegmentCreatePage() {
       return;
     }
     setDefinitionError(null);
+    setServerError(null);
 
     mutation.mutate();
   }
@@ -97,6 +80,7 @@ export function SegmentCreatePage() {
       <SegmentBuilder value={definition} onChange={setDefinition} slug={slug} />
 
       {definitionError ? <p className="text-sm font-medium text-destructive">{definitionError}</p> : null}
+      {serverError ? <p className="text-sm font-medium text-destructive">{serverError}</p> : null}
 
       <Button onClick={handleSave} disabled={mutation.isPending}>
         {mutation.isPending ? "Сохраняем…" : "Сохранить сегмент"}

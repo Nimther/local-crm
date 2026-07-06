@@ -14,33 +14,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { SubscriptionStatusBadge } from "@/features/contacts/SubscriptionStatusBadge";
 import { getSegment, listSegmentMembers, updateSegment } from "@/features/segments/api";
 import { SegmentBuilder } from "@/features/segments/SegmentBuilder";
+import { GENERIC_ERROR, validateDefinition } from "@/features/segments/validateDefinition";
 import { cn } from "@/lib/utils";
 
-const GENERIC_ERROR = "Что-то пошло не так. Попробуйте ещё раз — если ошибка повторится, обновите страницу.";
 const MEMBERS_PAGE_SIZE = 20;
-
-/**
- * Save-time validation (same rules as the create flow, UI-SPEC copy contract).
- * Returns the first violation found, or null.
- */
-function validateDefinition(definition: SegmentDefinition): string | null {
-  for (const group of definition.groups) {
-    if (group.conditions.length === 0) {
-      return "Добавьте хотя бы одно условие в каждую группу";
-    }
-    for (const cond of group.conditions) {
-      if (cond.type === "behavioral") {
-        if (cond.countOperator === "at_least" && !cond.count) {
-          return "Укажите количество";
-        }
-        if (cond.timeframe.kind === "last_days" && !cond.timeframe.days) {
-          return "Укажите количество дней";
-        }
-      }
-    }
-  }
-  return null;
-}
 
 const columnHelper = createColumnHelper<ContactResponse>();
 
@@ -227,16 +204,10 @@ export function SegmentDetailPage() {
     saveMutation.mutate();
   }
 
-  if (segmentQuery.isLoading || !definition) {
-    return (
-      <div className="space-y-4 p-8">
-        <Skeleton className="h-8 w-64" />
-        <Skeleton className="h-96 w-full" />
-      </div>
-    );
-  }
-
-  if (!segmentQuery.data) {
+  // WR-06: check isError BEFORE the loading/skeleton branch -- a deleted/bad
+  // segment id must surface the not-found card instead of hanging on an
+  // infinite skeleton (isLoading stays false but `definition` never gets set).
+  if (segmentQuery.isError || (!segmentQuery.isLoading && !segmentQuery.data)) {
     return (
       <div className="p-8">
         <Card>
@@ -248,10 +219,19 @@ export function SegmentDetailPage() {
     );
   }
 
+  if (segmentQuery.isLoading || !definition) {
+    return (
+      <div className="space-y-4 p-8">
+        <Skeleton className="h-8 w-64" />
+        <Skeleton className="h-96 w-full" />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-8 p-8">
       <div>
-        <h1 className="text-display font-semibold">{segmentQuery.data.name}</h1>
+        <h1 className="text-display font-semibold">{name}</h1>
       </div>
 
       <section className="space-y-4">
