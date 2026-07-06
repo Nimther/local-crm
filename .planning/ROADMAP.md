@@ -173,7 +173,7 @@ Plans:
 
 ### Phase 4: Broadcast Campaigns & Send Pipeline
 
-**Goal**: A marketer can send a real broadcast to a segment through a throttled, idempotent, suppression-aware queue — emails reliably reach inboxes via SendGrid Dynamic Templates.
+**Goal**: As a marketer, I want to send a real broadcast to a segment through a throttled, idempotent, suppression-aware queue, so that emails reliably reach inboxes via SendGrid Dynamic Templates.
 **Mode:** mvp
 **Depends on**: Phase 3
 **Requirements**: CAMP-01, CAMP-02, CAMP-03, CAMP-04, CAMP-05, SEND-01, SEND-02, SEND-03, SEND-04, SEND-05, SEND-06, SEND-07, SUBS-03, SUBS-04
