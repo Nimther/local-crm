@@ -1,15 +1,28 @@
 import type { PoolClient } from "pg";
 
-/** Either the send is a genuine no-op (already sent -- idempotent redelivery), or the caller should proceed with the returned `sendId`. */
-export type DispatchSendGateResult = "skipped" | { sendId: string };
+/**
+ * Either the send is a genuine no-op (already terminal -- idempotent
+ * redelivery), or the caller should proceed with the returned `sendId`.
+ * `interrupted: true` marks the CR-04 case: a PRIOR attempt already
+ * committed the 'dispatching' claim but never reached a terminal status
+ * (worker crash between the claim commit and the SendGrid call, or between
+ * the SendGrid call and the record transaction) -- the caller must NOT
+ * re-call SendGrid for this sendId; it must record it as failed instead.
+ */
+export type DispatchSendGateResult = "skipped" | { sendId: string; interrupted?: boolean };
 
 /**
  * Idempotent send-dispatch gate (SEND-06, RESEARCH.md Pattern 2). Inserts a
  * `sends` row with `ON CONFLICT (workspace_id, campaign_id, contact_id) DO
- * NOTHING`; on conflict, locks the existing row `FOR UPDATE` and returns
- * `"skipped"` only if it's already `sent` (a worker crash between "SendGrid
- * accepted" and "we recorded that" must never cause the retried job to send
- * again). Never re-calls SendGrid for a row already `sent`.
+ * NOTHING`; on conflict, locks the existing row `FOR UPDATE` and returns:
+ *   - `"skipped"` when the existing row is already terminal (`sent`,
+ *     `failed`, or `excluded`) -- never resend.
+ *   - `{ sendId, interrupted: true }` when the existing row is still
+ *     `dispatching` -- a prior attempt committed the claim and never
+ *     finished (CR-04); the caller must record this as `failed` rather than
+ *     re-calling SendGrid.
+ * A fresh insert (no conflict) returns `{ sendId }` (interrupted
+ * undefined/false) and the caller proceeds to send.
  */
 export async function dispatchSendGate(
   client: PoolClient,
@@ -31,10 +44,14 @@ export async function dispatchSendGate(
       `SELECT id, status FROM sends WHERE workspace_id = $1 AND campaign_id = $2 AND contact_id = $3 FOR UPDATE`,
       [workspaceId, campaignId, contactId]
     );
-    if (existing[0]?.status === "sent") {
+    const existingStatus = existing[0]?.status;
+    if (existingStatus === "sent" || existingStatus === "failed" || existingStatus === "excluded") {
       return "skipped";
     }
     sendId = existing[0]?.id;
+    if (sendId && existingStatus === "dispatching") {
+      return { sendId, interrupted: true };
+    }
   }
 
   if (!sendId) {
@@ -42,6 +59,18 @@ export async function dispatchSendGate(
   }
 
   return { sendId };
+}
+
+/**
+ * Releases a claim committed by `dispatchSendGate` while it is STILL
+ * `dispatching` -- a no-op if the row has already advanced past that status
+ * (e.g. a concurrent recordSendResult won the race). Safe to call after a
+ * 429/5xx (SendGrid never accepted the message) or after the per-tenant
+ * rate limiter denies a token, so a clean retry re-claims a fresh row
+ * instead of finding a stranded claim (T-04-12-03).
+ */
+export async function releaseDispatchClaim(client: PoolClient, sendId: string): Promise<void> {
+  await client.query(`DELETE FROM sends WHERE id = $1 AND status = 'dispatching'`, [sendId]);
 }
 
 /** Advances a `sends` row to its terminal `sent`/`failed` status, recording the provider's message id on success. */

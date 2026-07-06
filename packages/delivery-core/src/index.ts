@@ -28,6 +28,7 @@ export {
 
 export {
   dispatchSendGate,
+  releaseDispatchClaim,
   recordSendResult,
   recordExcluded,
   audienceExclusionBreakdown,

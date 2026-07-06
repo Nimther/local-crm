@@ -122,13 +122,33 @@ describe("dispatchSendGate idempotency (SEND-06)", () => {
     expect(result).toBe("skipped");
   });
 
-  it("proceeds with the existing row's id when it exists but is not yet 'sent' (e.g. still 'dispatching')", async () => {
+  it("returns 'skipped' when the existing row (FOR UPDATE) is already status='failed'", async () => {
+    const client = stubClient([[], [{ id: "send-4", status: "failed" }]]);
+    const result = await dispatchSendGate(client, {
+      workspaceId: "ws-1",
+      campaignId: "camp-1",
+      contactId: "c-4",
+    });
+    expect(result).toBe("skipped");
+  });
+
+  it("returns 'skipped' when the existing row (FOR UPDATE) is already status='excluded'", async () => {
+    const client = stubClient([[], [{ id: "send-5", status: "excluded" }]]);
+    const result = await dispatchSendGate(client, {
+      workspaceId: "ws-1",
+      campaignId: "camp-1",
+      contactId: "c-5",
+    });
+    expect(result).toBe("skipped");
+  });
+
+  it("CR-04: returns { sendId, interrupted: true } when the existing row is still 'dispatching' -- a prior attempt committed the claim and never finished, so the caller must NOT re-call SendGrid", async () => {
     const client = stubClient([[], [{ id: "send-3", status: "dispatching" }]]);
     const result = await dispatchSendGate(client, {
       workspaceId: "ws-1",
       campaignId: "camp-1",
       contactId: "c-3",
     });
-    expect(result).toEqual({ sendId: "send-3" });
+    expect(result).toEqual({ sendId: "send-3", interrupted: true });
   });
 });
