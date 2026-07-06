@@ -221,6 +221,21 @@ describe("send-dispatch.ts processSendJob durability (SEND-06/SEND-07, CR-03/CR-
     expect(await sendsRowCountFor(workspaceId, campaignId, contactId)).toBe(1);
   });
 
+  it("SEND-07: a test-send 4xx is reported failed, never sent", async () => {
+    const workspaceId = await freshWorkspaceId("dispatch-test-4xx");
+    await connectFixtureSendgridKey(workspaceId);
+    const campaignId = await createFixtureCampaign(workspaceId);
+
+    const counting = countingSendMail(400);
+    const result = await processSendJob(
+      { workspaceId, campaignId, kind: "test", testTo: "probe@fixture.test" },
+      { sendMail: counting.fn, redisClient }
+    );
+
+    expect(result.outcome).toBe("failed");
+    expect(counting.callCount(), "SendGrid must be called exactly once for the test send").toBe(1);
+  });
+
   it("SEND-06 regression: a redelivered job for an already-'sent' contact still calls SendGrid 0 times", async () => {
     const workspaceId = await freshWorkspaceId("dispatch-sent-regression");
     await connectFixtureSendgridKey(workspaceId);

@@ -407,6 +407,15 @@ export async function processSendJob(
       return { outcome: "rate_limited", rateLimitMs: parseRetryAfter(response.headers) };
     }
 
+    // SEND-07: mirrors the kind='campaign' branch's >=400 -> failed
+    // disposition (line ~333) -- a non-retryable 4xx rejection (bad
+    // template, unverified sender, etc.) must be reported as failed, never
+    // as a false 'sent'. The test path has no ledger row to update (D-12) --
+    // only the returned outcome changes.
+    if (response.status >= 400) {
+      return { outcome: "failed", sendId };
+    }
+
     return { outcome: "sent", sendId, providerMessageId: response.messageId };
   });
 }
