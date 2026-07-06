@@ -6,14 +6,14 @@ current_phase: 04
 current_phase_name: broadcast-campaigns-send-pipeline
 status: executing
 stopped_at: Completed 04-09-PLAN.md
-last_updated: "2026-07-06T13:08:27.304Z"
+last_updated: "2026-07-06T13:15:47.370Z"
 last_activity: 2026-07-06
 last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 7
   completed_phases: 3
   total_plans: 42
-  completed_plans: 39
+  completed_plans: 40
   percent: 43
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-07-06)
 ## Current Position
 
 Phase: 04 (broadcast-campaigns-send-pipeline) — EXECUTING
-Plan: 3 of 13
+Plan: 4 of 13
 Status: Ready to execute
 Last activity: 2026-07-06 — Phase 04 execution started
 
@@ -96,6 +96,7 @@ Progress: [████████████████████] 29/29 p
 | Phase 04 P08 | 35min | 3 tasks | 11 files |
 | Phase 04 P09 | 20min | 2 tasks | 3 files |
 | Phase 04 P10 | 12min | 2 tasks | 4 files |
+| Phase 04 P11 | 20min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -203,6 +204,8 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-09: resolveCampaignFromEmail wraps its own withTenant(workspaceId, ...) internally rather than assuming an ambient tenant context, matching the plan's literal function signature
 - [Phase ?]: [Phase 04]: 04-10: recordExcluded's ON CONFLICT DO UPDATE guarded with WHERE sends.status NOT IN ('sent','dispatching','failed') -- a redelivered kickoff exclusion re-walk now no-ops against a preserved row instead of demoting it (CR-07)
 - [Phase ?]: [Phase 04]: 04-10: packages/delivery-core gained its first real-Postgres integration test lane (src/test/db-fixture.ts + vitest.config.ts DATABASE_URL routing), mirroring apps/worker's fixture -- prior delivery-core tests all stubbed PoolClient
+- [Phase 04]: 04-11: consolidated @fastify/helmet into a single registration in server.ts with explicit strict CSP directives, removing a pre-existing duplicate default (permissive) registration nested inside auth/plugin.ts (two competing onSend hooks would have raced on the same header)
+- [Phase 04]: 04-11: malformed unsubscribe tokens get a fixed, tokenless form action (posts to current URL) rather than any escaped echo -- nothing token-derived reaches the HTML at all for a non-conforming input
 
 ### Pending Todos
 
@@ -229,6 +232,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-06T13:06:34.628Z
+Last session: 2026-07-06T13:15:13.954Z
 Stopped at: Completed 04-09-PLAN.md
 Resume file: None
