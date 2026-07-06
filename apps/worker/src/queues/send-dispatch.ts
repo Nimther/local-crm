@@ -10,6 +10,8 @@ import {
   releaseDispatchClaim,
   recordSendResult,
   recordExcluded,
+  incrementCampaignSendCounter,
+  tryCompleteCampaign,
   buildContactTemplateData,
   buildMailSendRequest,
   sendTenantMailV3,
@@ -100,6 +102,7 @@ function parseRetryAfter(headers: Headers): number {
 interface CampaignRow {
   templateId: string | null;
   fromEmail: string | null;
+  status: string;
 }
 
 interface SendgridKeyRow {
@@ -114,6 +117,8 @@ interface SendPrereqs {
   rps: number;
   templateId: string;
   fromEmail: string;
+  /** CR-06: the campaign's live status -- claimCampaignSend gates kind='campaign' dispatch on this being 'sending'; the kind='test' path never reads it. */
+  status: string;
 }
 
 /**
@@ -138,7 +143,7 @@ async function readSendPrereqs(client: PoolClient, workspaceId: string, campaign
   const rps = settings.rpsLimit ?? DEFAULT_TENANT_RPS;
 
   const { rows: campaignRows } = await client.query<CampaignRow>(
-    `SELECT template_id as "templateId", from_email as "fromEmail"
+    `SELECT template_id as "templateId", from_email as "fromEmail", status
      FROM campaigns WHERE id = $1 AND workspace_id = $2`,
     [campaignId, workspaceId]
   );
@@ -147,7 +152,7 @@ async function readSendPrereqs(client: PoolClient, workspaceId: string, campaign
     throw new Error(`Campaign ${campaignId} is missing a templateId/fromEmail for dispatch`);
   }
 
-  return { apiKey, rps, templateId: campaign.templateId, fromEmail: campaign.fromEmail };
+  return { apiKey, rps, templateId: campaign.templateId, fromEmail: campaign.fromEmail, status: campaign.status };
 }
 
 interface ClaimedCampaignSend extends SendPrereqs {
@@ -180,6 +185,13 @@ async function claimCampaignSend(
   const { workspaceId, campaignId, contactId } = params;
   const prereqs = await readSendPrereqs(client, workspaceId, campaignId);
 
+  // CR-06: a campaign that is no longer 'sending' (canceled, or already
+  // terminal) must never claim or dispatch -- checked before the contact
+  // fetch, the pre-send gate, or dispatchSendGate's own claim insert.
+  if (prereqs.status !== "sending") {
+    return { kind: "skipped" };
+  }
+
   const { rows: contactRows } = await client.query<ContactRow>(
     `SELECT ${CONTACT_COLUMNS} FROM contacts WHERE id = $1 AND workspace_id = $2`,
     [contactId, workspaceId]
@@ -208,6 +220,8 @@ async function claimCampaignSend(
     // Never re-call SendGrid for it -- record it as failed instead, closing
     // the duplicate-send window at-most-once.
     await recordSendResult(client, dispatchResult.sendId, { status: "failed" });
+    await incrementCampaignSendCounter(client, campaignId, "failed");
+    await tryCompleteCampaign(client, campaignId);
     return { kind: "failed", sendId: dispatchResult.sendId };
   }
 
@@ -318,14 +332,21 @@ export async function processSendJob(
 
       if (response.status >= 400) {
         // CR-03: a non-retryable 4xx rejection (400/401/403/413/...) is
-        // recorded as failed, never as sent.
-        await withTenantTransaction((client) => recordSendResult(client, claim.sendId, { status: "failed" }));
+        // recorded as failed, never as sent. CR-05: the counter/completion
+        // pair is called in the SAME transaction as the terminal record.
+        await withTenantTransaction(async (client) => {
+          await recordSendResult(client, claim.sendId, { status: "failed" });
+          await incrementCampaignSendCounter(client, campaignId, "failed");
+          await tryCompleteCampaign(client, campaignId);
+        });
         return { outcome: "failed", sendId: claim.sendId };
       }
 
-      await withTenantTransaction((client) =>
-        recordSendResult(client, claim.sendId, { status: "sent", providerMessageId: response.messageId })
-      );
+      await withTenantTransaction(async (client) => {
+        await recordSendResult(client, claim.sendId, { status: "sent", providerMessageId: response.messageId });
+        await incrementCampaignSendCounter(client, campaignId, "sent");
+        await tryCompleteCampaign(client, campaignId);
+      });
       return { outcome: "sent", sendId: claim.sendId, providerMessageId: response.messageId };
     }
 

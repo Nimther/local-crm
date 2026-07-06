@@ -1,7 +1,7 @@
 import { Worker, type Job, type ConnectionOptions } from "bullmq";
 import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { CONTACT_COLUMNS, type ContactRow } from "@mega-crm/contacts-core";
-import { evaluatePreSendGate, recordExcluded } from "@mega-crm/delivery-core";
+import { evaluatePreSendGate, recordExcluded, tryCompleteCampaign } from "@mega-crm/delivery-core";
 import { CAMPAIGN_KICKOFF_QUEUE, campaignKickoffJobSchema, type CampaignKickoffJob } from "@mega-crm/shared-schemas";
 import { materializeCampaignSnapshot } from "./recipient-snapshot.js";
 import { emailBroadcastQueue } from "./campaign-broadcast-producer.js";
@@ -69,10 +69,15 @@ export async function processCampaignKickoffJob(data: CampaignKickoffJob): Promi
     let cursor: string | null = null;
     let sendableTotal = 0;
     let excludedTotal = 0;
+    let canceledMidFanOut = false;
 
     // eslint-disable-next-line no-constant-condition
     while (true) {
-      const recipientIds = await withTenantTransaction(async (client) => {
+      const page = await withTenantTransaction(async (client) => {
+        const { rows: statusRows } = await client.query<{ status: string }>(
+          `SELECT status FROM campaigns WHERE id = $1`,
+          [campaignId]
+        );
         const { rows } = await client.query<{ contactId: string }>(
           `SELECT contact_id as "contactId" FROM campaign_recipients
            WHERE campaign_id = $1 ${cursor ? "AND contact_id > $2" : ""}
@@ -80,9 +85,19 @@ export async function processCampaignKickoffJob(data: CampaignKickoffJob): Promi
            LIMIT ${cursor ? "$3" : "$2"}`,
           cursor ? [campaignId, cursor, BREAKDOWN_PAGE_SIZE] : [campaignId, BREAKDOWN_PAGE_SIZE]
         );
-        return rows.map((row) => row.contactId);
+        return { status: statusRows[0]?.status, recipientIds: rows.map((row) => row.contactId) };
       });
-      if (recipientIds.length === 0) break;
+
+      // CR-06: re-read status at the start of every page -- a cancel (or a
+      // 'sent' terminal reached through some other path) that happens
+      // mid-fan-out stops further enqueuing immediately, without waiting
+      // for the whole frozen snapshot to be walked.
+      if (page.status === "canceled" || page.status === "sent") {
+        canceledMidFanOut = true;
+        break;
+      }
+      if (page.recipientIds.length === 0) break;
+      const recipientIds = page.recipientIds;
 
       const contacts = await withTenantTransaction(async (client) => {
         const { rows } = await client.query<ContactRow>(
@@ -131,9 +146,20 @@ export async function processCampaignKickoffJob(data: CampaignKickoffJob): Promi
       cursor = recipientIds.at(-1) ?? cursor;
     }
 
+    if (canceledMidFanOut) {
+      // CR-06: the campaign was canceled (or otherwise reached 'sent')
+      // while this fan-out was still walking the frozen snapshot -- leave
+      // its status/totals exactly as that transition set them. Do not mark
+      // fan_out_complete (the walk genuinely did not finish) and do not
+      // force any status transition here.
+      return;
+    }
+
     if (sendableTotal === 0) {
       // D-05: an empty sendable audience completes straight to 'sent' with
-      // 0 sent -- no separate failed state.
+      // 0 sent -- no separate failed state. Guarded WHERE status='sending'
+      // (CR-06) so a campaign canceled between the entry-level check and
+      // this final write is never forced back to 'sent'.
       await withTenantTransaction((client) =>
         client.query(
           `UPDATE campaigns SET
@@ -143,15 +169,15 @@ export async function processCampaignKickoffJob(data: CampaignKickoffJob): Promi
              fan_out_complete = true,
              terminal_at = now(),
              updated_at = now()
-           WHERE id = $1`,
+           WHERE id = $1 AND status = 'sending'`,
           [campaignId, sendableTotal, excludedTotal]
         )
       );
       return;
     }
 
-    await withTenantTransaction((client) =>
-      client.query(
+    await withTenantTransaction(async (client) => {
+      await client.query(
         `UPDATE campaigns SET
            sendable_total = $2,
            excluded_total = $3,
@@ -159,8 +185,14 @@ export async function processCampaignKickoffJob(data: CampaignKickoffJob): Promi
            updated_at = now()
          WHERE id = $1`,
         [campaignId, sendableTotal, excludedTotal]
-      )
-    );
+      );
+      // CR-05: covers the case where every sendable recipient's send
+      // already completed (incrementCampaignSendCounter/tryCompleteCampaign
+      // in send-dispatch.ts) before fan_out_complete was set here --
+      // tryCompleteCampaign's own status='sending' guard makes this a
+      // no-op for an already-canceled/terminal campaign.
+      await tryCompleteCampaign(client, campaignId);
+    });
   });
 }
 
