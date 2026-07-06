@@ -2,6 +2,8 @@ import type { Worker } from "bullmq";
 import { buildRedisConnectionOptions, createRedisConnection } from "./queues/connection.js";
 import { createEventsIngestWorker } from "./queues/events-ingest.worker.js";
 import { createImportsCsvWorker } from "./queues/imports-csv.worker.js";
+import { createEmailBroadcastWorker } from "./queues/email-broadcast.worker.js";
+import { createEmailTriggeredWorker } from "./queues/email-triggered.worker.js";
 
 /**
  * The worker process's runtime handle: a standalone shared ioredis
@@ -44,6 +46,12 @@ export async function buildWorker(): Promise<WorkerRuntime> {
   const workers: Worker[] = [
     createEventsIngestWorker(buildRedisConnectionOptions(redisUrl)),
     createImportsCsvWorker(buildRedisConnectionOptions(redisUrl)),
+    // SEND-03: two independently-concurrent queues (bounded broadcast,
+    // higher-concurrency triggered) -- each gets its OWN
+    // buildRedisConnectionOptions(...) call, same nominal-type reason as the
+    // two workers above (never a constructed Redis instance).
+    createEmailBroadcastWorker(buildRedisConnectionOptions(redisUrl)),
+    createEmailTriggeredWorker(buildRedisConnectionOptions(redisUrl)),
   ];
 
   const close = async (): Promise<void> => {
@@ -75,7 +83,7 @@ async function main(): Promise<void> {
 
   // eslint-disable-next-line no-console
   console.log(
-    `apps/worker started (${runtime.workers.length} BullMQ worker(s) registered: events:ingest, imports:csv)`
+    `apps/worker started (${runtime.workers.length} BullMQ worker(s) registered: events:ingest, imports:csv, email-broadcast, email-triggered)`
   );
 }
 
