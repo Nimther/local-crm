@@ -25,16 +25,15 @@ Multi-tenant SaaS-платформа marketing automation для B2C-компа�
 - [x] Идентификация контакта: external_id (основной ключ) + email (запасной) — Validated in Phase 2: приоритет external_id→email в shared upsert, external_id иммутабелен после установки (D-06)
 - [x] Event ingestion: server-side HTTP API с API-ключом, свободная схема событий (имя + JSON-свойства, как у Klaviyo) — Validated in Phase 2: POST /v1/events + BullMQ ingest worker, идемпотентность per-tenant, live event feed в карточке контакта
 - [x] Сегментация: динамические сегменты по свойствам профиля И по поведению/событиям («сделал заказ за 30 дней», «не открывал письма») — Validated in Phase 3: компилятор условий (fails-closed allow-list → SQL с bind-параметрами), builder UI с live preview-count, статусы degraded при таймауте, RLS-изоляция, UAT 2/2
+- [x] Broadcast-кампании: создание (сегмент + Dynamic Template), тестовое письмо, запуск/планирование, state machine draft → scheduled → sending → sent, live-прогресс — Validated in Phase 4: verification 5/5, полный send loop подтверждён
+- [x] Отправка через SendGrid v3 mail/send + Dynamic Templates от имени тенанта (BYO key, send-половина) — Validated in Phase 4: расшифровка tenant key → mail/send с template_id + dynamic_template_data, one-click List-Unsubscribe header, working unsubscribe endpoint (включая RFC 8058 urlencoded POST, gap-closure 04-14)
+- [x] Очередь отправки с контролем RPS: разделённые очереди email:triggered / email:broadcast, per-tenant token bucket (rate-limiter-flexible), идемпотентность отправок на ретраях, suppression-фильтрация перед отправкой — Validated in Phase 4
 
 ### Active
 
-- [ ] Отправка через SendGrid от имени тенанта (BYO key) — connect выполнен в Phase 1, send-путь в Phase 4
-- [ ] Статус подписки: платформа ведёт свой subscription status (введён в Phase 2: suppression-check на создании, валидация переходов), обрабатывает unsubscribe из SendGrid webhook (Phase 5), фильтрует перед отправкой (Phase 4)
+- [ ] Статус подписки: платформа ведёт свой subscription status (введён в Phase 2; suppression-фильтрация перед отправкой и one-click unsubscribe выполнены в Phase 4), остаётся обработка unsubscribe из SendGrid webhook (Phase 5)
 - [ ] Триггерные цепочки: визуальный canvas-редактор с drag-and-drop (узлы, ветвления, соединения)
 - [ ] Правила цепочек: exit conditions, контроль повторного входа (once ever / once per N days / every time), quiet hours, глобальный frequency cap на контакт
-- [ ] Broadcast-кампании: создание, выбор сегмента, запуск/планирование
-- [ ] Отправка через SendGrid v3 mail/send + Dynamic Templates (template_id + dynamic_template_data)
-- [ ] Очередь отправки с контролем RPS: и триггерные, и broadcast-письма через очередь; broadcast не блокирует триггерные
 - [ ] SendGrid Event Webhook: обработка delivered/opened/clicked/bounced/unsubscribed
 - [ ] Аналитика: метрики по кампаниям и шагам цепочек (sent/delivered/opened/clicked/bounced/unsubscribed), timeline активности в карточке контакта, сводный дашборд воркспейса, по-письмовый лог отправок с фильтрами
 
@@ -75,10 +74,10 @@ Multi-tenant SaaS-платформа marketing automation для B2C-компа�
 | Canvas drag-and-drop редактор цепочек в v1 | Ключевой дифференциатор UX, как Klaviyo/n8n; принято осознанно несмотря на стоимость | — Pending |
 | Свободная схема событий (имя + JSON) | Минимум трения при интеграции, модель Klaviyo; типы появляются в UI по мере поступления | ✓ Phase 2: события с произвольным JSON-payload принимаются, отображаются в feed; reserved-key denylist защищает системные свойства |
 | external_id + email, upsert контакта из события | Стабильная идентификация при смене email; событие может создать контакт | ✓ Phase 2: shared upsert (contacts-core) используется API, CSV-воркером и event-воркером; конфликты email → D-04 hard error |
-| Собственный subscription status + фильтрация перед отправкой | Статус виден в платформе и участвует в сегментации; не полагаемся только на SendGrid suppression | — Pending |
+| Собственный subscription status + фильтрация перед отправкой | Статус виден в платформе и участвует в сегментации; не полагаемся только на SendGrid suppression | ✓ Phase 4 (send-половина): pre-send gate проверяет subscription status + suppression перед каждой отправкой; webhook-driven suppression — Phase 5 |
 | Поведенческая сегментация в v1 | Ядро ценности Klaviyo-подобного продукта; без неё триггерные сценарии слабые | ✓ Phase 3: единый компилятор SegmentDefinition → SQL (EXISTS-подзапросы по событиям, count/timeframe), on-the-fly вычисление со statement_timeout вместо материализации; движок общий для кампаний (Phase 4) и цепочек (Phase 6) |
 | Сегменты вычисляются on-the-fly (без материализации membership) | Проще и всегда актуально; DoS-риск ограничен statement_timeout + degraded-ответом | ✓ Phase 3: preview-count 2s / save-eval 15s timeout, 57014 → degraded/4xx; бенчмарк на 100k–1M контактов остаётся открытым флагом |
-| Очередь + RPS-троттлинг в MVP | Rate limits SendGrid; broadcast не должен блокировать триггерные письма | — Pending |
+| Очередь + RPS-троттлинг в MVP | Rate limits SendGrid; broadcast не должен блокировать триггерные письма | ✓ Phase 4: две BullMQ-очереди (email:triggered / email:broadcast) с отдельными воркерами, per-tenant token bucket через rate-limiter-flexible, идемпотентный dispatch без дублей на ретраях |
 | TypeScript full-stack | Один язык, экосистема canvas-библиотек (React Flow и т.п.) | ✓ Phase 1: Fastify + Drizzle + React/Vite стек собран и прошёл полный UAT |
 | Команда + базовые роли (Owner/Admin/Member) в v1 | SaaS для команд маркетинга; права на запуск кампаний и смену SendGrid-ключа | ✓ Phase 1: инвайты, серверная ролевая матрица и role-gated UI подтверждены UAT |
 
@@ -100,4 +99,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-06 after Phase 3 transition (UAT passed 2/2, security verified 17/17 threats closed, phase marked complete)*
+*Last updated: 2026-07-06 after Phase 4 completion (verification 5/5, gap-closure 04-14 closed SUBS-04 one-click unsubscribe blocker, полный broadcast send loop работает)*
