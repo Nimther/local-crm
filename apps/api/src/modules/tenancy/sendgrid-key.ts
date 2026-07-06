@@ -3,7 +3,7 @@ import { connectSendgridKeySchema } from "@mega-crm/shared-schemas";
 import { requirePermission, toFetchHeaders } from "../../middleware/role-guard.js";
 import { requireVerifiedEmail } from "../auth/verification-gate.js";
 import { withTenant } from "../../middleware/tenant-context.js";
-import { encryptTenantSecret, decryptTenantSecret } from "../../kms/client.js";
+import { encryptTenantSecret, decryptTenantSecret } from "@mega-crm/kms";
 import { validateTenantSendGridKey } from "./sendgrid-client.js";
 import { getKey, upsertKey, updateKeyStatus } from "./sendgrid-key.repository.js";
 import { findActiveWorkspaceBySlug } from "./workspace-lookup.js";

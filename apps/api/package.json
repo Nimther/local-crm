@@ -11,7 +11,6 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@aws-sdk/client-kms": "3.1079.0",
     "@fastify/cors": "11.2.0",
     "@fastify/helmet": "13.0.2",
     "@fastify/multipart": "10.0.0",
@@ -19,6 +18,7 @@
     "@fastify/type-provider-zod": "1.0.0",
     "@mega-crm/contacts-core": "0.1.0",
     "@mega-crm/db": "0.1.0",
+    "@mega-crm/kms": "0.1.0",
     "@mega-crm/segments-core": "0.1.0",
     "@mega-crm/shared-schemas": "0.1.0",
     "@mega-crm/tenant-context": "0.1.0",
