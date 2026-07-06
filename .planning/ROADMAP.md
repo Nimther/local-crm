@@ -185,7 +185,7 @@ Plans:
   4. Every delivered email goes through SendGrid v3 mail/send with a one-click List-Unsubscribe header, no contact exceeds the global frequency cap, and there are no duplicate emails on job retries.
   5. Sends are throttled per that tenant's RPS, ride a queue with a reserved triggered-priority lane, and survive SendGrid 429/5xx with backoff retries without losing emails.
 
-**Plans**: 8/8 plans complete
+**Plans**: 13 plans (8 executed; 5 gap-closure pending after verification found 4/5 must-haves unmet)
 **UI hint**: yes
 
 Plans:
@@ -212,6 +212,22 @@ Plans:
 **Wave 5** *(blocked on Wave 4)*
 
 - [x] 04-08-PLAN.md — Campaigns UI part 2: launch/schedule/cancel/test-send dialogs + detail + live progress + send settings + segment warning (CAMP-02, CAMP-03, CAMP-04, CAMP-05)
+
+**Gap closure** *(from 04-VERIFICATION.md — CR-01..CR-07)*
+
+_Wave 1 (parallel):_
+
+- [ ] 04-09-PLAN.md — Sender-email resolution: resolve fromSenderId → verified from_email at launch/schedule/test-send (CR-02, CAMP-01/02/04)
+- [ ] 04-10-PLAN.md — Ledger integrity: guard recordExcluded from demoting sent/dispatching rows (CR-07, SEND-04/06)
+- [ ] 04-11-PLAN.md — Public unsubscribe XSS fix + @fastify/helmet CSP (CR-01, SUBS-04)
+
+_Wave 2:_
+
+- [ ] 04-12-PLAN.md — Dispatch correctness: 3-unit transaction split (no duplicate on crash) + 4xx→failed (CR-03/CR-04, SEND-06/07)
+
+_Wave 3:_
+
+- [ ] 04-13-PLAN.md — Campaign completion + live progress counters + cancel enforcement (CR-05/CR-06, CAMP-02/03/05)
 
 ### Phase 5: Webhook Processing & Delivery Tracking
 
