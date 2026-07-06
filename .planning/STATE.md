@@ -4,17 +4,17 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 04
 current_phase_name: broadcast-campaigns-send-pipeline
-status: verifying
-stopped_at: Phase 4 UI-SPEC approved
-last_updated: "2026-07-06T10:16:10.542Z"
+status: executing
+stopped_at: Completed 04-09-PLAN.md
+last_updated: "2026-07-06T13:01:21.341Z"
 last_activity: 2026-07-06
 last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 7
   completed_phases: 3
-  total_plans: 37
-  completed_plans: 37
-  percent: 57
+  total_plans: 42
+  completed_plans: 38
+  percent: 43
 ---
 
 # Project State
@@ -29,8 +29,8 @@ See: .planning/PROJECT.md (updated 2026-07-06)
 ## Current Position
 
 Phase: 04 (broadcast-campaigns-send-pipeline) — EXECUTING
-Plan: 8 of 8
-Status: Verification found gaps (1/5 must-haves) — gap-closure planning needed, see 04-VERIFICATION.md and 04-REVIEW.md
+Plan: 2 of 13
+Status: Ready to execute
 Last activity: 2026-07-06 — Phase 04 execution started
 
 Progress: [████████████████████] 29/29 plans (100%)
@@ -94,6 +94,7 @@ Progress: [████████████████████] 29/29 p
 | Phase 04 P06 | 22min | 3 tasks | 14 files |
 | Phase 04 P07 | 25min | 3 tasks | 7 files |
 | Phase 04 P08 | 35min | 3 tasks | 11 files |
+| Phase 04 P09 | 20min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -197,6 +198,8 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 04]: 04-08: CampaignBuilderPage's 04-07 placeholder disabled launch/schedule buttons removed -- CampaignDetailPage's draft view embeds CampaignBuilderPage AND renders the real LaunchScheduleActions below it
 - [Phase ?]: [Phase 04]: 04-08: apiPut added to lib/api.ts -- send-settings route is PUT, no full-replace verb existed yet
 - [Phase ?]: [Phase 04]: 04-08: SendSettingsPage uses manual useState instead of react-hook-form+zodResolver -- workspaceSendSettingsSchema's frequencyWindowHours default(24) makes input/output types diverge for zodResolver's generic
+- [Phase 04]: 04-09: resolveCampaignFromEmail is only invoked when fromSenderId OR fromEmail is set on launch/schedule/test-send -- richer incomplete/missing-sender multi-field breakdown still owns the message when neither is set
+- [Phase 04]: 04-09: resolveCampaignFromEmail wraps its own withTenant(workspaceId, ...) internally rather than assuming an ambient tenant context, matching the plan's literal function signature
 
 ### Pending Todos
 
@@ -223,6 +226,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-06T10:15:29.489Z
-Stopped at: Phase 4 UI-SPEC approved
-Resume file: .planning/phases/04-broadcast-campaigns-send-pipeline/04-UI-SPEC.md
+Last session: 2026-07-06T13:01:21.316Z
+Stopped at: Completed 04-09-PLAN.md
+Resume file: None

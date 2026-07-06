@@ -185,7 +185,7 @@ Plans:
   4. Every delivered email goes through SendGrid v3 mail/send with a one-click List-Unsubscribe header, no contact exceeds the global frequency cap, and there are no duplicate emails on job retries.
   5. Sends are throttled per that tenant's RPS, ride a queue with a reserved triggered-priority lane, and survive SendGrid 429/5xx with backoff retries without losing emails.
 
-**Plans**: 13 plans (8 executed; 5 gap-closure pending after verification found 4/5 must-haves unmet)
+**Plans**: 9/13 plans executed
 **UI hint**: yes
 
 Plans:
@@ -217,7 +217,7 @@ Plans:
 
 _Wave 1 (parallel):_
 
-- [ ] 04-09-PLAN.md — Sender-email resolution: resolve fromSenderId → verified from_email at launch/schedule/test-send (CR-02, CAMP-01/02/04)
+- [x] 04-09-PLAN.md — Sender-email resolution: resolve fromSenderId → verified from_email at launch/schedule/test-send (CR-02, CAMP-01/02/04)
 - [ ] 04-10-PLAN.md — Ledger integrity: guard recordExcluded from demoting sent/dispatching rows (CR-07, SEND-04/06)
 - [ ] 04-11-PLAN.md — Public unsubscribe XSS fix + @fastify/helmet CSP (CR-01, SUBS-04)
 
@@ -309,7 +309,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 1. Workspace Foundation & Team Access | 7/7 | Complete    | 2026-07-03 |
 | 2. Contacts & Event Ingestion | 14/14 | Complete    | 2026-07-05 |
 | 3. Segmentation Engine | 8/8 | Complete    | 2026-07-06 |
-| 4. Broadcast Campaigns & Send Pipeline | 8/8 | Gaps found | - |
+| 4. Broadcast Campaigns & Send Pipeline | 9/13 | In Progress|  |
 | 5. Webhook Processing & Delivery Tracking | 0/3 | Not started | - |
 | 6. Flows (Triggered Chains) | 0/5 | Not started | - |
 | 7. Analytics, Dashboard & Send Log | 0/5 | Not started | - |
