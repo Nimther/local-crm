@@ -138,7 +138,7 @@ Plans:
   3. As the user edits segment conditions, a live count of matching contacts updates.
   4. The same saved segment definition resolves an identical membership set whether queried for a campaign audience or a flow trigger.
 
-**Plans**: 4 plans complete + 4 gap-closure plans (verification found gaps 2026-07-05: failed truth #1 + anti-patterns)
+**Plans**: 5/8 plans executed
 **UI hint**: yes
 
 Plans:
@@ -160,7 +160,7 @@ Plans:
 
 **Wave 5** *(gap closure — blocked on Wave 4)*
 
-- [ ] 03-05-PLAN.md — Contract + engine hardening: Zod standard-field allow-list (CR-01/WR-01 root cause) + prototype-safe fail-closed compiler + LIKE-wildcard escaping (WR-04) (SEGM-01, SEGM-03)
+- [x] 03-05-PLAN.md — Contract + engine hardening: Zod standard-field allow-list (CR-01/WR-01 root cause) + prototype-safe fail-closed compiler + LIKE-wildcard escaping (WR-04) (SEGM-01, SEGM-03)
 
 **Wave 6** *(gap closure — blocked on Wave 5)*
 
@@ -276,7 +276,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 |-------|----------------|--------|-----------|
 | 1. Workspace Foundation & Team Access | 7/7 | Complete    | 2026-07-03 |
 | 2. Contacts & Event Ingestion | 14/14 | Complete    | 2026-07-05 |
-| 3. Segmentation Engine | 4/4 | Gaps found | -          |
+| 3. Segmentation Engine | 5/8 | In Progress|  |
 | 4. Broadcast Campaigns & Send Pipeline | 0/6 | Not started | - |
 | 5. Webhook Processing & Delivery Tracking | 0/3 | Not started | - |
 | 6. Flows (Triggered Chains) | 0/5 | Not started | - |

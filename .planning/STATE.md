@@ -3,17 +3,17 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 current_phase: 03
-current_phase_name: Segmentation Engine
+current_phase_name: segmentation-engine
 status: executing
 stopped_at: Phase 03 verification — 2 gaps (tags unreachable in builder UI; silent 500 on default save)
-last_updated: "2026-07-06T03:27:10.507Z"
-last_activity: 2026-07-05
+last_updated: "2026-07-06T04:37:23.483Z"
+last_activity: 2026-07-06
 last_activity_desc: Phase 03 execution started
 progress:
   total_phases: 7
   completed_phases: 2
-  total_plans: 25
-  completed_plans: 25
+  total_plans: 29
+  completed_plans: 26
   percent: 29
 ---
 
@@ -24,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-05)
 
 **Core value:** Маркетолог настраивает триггерную цепочку или кампанию — и письма надёжно и вовремя доходят до нужных контактов, со сквозным отслеживанием статусов (delivered/opened/clicked/bounced).
-**Current focus:** Phase 03 — Segmentation Engine
+**Current focus:** Phase 03 — segmentation-engine
 
 ## Current Position
 
-Phase: 03 (Segmentation Engine) — EXECUTING
-Plan: 4 of 4
+Phase: 03 (segmentation-engine) — EXECUTING
+Plan: 2 of 8
 Status: Ready to execute
-Last activity: 2026-07-05 — Phase 03 execution started
+Last activity: 2026-07-06 — Phase 03 execution started
 
 Progress: [████████████████████] 21/21 plans (100%)
 
@@ -81,6 +81,7 @@ Progress: [████████████████████] 21/21 p
 | Phase 03 P02 | 55min | 3 tasks | 14 files |
 | Phase 03 P03 | 14min | 3 tasks | 11 files |
 | Phase 03 P04 | 25min | 2 tasks | 6 files |
+| Phase 03 P05 | 15min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -153,6 +154,8 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-03: role="combobox" on the shadcn Popover trigger button strips the accessible name-from-content, breaking getByRole queries — ARIA naming rules exclude combobox from name-from-content roles -- dropped the role override on FieldCombobox/EventCombobox triggers, kept default button semantics + aria-expanded only
 - [Phase ?]: [Phase 03]: 03-04: SegmentsListPage's 'Создан' column replaced by 'Обновлён' when adding the author column -- keeps row width reasonable while satisfying the plan's explicit request to add Обновлён + Автор columns
 - [Phase ?]: [Phase 03]: 03-04: DeleteSegmentDialog is a controlled component (open/onOpenChange props, no internal AlertDialogTrigger) driven by SegmentsListPage's selected-segment state -- avoids nesting an AlertDialogTrigger inside a DropdownMenuItem (Radix portal/focus conflict)
+- [Phase ?]: 03-05: attributeConditionSchema.field stays plain string (superRefine allow-list, not a discriminated-union narrow) so the web builder's empty-field draft sentinel keeps type-checking
+- [Phase ?]: 03-05: WR-01 fixed via Object.create(null) on STANDARD_FIELD_COLUMNS alone (no compile.ts change needed) -- verified a null-prototype object resolves constructor/toString/hasOwnProperty/__proto__ as undefined
 
 ### Pending Todos
 
@@ -179,6 +182,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-05T19:24:10.428Z
+Last session: 2026-07-06T04:36:03.063Z
 Stopped at: Completed 03-03-PLAN.md
 Resume file: None
