@@ -17,13 +17,46 @@ const PAGE_STYLE = `<style>
 </style>`;
 
 /**
+ * Strict base64url "<payload-segment>.<signature-segment>" shape check
+ * (CR-01/T-04-11-01) -- this is a FORMAT guard only, not a signature
+ * verification (GET still never verifies/mutates, T-04-03-02/03). Its only
+ * job is refusing to reflect anything that isn't shaped like a genuine
+ * token, closing the reflected-XSS vector at the source rather than relying
+ * solely on escaping.
+ */
+function isWellFormedUnsubscribeToken(token: string): boolean {
+  return /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token);
+}
+
+/**
+ * HTML-attribute escape (defense in depth, CR-01/T-04-11-01) -- applied to a
+ * token that already passed {@link isWellFormedUnsubscribeToken}. A
+ * well-formed base64url token never contains any of these characters, so
+ * this is a no-op on the happy path; it only matters if the format guard
+ * were ever bypassed.
+ */
+function escapeHtmlAttribute(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/**
  * GET confirm page (UI-SPEC): «Отписаться от рассылки?» + a form that POSTs
- * to the same URL. Rendered UNCONDITIONALLY -- the token is never inspected
- * on GET (T-04-03-02/T-04-03-03: nothing to leak, nothing to mutate, so a
- * forged/garbage token segment and a genuine one render byte-identical
- * output).
+ * to the same URL. The token itself is never inspected for VERIFICATION
+ * purposes on GET (T-04-03-02/T-04-03-03: nothing to leak, nothing to
+ * mutate) -- but as of CR-01 it IS checked for well-formedness before being
+ * reflected into the page: a malformed token renders this same generic page
+ * with a fixed, tokenless form action (still resolves to the current URL),
+ * while a well-formed token is HTML-attribute-escaped into the action.
  */
 function renderConfirmPage(token: string): string {
+  const formAction = isWellFormedUnsubscribeToken(token)
+    ? `/unsubscribe/${escapeHtmlAttribute(token)}`
+    : "";
   return `<!doctype html>
 <html lang="ru">
 <head>
@@ -36,7 +69,7 @@ ${PAGE_STYLE}
 <div class="card">
 <h1>Отписаться от рассылки?</h1>
 <p>Нажмите кнопку, чтобы больше не получать маркетинговые письма от этой компании.</p>
-<form method="POST" action="/unsubscribe/${token}">
+<form method="POST" action="${formAction}">
 <button type="submit">Отписаться</button>
 </form>
 </div>

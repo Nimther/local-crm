@@ -1,4 +1,5 @@
 import Fastify from "fastify";
+import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import {
   serializerCompiler,
@@ -42,6 +43,29 @@ export async function buildServer() {
   // are limited (invite accept/register-from-invite, T-01-13 brute-force
   // mitigation) -- every other route is unaffected.
   await app.register(rateLimit, { global: false });
+
+  // CR-01/WR-05: script-blocking CSP on every response, defense-in-depth on
+  // top of the token format guard + attribute escaping in
+  // unsubscribe.routes.ts. default-src 'none' blocks any script execution
+  // (script-src has no override, so it falls back to default-src);
+  // style-src allows 'unsafe-inline' because the public unsubscribe page
+  // (and better-auth's own pages, if any) render a plain in-file <style>
+  // block, matching this repo's no-template-engine convention -- there is
+  // no separate stylesheet to point script-src-style-nonce machinery at.
+  // This is the single registration for the whole app (previously
+  // registered a second time, with permissive defaults, nested inside
+  // authPlugin -- consolidated here so there is one source of truth for the
+  // CSP actually served).
+  await app.register(helmet, {
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'none'"],
+        styleSrc: ["'unsafe-inline'"],
+        baseUri: ["'none'"],
+        frameAncestors: ["'none'"],
+      },
+    },
+  });
 
   await app.register(authPlugin);
   await app.register(registerWorkspaceRoutes);
