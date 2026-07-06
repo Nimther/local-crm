@@ -1,18 +1,21 @@
 ---
 phase: 03-segmentation-engine
-reviewed: 2026-07-06T00:00:00Z
+reviewed: 2026-07-06T05:19:49Z
 depth: standard
-files_reviewed: 36
+files_reviewed: 42
 files_reviewed_list:
   - apps/api/package.json
   - apps/api/src/modules/segments/__tests__/attribute-conditions.test.ts
   - apps/api/src/modules/segments/__tests__/behavioral-conditions.test.ts
   - apps/api/src/modules/segments/__tests__/preview-count.test.ts
+  - apps/api/src/modules/segments/__tests__/segments-hardening.test.ts
   - apps/api/src/modules/segments/__tests__/unified-engine-contract.test.ts
   - apps/api/src/modules/segments/event-names.repository.ts
   - apps/api/src/modules/segments/segment.repository.ts
   - apps/api/src/modules/segments/segments.routes.ts
   - apps/api/src/server.ts
+  - apps/web/e2e/segments-behavior.spec.ts
+  - apps/web/e2e/segments-tags.spec.ts
   - apps/web/e2e/segments.spec.ts
   - apps/web/package.json
   - apps/web/src/App.tsx
@@ -26,6 +29,7 @@ files_reviewed_list:
   - apps/web/src/features/segments/SegmentsListPage.tsx
   - apps/web/src/features/segments/api.ts
   - apps/web/src/features/segments/useDebouncedValue.ts
+  - apps/web/src/features/segments/validateDefinition.ts
   - packages/db/migrations/0011_segments.sql
   - packages/db/migrations/0012_segments_rls_and_indexes.sql
   - packages/db/migrations/meta/_journal.json
@@ -38,191 +42,196 @@ files_reviewed_list:
   - packages/segments-core/src/operators.ts
   - packages/segments-core/src/types.ts
   - packages/segments-core/tsconfig.json
+  - packages/shared-schemas/package.json
+  - packages/shared-schemas/src/__tests__/segment.test.ts
   - packages/shared-schemas/src/index.ts
   - packages/shared-schemas/src/segment.ts
 findings:
   critical: 1
-  warning: 7
-  info: 10
-  total: 18
+  warning: 6
+  info: 7
+  total: 14
 status: issues_found
 ---
 
 # Phase 3: Code Review Report
 
-**Reviewed:** 2026-07-06
+**Reviewed:** 2026-07-06T05:19:49Z
 **Depth:** standard
-**Files Reviewed:** 36
+**Files Reviewed:** 42
 **Status:** issues_found
 
 ## Summary
 
-Reviewed the segmentation engine end to end: the SQL condition compiler (`packages/segments-core`), Zod boundary schemas, the RLS-scoped `segments` table and migrations, the evaluation repository and segments routes, and the builder/list/detail UI, plus the four API test suites and the e2e spec.
+Post-gap-closure re-review (supersedes the 2026-07-06T00:00:00Z review) of the Phase 3 segmentation engine: the `@mega-crm/segments-core` SQL compiler, Zod boundary schemas, segment CRUD/preview/members API routes and repositories, the loose-index-scan event-names repository, DB migrations (table + RLS + GIN index), and the React segment builder/list/detail/delete UI plus API/E2E tests.
 
-The core security posture is sound where it was designed to be: **values are always parameterized** (verified across every operator branch in `operators.ts`), **custom-property keys are bind params, never identifiers** (`compile.ts:53-54`), the compiled WHERE always carries `c.workspace_id = $1` as app-level defense-in-depth on top of RLS, `segments` gets the same ENABLE + FORCE + `workspace_isolation` triplet as other tenant tables (`0012_segments_rls_and_indexes.sql`), and `contacts`/`events` were confirmed FORCE-RLS'd from earlier migrations. The 404-not-401 workspace-oracle pattern is applied consistently, and the unified-engine contract test genuinely proves count/list/point-check agreement.
+The core injection surfaces are correctly closed: standard fields resolve only through a null-prototype allow-list (with prototype-pollution tests), custom property keys and all values are bind parameters, LIKE wildcards are escaped, groups are always parenthesized, and tenant isolation is enforced three ways (RLS + explicit `workspace_id` predicate + `AsyncLocalStorage` context). The three call modes (count/list/point-check) demonstrably share one compiled WHERE fragment, and the earlier review's WR items (statement timeout on save paths, ILIKE escaping, Object.prototype field names, error-vs-skeleton on detail) are verifiably fixed.
 
-However, the review found one BLOCKER in the primary save flow (default builder state produces a 500 that the UI silently swallows), and a cluster of warnings around the validation boundary: the Zod schema is far looser than the compiler assumes (any `field` string, any operator against any field kind), which converts user-reachable inputs into raw Postgres statement errors (500s) instead of 400s, breaks the allow-list's fail-closed guarantee via prototype-chain lookup, and leaves the stated DoS bound (statement_timeout) covering only one of four evaluation paths.
-
-## Narrative Findings (AI reviewer)
+However, the type-compatibility dimension of the boundary validation is still open: the Zod schema validates fields and operators independently but never together, so schema-valid definitions (e.g. `tags` + `eq`, `country` + `has_tag`, `subscriptionStatus` + `contains`) compile into SQL that is guaranteed to error at runtime — the exact "400, not 500" gap the 03-05/03-06 hardening pass closed for field names but left open for operator/value combinations. Several robustness and UI defects follow below.
 
 ## Critical Issues
 
-### CR-01: Default builder state saves to a 500; error is silently swallowed — broken primary create flow
+### CR-01: Operator/field-type compatibility is not validated at the boundary — schema-valid definitions produce guaranteed SQL errors (500) on every evaluation route
 
-**File:** `packages/shared-schemas/src/segment.ts:44`, `apps/web/src/features/segments/SegmentCreatePage.tsx:18-35,52-59`, `packages/segments-core/src/compile.ts:47-50`
-**Issue:** Three gaps compose into a broken happy path:
-1. `attributeConditionSchema` validates `field: z.string()` — empty string and any unknown field name pass Zod for `source: "standard"`.
-2. Client-side `validateDefinition` (SegmentCreatePage.tsx:18) only validates **behavioral** conditions; attribute conditions with an empty field (the builder's default `newAttributeCondition()` state, SegmentBuilder.tsx:117-119) pass untouched. The preview path is gated by `isConditionReadyForPreview`, but the save path is not.
-3. The create mutation (SegmentCreatePage.tsx:52-59) has **no `onError`** and never renders `mutation.isError`, and there is no global MutationCache handler (`lib/queryClient.ts`).
+**File:** `packages/shared-schemas/src/segment.ts:68-93` (also `packages/segments-core/src/operators.ts:60-124`)
+**Issue:** `attributeConditionSchema` validates `field` (allow-list) and `operator` (16-value enum) independently, but any operator may be combined with any field, and `value` is `z.unknown().optional()`. The compiler then emits SQL that fails at query time for many schema-valid combinations. All of these pass Zod (`400` is never returned) and instead surface as Postgres errors → Fastify 500 on `POST /segments`, `PATCH /segments/:id`, `POST /segments/preview-count`, and `GET /segments/:id/members`:
 
-Concrete reproduction: user opens «Создать сегмент», types a name, never touches the pre-filled empty condition row, clicks «Сохранить сегмент». POST passes Zod, `createSegment` runs, `compileSegmentDefinition` throws `Unknown standard field: ` inside the route handler → Fastify 500 → the UI shows nothing at all; the button just appears to do nothing. The same server gap makes preview-count/POST/PATCH return 500 (not 400) for any unknown-field definition sent directly to the API. Note the test `"rejects an unknown-field definition with 400"` (preview-count.test.ts:120) actually sends a bogus *operator*, not a bogus field — the unknown-field-over-HTTP path is untested and returns 500.
-**Fix:**
+- `{source:"standard", field:"tags", operator:"eq", value:"x"}` → `c.tags = $N` — `text[]` compared to a text param → `22P02 invalid array literal`.
+- `{source:"standard", field:"tags", operator:"is_empty"}` → `c.tags = ''` — `text[] = text` → type error.
+- `{source:"standard", field:"country", operator:"has_tag", value:"x"}` → `c.country @> ARRAY[$N]::text[]` → `42883 operator does not exist: text @> text[]`.
+- `{source:"standard", field:"subscriptionStatus", operator:"eq", value:"garbage"}` → `c.subscription_status = 'garbage'` — the column is a Postgres **enum** (`packages/db/src/schema/contacts.ts:40`), so a non-enum value → `22P02 invalid input value for enum`. `contains`/ILIKE on the enum column fails similarly.
+- `{source:"standard", field:"country", operator:"gt", value:5}` → `(c.country)::numeric` → cast error as soon as any contact has a non-numeric country (i.e. always).
+- `{operator:"eq"}` with **no `value`** → `params.push(undefined)` → pg sends `NULL` → `column = NULL` is always false. This one does not error — it silently saves a segment whose condition can never match (member count 0), which is a wrong-results bug, not just a 5xx.
+- `{operator:"in_last_days", value:"abc"}` → `('abc' || ' days')::interval` → `22007` → 500.
+
+Note this is the same defect class the phase's own hardening suite (`segments-hardening.test.ts`, "CR-01: ... returns 400, not 500") claims to have closed — it was closed for unknown *fields* only; the operator and value dimensions remain open. An authenticated member of any workspace can trigger these 500s trivially, and `createSegment`'s in-transaction count means such definitions fail the save with an opaque 500 the frontend renders as a generic error.
+
+**Fix:** Add a `superRefine` to `attributeConditionSchema` that enforces a field-kind → operator matrix (mirror the web builder's `OPERATORS_BY_KIND`, `apps/web/src/features/segments/SegmentBuilder.tsx:59-91`) and validates `value` shape per operator:
+
 ```ts
-// shared-schemas/src/segment.ts — validate standard fields at the boundary:
-const standardFieldSchema = z.enum(["country", "city", "firstName", "lastName", "phone", "subscriptionStatus", "tags"]);
-export const attributeConditionSchema = z.discriminatedUnion("source", [
-  z.object({ type: z.literal("attribute"), source: z.literal("standard"), field: standardFieldSchema, operator: conditionOperatorSchema, value: z.unknown().optional() }),
-  z.object({ type: z.literal("attribute"), source: z.literal("custom"), field: z.string().min(1), operator: conditionOperatorSchema, value: z.unknown().optional() }),
-]);
+const STANDARD_FIELD_KINDS: Record<StandardField, "string" | "enum" | "tags"> = {
+  country: "string", city: "string", firstName: "string", lastName: "string",
+  phone: "string", subscriptionStatus: "enum", tags: "tags",
+};
+const OPERATORS_FOR_KIND: Record<string, ReadonlySet<ConditionOperator>> = {
+  string: new Set(["eq","neq","contains","not_contains","is_empty","is_not_empty"]),
+  enum:   new Set(["eq","neq"]),
+  tags:   new Set(["has_tag","not_has_tag"]),
+  // custom fields: allow the full string/number/bool/date sets
+};
+// in superRefine: reject operator not in the set for the field's kind;
+// require a non-empty string/number `value` for value-bearing operators;
+// require z.enum(["subscribed","unsubscribed","suppressed"]) for subscriptionStatus eq/neq;
+// require z.number() for gt/gte/lt/lte/in_last_days.
 ```
-Additionally: extend the client `validateDefinition` to reject attribute conditions with empty `field` (and missing `value` for value-requiring operators), and add `onError: () => setServerError(GENERIC_ERROR)` + error rendering to the create mutation (mirroring SegmentDetailPage).
+
+For custom fields (kind unknowable server-side), at minimum validate `value` presence/primitiveness per operator, and see WR-01 for the cast guard.
 
 ## Warnings
 
-### WR-01: Prototype-chain lookup breaks the allow-list's fail-closed guarantee
+### WR-01: Unguarded `::numeric`/`::timestamptz`/`::boolean` casts on custom properties — one bad contact value breaks the entire segment's evaluation
 
-**File:** `packages/segments-core/src/compile.ts:47-51`, `packages/segments-core/src/operators.ts:17-25`
-**Issue:** `STANDARD_FIELD_COLUMNS` is a plain object literal, so `STANDARD_FIELD_COLUMNS[cond.field]` resolves **inherited** `Object.prototype` members. Verified empirically: `field: "constructor"`, `"toString"`, `"hasOwnProperty"`, `"__proto__"` all return truthy values, bypass the `if (!mapped) throw` guard, and get template-interpolated into the SQL as e.g. `function Object() { [native code] } = $2`. The interpolated text is fixed native-code stringification (not attacker-controlled), so this is not an injection vector, but the phase's stated primary SQLi mitigation ("a client-supplied field NEVER reaches SQL as a raw identifier ... fails closed") is factually violated: a non-allow-listed client string selects what gets interpolated, and the result is a Postgres syntax error surfacing as a 500 instead of a clean rejection. CR-01's Zod enum closes the HTTP path, but the compiler must be fail-closed on its own terms — it is the documented last line of defense and has other callers (worker, future phases).
-**Fix:**
-```ts
-// operators.ts — remove the prototype chain entirely:
-export const STANDARD_FIELD_COLUMNS: Record<string, string> = Object.assign(Object.create(null), {
-  country: "c.country", /* ... */
-});
-// or in compile.ts:
-const mapped = Object.hasOwn(STANDARD_FIELD_COLUMNS, cond.field) ? STANDARD_FIELD_COLUMNS[cond.field] : undefined;
-```
-Add a compile test asserting `field: "constructor"` throws.
+**File:** `packages/segments-core/src/operators.ts:83-109`
+**Issue:** Number/date/bool operators on `custom` fields compile to `(c.properties ->> $N)::numeric` (etc.). The cast is applied to every scanned row, so if *any* contact in the workspace has a non-castable value for that property (e.g. `orderTotal: "N/A"` arriving later via event ingestion or CSV import), the whole query raises `22P02` and count/list/point-check all return 500 — including for a segment that saved successfully when the data was still clean. This will also break Phase 4 campaign audience resolution and Phase 6 flow point-checks against that segment, since all consumers share this compiled fragment.
+**Fix:** Use a validity-guarded cast so non-castable rows simply don't match instead of aborting the query. On PG 16+:
 
-### WR-02: No per-field-kind operator/value validation — accepted definitions produce runtime statement errors (500s), including data-dependent breakage of saved segments
-
-**File:** `packages/shared-schemas/src/segment.ts:41-60`, `packages/segments-core/src/operators.ts:62-94`
-**Issue:** Zod validates the operator against the full 17-operator enum regardless of field kind, and `value` is `z.unknown()`. The compiler then emits hard casts. Every one of these passes validation and dies as a Postgres statement error → unhandled 500 (preview-count only maps `57014`; `22P02`/`42883` rethrow):
-- `gt/gte/lt/lte` on a text column or custom property: `(c.country)::numeric` / `(c.properties ->> $N)::numeric` errors (`22P02`) if **any** in-tenant row holds a non-numeric value.
-- `has_tag` on any non-array column (`c.country @> ARRAY[...]` — operator does not exist, `42883`); `is_empty`/`eq` with a non-label value on `subscription_status` (Postgres enum → invalid input value).
-- `before/after/in_last_days` with a non-date/non-numeric `value` (`22P02`); `days`/`count` have `min(1)` but no max — `days: 10**15` overflows `::interval` (`22015`).
-
-The worst variant is time-delayed: a `gt`-on-custom-property segment saved while all property values are numeric starts **permanently 500ing on GET /members and on any PATCH** the moment one contact later receives a non-numeric value for that property (event ingestion and CSV import both write freeform `properties`). RLS confines the blast radius to the tenant's own rows (policy quals evaluate before non-leakproof user quals), but within the tenant this is a real production-breakage path with no recovery in the UI.
-**Fix:** Two layers: (1) in shared-schemas, constrain operator per source/kind where knowable and give `value` a concrete schema per operator (`z.coerce.number()` for gt/gte/lt/lte/in_last_days with a sane `max`, `z.string()` for string/tag ops, enum labels for subscriptionStatus); (2) in operators.ts, compile numeric/timestamp comparisons defensively so bad row data excludes the row instead of aborting the statement, e.g.:
 ```sql
--- instead of (col)::numeric > $N
-(col ~ '^-?[0-9]+(\.[0-9]+)?$' AND (col)::numeric > $N)
+CASE WHEN pg_input_is_valid(c.properties ->> $N, 'numeric')
+     THEN (c.properties ->> $N)::numeric END > $M
 ```
-(or a `safe_numeric` SQL helper). At minimum, map non-timeout Postgres data errors (`22xxx` class) on the preview path to a 400/degraded response rather than 500.
 
-### WR-03: statement_timeout DoS bound covers only preview-count; create, update, and members evaluate definitions unbounded
+or a regex guard (`(c.properties ->> $N) ~ '^-?[0-9]+(\.[0-9]+)?$' AND (c.properties ->> $N)::numeric > $M`) for numeric; analogous guards for timestamptz/boolean.
 
-**File:** `apps/api/src/modules/segments/segments.routes.ts:28-36,140-143,206-214,233`, `apps/api/src/modules/segments/segment.repository.ts:93-118,145-171,217-254`
-**Issue:** The route comment claims preview-count "is the one call mode where a client can submit an arbitrary (unsaved) definition" — that is not true. `POST /segments` and `PATCH /segments/:id` accept an equally arbitrary definition and synchronously run the same `count(*)` inside `createSegment`/`updateSegment` with **no** `statementTimeoutMs`, and `GET /:id/members` runs count + list for the saved definition unbounded on every page view. A member can hammer POST/PATCH with pathological definitions (many custom-property `->>` conditions the 0012 migration comment explicitly says have no index and rely on the timeout as "the DoS safety net") at the same rate as preview, holding tenant-pool connections indefinitely — exactly the T-03-04 scenario the timeout was added to prevent. Extra sting: create/update hold the timeout-less count **inside the INSERT/UPDATE transaction** (with `FOR UPDATE` on the row in updateSegment), extending lock hold times.
-**Fix:** Pass a statement timeout on every evaluation path — a generous one (e.g. 10–15s) for create/update/members if 2s is deemed too tight for saves — and map `57014` on create/update to a 4xx "definition too expensive" response. Alternatively compute the initial member_count outside the write transaction.
+### WR-02: `timeframe.days` and `in_last_days` value have no upper bound — interval overflow yields 500
 
-### WR-04: LIKE wildcards not escaped in contains/not_contains — wrong membership for values containing %, _ or \
+**File:** `packages/shared-schemas/src/segment.ts:103` (and `packages/segments-core/src/compile.ts:72-75`, `operators.ts:107-109`)
+**Issue:** `days: z.number().int().min(1)` accepts values up to 2^53. Postgres interval day fields are int32, so `days: 10000000000` compiles to `('10000000000 days')::interval` → `22015 interval field value out of range` → 500 on all evaluation routes. Same for the `in_last_days` attribute operator, whose value is completely unvalidated (`z.unknown()`). `count` similarly has `min(1)` but no `max` (harmless today, but unbounded).
+**Fix:** `days: z.number().int().min(1).max(3650)` (or another product-sensible ceiling), the same bound on `in_last_days` values once CR-01's value validation exists, and `count: ... .max(100000)`.
 
-**File:** `packages/segments-core/src/operators.ts:52-57`
-**Issue:** `params.push(`%${String(value)}%`)` embeds the raw user value inside an ILIKE pattern. `%` and `_` in the value are interpreted as wildcards: `contains "50%_off"` matches "50 anything off…", `contains "%"` matches every non-null row, and a trailing `\` can produce an invalid pattern. Parameterized (no injection), but the computed membership — the product's core promise — is silently wrong for these values.
-**Fix:**
+### WR-03: Non-UUID `:id` route params surface as Postgres 22P02 → 500 instead of 404
+
+**File:** `apps/api/src/modules/segments/segments.routes.ts:209-293` (via `segment.repository.ts:219-228`)
+**Issue:** `GET/PATCH/DELETE /api/workspaces/:slug/segments/:id` and `GET .../:id/members` pass `id` straight into `WHERE id = $2` against a `uuid` column. `GET /segments/not-a-uuid` raises `22P02 invalid input syntax for type uuid` → unhandled → 500. A stray browser URL or fuzzing produces 5xx noise where the correct answer is 404. (Contacts routes share this pattern, so this is a codebase-wide convention — but this phase added four more instances.)
+**Fix:** Validate the param up front and short-circuit:
+
 ```ts
-const escaped = String(value).replace(/[\\%_]/g, (m) => `\\${m}`);
-params.push(`%${escaped}%`);
-return `${column} ILIKE $${params.length}`; // backslash is the default ESCAPE char
+const uuidSchema = z.string().uuid();
+if (!uuidSchema.safeParse(id).success) {
+  return reply.code(404).send({ error: "Segment not found" });
+}
 ```
 
-### WR-05: Segments list UI hardcodes page 1 — segments beyond the first 20 are unreachable
+(or catch pg error code `22P02` in the repository and return `null`).
 
-**File:** `apps/web/src/features/segments/SegmentsListPage.tsx:22,40-45`
-**Issue:** The query is fixed at `{ page: 1, pageSize: PAGE_SIZE }` with no pagination controls; `total` from the response is never used. The 21st segment a tenant creates is invisible in the UI (it exists only via direct URL), with no indicator that anything is missing. D-10 specifies a paginated list; the API supports it; the UI doesn't.
-**Fix:** Add `page` state + Назад/Вперёд controls exactly as `SegmentMembersTable` already does in `SegmentDetailPage.tsx:140-158`.
+### WR-04: preview-count concurrency is unbounded — statement_timeout bounds duration, not parallelism, of expensive queries against the shared pool
 
-### WR-06: Segment detail page shows an infinite skeleton on 404/error; the not-found branch is unreachable
+**File:** `apps/api/src/modules/segments/segments.routes.ts:186-207`
+**Issue:** The 2s `statement_timeout` (D-08/T-03-04) caps how long *one* preview query runs, but nothing caps how many run concurrently. Each request holds a connection from the single shared `@mega-crm/tenant-context` pool (default pg pool size 10) for up to 2s. One authenticated user scripting parallel preview-count requests with pathological definitions can keep the pool saturated indefinitely, starving every other tenant's API traffic — a cross-tenant availability risk the statement timeout alone does not mitigate. `@fastify/rate-limit` is already registered with `global: false` (`server.ts:33`) exactly so routes can opt in.
+**Fix:** Opt the route into rate limiting:
 
-**File:** `apps/web/src/features/segments/SegmentDetailPage.tsx:230-249`
-**Issue:** `if (segmentQuery.isLoading || !definition) return <Skeleton/>` — when `getSegment` rejects (deleted segment, bad id, network error), `isLoading` becomes false but `definition` stays `null`, so the skeleton renders forever. The subsequent `if (!segmentQuery.data)` "Сегмент не найден" card can never render, because reaching it requires `definition` to be set, which only happens from `segmentQuery.data`. Dead code masking a hang.
-**Fix:** Check the error state first:
-```tsx
-if (segmentQuery.isError) return <NotFoundCard />;
-if (segmentQuery.isLoading || !definition) return <Skeleton />;
+```ts
+fastify.post("/api/workspaces/:slug/segments/preview-count",
+  { config: { rateLimit: { max: 30, timeWindow: "10 seconds" } } },
+  async (request, reply) => { ... });
 ```
 
-### WR-07: Create-segment mutation has no error feedback of any kind
+### WR-05: Segments list shows the "Сегментов пока нет" empty state when a page beyond the last becomes empty (e.g. after deleting the last row on page 2)
 
-**File:** `apps/web/src/features/segments/SegmentCreatePage.tsx:52-59`
-**Issue:** Beyond the CR-01 validation scenario, **any** failure of `createSegment` (network error, 5xx, session expiry) is silent: the mutation defines no `onError`, `mutation.isError` is never rendered, and there is no global MutationCache handler. The user clicks save and nothing happens. The sibling flows (SegmentDetailPage save, DeleteSegmentDialog) both set and render `serverError` — the create page omits the pattern.
-**Fix:** Add `onError: () => setServerError(GENERIC_ERROR)` and render it, matching `SegmentDetailPage.tsx:195-209,269`.
+**File:** `apps/web/src/features/segments/SegmentsListPage.tsx:83-96, 163`
+**Issue:** The empty-state card renders whenever `items.length === 0`, and the pagination controls render only when `items.length > 0`. After deleting the only segment on page 2 (or navigating to an out-of-range page), the query returns `items: []` with `total > 0`: the user sees "Сегментов пока нет" — factually wrong — and the pagination controls that would let them navigate back are hidden, stranding them until a full reload.
+**Fix:** Clamp the page when data shrinks and gate the empty state on `total`, not `items.length`:
+
+```ts
+useEffect(() => {
+  if (data && page > 1 && data.items.length === 0 && data.total > 0) {
+    setPage(Math.max(1, Math.ceil(data.total / PAGE_SIZE)));
+  }
+}, [data, page]);
+// and: items.length === 0 && total === 0 ? <EmptyState/> : <Table/>
+```
+
+### WR-06: Server error messages are discarded — the deliberately crafted "too expensive to evaluate" 400 hint can never reach the user
+
+**File:** `apps/web/src/features/segments/SegmentCreatePage.tsx:38-40`, `apps/web/src/features/segments/SegmentDetailPage.tsx:183-185`, `apps/web/src/features/segments/DeleteSegmentDialog.tsx:48-50`
+**Issue:** All three `onError` handlers unconditionally show `GENERIC_ERROR` ("Что-то пошло не так…"). But the API layer (`lib/api.ts`) throws `ApiError` whose `.message`/`.status` carry the server's response — including the WR-03 hardening path's purpose-built `400 "Segment definition is too expensive to evaluate — narrow the conditions"` from create/update/members (routes lines 168, 251, 277). That server-side work is currently unreachable by any user: a statement-timeout save failure looks identical to a network blip, and the user gets no hint to narrow conditions. (Also note the server copy is English while the entire UI is Russian.)
+**Fix:** Differentiate 4xx responses:
+
+```ts
+onError: (err) => {
+  setServerError(err instanceof ApiError && err.status === 400
+    ? "Не удалось вычислить сегмент при таких условиях — уберите часть условий и попробуйте снова."
+    : GENERIC_ERROR);
+},
+```
+
+(keyed off a machine-readable error code from the API rather than the message string, ideally — add `code: "definition_too_expensive"` to the route's 400 body).
 
 ## Info
 
-### IN-01: `:id` route params not validated as UUID — non-UUID ids return 500, not 404
+### IN-01: types.ts claims `count` is "Required when countOperator === 'at_least' (validated by Zod at the boundary)" — no such validation exists
 
-**File:** `apps/api/src/modules/segments/segments.routes.ts:182-187,196,223,240`
-**Issue:** `GET /segments/not-a-uuid` reaches `WHERE id = $2` and dies with Postgres `22P02` → 500. Matches the pre-existing contacts-routes pattern, so flagged for consistency, not regression.
-**Fix:** `z.string().uuid()` on `:id` params (in both modules), returning 404 on failure.
+**File:** `packages/segments-core/src/types.ts:60-62`, `packages/shared-schemas/src/segment.ts:97-106`
+**Issue:** `behavioralConditionSchema` declares `count` as plain `.optional()` with no refinement tying it to `countOperator`. The compiler defaults missing count to 1 (`compile.ts:78`), so behavior is well-defined, but the doc comment asserts a boundary guarantee that is not implemented — future readers will rely on it.
+**Fix:** Either add the `superRefine` (`countOperator === "at_least" && count === undefined` → issue) or correct the comment to "defaults to 1 in the compiler".
 
-### IN-02: Doc claims Zod requires `count` for `at_least` — it does not
+### IN-02: `GENERIC_ERROR` is duplicated in DeleteSegmentDialog despite the "cannot drift" comment
 
-**File:** `packages/segments-core/src/types.ts:60-62`, `packages/shared-schemas/src/segment.ts:55`
-**Issue:** The comment says "Required when countOperator === 'at_least' (validated by Zod at the boundary)" but the schema has plain `count: ...optional()` with no refine. The compiler silently defaults to 1 — sane, but the documented invariant is false and future consumers may rely on it.
-**Fix:** Add `.superRefine` requiring `count` when `countOperator === "at_least"`, or correct the comment.
+**File:** `apps/web/src/features/segments/DeleteSegmentDialog.tsx:18`
+**Issue:** `validateDefinition.ts:9` exports `GENERIC_ERROR` explicitly "so the copy cannot drift between the two flows", yet `DeleteSegmentDialog.tsx` re-declares an identical private copy instead of importing it.
+**Fix:** `import { GENERIC_ERROR } from "@/features/segments/validateDefinition";` and delete the local constant.
 
-### IN-03: tags conditions supported by engine and tested, but not exposed in the builder UI
+### IN-03: Array index used as React key for groups and condition rows
 
-**File:** `apps/web/src/features/segments/SegmentBuilder.tsx:42-49,58-86`
-**Issue:** `has_tag`/`not_has_tag` and the `tags` field exist in the compiler, schemas, GIN index (0012), and API tests — but `STANDARD_FIELDS`/`OPERATORS_BY_KIND` never offer them, so no user can build a tag condition. Tests writing `field: "tags" as never` also hint at type friction. If deliberate deferral, document it; otherwise a shipped-but-unreachable feature.
-**Fix:** Add `{ field: "tags", label: "Теги", kind: "tags" }` with a `tags` operator group, or record the deferral.
+**File:** `apps/web/src/features/segments/SegmentBuilder.tsx:578, 604`
+**Issue:** `key={groupIndex}` / `key={conditionIndex}` with mid-list removal means React reuses component instances across logical rows. Condition values are controlled (safe), but `FieldCombobox`/`EventCombobox` hold local `open`/`search` state — removing row 0 while row 1's popover is open transfers that popover/search state to the wrong row.
+**Fix:** Generate a stable client-side id per condition/group when rows are created (e.g. `crypto.randomUUID()` stored alongside draft state) and key on it.
 
-### IN-04: `validateDefinition` duplicated verbatim across create and detail pages
+### IN-04: `createdByUserId` nullability drift across DB, repository type, and response schema
 
-**File:** `apps/web/src/features/segments/SegmentCreatePage.tsx:18-35`, `apps/web/src/features/segments/SegmentDetailPage.tsx:26-43`
-**Issue:** Identical 18-line function copy-pasted; the CR-01 fix must touch both or they drift.
-**Fix:** Extract to `features/segments/validateDefinition.ts` and import in both.
+**File:** `packages/db/migrations/0011_segments.sql:6`, `apps/api/src/modules/segments/segment.repository.ts:10`, `packages/shared-schemas/src/segment.ts:173`
+**Issue:** DB column is `text NOT NULL`, `SegmentRow` types it `string`, but `segmentResponseSchema` declares `z.string().nullable()`. Also there is no FK to the better-auth `user` table, so deleting a user leaves dangling author ids (the list page degrades to "—" via the members lookup map, so cosmetic today).
+**Fix:** Align the three declarations (either make the column nullable with `ON DELETE SET NULL`, or drop `.nullable()` from the schema) and document the deliberate absence of the FK.
 
-### IN-05: Array-index React keys for group/condition rows
+### IN-05: `idx_contacts_tags_gin` created without CONCURRENTLY
 
-**File:** `apps/web/src/features/segments/SegmentBuilder.tsx:573,599`
-**Issue:** `key={groupIndex}` / `key={conditionIndex}` with mid-list removal means uncontrolled row-local state (combobox `open`/`search` in FieldCombobox/EventCombobox) can attach to the wrong row after a deletion.
-**Fix:** Generate a stable client-side id per group/condition on creation and use it as the key.
+**File:** `packages/db/migrations/0012_segments_rls_and_indexes.sql:22`
+**Issue:** `CREATE INDEX ... USING gin (tags)` takes a write lock on `contacts` for the duration of the build. At the project's target scale (100k–1M contacts) this blocks contact writes/event-driven upserts during deploy. Transactional migration runners can't use `CONCURRENTLY`, so this needs an out-of-band step if applied to a large production table.
+**Fix:** Acceptable now (table is small); note in the ops runbook that future large-table index builds need `CREATE INDEX CONCURRENTLY` outside the migration transaction.
 
-### IN-06: `segments` list ordering has no tie-breaker and `workspace_id` has no index
+### IN-06: `PATCH /segments/:id` accepts an empty body `{}` as a valid no-op that still bumps `updated_at`
 
-**File:** `apps/api/src/modules/segments/segment.repository.ts:181-186`, `packages/db/migrations/0011_segments.sql`
-**Issue:** `ORDER BY created_at DESC` without `id` tie-breaker can paginate unstably for equal timestamps — the contacts/members paths deliberately added one (Open Question 3) but listSegments didn't. No index on `segments(workspace_id)` for the list filter/RLS qual or the FK cascade; fine at current cardinality, cheap to add now.
-**Fix:** `ORDER BY created_at DESC, id ASC`; `CREATE INDEX ON segments (workspace_id, created_at DESC)`.
+**File:** `packages/shared-schemas/src/segment.ts:143-147`, `apps/api/src/modules/segments/segment.repository.ts:274-285`
+**Issue:** Both fields optional with no "at least one" refinement — `PATCH {}` runs the full SELECT-FOR-UPDATE + UPDATE cycle and mutates `updated_at`, misleading the list's "Обновлён" column.
+**Fix:** `updateSegmentSchema.refine((p) => p.name !== undefined || p.definition !== undefined, "at least one of name/definition required")`.
 
-### IN-07: `created_by_user_id` has no FK, and repo/response types disagree on nullability
+### IN-07: `neq`/`not_contains` exclude NULL-valued contacts (SQL three-valued logic)
 
-**File:** `packages/db/migrations/0011_segments.sql:6`, `apps/api/src/modules/segments/segment.repository.ts:10`, `packages/shared-schemas/src/segment.ts:127`
-**Issue:** Column is `text NOT NULL` with no FK to the auth user table (dangling author after user deletion — list UI already tolerates it with "—"), while `SegmentRow.createdByUserId: string` and `segmentResponseSchema...nullable()` disagree with each other. Pick one contract.
-**Fix:** Either add `REFERENCES "user"(id) ON DELETE SET NULL` and make the column/type nullable, or keep NOT NULL and drop `.nullable()` from the response schema.
-
-### IN-08: statement_timeout set via string interpolation
-
-**File:** `apps/api/src/modules/segments/segment.repository.ts:75-77`
-**Issue:** `SET LOCAL statement_timeout = ${Number(opts.statementTimeoutMs)}` — the `Number()` guard prevents injection (worst case `NaN` → SQL syntax error), and the only current caller passes a constant, but it is the one non-parameterized value interpolation in the module.
-**Fix:** `await client.query("SELECT set_config('statement_timeout', $1, true)", [String(ms)])` — matches the tenant-context GUC pattern.
-
-### IN-09: event-names endpoint returns an unbounded list
-
-**File:** `apps/api/src/modules/segments/event-names.repository.ts:11-31`
-**Issue:** The loose-index-scan CTE is the right pattern (correct termination via the `IS NOT NULL` recursion guard), but there is no cap on distinct names — a tenant ingesting high-cardinality event names (e.g. names with embedded ids) makes this response arbitrarily large and the recursion arbitrarily deep on every builder mount.
-**Fix:** Add a `LIMIT` (e.g. 500) to the outer select and a matching iteration cap; the combobox is a picker, not an export.
-
-### IN-10: `neq`/`not_contains` never match NULL columns — likely surprising membership semantics
-
-**File:** `packages/segments-core/src/operators.ts:49-57`
-**Issue:** `c.country <> $N` excludes contacts with `country IS NULL` (standard SQL three-valued logic). A marketer building «Страна не равно RU» almost certainly expects contacts with no country set to be included. Same for `not_contains`. This is a product-semantics decision, but it is currently implicit and untested.
-**Fix:** Decide explicitly; if NULLs should match negations, compile `(${column} IS DISTINCT FROM $N)` for `neq` and `(${column} IS NULL OR NOT (${column} ILIKE $N))` for `not_contains`, and add tests pinning the choice.
+**File:** `packages/segments-core/src/operators.ts:70-78`
+**Issue:** `c.country <> 'RU'` and `NOT (c.city ILIKE ...)` evaluate to NULL (not true) for contacts where the column is NULL, so "Страна не равно RU" silently excludes every contact with no country set. Marketers typically expect negation to include unknowns. `is_empty` exists as a workaround, but users must know to OR it in.
+**Fix:** Decide the intended semantics explicitly. If NULLs should match negations: `(${column} IS DISTINCT FROM $N)` for `neq` and `(${column} IS NULL OR NOT (${column} ILIKE $N))` for `not_contains`. Otherwise document the current behavior in the builder UI copy.
 
 ---
 
-_Reviewed: 2026-07-06_
+_Reviewed: 2026-07-06T05:19:49Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
