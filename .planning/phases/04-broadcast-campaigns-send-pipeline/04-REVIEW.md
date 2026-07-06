@@ -1,107 +1,166 @@
 ---
 phase: 04-broadcast-campaigns-send-pipeline
-reviewed: 2026-07-06T15:20:00Z
+reviewed: 2026-07-06T18:22:15Z
 depth: standard
-files_reviewed: 2
+files_reviewed: 8
 files_reviewed_list:
-  - apps/api/src/modules/delivery/unsubscribe.routes.ts
-  - apps/api/src/modules/delivery/__tests__/unsubscribe-content-type.test.ts
+  - apps/web/src/features/campaigns/CampaignBuilderPage.tsx
+  - apps/web/src/features/campaigns/CampaignsListPage.tsx
+  - apps/web/src/features/segments/SegmentDetailPage.tsx
+  - packages/shared-schemas/src/__tests__/pagination.test.ts
+  - packages/shared-schemas/src/campaign.ts
+  - packages/shared-schemas/src/index.ts
+  - packages/shared-schemas/src/pagination.ts
+  - packages/shared-schemas/src/segment.ts
 findings:
   critical: 0
-  warning: 3
-  info: 2
+  warning: 2
+  info: 3
   total: 5
 status: issues_found
 ---
 
-# Phase 04: Code Review Report — Post-04-14 Delta Review
+# Phase 04: Code Review Report — Post-04-15 Delta Review
 
-**Reviewed:** 2026-07-06T15:20:00Z
+**Reviewed:** 2026-07-06T18:22:15Z
 **Depth:** standard
-**Files Reviewed:** 2
+**Files Reviewed:** 8
 **Status:** issues_found (warnings only — no blockers)
 
-> This is a delta review of the 04-14 gap-closure change only, superseding the
-> prior full-phase report (93 files, one blocker CR-01: 415 on urlencoded
-> unsubscribe POSTs). The prior report remains in git history. **CR-01 is
-> confirmed fixed** — no Critical findings remain. All findings below are
-> test-coverage warnings against the new regression suite; the source fix
-> itself is correct, correctly scoped, and secure.
+> Delta review of the 04-15 gap-closure change only (commits e67113f..b54219d over
+> a4598d9), superseding the prior 04-14 delta report (unsubscribe content-type;
+> warnings only, no blockers — remains in git history).
 
 ## Narrative Findings (AI reviewer)
 
 ## Summary
 
-The 04-14 fix registers a scoped `addContentTypeParser("application/x-www-form-urlencoded", { parseAs: "buffer", bodyLimit: 1024 }, ...)` inside `registerUnsubscribeRoutes` that buffers and discards the body (`done(null, undefined)`), since the signed URL-path token is the sole authorization input and the handler never reads `request.body`.
+Reviewed the 04-15 delta: the new `EXHAUSTIVE_LOOKUP_PAGE_SIZE = 200` constant in
+`packages/shared-schemas/src/pagination.ts`, the widened `segmentListQuerySchema` /
+`campaignListQuerySchema` `pageSize` bounds referencing it, the contract regression test,
+and the three web call sites repointed at the constant.
 
-The four security-relevant properties named in the review scope were each verified against Fastify 5.9.0 source (`node_modules/fastify/lib/content-type-parser.js`, `plugin-override.js`) **and** empirically via a runtime probe against a scoped-parser Fastify instance:
+The core fix is correct and verified end-to-end:
 
-1. **Scoping — correct, no leak.** `registerUnsubscribeRoutes` is a plain async function (not `fastify-plugin`-wrapped) mounted via `app.register()` (`apps/api/src/server.ts:82`). Fastify's `override()` builds a fresh `ContentTypeParser` copy for every encapsulated register scope (`plugin-override.js:46`), so the parser applies only to `/unsubscribe/*`. Probe: urlencoded POST to a sibling-scope route → **415**. The comment at `unsubscribe.routes.ts:126-130` is accurate.
-2. **bodyLimit — correct.** With `parseAs: "buffer"`, Fastify enforces the parser-level 1024-byte limit both via the `Content-Length` pre-check and via streamed `receivedLength` accounting (chunked-encoding safe), returning **413** `FST_ERR_CTP_BODY_TOO_LARGE` with `connection: close`. Probe: 2KB body → **413**. Route-level `bodyLimit` is unset on both routes, so nothing overrides the 1024 limit. RFC 8058 bodies are ~26 bytes (`List-Unsubscribe=One-Click`); 1024 is a generous, fail-closed ceiling.
-3. **Charset-parameterized content types — correctly matched.** Fastify 5.9's `getParser` falls back to a lowercased media-type-essence lookup after the exact-match miss (`content-type-parser.js:150`), so `application/x-www-form-urlencoded; charset=UTF-8` (and case variants) hit the scoped parser. Probe: charset-parameterized and uppercase variants → **200**. However this behavior is not pinned by any test — see WR-02.
-4. **Security of discarding the body — sound.** The handler's only input is the HMAC-verified `:token` path param; `request.body` is never read on either route in this scope, so `undefined` body cannot influence any decision. The verify-then-mutate path is unchanged by this delta.
+- All three call sites (`CampaignBuilderPage.tsx:37`, `CampaignsListPage.tsx:72`,
+  `SegmentDetailPage.tsx:169`) now send the exact constant the schemas enforce as `max` —
+  the client/server contract can no longer drift silently. No leftover hardcoded
+  `pageSize: 200`/`100` literals remain at exhaustive-lookup call sites (grep-verified).
+- The server honors the widened bound: both route handlers
+  (`apps/api/src/modules/segments/segments.routes.ts:127`,
+  `apps/api/src/modules/campaigns/campaigns.routes.ts:168`) pass `parsed.data` straight into
+  repository queries using parameterized `LIMIT $n OFFSET $n` — no hidden clamp, no SQL
+  injection surface.
+- The contract test suite runs and passes (18/18 in `packages/shared-schemas`), pinning the
+  accepted value, the rejected boundary (+1), min/integer constraints, and the default of 20.
+- `index.ts`'s new `export * from "./pagination.js"` introduces no name collisions.
+- `segmentMembersQuerySchema` correctly keeps its literal `max(100)` — members are
+  high-cardinality and not an exhaustive-lookup surface.
 
-Remaining findings are all gaps in the regression suite: it locks in the two happy-path shapes but does not pin the encapsulation boundary, the charset variant, or the browser-form `Accept: text/html` branch — the exact class of framework-behavior regressions this fix exists to guard against.
+However, the fix moved the failure mode rather than eliminating it: the original bug was a
+loud 400 when the client's lookup pageSize exceeded the schema ceiling; the surviving gap is
+*silent truncation* when a workspace exceeds 200 segments/campaigns — nothing enforces that
+bound server-side and no call site checks `total`. Findings below.
 
 ## Warnings
 
-### WR-01: Scope-guard test verifies media-type specificity, not encapsulation (T-04-14-02 untested)
+### WR-01: "Exhaustive" lookups silently truncate past 200 rows with no total check — the D-03 safety warning can silently disappear
 
-**File:** `apps/api/src/modules/delivery/__tests__/unsubscribe-content-type.test.ts:142-150`
-**Issue:** The test named "scope guard" POSTs `application/xml` to the **unsubscribe route** and asserts 415. That proves the parser is media-type-specific, but the actual scoping risk documented in the source comment (T-04-14-02: the parser "cannot weaken body parsing for any sibling route — /api/auth/*, campaigns, contacts, segments") is the **opposite direction**: it requires asserting that a **sibling-scope route** still rejects `application/x-www-form-urlencoded` with 415. Today encapsulation holds (verified empirically), but it holds only because `registerUnsubscribeRoutes` is a plain async function mounted via `app.register()`. If a future refactor wraps it in `fastify-plugin` (a routine "fix" when someone wants a decorator to escape the scope) or hoists the `addContentTypeParser` call into `buildServer`, the parser silently becomes app-wide — every authenticated JSON API route would start accepting urlencoded requests with `request.body === undefined` — and no test would fail.
-**Fix:** Add one test that POSTs urlencoded to an existing sibling route and asserts 415:
+**File:** `apps/web/src/features/segments/SegmentDetailPage.tsx:167-174` (also `apps/web/src/features/campaigns/CampaignBuilderPage.tsx:35-41`, `apps/web/src/features/campaigns/CampaignsListPage.tsx:70-80`)
+**Issue:** All three call sites fetch only `page: 1` with `pageSize: EXHAUSTIVE_LOOKUP_PAGE_SIZE`
+and never inspect the `total` field the API already returns. There is no server-side cap on
+segments or campaigns per workspace (grep-verified: no MAX_SEGMENTS/MAX_CAMPAIGNS-style limit
+exists anywhere in `apps/api` or `packages`), so past 200 rows each site degrades silently:
 
-```typescript
-it("urlencoded parser does not leak to sibling scopes (T-04-14-02)", async () => {
-  const res = await app.inject({
-    method: "POST",
-    url: "/api/workspaces",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    payload: "name=x",
-  });
-  expect(res.statusCode).toBe(415);
-});
+1. `SegmentDetailPage` (sharpest edge): the D-03 warning — "a scheduled campaign references
+   this segment; editing changes its audience" — is an explicit safety mechanism. With >200
+   campaigns, the scheduled one can fall outside page 1 (list ordering is recency-based, so
+   its position is arbitrary), the warning is silently absent, and a marketer edits a live
+   scheduled campaign's audience with no notice. The comment at line 166 ("workspace campaign
+   counts are small") is an assumption, not an enforced invariant.
+2. `SegmentPicker` (CampaignBuilderPage): segments beyond row 200 cannot be selected at all.
+3. `CampaignsListPage`: campaigns referencing segments beyond row 200 show "—" as audience.
+
+This is the same failure class the 04-15 debug session fixed (client asks for more than the
+contract delivers), moved from a loud 400 to silent data loss. The degradation is detectable
+for free from the response's `total`.
+**Fix:** At minimum, detect truncation and surface it, e.g. in each lookup consumer:
+
+```tsx
+const lookupTruncated =
+  (referencingCampaignsQuery.data?.total ?? 0) > EXHAUSTIVE_LOOKUP_PAGE_SIZE;
+// SegmentDetailPage: when lookupTruncated, render the amber notice in a
+// "could not verify all campaigns" form instead of omitting it entirely.
 ```
 
-### WR-02: Charset-parameterized content type (`; charset=UTF-8`) works but is unpinned by tests
+Longer term, the D-03 check should be a dedicated server query — the repository already has
+exactly this shape for the delete guard
+(`apps/api/src/modules/segments/segment.repository.ts:305`:
+`SELECT name FROM campaigns WHERE workspace_id = $1 AND segment_id = $2 ... LIMIT 1`);
+exposing a scheduled-status variant removes the exhaustive fetch from this path entirely.
 
-**File:** `apps/api/src/modules/delivery/__tests__/unsubscribe-content-type.test.ts` (missing case); `apps/api/src/modules/delivery/unsubscribe.routes.ts:131-137`
-**Issue:** Real HTTP clients and some mailbox providers send `Content-Type: application/x-www-form-urlencoded; charset=UTF-8`. This currently matches the scoped parser only via Fastify 5.9's media-type-essence fallback (`content-type-parser.js:150` — a lookup the Fastify source itself annotates as reconciling "conflicting desires across our test suite"). CR-01 was precisely a framework content-type-matching behavior nobody had a test for; if a Fastify upgrade tightens string-parser matching to exact-match, charset-bearing one-click POSTs regress to 415 — silently failing unsubscribes, a compliance-relevant failure (RFC 8058 / CAN-SPAM exposure) — and this regression suite, whose sole purpose is content-type parsing, would stay green.
-**Fix:** Add a third happy-path test identical to the one-click test but with `"content-type": "application/x-www-form-urlencoded; charset=UTF-8"`, asserting 2xx and `subscriptionStatus === "unsubscribed"`.
+### WR-02: SegmentPicker keys cmdk items by segment name — duplicate names can select the wrong segment
 
-### WR-03: The `Accept: text/html` success-page branch has zero test coverage; the "confirm-page form POST" test does not actually simulate a browser form submit
+**File:** `apps/web/src/features/campaigns/CampaignBuilderPage.tsx:66`
+**Issue:** `<CommandItem key={segment.id} value={segment.name} ...>` — cmdk identifies and
+matches items by `value`, and segment names have no uniqueness constraint (the repository's
+`SegmentConflictError` covers only delete-time referential conflicts, not name collisions;
+`createSegmentSchema` imposes none). Two segments named "VIP" produce two cmdk items with
+identical values: filtering/highlighting becomes ambiguous and selecting one can fire the
+other item's `onSelect`, silently pointing the campaign at the wrong audience — a
+consequential mis-selection for a broadcast send. Pre-existing pattern, but line 66's
+component is squarely in this delta's blast radius (its query is what 04-15 fixed).
+**Fix:** Key the item by id and keep the name for text filtering:
 
-**File:** `apps/api/src/modules/delivery/__tests__/unsubscribe-content-type.test.ts:118-140`; branch at `apps/api/src/modules/delivery/unsubscribe.routes.ts:153,176-179`
-**Issue:** A real browser `<form method="POST">` submit sends **both** `Content-Type: application/x-www-form-urlencoded` **and** `Accept: text/html`. The new "confirm-page form POST" test sets only the content-type; `app.inject` sends no `Accept` header, so `acceptsHtml` is false and the test exercises the identical RFC-8058 empty-body branch as the first test. Grepping all three unsubscribe suites (`unsubscribe.test.ts`, `unsubscribe-xss.test.ts`, this file) confirms **no test anywhere sets an Accept header** — `renderSuccessPage()` and the `acceptsHtml` branch (`unsubscribe.routes.ts:176-179`) are entirely uncovered. The mutation still happens before the branch, so a rendering bug wouldn't lose the unsubscribe, but the human confirm-flow's visible outcome (the «Вы отписаны» page) could break — e.g., a serializer/type regression turning it into a 500 after the DB write — with no failing test, and the test's name/comment claim coverage it doesn't provide.
-**Fix:** In the confirm-page test, add `accept: "text/html"` to the headers and strengthen assertions:
-
-```typescript
-headers: {
-  "content-type": "application/x-www-form-urlencoded",
-  accept: "text/html",
-},
-// ...
-expect(res.statusCode).toBe(200);
-expect(res.headers["content-type"]).toContain("text/html");
-expect(res.body).toContain("Вы отписаны");
+```tsx
+<CommandItem
+  key={segment.id}
+  value={segment.id}
+  keywords={[segment.name]}
+  onSelect={() => choose(segment.id)}
+>
+  {segment.name}
+</CommandItem>
 ```
 
 ## Info
 
-### IN-01: Oversized-body 413 behavior (bodyLimit: 1024) is untested and undocumented in the suite
+### IN-01: Identical segment lookup duplicated under two query keys
 
-**File:** `apps/api/src/modules/delivery/unsubscribe.routes.ts:133`; missing test in `unsubscribe-content-type.test.ts`
-**Issue:** A urlencoded body over 1024 bytes gets 413 `FST_ERR_CTP_BODY_TOO_LARGE` (verified empirically). This is the intended fail-closed behavior (T-04-14-01), but no test pins either the limit or its failure mode; a later "helpful" bump or removal of `bodyLimit` would be invisible.
-**Fix:** Add a test POSTing a >1024-byte urlencoded payload and asserting `expect(res.statusCode).toBe(413)`.
+**File:** `apps/web/src/features/campaigns/CampaignBuilderPage.tsx:36` and `apps/web/src/features/campaigns/CampaignsListPage.tsx:71`
+**Issue:** Both run the exact same request
+(`listSegments(slug, { page: 1, pageSize: EXHAUSTIVE_LOOKUP_PAGE_SIZE })`) but under
+different query keys (`"picker"` vs `"all-for-lookup"`), so TanStack Query caches and fetches
+the same data twice per workspace session. The 04-15 change touched both lines and was the
+natural moment to converge them.
+**Fix:** Extract a shared `queryOptions` helper (e.g. `segmentsLookupQuery(slug)`) in
+`apps/web/src/features/segments/api.ts` holding the single key + queryFn; both pages consume it.
 
-### IN-02: `toBeLessThan(300)` status assertions also admit 1xx responses
+### IN-02: Contract test never exercises the string form that actually crosses the wire
 
-**File:** `apps/api/src/modules/delivery/__tests__/unsubscribe-content-type.test.ts:112,136`
-**Issue:** `expect(res.statusCode).toBeLessThan(300)` passes for any 1xx status, not just 2xx. Fastify won't emit 1xx here in practice, but the assertion is looser than the RFC 8058 requirement ("2xx") the test comments cite.
-**Fix:** Assert the exact expected code — `expect(res.statusCode).toBe(200)` — or bound both ends (`toBeGreaterThanOrEqual(200)` + `toBeLessThan(300)`).
+**File:** `packages/shared-schemas/src/__tests__/pagination.test.ts:19,27`
+**Issue:** The routes parse `request.query`, where `pageSize` arrives as the *string* `"200"`
+and relies on `z.coerce.number()`. The test feeds only numbers, so the coercion path — the
+one production traffic takes — is unpinned. A future refactor from `z.coerce.number()` to
+`z.number()` would keep this suite green while reintroducing a 400 on every real request —
+the exact regression class this contract test exists to prevent.
+**Fix:** Add one assertion per schema:
+`expect(segmentListQuerySchema.safeParse({ pageSize: String(EXHAUSTIVE_LOOKUP_PAGE_SIZE) }).success).toBe(true);`
+
+### IN-03: Public API max page size is now coupled to a UI lookup constant
+
+**File:** `packages/shared-schemas/src/pagination.ts:15` (consumed at `segment.ts:154`, `campaign.ts:39`)
+**Issue:** The single-source-of-truth design is intentional and well documented, but note the
+coupling direction: `EXHAUSTIVE_LOOKUP_PAGE_SIZE` is semantically a *client* lookup size, yet
+it now defines the *public API* ceiling for `GET /segments` and `GET /campaigns` for all
+consumers (including API-key integrations). If WR-01 is later "fixed" by bumping the constant
+to a large value, the public list endpoints' max page size silently balloons with it.
+**Fix:** If the constant ever needs to grow, split into `MAX_LIST_PAGE_SIZE` (API bound) and
+`EXHAUSTIVE_LOOKUP_PAGE_SIZE` (client value) with a test asserting
+`EXHAUSTIVE_LOOKUP_PAGE_SIZE <= MAX_LIST_PAGE_SIZE`. No action needed at 200.
 
 ---
 
-_Reviewed: 2026-07-06T15:20:00Z_
+_Reviewed: 2026-07-06T18:22:15Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
