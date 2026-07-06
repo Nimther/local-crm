@@ -1,9 +1,9 @@
 ---
-status: partial
+status: diagnosed
 phase: 04-broadcast-campaigns-send-pipeline
 source: [04-01-SUMMARY.md, 04-02-SUMMARY.md, 04-03-SUMMARY.md, 04-04-SUMMARY.md, 04-05-SUMMARY.md, 04-06-SUMMARY.md, 04-07-SUMMARY.md, 04-08-SUMMARY.md, 04-09-SUMMARY.md, 04-10-SUMMARY.md, 04-11-SUMMARY.md, 04-12-SUMMARY.md, 04-13-SUMMARY.md, 04-14-SUMMARY.md]
 started: 2026-07-06T14:53:14Z
-updated: 2026-07-06T17:47:51Z
+updated: 2026-07-06T17:52:28Z
 ---
 
 ## Current Test
@@ -401,7 +401,18 @@ blocked: 0
   reason: "User reported: Не могу выбрать сегмент аудитории — сегменты не отображаются. В консоли ошибка http://localhost:5173/api/workspaces/localrent/segments?page=1&pageSize=200 400 (Bad Request)"
   severity: blocker
   test: 3
-  root_cause: ""
-  artifacts: []
-  missing: []
-  debug_session: ""
+  root_cause: "Client/server contract mismatch: Phase 4 UI requests pageSize=200 while shared Zod query schemas cap pageSize at max(100); Fastify rejects with 400 before the handler runs. Three call sites affected (one visible blocker + two silent failures, incl. latent Test 12 D-03 warning)."
+  artifacts:
+    - path: "apps/web/src/features/campaigns/CampaignBuilderPage.tsx"
+      issue: "SegmentPicker requests listSegments pageSize=200 (line 36) — the reported blocker"
+    - path: "apps/web/src/features/campaigns/CampaignsListPage.tsx"
+      issue: "segment-name lookup requests pageSize=200 (line 71) — silent 400, segment names blank"
+    - path: "apps/web/src/features/segments/SegmentDetailPage.tsx"
+      issue: "D-03 scheduled-campaign warning requests listCampaigns pageSize=200 (line 164) — silent 400, warning never renders"
+    - path: "packages/shared-schemas/src/segment.ts"
+      issue: "segmentListQuerySchema caps pageSize at 100 (line 152)"
+    - path: "packages/shared-schemas/src/campaign.ts"
+      issue: "campaignListQuerySchema caps pageSize at 100 (line 37)"
+  missing:
+    - "Align client pageSize with schema bounds at ALL three call sites (clamp to 100) OR raise both shared-schema maxes to 200 — one consistent pass, not just the picker"
+  debug_session: ".planning/debug/campaign-builder-segments-400.md"
