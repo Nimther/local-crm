@@ -5,16 +5,16 @@ milestone_name: milestone
 current_phase: 03
 current_phase_name: segmentation-engine
 status: executing
-stopped_at: Phase 03 verification — 2 gaps (tags unreachable in builder UI; silent 500 on default save)
-last_updated: "2026-07-06T04:54:12.168Z"
+stopped_at: Completed 03-08-PLAN.md (segmentation UI gap-closure E2E)
+last_updated: "2026-07-06T05:08:48.087Z"
 last_activity: 2026-07-06
 last_activity_desc: Phase 03 execution started
 progress:
   total_phases: 7
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 29
-  completed_plans: 28
-  percent: 29
+  completed_plans: 29
+  percent: 43
 ---
 
 # Project State
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-07-05)
 ## Current Position
 
 Phase: 03 (segmentation-engine) — EXECUTING
-Plan: 4 of 8
+Plan: 5 of 8
 Status: Ready to execute
 Last activity: 2026-07-06 — Phase 03 execution started
 
@@ -84,6 +84,7 @@ Progress: [████████████████████] 21/21 p
 | Phase 03 P05 | 15min | 2 tasks | 6 files |
 | Phase 03 P06 | 15min | 2 tasks | 3 files |
 | Phase 03 P07 | 15min | 2 tasks | 5 files |
+| Phase 03 P08 | 15min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -161,6 +162,8 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 03]: 03-06: SAVE_EVAL_STATEMENT_TIMEOUT_MS set to 15000ms (vs preview-count's 2000ms) -- create/update/members reject with 400 on 57014 rather than degrading like preview-count, since there is no meaningful partial state for a persisted write
 - [Phase ?]: [Phase 03]: 03-07: validateDefinition.ts hardcodes its own HIDDEN_VALUE_OPERATORS set mirroring SegmentBuilder's rather than importing it (not exported) -- both mirror the same fixed 16-operator ConditionOperator enum
 - [Phase ?]: [Phase 03]: 03-07: SegmentDetailPage's header reads local name state instead of segmentQuery.data.name -- avoids a TS possibly-undefined narrowing gap once isError is checked ahead of the skeleton branch (WR-06)
+- [Phase 03]: 03-08: Radix Select-role comboboxes (countOperator/timeframe) are located by DOM-order index via getByRole('combobox').nth(n), not accessible name -- combobox is a name-from-author-only ARIA role — Mirrors the 03-03 STATE finding for the custom Field/Event popover comboboxes, applied here to the framework <Select> layer
+- [Phase 03]: 03-08: SEGM-02 E2E removes the default empty attribute condition before adding the behavioral condition under test, so CR-01's client-side validation doesn't block the save
 
 ### Pending Todos
 
@@ -187,6 +190,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-06T04:53:21.188Z
-Stopped at: Completed 03-03-PLAN.md
+Last session: 2026-07-06T05:08:48.063Z
+Stopped at: Completed 03-08-PLAN.md (segmentation UI gap-closure E2E)
 Resume file: None

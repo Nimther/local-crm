@@ -15,7 +15,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Workspace Foundation & Team Access** - Multi-tenant workspaces, team invites, roles, and a validated encrypted SendGrid key (completed 2026-07-03)
 - [x] **Phase 2: Contacts & Event Ingestion** - Contact base via UI/CSV/API plus an async server-side event stream that upserts contacts (completed 2026-07-04)
-- [ ] **Phase 3: Segmentation Engine** - Dynamic profile + behavioral segments with live preview, on one shared evaluation engine
+- [x] **Phase 3: Segmentation Engine** - Dynamic profile + behavioral segments with live preview, on one shared evaluation engine (completed 2026-07-06)
 - [ ] **Phase 4: Broadcast Campaigns & Send Pipeline** - First complete send loop: throttled, idempotent, suppression-aware broadcasts via SendGrid
 - [ ] **Phase 5: Webhook Processing & Delivery Tracking** - Verified, deduplicated delivery events that update message status and auto-suppress contacts
 - [ ] **Phase 6: Flows (Triggered Chains)** - Visual canvas builder and versioned execution engine for automated triggered chains
@@ -138,7 +138,7 @@ Plans:
   3. As the user edits segment conditions, a live count of matching contacts updates.
   4. The same saved segment definition resolves an identical membership set whether queried for a campaign audience or a flow trigger.
 
-**Plans**: 7/8 plans executed
+**Plans**: 8/8 plans complete
 **UI hint**: yes
 
 Plans:
@@ -169,7 +169,7 @@ Plans:
 
 **Wave 7** *(gap closure — blocked on Wave 6)*
 
-- [ ] 03-08-PLAN.md — E2E behavior coverage: tags slice + CR-01 regression + SEGM-02 behavioral inputs + SEGM-04 degraded state (SEGM-01, SEGM-02, SEGM-04)
+- [x] 03-08-PLAN.md — E2E behavior coverage: tags slice + CR-01 regression + SEGM-02 behavioral inputs + SEGM-04 degraded state (SEGM-01, SEGM-02, SEGM-04)
 
 ### Phase 4: Broadcast Campaigns & Send Pipeline
 
@@ -276,7 +276,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 |-------|----------------|--------|-----------|
 | 1. Workspace Foundation & Team Access | 7/7 | Complete    | 2026-07-03 |
 | 2. Contacts & Event Ingestion | 14/14 | Complete    | 2026-07-05 |
-| 3. Segmentation Engine | 7/8 | In Progress|  |
+| 3. Segmentation Engine | 8/8 | Complete   | 2026-07-06 |
 | 4. Broadcast Campaigns & Send Pipeline | 0/6 | Not started | - |
 | 5. Webhook Processing & Delivery Tracking | 0/3 | Not started | - |
 | 6. Flows (Triggered Chains) | 0/5 | Not started | - |
