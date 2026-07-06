@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { EXHAUSTIVE_LOOKUP_PAGE_SIZE } from "@mega-crm/shared-schemas";
 import { cn } from "@/lib/utils";
 import {
   deleteCampaign,
@@ -68,7 +69,7 @@ export function CampaignsListPage() {
   // way SegmentsListPage resolves createdByUserId -> member name.
   const segmentsQuery = useQuery({
     queryKey: ["workspace", slug, "segments", "all-for-lookup"],
-    queryFn: () => listSegments(slug, { page: 1, pageSize: 200 }),
+    queryFn: () => listSegments(slug, { page: 1, pageSize: EXHAUSTIVE_LOOKUP_PAGE_SIZE }),
     enabled: Boolean(slug),
   });
 

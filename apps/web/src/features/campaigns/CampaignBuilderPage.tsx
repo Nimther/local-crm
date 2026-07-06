@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
 
+import { EXHAUSTIVE_LOOKUP_PAGE_SIZE } from "@mega-crm/shared-schemas";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
@@ -33,7 +34,7 @@ function SegmentPicker({
 
   const segmentsQuery = useQuery({
     queryKey: ["workspace", slug, "segments", "picker"],
-    queryFn: () => listSegments(slug, { page: 1, pageSize: 200 }),
+    queryFn: () => listSegments(slug, { page: 1, pageSize: EXHAUSTIVE_LOOKUP_PAGE_SIZE }),
     enabled: Boolean(slug),
   });
 

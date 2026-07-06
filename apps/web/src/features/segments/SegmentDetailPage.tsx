@@ -4,7 +4,12 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { useParams } from "react-router";
 import { toast } from "sonner";
 
-import type { ContactResponse, SegmentDefinition, SegmentResponse } from "@mega-crm/shared-schemas";
+import {
+  EXHAUSTIVE_LOOKUP_PAGE_SIZE,
+  type ContactResponse,
+  type SegmentDefinition,
+  type SegmentResponse,
+} from "@mega-crm/shared-schemas";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -161,7 +166,7 @@ export function SegmentDetailPage() {
   // counts are small; same read-only, non-blocking scope as the UI-SPEC note).
   const referencingCampaignsQuery = useQuery({
     queryKey: ["workspace", slug, "campaigns", "for-segment-warning"],
-    queryFn: () => listCampaigns(slug, { page: 1, pageSize: 200 }),
+    queryFn: () => listCampaigns(slug, { page: 1, pageSize: EXHAUSTIVE_LOOKUP_PAGE_SIZE }),
     enabled: Boolean(slug) && Boolean(id),
   });
   const referencingScheduledCampaign = referencingCampaignsQuery.data?.items.find(
