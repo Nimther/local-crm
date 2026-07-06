@@ -19,5 +19,15 @@ export default defineConfig({
     testTimeout: 20_000,
     hookTimeout: 20_000,
     exclude: [...configDefaults.exclude, "dist/**"],
+    env: {
+      // 04-10: send-ledger-integrity.test.ts is delivery-core's first
+      // integration test needing a real Postgres connection (RLS-forced
+      // fixtures via @mega-crm/tenant-context's withTenant/withTenantTransaction)
+      // -- route it at the isolated test database, matching apps/api and
+      // apps/worker's vitest.config.ts convention. Every OTHER existing test
+      // in this package stubs the PoolClient directly and never opens a real
+      // connection, so this is additive and does not change their behavior.
+      DATABASE_URL: process.env.TEST_DATABASE_URL ?? "",
+    },
   },
 });
