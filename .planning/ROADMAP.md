@@ -138,7 +138,7 @@ Plans:
   3. As the user edits segment conditions, a live count of matching contacts updates.
   4. The same saved segment definition resolves an identical membership set whether queried for a campaign audience or a flow trigger.
 
-**Plans**: 4/4 plans complete
+**Plans**: 4 plans complete + 4 gap-closure plans (verification found gaps 2026-07-05: failed truth #1 + anti-patterns)
 **UI hint**: yes
 
 Plans:
@@ -157,6 +157,19 @@ Plans:
 **Wave 4** *(blocked on Wave 3)*
 
 - [x] 03-04-PLAN.md — Segment detail (edit + paginated member list) + delete + list enrichment (count/freshness/author) (SEGM-01, SEGM-03)
+
+**Wave 5** *(gap closure — blocked on Wave 4)*
+
+- [ ] 03-05-PLAN.md — Contract + engine hardening: Zod standard-field allow-list (CR-01/WR-01 root cause) + prototype-safe fail-closed compiler + LIKE-wildcard escaping (WR-04) (SEGM-01, SEGM-03)
+
+**Wave 6** *(gap closure — blocked on Wave 5)*
+
+- [ ] 03-06-PLAN.md — API hardening: statement_timeout on create/update/members (WR-03) + 57014→4xx mapping + HTTP tests (400 on unknown field, tags round-trip) (SEGM-01, SEGM-04)
+- [ ] 03-07-PLAN.md — Web builder: reachable tags condition + CR-01 client validation/error UI + list pagination (WR-05) + detail not-found (WR-06) (SEGM-01)
+
+**Wave 7** *(gap closure — blocked on Wave 6)*
+
+- [ ] 03-08-PLAN.md — E2E behavior coverage: tags slice + CR-01 regression + SEGM-02 behavioral inputs + SEGM-04 degraded state (SEGM-01, SEGM-02, SEGM-04)
 
 ### Phase 4: Broadcast Campaigns & Send Pipeline
 
