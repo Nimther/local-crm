@@ -83,6 +83,10 @@ export function TestSendPanel({ slug, campaign }: { slug: string; campaign: Camp
 
         <div className="space-y-2">
           <Label htmlFor="test-send-json">dynamic_template_data</Label>
+          <p className="text-sm text-muted-foreground">
+            Это пример данных реального контакта из сегмента кампании (включая его email) — письмо всё равно уйдёт на
+            адрес, указанный в поле «Получатель» выше.
+          </p>
           {sampleQuery.isLoading ? (
             <Skeleton className="h-40 w-full" />
           ) : (
