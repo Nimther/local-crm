@@ -19,10 +19,19 @@ import { registerApiKeyRoutes } from "./modules/api-keys/api-keys.routes.js";
 import { registerEventsApiRoutes } from "./modules/events/events-api.routes.js";
 import { registerCsvImportRoutes } from "./modules/contacts/csv-import.routes.js";
 import { registerSegmentsRoutes } from "./modules/segments/segments.routes.js";
+import { registerUnsubscribeRoutes } from "./modules/delivery/unsubscribe.routes.js";
 
 /** Assembles the Fastify app: zod type provider, better-auth handler, workspace/profile/invite/member routes. */
 export async function buildServer() {
-  const app = Fastify({ loggerInstance: logger }).withTypeProvider<ZodTypeProvider>();
+  const app = Fastify({
+    loggerInstance: logger,
+    // 04-03: find-my-way's default maxParamLength (100) is too small for the
+    // signed `:token` route param on /unsubscribe/:token -- the HMAC token
+    // (base64url JSON payload + '.' + base64url signature) runs ~230-260
+    // chars. Without this, find-my-way returns a 414 for every genuine
+    // token, defeating the endpoint entirely.
+    routerOptions: { maxParamLength: 1024 },
+  }).withTypeProvider<ZodTypeProvider>();
 
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
@@ -44,6 +53,7 @@ export async function buildServer() {
   await app.register(registerEventsApiRoutes);
   await app.register(registerCsvImportRoutes);
   await app.register(registerSegmentsRoutes);
+  await app.register(registerUnsubscribeRoutes);
 
   return app;
 }

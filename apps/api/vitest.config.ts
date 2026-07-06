@@ -43,6 +43,12 @@ export default defineConfig({
       // sendgrid-key-connect.test.ts never require real AWS credentials.
       KMS_PROVIDER: process.env.KMS_PROVIDER ?? "local",
       KMS_LOCAL_KEK: process.env.KMS_LOCAL_KEK ?? "grdVCb1fxmhPzylKEPqafcPW4xOMaynE0UwaFUo2OUE=",
+      // 04-03: delivery-core reads these directly from process.env (no zod
+      // schema, matching the KMS/tenant-context pattern) -- test-only values,
+      // never real platform secrets.
+      UNSUBSCRIBE_TOKEN_SECRET:
+        process.env.UNSUBSCRIBE_TOKEN_SECRET ?? "test-only-unsubscribe-secret-at-least-32-bytes",
+      PUBLIC_APP_URL: process.env.PUBLIC_APP_URL ?? "https://api.test.local",
     },
   },
 });
