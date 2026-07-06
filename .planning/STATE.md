@@ -6,14 +6,14 @@ current_phase: 04
 current_phase_name: broadcast-campaigns-send-pipeline
 status: executing
 stopped_at: Completed 04-09-PLAN.md
-last_updated: "2026-07-06T13:01:21.341Z"
+last_updated: "2026-07-06T13:08:27.304Z"
 last_activity: 2026-07-06
 last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 7
   completed_phases: 3
   total_plans: 42
-  completed_plans: 38
+  completed_plans: 39
   percent: 43
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-07-06)
 ## Current Position
 
 Phase: 04 (broadcast-campaigns-send-pipeline) — EXECUTING
-Plan: 2 of 13
+Plan: 3 of 13
 Status: Ready to execute
 Last activity: 2026-07-06 — Phase 04 execution started
 
@@ -95,6 +95,7 @@ Progress: [████████████████████] 29/29 p
 | Phase 04 P07 | 25min | 3 tasks | 7 files |
 | Phase 04 P08 | 35min | 3 tasks | 11 files |
 | Phase 04 P09 | 20min | 2 tasks | 3 files |
+| Phase 04 P10 | 12min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -200,6 +201,8 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 04]: 04-08: SendSettingsPage uses manual useState instead of react-hook-form+zodResolver -- workspaceSendSettingsSchema's frequencyWindowHours default(24) makes input/output types diverge for zodResolver's generic
 - [Phase 04]: 04-09: resolveCampaignFromEmail is only invoked when fromSenderId OR fromEmail is set on launch/schedule/test-send -- richer incomplete/missing-sender multi-field breakdown still owns the message when neither is set
 - [Phase 04]: 04-09: resolveCampaignFromEmail wraps its own withTenant(workspaceId, ...) internally rather than assuming an ambient tenant context, matching the plan's literal function signature
+- [Phase ?]: [Phase 04]: 04-10: recordExcluded's ON CONFLICT DO UPDATE guarded with WHERE sends.status NOT IN ('sent','dispatching','failed') -- a redelivered kickoff exclusion re-walk now no-ops against a preserved row instead of demoting it (CR-07)
+- [Phase ?]: [Phase 04]: 04-10: packages/delivery-core gained its first real-Postgres integration test lane (src/test/db-fixture.ts + vitest.config.ts DATABASE_URL routing), mirroring apps/worker's fixture -- prior delivery-core tests all stubbed PoolClient
 
 ### Pending Todos
 
@@ -226,6 +229,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-06T13:01:21.316Z
+Last session: 2026-07-06T13:06:34.628Z
 Stopped at: Completed 04-09-PLAN.md
 Resume file: None
