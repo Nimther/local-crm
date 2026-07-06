@@ -17,9 +17,10 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { SubscriptionStatusBadge } from "@/features/contacts/SubscriptionStatusBadge";
-import { listCampaigns } from "@/features/campaigns/api";
+import { listCampaigns, type CampaignResponse } from "@/features/campaigns/api";
 import { getSegment, listSegmentMembers, updateSegment } from "@/features/segments/api";
 import { SegmentBuilder } from "@/features/segments/SegmentBuilder";
+import { findBlockingScheduledCampaign } from "@/features/segments/segmentSaveGate";
 import { GENERIC_ERROR, validateDefinition } from "@/features/segments/validateDefinition";
 import { cn } from "@/lib/utils";
 
@@ -169,8 +170,11 @@ export function SegmentDetailPage() {
     queryFn: () => listCampaigns(slug, { page: 1, pageSize: EXHAUSTIVE_LOOKUP_PAGE_SIZE }),
     enabled: Boolean(slug) && Boolean(id),
   });
-  const referencingScheduledCampaign = referencingCampaignsQuery.data?.items.find(
-    (campaign) => campaign.segmentId === id && campaign.status === "scheduled"
+  // Same pure decision drives both the passive mount-time banner and the
+  // save-time gate below (segmentSaveGate.ts) -- they can never disagree.
+  const referencingScheduledCampaign = findBlockingScheduledCampaign(
+    referencingCampaignsQuery.data?.items ?? [],
+    id
   );
 
   const [name, setName] = useState("");
@@ -181,6 +185,11 @@ export function SegmentDetailPage() {
   // Bumped after a successful save so the member table remounts its query
   // (D-13: membership must reflect the newly saved definition).
   const [refreshToken, setRefreshToken] = useState(0);
+  // Set once handleSave's save-time refetch finds a scheduled campaign
+  // referencing this segment (UAT Test 12 gap-closure) -- the next click on
+  // the same (unchanged) edit is the user's explicit confirm. Reset on any
+  // subsequent name/definition edit so a fresh edit re-gates.
+  const [pendingConfirmCampaign, setPendingConfirmCampaign] = useState<{ name: string } | null>(null);
 
   useEffect(() => {
     if (segmentQuery.data) {
@@ -205,7 +214,17 @@ export function SegmentDetailPage() {
     },
   });
 
-  function handleSave() {
+  function handleNameChange(value: string) {
+    setName(value);
+    setPendingConfirmCampaign(null);
+  }
+
+  function handleDefinitionChange(value: SegmentDefinition) {
+    setDefinition(value);
+    setPendingConfirmCampaign(null);
+  }
+
+  async function handleSave() {
     if (!definition) return;
     const trimmedName = name.trim();
     if (!trimmedName) {
@@ -221,6 +240,35 @@ export function SegmentDetailPage() {
     }
     setDefinitionError(null);
 
+    // D-03 save-time gate: only run the refetch+block check on the FIRST
+    // click of an unconfirmed edit. If the user already confirmed a prior
+    // blocking result (pendingConfirmCampaign set, and neither name nor
+    // definition changed since -- see handleNameChange/handleDefinitionChange),
+    // this click commits directly.
+    if (!pendingConfirmCampaign) {
+      // Await a FRESH referencing-campaigns snapshot -- defeats the stale
+      // mount-time cache (refetchOnWindowFocus is false app-wide), so a
+      // campaign scheduled after this editor mounted is still caught here
+      // (the exact UAT Test 12 timing).
+      let freshItems: CampaignResponse[] = [];
+      try {
+        const freshResult = await referencingCampaignsQuery.refetch();
+        freshItems = freshResult.data?.items ?? [];
+      } catch {
+        // A refetch failure must never silently block OR silently allow the
+        // save with no feedback -- it's surfaced via
+        // referencingCampaignsQuery.isError (the muted note below), and we
+        // fall through treating it as non-blocking.
+      }
+
+      const blocking = findBlockingScheduledCampaign(freshItems, id);
+      if (blocking) {
+        setPendingConfirmCampaign(blocking);
+        return;
+      }
+    }
+
+    setPendingConfirmCampaign(null);
     saveMutation.mutate();
   }
 
@@ -260,23 +308,37 @@ export function SegmentDetailPage() {
           аудиторию.
         </p>
       ) : null}
+      {referencingCampaignsQuery.isError ? (
+        <p className="text-sm text-muted-foreground">Не удалось проверить связанные кампании.</p>
+      ) : null}
 
       <section className="space-y-4">
         <h2 className="text-xl font-semibold">Определение сегмента</h2>
 
         <div className="max-w-sm space-y-2">
           <Label htmlFor="segment-name">Название сегмента</Label>
-          <Input id="segment-name" value={name} onChange={(e) => setName(e.target.value)} />
+          <Input id="segment-name" value={name} onChange={(e) => handleNameChange(e.target.value)} />
           {nameError ? <p className="text-sm text-destructive">{nameError}</p> : null}
         </div>
 
-        <SegmentBuilder value={definition} onChange={setDefinition} slug={slug} />
+        <SegmentBuilder value={definition} onChange={handleDefinitionChange} slug={slug} />
 
         {definitionError ? <p className="text-sm font-medium text-destructive">{definitionError}</p> : null}
         {serverError ? <p className="text-sm font-medium text-destructive">{serverError}</p> : null}
 
+        {pendingConfirmCampaign ? (
+          <p className="rounded-md bg-amber-100 px-3 py-2 text-sm font-medium text-amber-900">
+            Сегмент используется запланированной кампанией «{pendingConfirmCampaign.name}» — сохранение изменит её
+            аудиторию. Нажмите «Всё равно сохранить», чтобы подтвердить.
+          </p>
+        ) : null}
+
         <Button onClick={handleSave} disabled={saveMutation.isPending}>
-          {saveMutation.isPending ? "Сохраняем…" : "Сохранить изменения"}
+          {saveMutation.isPending
+            ? "Сохраняем…"
+            : pendingConfirmCampaign
+              ? "Всё равно сохранить"
+              : "Сохранить изменения"}
         </Button>
       </section>
 
