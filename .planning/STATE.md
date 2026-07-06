@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 04
 current_phase_name: broadcast-campaigns-send-pipeline
 status: executing
-stopped_at: Completed 04-16-PLAN.md
-last_updated: "2026-07-06T19:46:25.050Z"
+stopped_at: Completed 04-17-PLAN.md
+last_updated: "2026-07-06T19:54:06.566Z"
 last_activity: 2026-07-06
 last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 7
   completed_phases: 3
   total_plans: 47
-  completed_plans: 45
+  completed_plans: 46
   percent: 43
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-07-06)
 ## Current Position
 
 Phase: 04 (broadcast-campaigns-send-pipeline) — EXECUTING
-Plan: 2 of 18
+Plan: 3 of 18
 Status: Ready to execute
 Last activity: 2026-07-06 — Phase 04 execution started
 
@@ -103,6 +103,7 @@ Progress: [████████████████████] 29/29 p
 | Phase 04 P14 | 10min | 2 tasks | 2 files |
 | Phase 04 P15 | 15min | 2 tasks | 8 files |
 | Phase 04 P16 | 12min | 2 tasks | 5 files |
+| Phase 04 P17 | 8min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -220,6 +221,8 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-15: single shared EXHAUSTIVE_LOOKUP_PAGE_SIZE=200 constant in pagination.ts governs both segmentListQuerySchema/campaignListQuerySchema pageSize max and all three web exhaustive-lookup call sites, closing the UAT Test 3 400 blocker and latent Test 12 gap — Client sent pageSize=200 against schemas capped at max(100); a single exported constant + regression test prevents this client/server drift from recurring
 - [Phase ?]: [Phase 04]: 04-16: 32-char minimum for UNSUBSCRIBE_TOKEN_SECRET enforced consistently in apps/api/src/env.ts (zod) and apps/worker/src/server.ts (manual guard); check-env.mjs stays presence-only (dependency-free script)
 - [Phase ?]: [Phase 04]: 04-16: migrate-dev.mjs mirrors apps/api/vitest.config.ts's env-loading pattern (process.loadEnvFile try/catch) and lets a migrate failure propagate (no swallowing) so predev fails loudly on a real migration error
+- [Phase 04]: 04-17: test-send 4xx guard placed after the existing 429/5xx check and before the final sent return, returning { outcome: 'failed', sendId } with no ledger write (D-12)
+- [Phase 04]: 04-17: sample-data clarification is a single muted helper paragraph directly under the dynamic_template_data label, not a CardDescription rewrite
 
 ### Pending Todos
 
@@ -246,6 +249,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-06T19:46:25.023Z
-Stopped at: Completed 04-16-PLAN.md
+Last session: 2026-07-06T19:54:06.541Z
+Stopped at: Completed 04-17-PLAN.md
 Resume file: None
