@@ -185,7 +185,7 @@ Plans:
   4. Every delivered email goes through SendGrid v3 mail/send with a one-click List-Unsubscribe header, no contact exceeds the global frequency cap, and there are no duplicate emails on job retries.
   5. Sends are throttled per that tenant's RPS, ride a queue with a reserved triggered-priority lane, and survive SendGrid 429/5xx with backoff retries without losing emails.
 
-**Plans**: 17/18 plans executed
+**Plans**: 18/18 plans complete
 **UI hint**: yes
 
 Plans:
@@ -247,7 +247,7 @@ _Wave 1 (parallel):_
 
 - [x] 04-16-PLAN.md — Send-pipeline fail-fast: validate UNSUBSCRIBE_TOKEN_SECRET + PUBLIC_APP_URL in check-env/api-env/worker-boot + predev migration bootstrap (applies unapplied 0017–0019); user_setup handoff for the two .env values (SEND-05, SUBS-04, CAMP-05)
 - [x] 04-17-PLAN.md — Test-send 4xx observability: kind='test' branch reports SendGrid 4xx as failed (mirrors campaign branch) + regression test; clarify test-send sample-data copy as as-designed (SEND-07, CAMP-04)
-- [ ] 04-18-PLAN.md — Segment editor save-time D-03 gate: pure save-gate helper + save-time refetch+confirm + isError surfacing + new web vitest unit lane (CAMP-05)
+- [x] 04-18-PLAN.md — Segment editor save-time D-03 gate: pure save-gate helper + save-time refetch+confirm + isError surfacing + new web vitest unit lane (CAMP-05)
 
 ### Phase 5: Webhook Processing & Delivery Tracking
 
@@ -329,7 +329,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 1. Workspace Foundation & Team Access | 7/7 | Complete    | 2026-07-03 |
 | 2. Contacts & Event Ingestion | 14/14 | Complete    | 2026-07-05 |
 | 3. Segmentation Engine | 8/8 | Complete    | 2026-07-06 |
-| 4. Broadcast Campaigns & Send Pipeline | 17/18 | In Progress|  |
+| 4. Broadcast Campaigns & Send Pipeline | 18/18 | Complete   | 2026-07-06 |
 | 5. Webhook Processing & Delivery Tracking | 0/3 | Not started | - |
 | 6. Flows (Triggered Chains) | 0/5 | Not started | - |
 | 7. Analytics, Dashboard & Send Log | 0/5 | Not started | - |
