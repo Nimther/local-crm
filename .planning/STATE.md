@@ -2,44 +2,44 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 03
-current_phase_name: segmentation-engine
-status: executing
-stopped_at: Phase 03 verification — human_needed, 2 UAT items (D-13 member refresh, D-11 list enrichment); see 03-UAT.md
-last_updated: "2026-07-06T05:08:48.087Z"
+current_phase: 4
+current_phase_name: Broadcast Campaigns & Send Pipeline
+status: ready_to_plan
+stopped_at: Phase 03 complete (UAT 2/2, security verified), ready to plan Phase 4
+last_updated: "2026-07-06T05:49:00.968Z"
 last_activity: 2026-07-06
-last_activity_desc: Phase 03 execution started
+last_activity_desc: Phase 03 complete, transitioned to Phase 4
 progress:
   total_phases: 7
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 29
   completed_plans: 29
-  percent: 29
+  percent: 43
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-07-05)
+See: .planning/PROJECT.md (updated 2026-07-06)
 
 **Core value:** Маркетолог настраивает триггерную цепочку или кампанию — и письма надёжно и вовремя доходят до нужных контактов, со сквозным отслеживанием статусов (delivered/opened/clicked/bounced).
-**Current focus:** Phase 03 — segmentation-engine
+**Current focus:** Phase 4 — Broadcast Campaigns & Send Pipeline
 
 ## Current Position
 
-Phase: 03 (segmentation-engine) — EXECUTING
-Plan: 5 of 8
-Status: Ready to execute
-Last activity: 2026-07-06 — Phase 03 execution started
+Phase: 4 — Broadcast Campaigns & Send Pipeline
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-07-06 — Phase 03 complete, transitioned to Phase 4
 
-Progress: [████████████████████] 21/21 plans (100%)
+Progress: [████████████████████] 29/29 plans (100%)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 21
+- Total plans completed: 29
 - Average duration: — min
 - Total execution time: 0 hours
 
@@ -49,6 +49,7 @@ Progress: [████████████████████] 21/21 p
 |-------|-------|-------|----------|
 | 01 | 7 | - | - |
 | 02 | 14 | - | - |
+| 03 | 8 | - | - |
 
 **Recent Trend:**
 
@@ -173,7 +174,7 @@ None yet.
 
 Research flags to carry into planning:
 
-- Phase 2/3: benchmark behavioral segment queries at target scale (100k–1M contacts) before committing to the materialized-membership approach.
+- [Phase 3 → 4] Segments ship as on-the-fly evaluation bounded by statement_timeout (2s preview / 15s save-eval, 57014 → degraded/4xx) — the 100k–1M-contact benchmark is still outstanding; revisit materialized membership if Phase 4 broadcast audience selects hit the timeout at scale.
 - Phase 4: load-test triggered-vs-broadcast priority under a large broadcast (target: triggered sends within minutes).
 - Phase 5: integration test that replays a real signed SendGrid payload through the full HTTP stack (raw-body verification).
 - Phase 6: define quiet-hours timezone source and once-per-N-days re-entry semantics; simulate late-stage flow edits mid-execution.
@@ -190,6 +191,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-06T05:08:48.063Z
-Stopped at: Completed 03-08-PLAN.md (segmentation UI gap-closure E2E)
+Last session: 2026-07-06
+Stopped at: Phase 03 complete (UAT 2/2 passed, security verified), ready to plan Phase 4
 Resume file: None

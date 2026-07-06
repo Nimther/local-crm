@@ -1,7 +1,7 @@
 ---
 phase: 03-segmentation-engine
 verified: 2026-07-06T10:35:00Z
-status: human_needed
+status: passed
 score: 4/4 must-haves verified
 behavior_unverified: 0 # both previously-flagged behavior_unverified items (SEGM-02 UI, SEGM-04 degraded state) now have passing E2E exercising the actual behavior
 overrides_applied: 0
@@ -9,6 +9,7 @@ re_verification:
   previous_status: gaps_found
   previous_score: 2/4
   gaps_closed:
+
     - "Tags condition unreachable in builder UI (STANDARD_FIELDS omitted tags) -- closed by 03-07 (STANDARD_FIELDS/OPERATORS_BY_KIND tags entry), proven live by segments-tags.spec.ts"
     - "CR-01: default unconfigured attribute condition silently 500s on save -- closed by 03-05 (Zod superRefine allow-list, empty/unknown standard field -> 400) + 03-07 (client validateDefinition rejects empty field/missing value + onError/serverError UI) + 03-06 (HTTP-level 400 regression tests) -- proven live by segments-tags.spec.ts's CR-01 regression test"
     - "SEGM-02 behavioral conditional-input UI was present-but-behavior-unverified -- closed by 03-08's segments-behavior.spec.ts (count/timeframe show-hide + save/reopen round-trip), run live during this verification and passing"
@@ -16,9 +17,11 @@ re_verification:
   gaps_remaining: []
   regressions: []
 human_verification:
+
   - test: "Open a saved segment's detail page, change a condition (e.g. widen the country filter), save, and confirm the «Участники» member table and count refresh to reflect the new definition without a page reload."
     expected: "Member list and any displayed count update to match the edited definition (D-13's refreshToken mechanism is present in code but not exercised end-to-end by any test)."
     why_human: "No E2E edits-then-resaves-then-reverifies a segment's members; carried forward unaddressed from the original 03-04-SUMMARY (D2) finding -- the 03-05..03-08 gap-closure plans were scoped to the failed truth and the two behavior_unverified items only, not this item."
+
   - test: "View the segments list with at least one segment that has a non-null memberCount/memberCountAt and one whose author differs from the viewer."
     expected: "Member-count renders in Display weight with a correctly formatted «на {дата, время}» freshness line; the author name resolves correctly via GET /members (not a raw id or blank)."
     why_human: "No automated assertion reads these specific cell values/styling; carried forward unaddressed from the original 03-04-SUMMARY (D4) finding -- out of this gap-closure round's scope."

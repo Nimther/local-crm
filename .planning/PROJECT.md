@@ -24,11 +24,11 @@ Multi-tenant SaaS-платформа marketing automation для B2C-компа�
 - [x] Управление контактами: CRUD в UI, CSV-импорт с маппингом колонок, Contacts CRUD API, автосоздание из событий (upsert) — Validated in Phase 2: UAT 13/13 (CRUD, CSV wizard с dry-run/отчётом об ошибках, upsert из событий)
 - [x] Идентификация контакта: external_id (основной ключ) + email (запасной) — Validated in Phase 2: приоритет external_id→email в shared upsert, external_id иммутабелен после установки (D-06)
 - [x] Event ingestion: server-side HTTP API с API-ключом, свободная схема событий (имя + JSON-свойства, как у Klaviyo) — Validated in Phase 2: POST /v1/events + BullMQ ingest worker, идемпотентность per-tenant, live event feed в карточке контакта
+- [x] Сегментация: динамические сегменты по свойствам профиля И по поведению/событиям («сделал заказ за 30 дней», «не открывал письма») — Validated in Phase 3: компилятор условий (fails-closed allow-list → SQL с bind-параметрами), builder UI с live preview-count, статусы degraded при таймауте, RLS-изоляция, UAT 2/2
 
 ### Active
 
 - [ ] Отправка через SendGrid от имени тенанта (BYO key) — connect выполнен в Phase 1, send-путь в Phase 4
-- [ ] Сегментация: динамические сегменты по свойствам профиля И по поведению/событиям («сделал заказ за 30 дней», «не открывал письма»)
 - [ ] Статус подписки: платформа ведёт свой subscription status (введён в Phase 2: suppression-check на создании, валидация переходов), обрабатывает unsubscribe из SendGrid webhook (Phase 5), фильтрует перед отправкой (Phase 4)
 - [ ] Триггерные цепочки: визуальный canvas-редактор с drag-and-drop (узлы, ветвления, соединения)
 - [ ] Правила цепочек: exit conditions, контроль повторного входа (once ever / once per N days / every time), quiet hours, глобальный frequency cap на контакт
@@ -76,7 +76,8 @@ Multi-tenant SaaS-платформа marketing automation для B2C-компа�
 | Свободная схема событий (имя + JSON) | Минимум трения при интеграции, модель Klaviyo; типы появляются в UI по мере поступления | ✓ Phase 2: события с произвольным JSON-payload принимаются, отображаются в feed; reserved-key denylist защищает системные свойства |
 | external_id + email, upsert контакта из события | Стабильная идентификация при смене email; событие может создать контакт | ✓ Phase 2: shared upsert (contacts-core) используется API, CSV-воркером и event-воркером; конфликты email → D-04 hard error |
 | Собственный subscription status + фильтрация перед отправкой | Статус виден в платформе и участвует в сегментации; не полагаемся только на SendGrid suppression | — Pending |
-| Поведенческая сегментация в v1 | Ядро ценности Klaviyo-подобного продукта; без неё триггерные сценарии слабые | — Pending |
+| Поведенческая сегментация в v1 | Ядро ценности Klaviyo-подобного продукта; без неё триггерные сценарии слабые | ✓ Phase 3: единый компилятор SegmentDefinition → SQL (EXISTS-подзапросы по событиям, count/timeframe), on-the-fly вычисление со statement_timeout вместо материализации; движок общий для кампаний (Phase 4) и цепочек (Phase 6) |
+| Сегменты вычисляются on-the-fly (без материализации membership) | Проще и всегда актуально; DoS-риск ограничен statement_timeout + degraded-ответом | ✓ Phase 3: preview-count 2s / save-eval 15s timeout, 57014 → degraded/4xx; бенчмарк на 100k–1M контактов остаётся открытым флагом |
 | Очередь + RPS-троттлинг в MVP | Rate limits SendGrid; broadcast не должен блокировать триггерные письма | — Pending |
 | TypeScript full-stack | Один язык, экосистема canvas-библиотек (React Flow и т.п.) | ✓ Phase 1: Fastify + Drizzle + React/Vite стек собран и прошёл полный UAT |
 | Команда + базовые роли (Owner/Admin/Member) в v1 | SaaS для команд маркетинга; права на запуск кампаний и смену SendGrid-ключа | ✓ Phase 1: инвайты, серверная ролевая матрица и role-gated UI подтверждены UAT |
@@ -99,4 +100,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-05 after Phase 2 transition (UAT passed 13/13, security verified, phase marked complete)*
+*Last updated: 2026-07-06 after Phase 3 transition (UAT passed 2/2, security verified 17/17 threats closed, phase marked complete)*
