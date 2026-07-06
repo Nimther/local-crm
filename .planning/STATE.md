@@ -6,14 +6,14 @@ current_phase: 04
 current_phase_name: broadcast-campaigns-send-pipeline
 status: executing
 stopped_at: Completed 04-09-PLAN.md
-last_updated: "2026-07-06T13:15:47.370Z"
+last_updated: "2026-07-06T13:27:54.638Z"
 last_activity: 2026-07-06
 last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 7
   completed_phases: 3
   total_plans: 42
-  completed_plans: 40
+  completed_plans: 41
   percent: 43
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-07-06)
 ## Current Position
 
 Phase: 04 (broadcast-campaigns-send-pipeline) — EXECUTING
-Plan: 4 of 13
+Plan: 5 of 13
 Status: Ready to execute
 Last activity: 2026-07-06 — Phase 04 execution started
 
@@ -97,6 +97,7 @@ Progress: [████████████████████] 29/29 p
 | Phase 04 P09 | 20min | 2 tasks | 3 files |
 | Phase 04 P10 | 12min | 2 tasks | 4 files |
 | Phase 04 P11 | 20min | 2 tasks | 4 files |
+| Phase 04 P12 | 20min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -206,6 +207,8 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 04]: 04-10: packages/delivery-core gained its first real-Postgres integration test lane (src/test/db-fixture.ts + vitest.config.ts DATABASE_URL routing), mirroring apps/worker's fixture -- prior delivery-core tests all stubbed PoolClient
 - [Phase 04]: 04-11: consolidated @fastify/helmet into a single registration in server.ts with explicit strict CSP directives, removing a pre-existing duplicate default (permissive) registration nested inside auth/plugin.ts (two competing onSend hooks would have raced on the same header)
 - [Phase 04]: 04-11: malformed unsubscribe tokens get a fixed, tokenless form action (posts to current URL) rather than any escaped echo -- nothing token-derived reaches the HTML at all for a non-conforming input
+- [Phase ?]: [Phase 04]: 04-12: dispatchSendGate's terminal-skip set widened to 'sent'|'failed'|'excluded'; conflict on 'dispatching' now returns interrupted:true (CR-04)
+- [Phase ?]: [Phase 04]: 04-12: releaseDispatchClaim is a guarded DELETE (not a new send_status enum value) called on 429/5xx and rate-limiter denial so a claim is never left stranded (T-04-12-03)
 
 ### Pending Todos
 
@@ -232,6 +235,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-06T13:15:13.954Z
+Last session: 2026-07-06T13:27:12.585Z
 Stopped at: Completed 04-09-PLAN.md
 Resume file: None
