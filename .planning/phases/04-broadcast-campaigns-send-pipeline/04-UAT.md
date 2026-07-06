@@ -1,9 +1,9 @@
 ---
-status: partial
+status: diagnosed
 phase: 04-broadcast-campaigns-send-pipeline
 source: [04-01-SUMMARY.md, 04-02-SUMMARY.md, 04-03-SUMMARY.md, 04-04-SUMMARY.md, 04-05-SUMMARY.md, 04-06-SUMMARY.md, 04-07-SUMMARY.md, 04-08-SUMMARY.md, 04-09-SUMMARY.md, 04-10-SUMMARY.md, 04-11-SUMMARY.md, 04-12-SUMMARY.md, 04-13-SUMMARY.md, 04-14-SUMMARY.md]
 started: 2026-07-06T14:53:14Z
-updated: 2026-07-06T18:45:00Z
+updated: 2026-07-07T09:30:00Z
 ---
 
 ## Current Test
@@ -433,27 +433,61 @@ blocked: 3
   reason: "User reported: dynamic_template_data содержит не тот же имейл, который указан в инпуте выше блока с тестовым письмом. Тестовое письмо показывается, что отправляется, но не доходит до входящих."
   severity: major
   test: 4
-  root_cause: ""
-  artifacts: []
-  missing: []
-  debug_session: ""
+  root_cause: "Non-delivery: UNSUBSCRIBE_TOKEN_SECRET is missing from the dev .env — every test-send job throws 'UNSUBSCRIBE_TOKEN_SECRET is not set' in the worker (send-dispatch.ts:364, signing the List-Unsubscribe token before any SendGrid call), exhausts 5 BullMQ attempts, and lands in the failed set; the API already returned 202 {queued:true}, so the UI reports 'sent'. PUBLIC_APP_URL (unsubscribe-token.ts:99) is equally undocumented/unvalidated and is the next crash once the secret is set. No boot check validates either var; vitest configs inject test-only values, masking the gap from all automated tests. Sample-email mismatch: WORKING AS DESIGNED per D-18/D-19 — the test-sample endpoint deliberately previews the segment's first real member's merge data; the recipient input only controls delivery address. At most a UX-copy gap. Latent secondary defect: the kind='test' branch treats any non-429/non-5xx SendGrid status (incl. 400/401/403) as {outcome:'sent'}, silently swallowing rejections."
+  artifacts:
+    - path: "packages/delivery-core/src/unsubscribe-token.ts"
+      issue: "lines 22-28, 97-104: lazy runtime throw on two env vars no boot check requires"
+    - path: ".env.example"
+      issue: "never documents UNSUBSCRIBE_TOKEN_SECRET or PUBLIC_APP_URL — user's .env never got them"
+    - path: "scripts/check-env.mjs"
+      issue: "lines 43-60: required-vars list omits both vars"
+    - path: "apps/api/src/env.ts"
+      issue: "zod env schema omits both vars (no fail-fast)"
+    - path: "apps/worker/src/queues/send-dispatch.ts"
+      issue: "lines 406-410: kind='test' branch swallows SendGrid 4xx as {outcome:'sent'}"
+  missing:
+    - "Add UNSUBSCRIBE_TOKEN_SECRET (openssl rand -base64 32) and PUBLIC_APP_URL to dev .env and .env.example"
+    - "Fail-fast boot validation of both vars in scripts/check-env.mjs, apps/api env schema, and a worker boot check"
+    - "Fix kind='test' branch to surface SendGrid 4xx as failed instead of sent"
+    - "UX copy: label the sample JSON as 'sample data from a segment contact' (close mismatch complaint as as-designed)"
+  debug_session: ".planning/debug/test-send-no-delivery.md"
 
 - truth: "Launching a campaign fans out send jobs: sent count advances and recipients receive the broadcast email"
   status: failed
   reason: "User reported: Диалог открывается, кампания показывает, что отправляется, но несколько минут висит «0 отправленных». Во входящих у получателей тоже ничего нет."
   severity: blocker
   test: 5
-  root_cause: ""
-  artifacts: []
-  missing: []
-  debug_session: ""
+  root_cause: "TWO independent fatal causes, both proven from live failed-job state in Redis. (1) Unapplied DB migrations: dev DB is migrated only through 0016; migrations 0017-0019 (incl. 0017_campaigns_fan_out_complete.sql) were never applied — npm run dev has no migrate step. The campaign-kickoff worker's first query (campaign-kickoff.worker.ts:53-57) throws 'column fan_out_complete does not exist'; both launched campaigns' kickoff jobs exhausted 5/5 BullMQ retries, and since the launch route flips status to 'sending' before kickoff runs, the campaign is stuck at 0 sent forever. (2) UNSUBSCRIBE_TOKEN_SECRET missing from worker env kills every send even after (1) is fixed — campaign path signs the same token at send-dispatch.ts:231. Queue topology eliminated: names match, all 6 workers registered, jobs were consumed and failed, not stranded. Failed kickoff jobs won't self-heal (attempts exhausted) — stuck campaign needs retry or cancel + relaunch after fixes."
+  artifacts:
+    - path: "packages/db/migrations/0017_campaigns_fan_out_complete.sql"
+      issue: "exists in repo but never applied to live dev DB (drizzle journal rows stop at 0016); no migrate step in dev bootstrap"
+    - path: "packages/delivery-core/src/unsubscribe-token.ts"
+      issue: "lines 22-28: lazy per-job throw instead of fail-fast boot validation"
+    - path: "apps/worker/src/server.ts"
+      issue: "validates only REDIS_URL — no UNSUBSCRIBE_TOKEN_SECRET/PUBLIC_APP_URL boot check"
+    - path: "apps/api/src/env.ts"
+      issue: "does not validate UNSUBSCRIBE_TOKEN_SECRET"
+    - path: ".env.example"
+      issue: "no UNSUBSCRIBE_TOKEN_SECRET entry — 04-03 never updated dev setup docs"
+  missing:
+    - "Apply migrations (npm run db:migrate) and prevent recurrence: migrate step in dev bootstrap or boot-time migration-freshness check"
+    - "Env fix (same as test-4 gap): document + fail-fast validate UNSUBSCRIBE_TOKEN_SECRET and PUBLIC_APP_URL in api and worker"
+    - "Recover stuck campaign: retry failed kickoff job or cancel + re-launch after fixes"
+  debug_session: ".planning/debug/broadcast-launch-zero-sent.md"
 
 - truth: "Segment editor warns that a scheduled campaign references this segment (D-03) before saving changes"
   status: failed
   reason: "User reported: предупреждение перед сохранением не появляется"
   severity: major
   test: 12
-  root_cause: ""
-  artifacts: []
-  missing: []
-  debug_session: ""
+  root_cause: "NOT a recurrence of the pageSize bug — 04-15 fix verified effective at every layer (pageSize=200 passes validation; RLS-scoped replication of the exact query returns the scheduled campaign with matching segmentId). The defect is the warning's client-side lifecycle in SegmentDetailPage.tsx: it is a one-shot, mount-time-only passive banner with no save-time check. The referencing-campaigns useQuery runs once at mount, refetchOnWindowFocus is false app-wide, fetch errors are silently swallowed (no isError branch), and handleSave() performs zero D-03 validation. When the editor mounts before/while the campaign is scheduled (the exact test-12 flow: campaign scheduled 23:48:43, segment saved 23:55:40), the warning deterministically never appears — including at save, where the UAT truth anchors the expectation. Banner has zero unit/E2E coverage."
+  artifacts:
+    - path: "apps/web/src/features/segments/SegmentDetailPage.tsx"
+      issue: "lines 167-174: warning computed only from mount-time snapshot; lines 208-225: handleSave has no D-03 check; query error state silently renders as no-warning"
+    - path: "apps/web/src/lib/queryClient.ts"
+      issue: "refetchOnWindowFocus: false guarantees a mounted editor never refreshes the campaigns snapshot"
+  missing:
+    - "Save-time D-03 check: in handleSave, refetch the referencing-campaigns lookup (queryClient.fetchQuery/refetch) before mutate() and gate the save behind an explicit confirm/inline warning"
+    - "Surface query isError instead of rendering nothing"
+    - "Component test with a mocked scheduled campaign referencing the segment"
+  debug_session: ".planning/debug/segment-editor-d03-warning-missing.md"
