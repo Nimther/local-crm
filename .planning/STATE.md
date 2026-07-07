@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 04
 current_phase_name: broadcast-campaigns-send-pipeline
 status: executing
-stopped_at: Completed 04-17-PLAN.md
-last_updated: "2026-07-06T20:00:54.927Z"
-last_activity: 2026-07-06
+stopped_at: Completed 04-19-PLAN.md
+last_updated: "2026-07-07T03:43:02.116Z"
+last_activity: 2026-07-07
 last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 7
   completed_phases: 4
-  total_plans: 47
-  completed_plans: 47
+  total_plans: 48
+  completed_plans: 48
   percent: 57
 ---
 
@@ -29,9 +29,9 @@ See: .planning/PROJECT.md (updated 2026-07-06)
 ## Current Position
 
 Phase: 04 (broadcast-campaigns-send-pipeline) — EXECUTING
-Plan: 4 of 18
+Plan: 2 of 19
 Status: Ready to execute
-Last activity: 2026-07-06 — Phase 04 execution started
+Last activity: 2026-07-07 — Phase 04 execution started
 
 Progress: [████████████████████] 29/29 plans (100%)
 
@@ -105,6 +105,7 @@ Progress: [████████████████████] 29/29 p
 | Phase 04 P16 | 12min | 2 tasks | 5 files |
 | Phase 04 P17 | 8min | 2 tasks | 3 files |
 | Phase 04 P18 | 20min | 2 tasks | 5 files |
+| Phase 04 P19 | 15min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -225,6 +226,8 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-17: test-send 4xx guard placed after the existing 429/5xx check and before the final sent return, returning { outcome: 'failed', sendId } with no ledger write (D-12)
 - [Phase 04]: 04-17: sample-data clarification is a single muted helper paragraph directly under the dynamic_template_data label, not a CardDescription rewrite
 - [Phase ?]: [Phase 04]: 04-18: Inline two-step confirm (not AlertDialog) for the D-03 save-time gate -- a refetch error inside handleSave is treated as non-blocking, surfaced only via referencingCampaignsQuery.isError's muted note
+- [Phase ?]: [Phase 04]: 04-19: worker test-send fallback contactId changed from placeholder literal to randomUUID() (CR-01 root cause) -- unknown-but-valid UUID safely no-ops on redemption instead of raising Postgres 22P02
+- [Phase ?]: [Phase 04]: 04-19: API POST /unsubscribe isUuid() guard shares the SAME if-block as isValid (no new response branch) -- preserves the byte-identical-response invariant for a structurally-invalid contactId
 
 ### Pending Todos
 
@@ -251,6 +254,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-06T20:00:25.669Z
-Stopped at: Completed 04-17-PLAN.md
+Last session: 2026-07-07T03:43:02.087Z
+Stopped at: Completed 04-19-PLAN.md
 Resume file: None

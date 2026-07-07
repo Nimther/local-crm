@@ -130,6 +130,17 @@ None — no external service configuration required by this plan's executable sc
 - Full workspace automated suite: 268/269 passing (1 pre-existing, unrelated, out-of-scope worker test failure logged in `deferred-items.md`; not caused by this plan).
 - Remaining outstanding item before Phase 04 can be considered fully verified end-to-end: the human verification step (populate `.env` secrets, live SendGrid UAT re-run) carried from 04-VERIFICATION.md -- unchanged by this plan, still pending a human with `.env` access.
 
+## Self-Check: PASSED
+
+- FOUND: apps/worker/src/queues/send-dispatch.ts
+- FOUND: apps/worker/src/queues/__tests__/send-dispatch-idempotency.test.ts
+- FOUND: apps/api/src/modules/delivery/unsubscribe.routes.ts
+- FOUND: apps/api/src/modules/delivery/__tests__/unsubscribe-test-send.test.ts
+- FOUND: .planning/phases/04-broadcast-campaigns-send-pipeline/deferred-items.md
+- FOUND commit 9443638 (Task 1)
+- FOUND commit e5196c7 (Task 2)
+- FOUND commit 1bf248c (docs: add plan summary)
+
 ---
 *Phase: 04-broadcast-campaigns-send-pipeline*
 *Completed: 2026-07-07*
