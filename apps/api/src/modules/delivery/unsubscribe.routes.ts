@@ -29,6 +29,23 @@ function isWellFormedUnsubscribeToken(token: string): boolean {
 }
 
 /**
+ * Canonical RFC 4122 UUID shape check (CR-01, T-04-19-01/02). A
+ * signature-valid token's `contactId` is only trustworthy as an *identity*,
+ * never as a *shape* -- `verifyUnsubscribeToken` does no format validation,
+ * and the worker's test-send path historically signed a non-UUID placeholder
+ * literal (closed in 04-19 Task 1). This guard is defense-in-depth on the
+ * redemption side: it always matches a real `crypto.randomUUID()` /
+ * `gen_random_uuid()` contact id, so it never rejects a genuine contact --
+ * it only refuses to let a structurally-invalid contactId reach the
+ * uuid-typed `contacts.id` column, where Postgres would otherwise raise an
+ * uncaught 22P02 and produce a distinguishable 500 (breaking the POST
+ * handler's byte-identical-response invariant, T-04-03-02).
+ */
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
+/**
  * HTML-attribute escape (defense in depth, CR-01/T-04-11-01) -- applied to a
  * token that already passed {@link isWellFormedUnsubscribeToken}. A
  * well-formed base64url token never contains any of these characters, so
@@ -156,13 +173,19 @@ export async function registerUnsubscribeRoutes(fastify: FastifyInstance): Promi
     const nowSeconds = Math.floor(Date.now() / 1000);
     const isValid = payload !== null && payload.exp >= nowSeconds;
 
-    if (isValid) {
+    if (isValid && isUuid(payload.contactId)) {
       // T-04-03-01: the HMAC signature already binds this token to a
       // specific sendId/contactId/workspaceId -- safe to trust
       // payload.workspaceId for RLS tenant scoping without a separate
       // lookup. Idempotent: an already-unsubscribed contact is a no-op, and
       // an unknown contactId simply updates zero rows (never surfaced to the
       // caller -- T-04-03-02).
+      //
+      // CR-01: a signature-valid token whose contactId is NOT UUID-shaped
+      // (e.g. a pre-04-19 test-send token) skips this UPDATE entirely and
+      // falls through to the exact same response-construction block below --
+      // no new branch on the reply -- so it stays byte-identical to the
+      // unknown-contact and forged-token cases (T-04-19-02).
       await withTenant(payload.workspaceId, () =>
         withTenantTransaction(async (client) => {
           await client.query(
