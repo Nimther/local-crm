@@ -42,7 +42,11 @@ export default defineConfig({
       KMS_LOCAL_KEK: process.env.KMS_LOCAL_KEK ?? "grdVCb1fxmhPzylKEPqafcPW4xOMaynE0UwaFUo2OUE=",
       UNSUBSCRIBE_TOKEN_SECRET:
         process.env.UNSUBSCRIBE_TOKEN_SECRET ?? "test-only-unsubscribe-secret-at-least-32-bytes",
-      PUBLIC_APP_URL: process.env.PUBLIC_APP_URL ?? "https://api.test.local",
+      // Deterministic regardless of the repo-root .env: dev/UAT populates a real
+      // PUBLIC_APP_URL there, and a plain `process.env.PUBLIC_APP_URL ??` fallback
+      // would leak it into unsubscribe-URL assertions. TEST_-prefixed override
+      // mirrors the TEST_DATABASE_URL / TEST_REDIS_URL convention above.
+      PUBLIC_APP_URL: process.env.TEST_PUBLIC_APP_URL ?? "https://api.test.local",
     },
   },
 });

@@ -5,6 +5,11 @@ scope-boundary rule (not fixed, not part of the originating plan's task scope).
 
 ## 04-19: pre-existing SEND-05 test/env coupling break (unrelated to CR-01)
 
+**RESOLVED (2026-07-07, orchestrator post-merge gate after wave 1):**
+`apps/worker/vitest.config.ts` now reads `TEST_PUBLIC_APP_URL ?? "https://api.test.local"`
+(the suggested fix below), mirroring the `TEST_DATABASE_URL` / `TEST_REDIS_URL`
+convention. Worker suite 41/41 green with a populated repo-root `.env`.
+
 - **Found during:** 04-19 Task 1 verification (`npm test -w @mega-crm/worker`)
 - **Symptom:** `send-dispatch-idempotency.test.ts` > "SEND-05/SUBS-03: a sendable
   contact is decrypted, gated, sent, and recorded as sent" fails:
