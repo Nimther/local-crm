@@ -360,10 +360,17 @@ export async function processSendJob(
       throw new Error("testTo is required for kind='test'");
     }
     const sendId = randomUUID();
+    // CR-01: a test send has no real contact (the enqueuing route never
+    // sets one), but the signed token's contactId still flows into the
+    // public unsubscribe route's uuid-typed `WHERE id = $1` (CAMP-04,
+    // SUBS-04). Falling back to a valid random UUID (not a placeholder
+    // literal) guarantees a redeemed test-send link always resolves to
+    // either a real contact or an unknown-but-valid UUID (0 rows updated,
+    // still the normal 2xx) -- never a Postgres 22P02 on a non-UUID literal.
     const unsubscribeUrl = buildListUnsubscribeUrl(
       signUnsubscribeToken({
         sendId,
-        contactId: contactId ?? "test-send",
+        contactId: contactId ?? randomUUID(),
         workspaceId,
         exp: Math.floor(Date.now() / 1000) + UNSUBSCRIBE_TOKEN_TTL_SECONDS,
       })

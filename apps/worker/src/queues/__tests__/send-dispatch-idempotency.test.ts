@@ -5,7 +5,7 @@ import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { encryptTenantSecret } from "@mega-crm/kms";
 import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool } from "../../test/db-fixture.js";
 import { processSendJob, type SendJobResult } from "../send-dispatch.js";
-import type { SendGridMailSendRequest, SendTenantMailResult } from "@mega-crm/delivery-core";
+import { verifyUnsubscribeToken, type SendGridMailSendRequest, type SendTenantMailResult } from "@mega-crm/delivery-core";
 
 /**
  * send-dispatch.ts's shared `processSendJob` (SEND-01/05/06/07, SUBS-03,
@@ -234,6 +234,31 @@ describe("send-dispatch.ts processSendJob (SEND-01/05/06/07, SUBS-03, D-12)", ()
       })
     );
     expect(rowCount, "D-12: test sends are never written to the send ledger").toBe(0);
+  });
+
+  it("CR-01: a test send with no contactId signs its List-Unsubscribe token with a valid random UUID, not a placeholder literal", async () => {
+    const workspaceId = await freshWorkspaceId("dispatch-test-send-uuid");
+    await connectFixtureSendgridKey(workspaceId);
+    const campaignId = await createFixtureCampaign(workspaceId);
+
+    const counting = countingSendMail();
+    const result = await processSendJob(
+      { workspaceId, campaignId, kind: "test", testTo: "probe@fixture.test" },
+      { sendMail: counting.fn, redisClient }
+    );
+
+    expect(result.outcome).toBe("sent");
+
+    const payload = counting.lastPayload();
+    const header = payload?.headers["List-Unsubscribe"];
+    expect(header).toMatch(/^<.+\/unsubscribe\/.+>$/);
+    const token = header?.slice(header.indexOf("/unsubscribe/") + "/unsubscribe/".length, header.length - 1);
+    expect(token).toBeTruthy();
+
+    const decoded = verifyUnsubscribeToken(token!);
+    expect(decoded).not.toBeNull();
+    expect(decoded?.contactId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+    expect(decoded?.contactId).not.toBe("test-send");
   });
 
   it("send-dispatch.ts never imports @sendgrid/mail's module-level singleton", async () => {
