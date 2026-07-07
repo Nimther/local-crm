@@ -185,7 +185,7 @@ Plans:
   4. Every delivered email goes through SendGrid v3 mail/send with a one-click List-Unsubscribe header, no contact exceeds the global frequency cap, and there are no duplicate emails on job retries.
   5. Sends are throttled per that tenant's RPS, ride a queue with a reserved triggered-priority lane, and survive SendGrid 429/5xx with backoff retries without losing emails.
 
-**Plans**: 18/18 plans complete
+**Plans**: 19 plans (18 complete, 1 gap-closure pending)
 **UI hint**: yes
 
 Plans:
@@ -248,6 +248,12 @@ _Wave 1 (parallel):_
 - [x] 04-16-PLAN.md — Send-pipeline fail-fast: validate UNSUBSCRIBE_TOKEN_SECRET + PUBLIC_APP_URL in check-env/api-env/worker-boot + predev migration bootstrap (applies unapplied 0017–0019); user_setup handoff for the two .env values (SEND-05, SUBS-04, CAMP-05)
 - [x] 04-17-PLAN.md — Test-send 4xx observability: kind='test' branch reports SendGrid 4xx as failed (mirrors campaign branch) + regression test; clarify test-send sample-data copy as as-designed (SEND-07, CAMP-04)
 - [x] 04-18-PLAN.md — Segment editor save-time D-03 gate: pure save-gate helper + save-time refetch+confirm + isError surfacing + new web vitest unit lane (CAMP-05)
+
+**Gap closure round 5** *(from 04-VERIFICATION.md 2026-07-07 — CR-01 test-send unsubscribe token 500)*
+
+_Wave 1:_
+
+- [ ] 04-19-PLAN.md — CR-01 fix: sign a real random UUID for test-send unsubscribe tokens (worker root cause) + guard the public unsubscribe POST against a non-UUID contactId (uniform response, no 500) + worker & API regression coverage (CAMP-04, SUBS-04)
 
 ### Phase 5: Webhook Processing & Delivery Tracking
 
