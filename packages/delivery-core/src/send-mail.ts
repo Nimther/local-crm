@@ -8,7 +8,7 @@ export interface SendGridMailSendRequest {
   personalizations: Array<{
     to: [{ email: string }];
     dynamic_template_data: Record<string, unknown>;
-    custom_args: { send_id: string; workspace_id: string; campaign_id: string };
+    custom_args: { send_id: string; workspace_id: string; campaign_id: string; test?: "true" };
   }>;
   from: { email: string };
   template_id: string;
@@ -21,6 +21,11 @@ export interface SendGridMailSendRequest {
     // (contacts.subscription_status) is the single source of truth, avoiding
     // two competing unsubscribe mechanisms.
     subscription_tracking: { enable: false };
+    // D-04 (Phase 5, closes Pitfall 3): forced on for EVERY send, independent
+    // of the tenant's own SendGrid account-level tracking settings -- webhook
+    // opened/clicked events never fire otherwise.
+    open_tracking: { enable: true };
+    click_tracking: { enable: true };
   };
 }
 
@@ -35,6 +40,14 @@ export interface BuildMailSendRequestParams {
   sendId: string;
   workspaceId: string;
   campaignId: string;
+  /**
+   * D-15 (Phase 5, closes Pitfall 2): when true, tags the outbound message
+   * with a `test: "true"` custom_arg so webhook events for it can be
+   * excluded from stats/suppression -- a bounced test address must never be
+   * indistinguishable from a real orphaned send. Only `kind='test'` dispatch
+   * sets this; `kind='campaign'` sends must never carry the key at all.
+   */
+  isTest?: boolean;
 }
 
 /** Builds the exact `mail/send` request shape for one recipient (SEND-05, D-15). */
@@ -48,6 +61,7 @@ export function buildMailSendRequest(params: BuildMailSendRequestParams): SendGr
           send_id: params.sendId,
           workspace_id: params.workspaceId,
           campaign_id: params.campaignId,
+          ...(params.isTest === true ? { test: "true" as const } : {}),
         },
       },
     ],
@@ -59,6 +73,8 @@ export function buildMailSendRequest(params: BuildMailSendRequestParams): SendGr
     },
     tracking_settings: {
       subscription_tracking: { enable: false },
+      open_tracking: { enable: true },
+      click_tracking: { enable: true },
     },
   };
 }

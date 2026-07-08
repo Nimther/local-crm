@@ -318,6 +318,7 @@ export async function processSendJob(
         sendId: claim.sendId,
         workspaceId,
         campaignId,
+        isTest: false,
       });
       const response = await sendMail(claim.apiKey, payload);
 
@@ -407,6 +408,7 @@ export async function processSendJob(
       sendId,
       workspaceId,
       campaignId,
+      isTest: true,
     });
     const response = await sendMail(prereqs.apiKey, payload);
 
