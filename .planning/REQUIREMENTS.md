@@ -76,7 +76,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **WBHK-01**: Платформа принимает SendGrid Event Webhook на per-tenant URL с проверкой ECDSA-подписи по сырому телу запроса
 - [x] **WBHK-02**: Обрабатываются события delivered / opened / clicked / bounced / unsubscribed / spam report / dropped
 - [x] **WBHK-03**: События дедуплицируются по sg_event_id — повторная доставка webhook не искажает статистику
-- [ ] **WBHK-04**: Webhook-события обновляют статус конкретного письма в send log и статус подписки контакта
+- [x] **WBHK-04**: Webhook-события обновляют статус конкретного письма в send log и статус подписки контакта
 
 ### Analytics
 
@@ -162,7 +162,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | WBHK-01 | Phase 5 | Complete |
 | WBHK-02 | Phase 5 | Complete |
 | WBHK-03 | Phase 5 | Complete |
-| WBHK-04 | Phase 5 | Pending |
+| WBHK-04 | Phase 5 | Complete |
 | SUBS-02 | Phase 5 | Complete |
 | FLOW-01 | Phase 6 | Pending |
 | FLOW-02 | Phase 6 | Pending |

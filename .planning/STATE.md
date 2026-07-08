@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 05
 current_phase_name: webhook-processing-delivery-tracking
 status: executing
-stopped_at: Completed 05-02-PLAN.md
-last_updated: "2026-07-08T14:20:44.178Z"
+stopped_at: Completed 05-03-PLAN.md
+last_updated: "2026-07-08T14:37:42.760Z"
 last_activity: 2026-07-08
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 7
   completed_phases: 4
   total_plans: 53
-  completed_plans: 50
+  completed_plans: 51
   percent: 57
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-07-06)
 ## Current Position
 
 Phase: 05 (webhook-processing-delivery-tracking) — EXECUTING
-Plan: 3 of 5
+Plan: 4 of 5
 Status: Ready to execute
 Last activity: 2026-07-08 — Phase 05 execution started
 
@@ -108,6 +108,7 @@ Progress: [████████████████████] 48/48 p
 | Phase 04 P19 | 15min | 2 tasks | 6 files |
 | Phase 05 P01 | 15min | 3 tasks | 17 files |
 | Phase 05 P02 | 15min | 3 tasks | 10 files |
+| Phase 05 P03 | 20min | 3 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -234,6 +235,9 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-01: workspace_webhook_endpoints uses a GUC-scoped webhook_endpoint_runtime_lookup RLS policy (mirrors workspace_api_keys' api_key_runtime_lookup) so findWebhookEndpointByToken can resolve workspace_id + public_key before any tenant context exists
 - [Phase 05]: 05-02: DeliveryFacts keeps unsubscribedAt in its shape (matching the plan's literal interface) though it does not participate in the D-06 priority chain -- unsubscribe is a subscription-status concern handled separately by 05-03
 - [Phase 05]: 05-02: custom_args widened with a narrowly-typed optional test?: "true" field (not a generic string record) so send_id/workspace_id/campaign_id stay required and type-checked
+- [Phase 05]: 05-03: spam_report and dropped events both increment campaigns.bounced_count -- no dedicated spam/dropped counter exists; every non-delivery, non-unsubscribe terminal folds into bounced_count (D-08 grouping)
+- [Phase 05]: 05-03: orphan send_id resolution runs as a batch pre-check before the send_events INSERT (send_id carries a real FK to sends(id)) -- an unresolved id is nulled out before insertion rather than crashing the batch on a foreign-key violation
+- [Phase 05]: 05-03: dropped's bounced_count increment fires for every dropped event that sets dropped_at for the first time, independent of resolveSuppression's outcome -- a drop is 'не доставлено' regardless of the specific downstream status effect
 
 ### Pending Todos
 
@@ -260,6 +264,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-08T14:20:39.416Z
-Stopped at: Completed 05-02-PLAN.md
+Last session: 2026-07-08T14:37:42.735Z
+Stopped at: Completed 05-03-PLAN.md
 Resume file: None
