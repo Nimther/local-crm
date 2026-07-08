@@ -268,13 +268,24 @@ _Wave 1:_
   3. Duplicate webhook deliveries (same sg_event_id) do not double-count or corrupt delivery statistics.
   4. A bounce, spam complaint, or unsubscribe automatically flips the contact's subscription status so subsequent sends skip that contact.
 
-**Plans**: TBD
+**Plans**: 5 plans
+**UI hint**: yes
 
 Plans:
 
-- [ ] 05-01: Per-tenant webhook endpoint + raw-body ECDSA signature verification
-- [ ] 05-02: Async webhook processor (ack fast) + dedupe by sg_event_id
-- [ ] 05-03: Message status + contact subscription updates (suppress on bounce/spam/unsubscribe)
+**Wave 1** *(parallel)*
+
+- [ ] 05-01-PLAN.md — Webhook receiver walking skeleton: send_events (partitioned) + webhook_endpoints schema/migrations + raw-body ECDSA verify route + dedup-insert worker (WBHK-01, WBHK-03)
+- [ ] 05-02-PLAN.md — Send-side markers (force open/click tracking + test custom_arg) + pure delivery logic (event normalize, suppression rules, current-status priority) (WBHK-02, SUBS-02)
+
+**Wave 2** *(parallel — blocked on Wave 1)*
+
+- [ ] 05-03-PLAN.md — Delivery-status + suppression processing: sends fact columns + campaign counters + contacts soft-bounce streak (migrations + BLOCKING push) + full worker side-effect pipeline (WBHK-02, WBHK-04, SUBS-02)
+- [ ] 05-04-PLAN.md — SendGrid auto-provisioning on key connect/recheck + PATCH-in-place reconnect guard + webhook health/reconnect routes (WBHK-01)
+
+**Wave 3** *(blocked on Wave 2)*
+
+- [ ] 05-05-PLAN.md — UI: campaign delivery counters (delivered/opened/clicked/не доставлено/unsubscribed) + webhook health card + reconnect + onboarding "включить отслеживание доставки" item (WBHK-04)
 
 ### Phase 6: Flows (Triggered Chains)
 
@@ -336,6 +347,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 2. Contacts & Event Ingestion | 14/14 | Complete    | 2026-07-05 |
 | 3. Segmentation Engine | 8/8 | Complete    | 2026-07-06 |
 | 4. Broadcast Campaigns & Send Pipeline | 19/19 | Complete    | 2026-07-06 |
-| 5. Webhook Processing & Delivery Tracking | 0/3 | Not started | - |
+| 5. Webhook Processing & Delivery Tracking | 0/5 | Not started | - |
 | 6. Flows (Triggered Chains) | 0/5 | Not started | - |
 | 7. Analytics, Dashboard & Send Log | 0/5 | Not started | - |
