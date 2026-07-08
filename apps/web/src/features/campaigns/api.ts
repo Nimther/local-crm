@@ -30,6 +30,11 @@ export interface CampaignResponse {
   excludedTotal: number | null;
   sendingStartedAt: string | null;
   terminalAt: string | null;
+  deliveredCount: number;
+  openedCount: number;
+  clickedCount: number;
+  bouncedCount: number;
+  unsubscribedCount: number;
   createdByUserId: string | null;
   createdAt: string;
   updatedAt: string;
@@ -118,6 +123,11 @@ export interface CampaignProgress {
   failedCount: number;
   sendableTotal: number | null;
   excludedTotal: number | null;
+  deliveredCount: number;
+  openedCount: number;
+  clickedCount: number;
+  bouncedCount: number;
+  unsubscribedCount: number;
   ledger: {
     sent: number;
     failed: number;

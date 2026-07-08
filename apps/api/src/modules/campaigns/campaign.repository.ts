@@ -19,6 +19,11 @@ export interface CampaignRow {
   snapshotCursor: string | null;
   sendingStartedAt: Date | null;
   terminalAt: Date | null;
+  deliveredCount: number;
+  openedCount: number;
+  clickedCount: number;
+  bouncedCount: number;
+  unsubscribedCount: number;
   createdByUserId: string;
   createdAt: Date;
   updatedAt: Date;
@@ -42,6 +47,11 @@ const CAMPAIGN_COLUMNS = `
   snapshot_cursor as "snapshotCursor",
   sending_started_at as "sendingStartedAt",
   terminal_at as "terminalAt",
+  delivered_count as "deliveredCount",
+  opened_count as "openedCount",
+  clicked_count as "clickedCount",
+  bounced_count as "bouncedCount",
+  unsubscribed_count as "unsubscribedCount",
   created_by_user_id as "createdByUserId",
   created_at as "createdAt",
   updated_at as "updatedAt"
@@ -369,6 +379,11 @@ export interface CampaignProgress {
   failedCount: number;
   sendableTotal: number | null;
   excludedTotal: number | null;
+  deliveredCount: number;
+  openedCount: number;
+  clickedCount: number;
+  bouncedCount: number;
+  unsubscribedCount: number;
   ledger: {
     sent: number;
     failed: number;
@@ -378,11 +393,12 @@ export interface CampaignProgress {
 }
 
 /**
- * CAMP-05: reads the row's own progress counters (kept fresh by the 04-06
- * kickoff/dispatch worker) AND independently re-aggregates live counts from
- * the `sends` ledger, grouped by status -- a second, cheap cross-check so a
- * stuck counter-update never silently diverges from the ledger's own truth
- * during an in-flight send.
+ * CAMP-05/D-07/D-09: reads the row's own progress counters (kept fresh by
+ * the 04-06 kickoff/dispatch worker AND, since 05-03, the webhook worker's
+ * delivered/opened/clicked/bounced/unsubscribed counters) AND independently
+ * re-aggregates live counts from the `sends` ledger, grouped by status -- a
+ * second, cheap cross-check so a stuck counter-update never silently
+ * diverges from the ledger's own truth during an in-flight send.
  */
 export async function getCampaignProgress(id: string): Promise<CampaignProgress | null> {
   return withTenantTransaction(async (client) => {
@@ -413,6 +429,11 @@ export async function getCampaignProgress(id: string): Promise<CampaignProgress 
       failedCount: campaign.failedCount,
       sendableTotal: campaign.sendableTotal,
       excludedTotal: campaign.excludedTotal,
+      deliveredCount: campaign.deliveredCount,
+      openedCount: campaign.openedCount,
+      clickedCount: campaign.clickedCount,
+      bouncedCount: campaign.bouncedCount,
+      unsubscribedCount: campaign.unsubscribedCount,
       ledger,
     };
   });

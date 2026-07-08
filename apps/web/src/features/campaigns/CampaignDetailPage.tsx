@@ -120,16 +120,42 @@ function SummaryView({ campaign }: { campaign: CampaignResponse }) {
       <CardHeader>
         <CardTitle>{campaign.status === "canceled" ? "Кампания отменена" : "Кампания отправлена"}</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-2">
-        <p className="text-sm text-muted-foreground">
-          {campaign.sentCount} из {total} отправлено
-        </p>
-        {campaign.excludedTotal ? (
-          <p className="text-sm text-muted-foreground">{campaign.excludedTotal} исключено</p>
-        ) : null}
-        {campaign.failedCount > 0 ? (
-          <p className="text-sm font-medium text-destructive">{campaign.failedCount} ошибок</p>
-        ) : null}
+      <CardContent className="space-y-4">
+        <div className="space-y-2">
+          <p className="text-sm text-muted-foreground">
+            {campaign.sentCount} из {total} отправлено
+          </p>
+          {campaign.excludedTotal ? (
+            <p className="text-sm text-muted-foreground">{campaign.excludedTotal} исключено</p>
+          ) : null}
+          {campaign.failedCount > 0 ? (
+            <p className="text-sm font-medium text-destructive">{campaign.failedCount} ошибок</p>
+          ) : null}
+        </div>
+
+        {/* D-07/D-08/D-09: delivery counters sourced from the campaigns row, kept fresh by the 05-03 webhook worker. */}
+        <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-5">
+          <div>
+            <dt className="text-muted-foreground">Доставлено</dt>
+            <dd className="font-medium">{campaign.deliveredCount}</dd>
+          </div>
+          <div>
+            <dt className="text-muted-foreground">Открытий</dt>
+            <dd className="font-medium">{campaign.openedCount}</dd>
+          </div>
+          <div>
+            <dt className="text-muted-foreground">Кликов</dt>
+            <dd className="font-medium">{campaign.clickedCount}</dd>
+          </div>
+          <div>
+            <dt className="text-muted-foreground">Не доставлено</dt>
+            <dd className="font-medium">{campaign.bouncedCount}</dd>
+          </div>
+          <div>
+            <dt className="text-muted-foreground">Отписалось</dt>
+            <dd className="font-medium">{campaign.unsubscribedCount}</dd>
+          </div>
+        </dl>
       </CardContent>
     </Card>
   );
