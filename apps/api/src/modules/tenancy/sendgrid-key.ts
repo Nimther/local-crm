@@ -1,21 +1,81 @@
+import { randomBytes } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { connectSendgridKeySchema } from "@mega-crm/shared-schemas";
 import { requirePermission, toFetchHeaders } from "../../middleware/role-guard.js";
 import { requireVerifiedEmail } from "../auth/verification-gate.js";
 import { withTenant } from "../../middleware/tenant-context.js";
 import { encryptTenantSecret, decryptTenantSecret } from "@mega-crm/kms";
+import { env } from "../../env.js";
 import { validateTenantSendGridKey } from "./sendgrid-client.js";
 import { getKey, upsertKey, updateKeyStatus } from "./sendgrid-key.repository.js";
 import { findActiveWorkspaceBySlug } from "./workspace-lookup.js";
 import { getCallerRoles } from "./member-roles.js";
+import { provisionEventWebhook } from "../webhooks/sendgrid-webhook-provision.js";
+import {
+  getWebhookEndpointByWorkspace,
+  upsertWebhookEndpoint,
+} from "../webhooks/webhook-endpoint.repository.js";
 
 const INVALID_KEY_ERROR =
   "SendGrid отклонил ключ: он недействителен или отозван. Проверьте ключ в настройках SendGrid и вставьте его заново.";
 const MISSING_SCOPE_ERROR =
   "Ключ действителен, но не имеет права mail.send. Создайте в SendGrid ключ с доступом Mail Send и подключите его.";
+const WEBHOOK_MISSING_SCOPE_WARNING =
+  "SendGrid ключ подключён, но у него нет прав на управление вебхуками, поэтому отслеживание доставки не настроено автоматически. Создайте ключ с правами Webhooks Settings или настройте вебхук вручную.";
+const WEBHOOK_CAP_REACHED_WARNING =
+  "SendGrid ключ подключён, но на аккаунте достигнут лимит Event Webhook'ов, поэтому отслеживание доставки не настроено автоматически. Освободите слот в настройках SendGrid.";
+const WEBHOOK_PROVISION_FAILED_WARNING =
+  "SendGrid ключ подключён, но не удалось автоматически настроить вебхук отслеживания доставки. Попробуйте переподключить ключ позже.";
 
 function errorCopyFor(reason: "invalid" | "missing_scope"): string {
   return reason === "missing_scope" ? MISSING_SCOPE_ERROR : INVALID_KEY_ERROR;
+}
+
+function webhookWarningFor(reason: "missing_scope" | "cap_reached" | "failed"): string {
+  if (reason === "missing_scope") return WEBHOOK_MISSING_SCOPE_WARNING;
+  if (reason === "cap_reached") return WEBHOOK_CAP_REACHED_WARNING;
+  return WEBHOOK_PROVISION_FAILED_WARNING;
+}
+
+/**
+ * D-01/D-02/D-05: best-effort provisioning of the platform's own Event
+ * Webhook, called AFTER the SendGrid key itself has already been
+ * successfully connected/rechecked -- MUST be invoked from inside the same
+ * `withTenant(...)` scope that just wrote the key, and MUST NEVER throw
+ * (any exception here is caught by `provisionEventWebhook` itself; this
+ * wrapper adds a second layer so a bug in the endpoint-repository writes
+ * still cannot fail the key connect, D-01 fallback). Returns a non-fatal
+ * warning string to surface to the caller, or `undefined` on success.
+ */
+async function provisionWebhookBestEffort(apiKey: string): Promise<string | undefined> {
+  try {
+    const existing = await getWebhookEndpointByWorkspace();
+    const pathToken = existing?.pathToken ?? randomBytes(32).toString("base64url");
+    const callbackUrl = `${env.PUBLIC_APP_URL}/webhooks/sendgrid/${pathToken}`;
+
+    const result = await provisionEventWebhook(apiKey, callbackUrl, existing?.sendgridWebhookId ?? undefined);
+
+    if ("error" in result) {
+      await upsertWebhookEndpoint({
+        pathToken,
+        sendgridWebhookId: existing?.sendgridWebhookId ?? null,
+        publicKey: existing?.publicKey ?? null,
+        provisionStatus: "error",
+      });
+      return webhookWarningFor(result.error);
+    }
+
+    await upsertWebhookEndpoint({
+      pathToken,
+      sendgridWebhookId: result.id,
+      publicKey: result.publicKey,
+      provisionStatus: "active",
+    });
+    return undefined;
+  } catch {
+    // Defense-in-depth (D-01): provisioning must never fail the key connect.
+    return WEBHOOK_PROVISION_FAILED_WARNING;
+  }
 }
 
 /** D-22: mask shape `SG.aB3x…k9Qz` -- first chars (up to 6) + ellipsis + last 4. */
@@ -91,22 +151,26 @@ export async function registerSendgridKeyRoutes(fastify: FastifyInstance): Promi
       const encrypted = await encryptTenantSecret(workspace.id, parsed.data.apiKey);
       const keyMask = maskKey(parsed.data.apiKey);
 
-      await withTenant(workspace.id, () =>
-        upsertKey({
+      const webhookWarning = await withTenant(workspace.id, async () => {
+        await upsertKey({
           ciphertext: encrypted.ciphertext,
           encryptedDek: encrypted.encryptedDek,
           iv: encrypted.iv,
           authTag: encrypted.authTag,
           keyMask,
           status: "active",
-        })
-      );
+        });
+        // D-01/D-02: best-effort, non-blocking -- a webhook provisioning
+        // failure never turns this successful key connect into a failure.
+        return provisionWebhookBestEffort(parsed.data.apiKey);
+      });
 
       return reply.send({
         connected: true,
         keyMask,
         status: "active",
         verifiedSenders: validation.verifiedSenders,
+        ...(webhookWarning ? { webhookWarning } : {}),
       });
     }
   );
@@ -136,7 +200,14 @@ export async function registerSendgridKeyRoutes(fastify: FastifyInstance): Promi
 
       const validation = await validateTenantSendGridKey(plaintext);
       const status = validation.valid ? "active" : "error";
-      await withTenant(workspace.id, () => updateKeyStatus(status));
+
+      const webhookWarning = await withTenant(workspace.id, async () => {
+        await updateKeyStatus(status);
+        // D-01/D-02: only provision against a key that just re-validated as
+        // active -- an invalid/revoked key has nothing live to provision
+        // against, and the 422 branch below never reaches this warning.
+        return status === "active" ? provisionWebhookBestEffort(plaintext) : undefined;
+      });
 
       if (!validation.valid) {
         return reply.code(422).send({
@@ -152,6 +223,7 @@ export async function registerSendgridKeyRoutes(fastify: FastifyInstance): Promi
         keyMask: row.keyMask,
         status: "active",
         verifiedSenders: validation.verifiedSenders,
+        ...(webhookWarning ? { webhookWarning } : {}),
       });
     }
   );

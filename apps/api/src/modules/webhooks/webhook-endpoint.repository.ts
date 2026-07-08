@@ -1,8 +1,24 @@
 import { pool } from "../../db.js";
+import { getWorkspaceId, withTenantTransaction } from "../../middleware/tenant-context.js";
 
 export interface WebhookEndpointLookupRow {
   workspaceId: string;
   publicKey: string | null;
+}
+
+export interface WebhookEndpointRow {
+  pathToken: string;
+  sendgridWebhookId: string | null;
+  publicKey: string | null;
+  provisionStatus: string;
+  lastEventAt: Date | null;
+}
+
+export interface UpsertWebhookEndpointInput {
+  pathToken: string;
+  sendgridWebhookId: string | null;
+  publicKey: string | null;
+  provisionStatus: string;
 }
 
 /**
@@ -56,4 +72,58 @@ export async function findWebhookEndpointByToken(
   } finally {
     client.release(releaseWithError);
   }
+}
+
+/**
+ * Tenant-scoped read of the single per-workspace endpoint row (D-01/D-02/D-03).
+ * Unlike `findWebhookEndpointByToken` (pre-tenant-context runtime lookup via
+ * the `webhook_endpoint_runtime_lookup` policy), this goes through the
+ * normal `withTenantTransaction`/`workspace_isolation` RLS path like every
+ * other tenant-scoped repository -- it is only ever called from an
+ * authenticated route (webhook-health/reconnect, sendgrid-key connect/recheck).
+ */
+export async function getWebhookEndpointByWorkspace(): Promise<WebhookEndpointRow | null> {
+  return withTenantTransaction(async (client) => {
+    const { rows } = await client.query<WebhookEndpointRow>(
+      `SELECT path_token as "pathToken", sendgrid_webhook_id as "sendgridWebhookId",
+              public_key as "publicKey", provision_status as "provisionStatus",
+              last_event_at as "lastEventAt"
+       FROM workspace_webhook_endpoints
+       WHERE workspace_id = current_setting('app.current_workspace_id', true)::uuid`
+    );
+    return rows[0] ?? null;
+  });
+}
+
+/**
+ * Inserts-or-updates the single per-workspace endpoint row (D-01/D-02/D-05).
+ * There is no DB-level `UNIQUE(workspace_id)` constraint (only `path_token`
+ * is unique) -- this SELECT-then-branch is safe because provisioning is
+ * only ever triggered synchronously from a single connect/recheck HTTP
+ * request for a given workspace, never concurrently.
+ */
+export async function upsertWebhookEndpoint(row: UpsertWebhookEndpointInput): Promise<void> {
+  await withTenantTransaction(async (client) => {
+    const workspaceId = getWorkspaceId();
+    const { rows } = await client.query<{ id: string }>(
+      `SELECT id FROM workspace_webhook_endpoints WHERE workspace_id = $1`,
+      [workspaceId]
+    );
+    if (rows[0]) {
+      await client.query(
+        `UPDATE workspace_webhook_endpoints
+         SET path_token = $2, sendgrid_webhook_id = $3, public_key = $4,
+             provision_status = $5, updated_at = now()
+         WHERE workspace_id = $1`,
+        [workspaceId, row.pathToken, row.sendgridWebhookId, row.publicKey, row.provisionStatus]
+      );
+    } else {
+      await client.query(
+        `INSERT INTO workspace_webhook_endpoints
+           (workspace_id, path_token, sendgrid_webhook_id, public_key, provision_status)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [workspaceId, row.pathToken, row.sendgridWebhookId, row.publicKey, row.provisionStatus]
+      );
+    }
+  });
 }
