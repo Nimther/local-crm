@@ -30,8 +30,8 @@ See: .planning/PROJECT.md (updated 2026-07-06)
 
 Phase: 05 (webhook-processing-delivery-tracking) — EXECUTING
 Plan: 5 of 5
-Status: Phase complete — ready for verification
-Last activity: 2026-07-08 — Phase 05 execution started
+Status: Verification found gaps — gap closure needed (see 05-VERIFICATION.md)
+Last activity: 2026-07-08 — Phase 05 verification: gaps_found (2 blocker gaps from code review CR-01, WR-01/WR-02)
 
 Progress: [████████████████████] 48/48 plans (100%)
 
