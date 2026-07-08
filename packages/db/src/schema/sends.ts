@@ -20,10 +20,14 @@ export const sendStatusEnum = pgEnum("send_status", [
  * without a campaign reference. `kind` distinguishes "campaign" sends from
  * future flow-step sends; `exclusionReason` records why a recipient was
  * skipped (suppressed, frequency-capped, etc.) without occupying a `status`
- * value of its own. Phase 5 delivery-tracking columns (delivered/opened/
- * clicked/bounced timestamps, provider event ids) are intentionally NOT
- * added yet -- this table is designed to grow those columns later without a
- * structural change.
+ * value of its own.
+ *
+ * Phase 5 delivery-tracking fact columns (05-03, WBHK-04/D-06/D-09): each
+ * nullable timestamptz below is set by the webhook worker via a conditional
+ * `WHERE <col> IS NULL` first-write UPDATE -- once set, a fact column is
+ * NEVER overwritten by a later or replayed event (D-06 out-of-order
+ * safety). `bounceReason`/`dropReason` carry the terminal reason string
+ * alongside `bouncedAt`/`droppedAt`.
  */
 export const sends = pgTable(
   "sends",
@@ -42,6 +46,15 @@ export const sends = pgTable(
     providerMessageId: text("provider_message_id"),
     queuedAt: timestamp("queued_at", { withTimezone: true }).notNull().defaultNow(),
     sentAt: timestamp("sent_at", { withTimezone: true }),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+    firstOpenedAt: timestamp("first_opened_at", { withTimezone: true }),
+    firstClickedAt: timestamp("first_clicked_at", { withTimezone: true }),
+    bouncedAt: timestamp("bounced_at", { withTimezone: true }),
+    droppedAt: timestamp("dropped_at", { withTimezone: true }),
+    unsubscribedAt: timestamp("unsubscribed_at", { withTimezone: true }),
+    spamReportedAt: timestamp("spam_reported_at", { withTimezone: true }),
+    bounceReason: text("bounce_reason"),
+    dropReason: text("drop_reason"),
   },
   (t) => [
     unique("sends_workspace_campaign_contact_unique").on(t.workspaceId, t.campaignId, t.contactId),

@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, jsonb, pgEnum, unique } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, uuid, jsonb, pgEnum, unique, integer } from "drizzle-orm/pg-core";
 import { organization } from "./auth.js";
 
 /**
@@ -38,6 +38,13 @@ export const contacts = pgTable(
     tags: text("tags").array().notNull().default([]),
     properties: jsonb("properties").notNull().default({}), // D-09/D-10 custom properties
     subscriptionStatus: subscriptionStatusEnum("subscription_status").notNull().default("subscribed"),
+    // D-10 (Phase 5, 05-03): consecutive soft-bounce/blocked streak.
+    // Incremented on each genuinely-new soft bounce; reset to 0 on a
+    // genuinely-new delivered event. When it reaches
+    // SOFT_BOUNCE_SUPPRESS_THRESHOLD the webhook worker suppresses the
+    // contact (reason soft_bounce_streak) via a single atomic row-locked
+    // UPDATE ... RETURNING.
+    consecutiveSoftBounces: integer("consecutive_soft_bounces").notNull().default(0),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },

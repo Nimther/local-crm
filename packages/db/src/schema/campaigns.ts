@@ -28,6 +28,13 @@ export const campaignStatusEnum = pgEnum("campaign_status", [
  * job never re-walks `campaign_recipients` or re-enqueues sends once the
  * pass has already completed (T-04-06-03). `sendingStartedAt`/`terminalAt`
  * timestamp the sending/sent-or-canceled transitions for audit/metrics.
+ *
+ * Phase 5 delivery counters (05-03, D-07/D-09): unique-recipient summary
+ * counts, incremented exactly once per send the first time its matching
+ * `sends` fact column is set (mirrors the `sentCount`/`failedCount`
+ * precedent). `bouncedCount` groups BOTH hard-bounce and address-drop
+ * ("не доставлено", D-08) terminals into one field -- the distinguishing
+ * reason stays queryable per-send via `sends.bounce_reason`/`drop_reason`.
  */
 export const campaigns = pgTable("campaigns", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -51,6 +58,11 @@ export const campaigns = pgTable("campaigns", {
   fanOutComplete: boolean("fan_out_complete").notNull().default(false),
   sendingStartedAt: timestamp("sending_started_at", { withTimezone: true }),
   terminalAt: timestamp("terminal_at", { withTimezone: true }),
+  deliveredCount: integer("delivered_count").notNull().default(0),
+  openedCount: integer("opened_count").notNull().default(0),
+  clickedCount: integer("clicked_count").notNull().default(0),
+  bouncedCount: integer("bounced_count").notNull().default(0),
+  unsubscribedCount: integer("unsubscribed_count").notNull().default(0),
   createdByUserId: text("created_by_user_id").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
