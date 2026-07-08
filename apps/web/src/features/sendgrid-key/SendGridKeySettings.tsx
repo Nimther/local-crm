@@ -22,6 +22,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { KeyStatusBadge } from "@/features/sendgrid-key/KeyStatusBadge";
+import { getWebhookHealth, reconnectWebhook } from "@/features/webhooks/webhook-health.api";
 
 interface KeyMutationResponse {
   connected: true;
@@ -38,6 +39,93 @@ function extractErrorMessage(error: unknown): string {
     if (typeof body?.error === "string") return body.error;
   }
   return GENERIC_ERROR;
+}
+
+const RELATIVE_TIME_FORMAT = new Intl.RelativeTimeFormat("ru", { numeric: "auto" });
+
+/** «3 минуты назад» -- mirrors ContactEventFeed.tsx's Intl.RelativeTimeFormat("ru") pattern. */
+function relativeTime(iso: string): string {
+  const diffMs = new Date(iso).getTime() - Date.now();
+  const diffSec = Math.round(diffMs / 1000);
+  if (Math.abs(diffSec) < 60) return RELATIVE_TIME_FORMAT.format(diffSec, "second");
+  const diffMin = Math.round(diffSec / 60);
+  if (Math.abs(diffMin) < 60) return RELATIVE_TIME_FORMAT.format(diffMin, "minute");
+  const diffHour = Math.round(diffMin / 60);
+  if (Math.abs(diffHour) < 24) return RELATIVE_TIME_FORMAT.format(diffHour, "hour");
+  const diffDay = Math.round(diffHour / 24);
+  return RELATIVE_TIME_FORMAT.format(diffDay, "day");
+}
+
+function webhookHealthQueryKey(slug: string) {
+  return ["workspace", slug, "webhook-health"];
+}
+
+/**
+ * D-02/D-03: connected/disconnected indicator + last-event-received relative
+ * time + a "Переподключить"/"Включить отслеживание доставки" action for
+ * Owner/Admin (T-05-13: server independently re-enforces requirePermission,
+ * this gate is cosmetic only). Rendered only once a SendGrid key is
+ * connected -- webhook provisioning itself depends on the key.
+ */
+function WebhookHealthCard({ slug, canManage }: { slug: string; canManage: boolean }) {
+  const queryClient = useQueryClient();
+
+  const healthQuery = useQuery({
+    queryKey: webhookHealthQueryKey(slug),
+    queryFn: () => getWebhookHealth(slug),
+    enabled: Boolean(slug),
+  });
+
+  const reconnectMutation = useMutation({
+    mutationFn: () => reconnectWebhook(slug),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: webhookHealthQueryKey(slug) });
+      toast.success("Отслеживание доставки переподключено");
+    },
+    onError: (error: unknown) => {
+      toast.error(extractErrorMessage(error));
+    },
+  });
+
+  if (healthQuery.isLoading) {
+    return <Skeleton className="h-32 w-full" />;
+  }
+
+  const health = healthQuery.data;
+  const connected = Boolean(health?.connected);
+  const reconnectLabel = connected ? "Переподключить отслеживание" : "Включить отслеживание доставки";
+  const badgeStatus = connected ? "active" : health?.provisionStatus === "error" ? "error" : "pending";
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between gap-4">
+        <div>
+          <CardTitle className="flex items-center gap-3">
+            Отслеживание доставки
+            <KeyStatusBadge status={badgeStatus} />
+          </CardTitle>
+          <CardDescription>
+            {health?.lastEventAt
+              ? `Последнее событие получено: ${relativeTime(health.lastEventAt)}`
+              : "События ещё не поступали"}
+          </CardDescription>
+        </div>
+        {canManage ? (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => reconnectMutation.mutate()}
+            disabled={reconnectMutation.isPending}
+          >
+            <RefreshCw
+              className={reconnectMutation.isPending ? "mr-2 h-4 w-4 animate-spin" : "mr-2 h-4 w-4"}
+            />
+            {reconnectLabel}
+          </Button>
+        ) : null}
+      </CardHeader>
+    </Card>
+  );
 }
 
 /**
@@ -221,6 +309,8 @@ export function SendGridKeySettings() {
           </CardContent>
         </Card>
       )}
+
+      {status?.connected ? <WebhookHealthCard slug={slug} canManage={canManage} /> : null}
     </div>
   );
 }
