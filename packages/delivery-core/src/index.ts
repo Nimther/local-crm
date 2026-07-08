@@ -52,3 +52,5 @@ export {
   SOFT_BOUNCE_SUPPRESS_THRESHOLD,
   type SuppressionOutcome,
 } from "./suppression-rules.js";
+
+export { deriveCurrentStatus, type DeliveryFacts, type CurrentStatus } from "./send-status.js";
