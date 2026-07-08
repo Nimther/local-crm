@@ -268,7 +268,7 @@ _Wave 1:_
   3. Duplicate webhook deliveries (same sg_event_id) do not double-count or corrupt delivery statistics.
   4. A bounce, spam complaint, or unsubscribe automatically flips the contact's subscription status so subsequent sends skip that contact.
 
-**Plans**: 1/5 plans executed
+**Plans**: 2/5 plans executed
 **UI hint**: yes
 
 Plans:
@@ -276,7 +276,7 @@ Plans:
 **Wave 1** *(parallel)*
 
 - [x] 05-01-PLAN.md — Webhook receiver walking skeleton: send_events (partitioned) + webhook_endpoints schema/migrations + raw-body ECDSA verify route + dedup-insert worker (WBHK-01, WBHK-03)
-- [ ] 05-02-PLAN.md — Send-side markers (force open/click tracking + test custom_arg) + pure delivery logic (event normalize, suppression rules, current-status priority) (WBHK-02, SUBS-02)
+- [x] 05-02-PLAN.md — Send-side markers (force open/click tracking + test custom_arg) + pure delivery logic (event normalize, suppression rules, current-status priority) (WBHK-02, SUBS-02)
 
 **Wave 2** *(parallel — blocked on Wave 1)*
 
@@ -347,6 +347,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 2. Contacts & Event Ingestion | 14/14 | Complete    | 2026-07-05 |
 | 3. Segmentation Engine | 8/8 | Complete    | 2026-07-06 |
 | 4. Broadcast Campaigns & Send Pipeline | 19/19 | Complete    | 2026-07-06 |
-| 5. Webhook Processing & Delivery Tracking | 1/5 | In Progress|  |
+| 5. Webhook Processing & Delivery Tracking | 2/5 | In Progress|  |
 | 6. Flows (Triggered Chains) | 0/5 | Not started | - |
 | 7. Analytics, Dashboard & Send Log | 0/5 | Not started | - |

@@ -39,7 +39,7 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Subscription & Suppression
 
 - [x] **SUBS-01**: Каждый контакт имеет 3-state статус: subscribed / unsubscribed / suppressed (bounce, spam complaint) — с разной семантикой повторной подписки
-- [ ] **SUBS-02**: Unsubscribe/bounce/spam-события из SendGrid webhook автоматически обновляют статус контакта
+- [x] **SUBS-02**: Unsubscribe/bounce/spam-события из SendGrid webhook автоматически обновляют статус контакта
 - [x] **SUBS-03**: Перед каждой отправкой (цепочка или кампания) применяется pre-send фильтр по статусу подписки и suppression — недоставляемым и отписанным письма не отправляются
 - [x] **SUBS-04**: Каждое отправляемое письмо содержит one-click List-Unsubscribe header (требование Gmail/Yahoo для bulk-senders)
 
@@ -74,7 +74,7 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Webhook Processing
 
 - [x] **WBHK-01**: Платформа принимает SendGrid Event Webhook на per-tenant URL с проверкой ECDSA-подписи по сырому телу запроса
-- [ ] **WBHK-02**: Обрабатываются события delivered / opened / clicked / bounced / unsubscribed / spam report / dropped
+- [x] **WBHK-02**: Обрабатываются события delivered / opened / clicked / bounced / unsubscribed / spam report / dropped
 - [x] **WBHK-03**: События дедуплицируются по sg_event_id — повторная доставка webhook не искажает статистику
 - [ ] **WBHK-04**: Webhook-события обновляют статус конкретного письма в send log и статус подписки контакта
 
@@ -160,10 +160,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SUBS-03 | Phase 4 | Complete |
 | SUBS-04 | Phase 4 | Complete |
 | WBHK-01 | Phase 5 | Complete |
-| WBHK-02 | Phase 5 | Pending |
+| WBHK-02 | Phase 5 | Complete |
 | WBHK-03 | Phase 5 | Complete |
 | WBHK-04 | Phase 5 | Pending |
-| SUBS-02 | Phase 5 | Pending |
+| SUBS-02 | Phase 5 | Complete |
 | FLOW-01 | Phase 6 | Pending |
 | FLOW-02 | Phase 6 | Pending |
 | FLOW-03 | Phase 6 | Pending |
