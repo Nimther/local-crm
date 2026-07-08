@@ -6,6 +6,7 @@ import { createEmailBroadcastWorker } from "./queues/email-broadcast.worker.js";
 import { createEmailTriggeredWorker } from "./queues/email-triggered.worker.js";
 import { createCampaignKickoffWorker } from "./queues/campaign-kickoff.worker.js";
 import { createCampaignSchedulerWorker } from "./queues/campaign-scheduler.worker.js";
+import { createWebhookEventsWorker } from "./queues/webhook-events.worker.js";
 
 /**
  * The worker process's runtime handle: a standalone shared ioredis
@@ -80,6 +81,9 @@ export async function buildWorker(): Promise<WorkerRuntime> {
     // due `scheduled` campaigns and produces the same kickoff job.
     createCampaignKickoffWorker(buildRedisConnectionOptions(redisUrl)),
     createCampaignSchedulerWorker(buildRedisConnectionOptions(redisUrl)),
+    // WBHK-01/03: its own dedicated lane (not folded into events-ingest or
+    // either send queue), per CLAUDE.md queue-isolation guidance.
+    createWebhookEventsWorker(buildRedisConnectionOptions(redisUrl)),
   ];
 
   const close = async (): Promise<void> => {
@@ -111,7 +115,7 @@ async function main(): Promise<void> {
 
   // eslint-disable-next-line no-console
   console.log(
-    `apps/worker started (${runtime.workers.length} BullMQ worker(s) registered: events:ingest, imports:csv, email-broadcast, email-triggered, campaign-kickoff, campaign-scheduler)`
+    `apps/worker started (${runtime.workers.length} BullMQ worker(s) registered: events:ingest, imports:csv, email-broadcast, email-triggered, campaign-kickoff, campaign-scheduler, webhook-events)`
   );
 }
 
