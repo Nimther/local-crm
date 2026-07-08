@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 5
-current_phase_name: Webhook Processing & Delivery Tracking
-status: "Phase 04 shipped — PR #2 (covers phases 02–04)"
-stopped_at: Phase 5 context gathered
-last_updated: "2026-07-08T13:45:49.116Z"
+current_phase: 05
+current_phase_name: webhook-processing-delivery-tracking
+status: executing
+stopped_at: Completed 05-01-PLAN.md
+last_updated: "2026-07-08T14:11:43.623Z"
 last_activity: 2026-07-08
-last_activity_desc: Phase 05 planning complete
+last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 7
   completed_phases: 4
-  total_plans: 48
-  completed_plans: 48
+  total_plans: 53
+  completed_plans: 49
   percent: 57
 ---
 
@@ -24,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-06)
 
 **Core value:** Маркетолог настраивает триггерную цепочку или кампанию — и письма надёжно и вовремя доходят до нужных контактов, со сквозным отслеживанием статусов (delivered/opened/clicked/bounced).
-**Current focus:** Phase 5 — Webhook Processing & Delivery Tracking
+**Current focus:** Phase 05 — webhook-processing-delivery-tracking
 
 ## Current Position
 
-Phase: 5 — Webhook Processing & Delivery Tracking
-Plan: Not started
-Status: Phase 04 shipped — PR #2 (covers phases 02–04)
-Last activity: 2026-07-08 — Phase 05 planning complete
+Phase: 05 (webhook-processing-delivery-tracking) — EXECUTING
+Plan: 2 of 5
+Status: Ready to execute
+Last activity: 2026-07-08 — Phase 05 execution started
 
 Progress: [████████████████████] 48/48 plans (100%)
 
@@ -106,6 +106,7 @@ Progress: [████████████████████] 48/48 p
 | Phase 04 P17 | 8min | 2 tasks | 3 files |
 | Phase 04 P18 | 20min | 2 tasks | 5 files |
 | Phase 04 P19 | 15min | 2 tasks | 6 files |
+| Phase 05 P01 | 15min | 3 tasks | 17 files |
 
 ## Accumulated Context
 
@@ -228,6 +229,8 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 04]: 04-18: Inline two-step confirm (not AlertDialog) for the D-03 save-time gate -- a refetch error inside handleSave is treated as non-blocking, surfaced only via referencingCampaignsQuery.isError's muted note
 - [Phase ?]: [Phase 04]: 04-19: worker test-send fallback contactId changed from placeholder literal to randomUUID() (CR-01 root cause) -- unknown-but-valid UUID safely no-ops on redemption instead of raising Postgres 22P02
 - [Phase ?]: [Phase 04]: 04-19: API POST /unsubscribe isUuid() guard shares the SAME if-block as isValid (no new response branch) -- preserves the byte-identical-response invariant for a structurally-invalid contactId
+- [Phase 05]: 05-01: UNIQUE constraint widened to (workspace_id, sg_event_id, occurred_at) on send_events -- Postgres requires every unique constraint on a partitioned table to include the partition-key column; occurred_at is deterministic per sg_event_id across redeliveries so dedup still holds
+- [Phase 05]: 05-01: workspace_webhook_endpoints uses a GUC-scoped webhook_endpoint_runtime_lookup RLS policy (mirrors workspace_api_keys' api_key_runtime_lookup) so findWebhookEndpointByToken can resolve workspace_id + public_key before any tenant context exists
 
 ### Pending Todos
 
@@ -254,6 +257,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-08T12:59:40.323Z
-Stopped at: Phase 5 context gathered
-Resume file: .planning/phases/05-webhook-processing-delivery-tracking/05-CONTEXT.md
+Last session: 2026-07-08T14:11:43.592Z
+Stopped at: Completed 05-01-PLAN.md
+Resume file: None
