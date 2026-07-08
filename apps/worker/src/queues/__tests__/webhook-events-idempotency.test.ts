@@ -60,6 +60,79 @@ describe("webhook-events worker (WBHK-03, D-14)", () => {
     );
   }
 
+  // segments/campaigns/contacts/sends all carry ENABLE + FORCE ROW LEVEL
+  // SECURITY -- fixture inserts MUST run inside withTenant/withTenantTransaction
+  // (05-03: side-effect exactly-once-on-replay fixtures).
+  async function createFixtureCampaign(workspaceId: string): Promise<string> {
+    return withTenant(workspaceId, () =>
+      withTenantTransaction(async (client) => {
+        const { rows: segmentRows } = await client.query<{ id: string }>(
+          `INSERT INTO segments (workspace_id, name, definition, created_by_user_id)
+           VALUES ($1, 'Fixture segment', $2, 'test-user') RETURNING id`,
+          [workspaceId, { operator: "and", conditions: [] }]
+        );
+        const { rows: campaignRows } = await client.query<{ id: string }>(
+          `INSERT INTO campaigns (workspace_id, name, status, segment_id, template_id, from_email, created_by_user_id)
+           VALUES ($1, 'Fixture campaign', 'sent', $2, 'd-fixture-template', 'sender@fixture.test', 'test-user')
+           RETURNING id`,
+          [workspaceId, segmentRows[0].id]
+        );
+        return campaignRows[0].id;
+      })
+    );
+  }
+
+  async function createFixtureContact(workspaceId: string): Promise<string> {
+    const email = `contact-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@fixture.test`;
+    return withTenant(workspaceId, () =>
+      withTenantTransaction(async (client) => {
+        const { rows } = await client.query<{ id: string }>(
+          `INSERT INTO contacts (workspace_id, email, first_name, subscription_status)
+           VALUES ($1, $2, 'Fixture', 'subscribed') RETURNING id`,
+          [workspaceId, email]
+        );
+        return rows[0].id;
+      })
+    );
+  }
+
+  async function createFixtureSend(workspaceId: string, campaignId: string, contactId: string): Promise<string> {
+    return withTenant(workspaceId, () =>
+      withTenantTransaction(async (client) => {
+        const { rows } = await client.query<{ id: string }>(
+          `INSERT INTO sends (workspace_id, campaign_id, contact_id, kind, status, sent_at)
+           VALUES ($1, $2, $3, 'campaign', 'sent', now()) RETURNING id`,
+          [workspaceId, campaignId, contactId]
+        );
+        return rows[0].id;
+      })
+    );
+  }
+
+  async function sendDeliveredAt(workspaceId: string, sendId: string): Promise<Date | null> {
+    return withTenant(workspaceId, () =>
+      withTenantTransaction(async (client) => {
+        const { rows } = await client.query<{ deliveredAt: Date | null }>(
+          `SELECT delivered_at as "deliveredAt" FROM sends WHERE id = $1`,
+          [sendId]
+        );
+        return rows[0]?.deliveredAt ?? null;
+      })
+    );
+  }
+
+  async function campaignDeliveredCount(workspaceId: string, campaignId: string): Promise<number> {
+    return withTenant(workspaceId, () =>
+      withTenantTransaction(async (client) => {
+        const { rows } = await client.query<{ deliveredCount: number }>(
+          `SELECT delivered_count as "deliveredCount" FROM campaigns WHERE id = $1`,
+          [campaignId]
+        );
+        return rows[0]?.deliveredCount ?? 0;
+      })
+    );
+  }
+
   it("inserts N rows for a fresh batch of N distinct sg_event_ids, RETURNING yields N", async () => {
     const workspaceId = await freshWorkspaceId("wh-fresh");
     const events = [sendgridEvent(), sendgridEvent(), sendgridEvent()];
@@ -118,5 +191,31 @@ describe("webhook-events worker (WBHK-03, D-14)", () => {
 
     expect(result.inserted).toBe(2);
     expect(await countSendEvents(workspaceId)).toBe(2);
+  });
+
+  it("WBHK-04/D-09: a replayed batch leaves the delivery fact and campaign counter unchanged (exactly-once side effects)", async () => {
+    const workspaceId = await freshWorkspaceId("wh-replay-side-effects");
+    const campaignId = await createFixtureCampaign(workspaceId);
+    const contactId = await createFixtureContact(workspaceId);
+    const sendId = await createFixtureSend(workspaceId, campaignId, contactId);
+
+    const events = [
+      sendgridEvent({
+        custom_args: { send_id: sendId, workspace_id: workspaceId, campaign_id: campaignId },
+      }),
+    ];
+
+    const first = await processWebhookEventBatch({ workspaceId, events });
+    expect(first.inserted).toBe(1);
+    const deliveredAtAfterFirst = await sendDeliveredAt(workspaceId, sendId);
+    expect(deliveredAtAfterFirst).not.toBeNull();
+    expect(await campaignDeliveredCount(workspaceId, campaignId)).toBe(1);
+
+    // BullMQ at-least-once redelivery of the exact same batch.
+    const replay = await processWebhookEventBatch({ workspaceId, events });
+    expect(replay.inserted).toBe(0);
+
+    expect((await sendDeliveredAt(workspaceId, sendId))?.toISOString()).toBe(deliveredAtAfterFirst?.toISOString());
+    expect(await campaignDeliveredCount(workspaceId, campaignId), "delivered_count must not double-count on replay").toBe(1);
   });
 });
