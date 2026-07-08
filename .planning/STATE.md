@@ -6,14 +6,14 @@ current_phase: 05
 current_phase_name: webhook-processing-delivery-tracking
 status: executing
 stopped_at: Completed 05-03-PLAN.md
-last_updated: "2026-07-08T14:37:42.760Z"
+last_updated: "2026-07-08T14:53:48.480Z"
 last_activity: 2026-07-08
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 7
   completed_phases: 4
   total_plans: 53
-  completed_plans: 51
+  completed_plans: 52
   percent: 57
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-07-06)
 ## Current Position
 
 Phase: 05 (webhook-processing-delivery-tracking) — EXECUTING
-Plan: 4 of 5
+Plan: 5 of 5
 Status: Ready to execute
 Last activity: 2026-07-08 — Phase 05 execution started
 
@@ -109,6 +109,7 @@ Progress: [████████████████████] 48/48 p
 | Phase 05 P01 | 15min | 3 tasks | 17 files |
 | Phase 05 P02 | 15min | 3 tasks | 10 files |
 | Phase 05 P03 | 20min | 3 tasks | 12 files |
+| Phase 05 P04 | 15min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -238,6 +239,9 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-03: spam_report and dropped events both increment campaigns.bounced_count -- no dedicated spam/dropped counter exists; every non-delivery, non-unsubscribe terminal folds into bounced_count (D-08 grouping)
 - [Phase 05]: 05-03: orphan send_id resolution runs as a batch pre-check before the send_events INSERT (send_id carries a real FK to sends(id)) -- an unresolved id is nulled out before insertion rather than crashing the batch on a foreign-key violation
 - [Phase 05]: 05-03: dropped's bounced_count increment fires for every dropped event that sets dropped_at for the first time, independent of resolveSuppression's outcome -- a drop is 'не доставлено' regardless of the specific downstream status effect
+- [Phase ?]: No new migration for workspace_id UNIQUE -- upsertWebhookEndpoint uses SELECT-then-branch inside withTenantTransaction instead of ON CONFLICT
+- [Phase ?]: provisionEventWebhook pre-flights GET .../settings/all to reuse an existing platform webhook by friendly_name and detect max_allowed cap before POSTing (Pitfall 4)
+- [Phase ?]: webhookWarning is purely additive on the sendgrid-key connect/recheck success response -- never changes the existing connected:true contract (D-01)
 
 ### Pending Todos
 
@@ -264,6 +268,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-08T14:37:42.735Z
+Last session: 2026-07-08T14:52:38.652Z
 Stopped at: Completed 05-03-PLAN.md
 Resume file: None
