@@ -99,4 +99,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-06 after Phase 4 completion (re-verification 9/9 после gap-closure 04-15: shared EXHAUSTIVE_LOOKUP_PAGE_SIZE закрыл UAT Test 3 блокер сегмент-пикера; ранее 04-14 закрыл SUBS-04 one-click unsubscribe; полный broadcast send loop работает; UAT re-run ожидается через /gsd-verify-work 4)*
+*Last updated: 2026-07-08 after Phase 4 transition (UAT завершён 74/74: все 4 диагностированных гэпа закрыты и re-verified вживую — доставка тестового письма и broadcast (04-16 predev-миграции + env fail-fast), test-send 4xx observability + UX-копия (04-17), D-03 save-time gate (04-18), unsubscribe token UUID fix (04-19); SECURITY.md verified, 70 threats / 0 open; фаза 4 отмечена завершённой, переход к Phase 5)*
