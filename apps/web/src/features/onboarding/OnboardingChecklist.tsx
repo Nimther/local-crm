@@ -6,6 +6,7 @@ import type { ContactListResponse, SendgridKeyStatus } from "@mega-crm/shared-sc
 import { apiGet } from "@/lib/api";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { getWebhookHealth } from "@/features/webhooks/webhook-health.api";
 
 interface MemberListItem {
   id: string;
@@ -29,7 +30,8 @@ function buildItems(
   slug: string,
   sendgridConnected: boolean,
   hasSecondMember: boolean,
-  hasContacts: boolean
+  hasContacts: boolean,
+  webhookTrackingEnabled: boolean
 ): OnboardingItem[] {
   return [
     {
@@ -37,6 +39,12 @@ function buildItems(
       label: "Подключите SendGrid",
       href: `/w/${slug}/settings/sendgrid`,
       done: sendgridConnected,
+    },
+    {
+      id: "webhook-tracking",
+      label: "Включить отслеживание доставки",
+      href: `/w/${slug}/settings/sendgrid`,
+      done: webhookTrackingEnabled,
     },
     {
       id: "invite-team",
@@ -78,11 +86,21 @@ export function OnboardingChecklist({ slug }: { slug: string }) {
     enabled: Boolean(slug),
   });
 
+  // D-02: "Включить отслеживание доставки" -- done-state derives from the
+  // 05-04 webhook-health endpoint (connected already means
+  // provisionStatus==='active', see webhook-settings.routes.ts).
+  const webhookHealthQuery = useQuery({
+    queryKey: ["workspace", slug, "webhook-health"],
+    queryFn: () => getWebhookHealth(slug),
+    enabled: Boolean(slug),
+  });
+
   const items = buildItems(
     slug,
     Boolean(sendgridQuery.data?.connected),
     (membersQuery.data?.length ?? 0) > 1,
-    (contactsQuery.data?.total ?? 0) > 0
+    (contactsQuery.data?.total ?? 0) > 0,
+    Boolean(webhookHealthQuery.data?.connected && webhookHealthQuery.data?.provisionStatus === "active")
   );
 
   return (
