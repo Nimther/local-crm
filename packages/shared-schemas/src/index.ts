@@ -10,3 +10,4 @@ export * from "./queues.js";
 export * from "./segment.js";
 export * from "./campaign.js";
 export * from "./pagination.js";
+export * from "./webhook.js";
