@@ -26,6 +26,16 @@ export const EMAIL_TRIGGERED_QUEUE = "email-triggered";
 export const CAMPAIGN_KICKOFF_QUEUE = "campaign-kickoff";
 
 /**
+ * Phase 5 webhook-processing queue (WBHK-01/02/03): its own dedicated lane,
+ * not folded into events-ingest/email-broadcast/email-triggered -- a
+ * structurally distinct concern (delivery events vs. contact events vs.
+ * sends) with different downstream side effects (suppression/status vs.
+ * segment/flow triggers vs. mail dispatch), per CLAUDE.md's queue-isolation
+ * guidance and RESEARCH.md's Alternatives Considered.
+ */
+export const WEBHOOK_EVENTS_QUEUE = "webhook-events";
+
+/**
  * events:ingest job payload (EVNT-02/EVNT-03, finalized in 02-06): the
  * SOLE context the worker trusts (Pattern 2) -- `workspaceId` is re-derived
  * from this payload inside the worker (never ambient state), `eventId` is
@@ -111,3 +121,23 @@ export const campaignKickoffJobSchema = z.object({
   campaignId: z.string().uuid(),
 });
 export type CampaignKickoffJob = z.infer<typeof campaignKickoffJobSchema>;
+
+/**
+ * webhook-events job payload (WBHK-01/03): mirrors events-ingest's Pattern 2
+ * contract -- `workspaceId` is re-derived from this payload inside the
+ * worker (never ambient state), resolved by the route via
+ * `findWebhookEndpointByToken(pathToken)` BEFORE the payload itself is
+ * trusted (RESEARCH.md Architecture Patterns #1: unverified payload data
+ * must never select which signing key to verify against). `events` carries
+ * the ENTIRE verified SendGrid batch (5-50 raw events per POST) as one job
+ * -- ack-fast, whole-batch enqueue (RESEARCH.md Pattern 2), not one job per
+ * event. Each element is `z.unknown()` because this plan only stores raw
+ * event rows (dedup-only slice, WBHK-03) -- normalized field extraction
+ * happens inside the worker, not at the schema boundary, since SendGrid's
+ * per-event-type shape varies (05-03 adds normalization/side effects).
+ */
+export const webhookEventsJobSchema = z.object({
+  workspaceId: z.string().uuid(),
+  events: z.array(z.unknown()),
+});
+export type WebhookEventsJob = z.infer<typeof webhookEventsJobSchema>;

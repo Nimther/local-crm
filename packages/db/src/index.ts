@@ -13,6 +13,8 @@ import * as campaignsSchema from "./schema/campaigns.js";
 import * as campaignRecipientsSchema from "./schema/campaign-recipients.js";
 import * as sendsSchema from "./schema/sends.js";
 import * as workspaceSendSettingsSchema from "./schema/workspace-send-settings.js";
+import * as sendEventsSchema from "./schema/send-events.js";
+import * as webhookEndpointsSchema from "./schema/webhook-endpoints.js";
 
 const schema = {
   ...authSchema,
@@ -28,6 +30,8 @@ const schema = {
   ...campaignRecipientsSchema,
   ...sendsSchema,
   ...workspaceSendSettingsSchema,
+  ...sendEventsSchema,
+  ...webhookEndpointsSchema,
 };
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -58,4 +62,6 @@ export * from "./schema/campaigns.js";
 export * from "./schema/campaign-recipients.js";
 export * from "./schema/sends.js";
 export * from "./schema/workspace-send-settings.js";
+export * from "./schema/send-events.js";
+export * from "./schema/webhook-endpoints.js";
 export { TENANT_GUC_KEY } from "./rls.js";

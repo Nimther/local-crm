@@ -23,6 +23,7 @@
     "@mega-crm/segments-core": "0.1.0",
     "@mega-crm/shared-schemas": "0.1.0",
     "@mega-crm/tenant-context": "0.1.0",
+    "@sendgrid/eventwebhook": "^8.0.0",
     "@sendgrid/mail": "8.1.6",
     "better-auth": "1.6.23",
     "bullmq": "5.79.1",

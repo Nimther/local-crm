@@ -141,6 +141,20 @@
       "when": 1783324622289,
       "tag": "0019_campaigns_workspace_isolation_nullif_guard",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1783324622290,
+      "tag": "0020_send_events_partitioned",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1783324622291,
+      "tag": "0021_webhook_endpoints",
+      "breakpoints": true
     }
   ]
 }
