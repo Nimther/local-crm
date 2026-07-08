@@ -43,3 +43,12 @@ export {
   upsertWorkspaceSendSettings,
   type WorkspaceSendSettings,
 } from "./send-settings.js";
+
+export { normalizeEventType, type NormalizedEventType } from "./event-normalize.js";
+
+export {
+  resolveSuppression,
+  ADDRESS_DROP_REASONS,
+  SOFT_BOUNCE_SUPPRESS_THRESHOLD,
+  type SuppressionOutcome,
+} from "./suppression-rules.js";
