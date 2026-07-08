@@ -1,14 +1,14 @@
 ---
-status: diagnosed
+status: complete
 phase: 04-broadcast-campaigns-send-pipeline
-source: [04-01-SUMMARY.md, 04-02-SUMMARY.md, 04-03-SUMMARY.md, 04-04-SUMMARY.md, 04-05-SUMMARY.md, 04-06-SUMMARY.md, 04-07-SUMMARY.md, 04-08-SUMMARY.md, 04-09-SUMMARY.md, 04-10-SUMMARY.md, 04-11-SUMMARY.md, 04-12-SUMMARY.md, 04-13-SUMMARY.md, 04-14-SUMMARY.md]
+source: [04-01-SUMMARY.md, 04-02-SUMMARY.md, 04-03-SUMMARY.md, 04-04-SUMMARY.md, 04-05-SUMMARY.md, 04-06-SUMMARY.md, 04-07-SUMMARY.md, 04-08-SUMMARY.md, 04-09-SUMMARY.md, 04-10-SUMMARY.md, 04-11-SUMMARY.md, 04-12-SUMMARY.md, 04-13-SUMMARY.md, 04-14-SUMMARY.md, 04-15-SUMMARY.md, 04-16-SUMMARY.md, 04-17-SUMMARY.md, 04-18-SUMMARY.md, 04-19-SUMMARY.md]
 started: 2026-07-06T14:53:14Z
-updated: 2026-07-07T09:30:00Z
+updated: 2026-07-08T00:00:00Z
 ---
 
 ## Current Test
 
-[testing paused — 3 issues found, 3 tests blocked pending fixes]
+[testing complete]
 
 ## Tests
 
@@ -28,27 +28,27 @@ note: re-test after 04-15 fix (segments 400: pageSize=200 over schema max 100) �
 
 ### 4. Тестовое письмо себе
 expected: On the draft campaign, open the test-send panel. Sample dynamic_template_data JSON is auto-filled from a real contact in the selected segment and is editable. Send the test to your own address. The email arrives rendered via the SendGrid Dynamic Template.
-result: issue
-reported: "dynamic_template_data содержит не тот же имейл, который указан в инпуте выше блока с тестовым письмом. Тестовое письмо показывается, что отправляется, но не доходит до входящих."
-severity: major
+result: pass
+retest: passed 2026-07-07 after 04-16 (env fail-fast + migrations), 04-17 (4xx surfaced as failed + sample-data copy), 04-19 (test-send unsubscribe token UUID fix)
+previous: issue — "dynamic_template_data содержит не тот же имейл, который указан в инпуте выше блока с тестовым письмом. Тестовое письмо показывается, что отправляется, но не доходит до входящих." (severity: major)
 
 ### 5. Запуск кампании (immediate launch)
 expected: Click launch on the draft. A confirm dialog shows the sendable count plus an exclusion breakdown (suppressed/unsubscribed excluded) BEFORE committing. Confirm. The campaign transitions to «Отправляется» (sending).
-result: issue
-reported: "Диалог открывается, кампания показывает, что отправляется, но несколько минут висит «0 отправленных». Во входящих у получателей тоже ничего нет."
-severity: blocker
+result: pass
+retest: passed 2026-07-07 after 04-16 (migrations 0017-0019 now auto-applied via predev; env fail-fast)
+previous: issue — "Диалог открывается, кампания показывает, что отправляется, но несколько минут висит «0 отправленных». Во входящих у получателей тоже ничего нет." (severity: blocker)
 
 ### 6. Живой прогресс отправки
 expected: During sending, the campaign detail shows a determinate progress bar (sent / total) that updates via ~3s polling, plus a failed-count line. When done, status becomes «Отправлена» (sent).
-result: blocked
-blocked_by: other
-reason: "я не вижу динамику прогрессбара, так как отправка зависает на нуле отправленных. (Blocked by test 5 blocker: send pipeline stuck at 0 sent — re-test after fix.)"
+result: pass
+retest: passed 2026-07-07 after test 5 fixes (04-16) — progress bar advanced live during the re-launched broadcast
+previous: blocked — "я не вижу динамику прогрессбара, так как отправка зависает на нуле отправленных."
 
 ### 7. Письмо дошло до инбокса (outcome)
 expected: The broadcast email arrives in a real inbox, rendered from the SendGrid Dynamic Template with your contact's dynamic data. The message carries a one-click List-Unsubscribe header (visible in raw headers), and the unsubscribe link/POST actually unsubscribes the contact.
-result: blocked
-blocked_by: other
-reason: "Письмо не дошло до Инбокса. (Consequence of test 5 blocker: send pipeline stuck at 0 sent, no emails dispatched — re-test List-Unsubscribe/unsubscribe flow after fix.)"
+result: pass
+retest: passed 2026-07-07 after test 5 fixes (04-16) + 04-19 (unsubscribe token contactId UUID fix) — inbox delivery, List-Unsubscribe header, and working unsubscribe confirmed
+previous: blocked — "Письмо не дошло до Инбокса."
 
 ### 8. Планирование + scheduler worker
 expected: Schedule a second campaign via the datetime-local picker (labelled with your resolved local timezone). It stores UTC and shows status «Запланирована». Within ~60s after the scheduled time, the scheduler worker picks it up and it transitions to sending without manual action.
@@ -68,15 +68,15 @@ result: pass
 
 ### 12. Предупреждение в редакторе сегмента
 expected: Open a segment that is referenced by a scheduled campaign and edit it. The editor warns that a scheduled campaign references this segment (D-03) before you save changes.
-result: issue
-reported: "предупреждение перед сохранением не появляется"
-severity: major
+result: pass
+retest: passed 2026-07-07 after 04-18 — save-time refetch + explicit confirm gate verified in browser
+previous: issue — "предупреждение перед сохранением не появляется" (severity: major)
 
 ### 13. Coverage: suppression-aware queue
 expected: Goal-backward check of the user story's capability clause. After the unsubscribe in test 7, launch another broadcast to the same segment: the exclusion breakdown counts the unsubscribed contact, and no email is delivered to it.
-result: blocked
-blocked_by: other
-reason: "заблокировано тестом 7: письмо не приходит и отписаться невозможно от рассылки. (Chain: test 5 blocker → no delivery → no unsubscribe possible → suppression check untestable.)"
+result: pass
+retest: passed 2026-07-07 — exclusion breakdown counted the unsubscribed contact; no delivery to the unsubscribed address
+previous: blocked — "заблокировано тестом 7: письмо не приходит и отписаться невозможно от рассылки."
 
 ### 14. [04-01] campaigns table supports draft/scheduled/sending/sent/canceled status and references a segment by id with ON DELETE RESTRICT (D-14)
 expected: campaigns table supports draft/scheduled/sending/sent/canceled status and references a segment by id with ON DELETE RESTRICT (D-14)
@@ -396,14 +396,62 @@ result: pass
 source: automated
 coverage_id: D3
 
+### 67. [04-15] segmentListQuerySchema and campaignListQuerySchema accept pageSize=EXHAUSTIVE_LOOKUP_PAGE_SIZE (200) and still reject 201, non-integers, and <1; both still default to 20 when omitted
+expected: segmentListQuerySchema and campaignListQuerySchema accept pageSize=EXHAUSTIVE_LOOKUP_PAGE_SIZE (200) and still reject 201, non-integers, and <1; both still default to 20 when omitted
+result: pass
+source: automated
+coverage_id: D1
+
+### 68. [04-16] check-env.mjs, apps/api/src/env.ts, and apps/worker/src/server.ts all fail fast (loud error, non-zero exit / thrown Error) when UNSUBSCRIBE_TOKEN_SECRET or PUBLIC_APP_URL is missing or too short, instead of the worker crashing per-send-job
+expected: check-env.mjs, apps/api/src/env.ts, and apps/worker/src/server.ts all fail fast when UNSUBSCRIBE_TOKEN_SECRET or PUBLIC_APP_URL is missing or too short
+result: pass
+source: automated
+coverage_id: D1
+
+### 69. [04-16] scripts/migrate-dev.mjs applies pending Drizzle migrations (0017-0019) before the dev stack boots, wired as the second step of the root predev script
+expected: scripts/migrate-dev.mjs applies pending Drizzle migrations before the dev stack boots via predev
+result: pass
+source: automated
+coverage_id: D2
+
+### 70. [04-17] A test send whose SendGrid call returns a non-retryable 4xx (400/401/403/413) is reported as outcome 'failed', not silently swallowed as 'sent'
+expected: A test-send 4xx is reported failed, never sent (SEND-07)
+result: pass
+source: automated
+coverage_id: D1
+
+### 71. [04-18] findBlockingScheduledCampaign pure helper: only a status='scheduled' campaign referencing the exact segmentId blocks, across 5 pinned behaviors
+expected: findBlockingScheduledCampaign pure helper pinned across no-campaigns / matching-scheduled / non-matching-segment / non-scheduled-statuses / mixed-list cases
+result: pass
+source: automated
+coverage_id: D1
+
+### 72. [04-18] apps/web unit-test lane stood up (vitest.config.ts + package.json test script), runnable via npm run test -w @mega-crm/web and root npm test --workspaces
+expected: apps/web unit-test lane runnable via npm run test -w @mega-crm/web
+result: pass
+source: automated
+coverage_id: D2
+
+### 73. [04-19] Test-send unsubscribe tokens are signed with a valid random UUID contactId (worker root cause)
+expected: Test-send unsubscribe tokens are signed with a valid random UUID contactId, not a placeholder literal
+result: pass
+source: automated
+coverage_id: D1
+
+### 74. [04-19] Redeeming a test-send-shaped (non-UUID contactId) unsubscribe token returns the uniform 2xx response, byte-identical to the unknown-contact response, with no mutation and no 500
+expected: Test-send-shaped token redemption is a uniform, non-mutating 2xx on both POST and GET
+result: pass
+source: automated
+coverage_id: D2
+
 ## Summary
 
-total: 66
-passed: 60
-issues: 3
+total: 74
+passed: 74
+issues: 0
 pending: 0
 skipped: 0
-blocked: 3
+blocked: 0
 
 ## Gaps
 
@@ -429,7 +477,7 @@ blocked: 3
   debug_session: ".planning/debug/campaign-builder-segments-400.md"
 
 - truth: "Test-send panel auto-fills sample dynamic_template_data from a real contact matching the recipient input; sending a test delivers the email to the inbox rendered via the SendGrid Dynamic Template"
-  status: failed
+  status: closed  # fixed by plans 04-16/04-17/04-19, re-verified in UAT re-test 2026-07-07
   reason: "User reported: dynamic_template_data содержит не тот же имейл, который указан в инпуте выше блока с тестовым письмом. Тестовое письмо показывается, что отправляется, но не доходит до входящих."
   severity: major
   test: 4
@@ -453,7 +501,7 @@ blocked: 3
   debug_session: ".planning/debug/test-send-no-delivery.md"
 
 - truth: "Launching a campaign fans out send jobs: sent count advances and recipients receive the broadcast email"
-  status: failed
+  status: closed  # fixed by plan 04-16 (predev migrations + env fail-fast), re-verified in UAT re-test 2026-07-07
   reason: "User reported: Диалог открывается, кампания показывает, что отправляется, но несколько минут висит «0 отправленных». Во входящих у получателей тоже ничего нет."
   severity: blocker
   test: 5
@@ -476,7 +524,7 @@ blocked: 3
   debug_session: ".planning/debug/broadcast-launch-zero-sent.md"
 
 - truth: "Segment editor warns that a scheduled campaign references this segment (D-03) before saving changes"
-  status: failed
+  status: closed  # fixed by plan 04-18 (save-time D-03 gate), re-verified in UAT re-test 2026-07-07
   reason: "User reported: предупреждение перед сохранением не появляется"
   severity: major
   test: 12
