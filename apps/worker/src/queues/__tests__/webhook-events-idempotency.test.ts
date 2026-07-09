@@ -218,4 +218,36 @@ describe("webhook-events worker (WBHK-03, D-14)", () => {
     expect((await sendDeliveredAt(workspaceId, sendId))?.toISOString()).toBe(deliveredAtAfterFirst?.toISOString());
     expect(await campaignDeliveredCount(workspaceId, campaignId), "delivered_count must not double-count on replay").toBe(1);
   });
+
+  it("WBHK-03/D-09: a redelivered event with a missing/invalid timestamp does not double-insert or double-count", async () => {
+    const workspaceId = await freshWorkspaceId("wh-bad-ts-replay");
+    const campaignId = await createFixtureCampaign(workspaceId);
+    const contactId = await createFixtureContact(workspaceId);
+    const sendId = await createFixtureSend(workspaceId, campaignId, contactId);
+
+    const events = [
+      sendgridEvent({
+        timestamp: undefined,
+        custom_args: { send_id: sendId, workspace_id: workspaceId, campaign_id: campaignId },
+      }),
+    ];
+
+    const first = await processWebhookEventBatch({ workspaceId, events });
+    expect(first.inserted).toBe(0);
+
+    const replay = await processWebhookEventBatch({ workspaceId, events });
+    expect(replay.inserted).toBe(0);
+
+    expect(await countSendEvents(workspaceId)).toBe(0);
+    expect(await sendDeliveredAt(workspaceId, sendId)).toBeNull();
+    expect(await campaignDeliveredCount(workspaceId, campaignId)).toBe(0);
+  });
+
+  it("an out-of-range numeric timestamp in one event does not fail the rest of the batch", async () => {
+    const workspaceId = await freshWorkspaceId("wh-oob-ts");
+    const events = [sendgridEvent(), sendgridEvent({ timestamp: 1e20 }), sendgridEvent()];
+
+    await expect(processWebhookEventBatch({ workspaceId, events })).resolves.toEqual({ inserted: 2 });
+    expect(await countSendEvents(workspaceId)).toBe(2);
+  });
 });
