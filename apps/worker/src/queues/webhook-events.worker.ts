@@ -25,11 +25,15 @@ interface ExtractedEventRow {
   normalizedType: NormalizedEventType | null;
 }
 
+/** ECMAScript's maximum time value in milliseconds -- `new Date(ms)` never throws within this bound. */
+const MAX_DATE_TIME_VALUE_MS = 8.64e15;
+
 /**
  * Best-effort field extraction from a raw SendGrid webhook event (WBHK-01/02/
  * 03/04, D-14/D-15). Returns `null` for an event lacking a usable
- * `sg_event_id` (WBHK-03's sole dedup key) rather than throwing -- one
- * malformed event in a batch must not crash the whole batch.
+ * `sg_event_id` (WBHK-03's sole dedup key) OR a usable `timestamp`, rather
+ * than throwing -- one malformed event in a batch must not crash the whole
+ * batch.
  */
 function extractEventRow(raw: unknown): ExtractedEventRow | null {
   if (typeof raw !== "object" || raw === null) {
@@ -42,14 +46,26 @@ function extractEventRow(raw: unknown): ExtractedEventRow | null {
     return null;
   }
 
-  // SendGrid's `timestamp` is Unix seconds. Deterministic per-event -- the
-  // same replayed event always resolves to the same occurred_at, which is
-  // what makes `ON CONFLICT (workspace_id, sg_event_id, occurred_at)` dedupe
-  // correctly across redeliveries (see send-events.ts's doc-comment).
-  const occurredAt =
-    typeof event.timestamp === "number"
-      ? new Date(event.timestamp * 1000).toISOString()
-      : new Date().toISOString();
+  // SendGrid's `timestamp` is Unix seconds. It must be deterministic
+  // per-event -- the same replayed event always resolves to the same
+  // occurred_at, which is what makes `ON CONFLICT (workspace_id,
+  // sg_event_id, occurred_at)` dedupe correctly across redeliveries (see
+  // send-events.ts's doc-comment). A missing/non-numeric timestamp is
+  // therefore treated exactly like a missing sg_event_id (skip -- return
+  // null) rather than substituted with wall-clock time: a wall-clock
+  // fallback would differ on every redelivery, defeating the dedup key
+  // (WR-01). An out-of-range numeric timestamp would make `new Date(...)`
+  // throw a RangeError and crash the whole batch (WR-02), so it is
+  // bounds-checked against the ECMAScript Date-representable range before
+  // construction.
+  const isUsableTimestamp =
+    typeof event.timestamp === "number" &&
+    Number.isFinite(event.timestamp) &&
+    Math.abs(event.timestamp * 1000) <= MAX_DATE_TIME_VALUE_MS;
+  if (!isUsableTimestamp) {
+    return null;
+  }
+  const occurredAt = new Date((event.timestamp as number) * 1000).toISOString();
 
   const eventType = typeof event.event === "string" ? event.event : "unknown";
   const rawSubtype = typeof event.type === "string" ? event.type : undefined;
