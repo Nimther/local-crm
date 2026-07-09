@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-const envSchema = z
+export const envSchema = z
   .object({
     DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
     // 02-05: BullMQ queue backend (event ingestion + CSV import); the API
@@ -48,6 +48,20 @@ const envSchema = z
         code: z.ZodIssueCode.custom,
         message: "KMS_KEK_ID is required when KMS_PROVIDER=aws",
         path: ["KMS_KEK_ID"],
+      });
+    }
+    // 05-12 gap-closure (defense-in-depth #2): SendGrid rejects a non-https
+    // Event Webhook URL outright (400 "webhook url must use https"). The
+    // provisioning-layer pre-flight guard catches this at request time, but
+    // a production boot should never even start with a misconfigured
+    // PUBLIC_APP_URL -- development/test intentionally still allow http
+    // (local tunnels / localhost), matching the KMS_PROVIDER=local guard's
+    // same NODE_ENV-gated shape above.
+    if (val.NODE_ENV === "production" && val.PUBLIC_APP_URL.startsWith("http://")) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "PUBLIC_APP_URL must use https when NODE_ENV=production (SendGrid rejects non-https webhook URLs)",
+        path: ["PUBLIC_APP_URL"],
       });
     }
   });

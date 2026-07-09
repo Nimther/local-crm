@@ -103,5 +103,24 @@ if (/localhost|127\.0\.0\.1/.test(publicAppUrl)) {
   );
 }
 
+// 05-12 gap-closure (round-4 UAT root cause): SendGrid rejects ANY non-https
+// Event Webhook URL with `400 "webhook url must use https"`, not just
+// localhost ones (e.g. a plain http:// tunnel URL also fails). Broader than
+// the localhost-only check above -- fires on any http:// scheme. Non-fatal:
+// per the 05-10 decision, local dev of every other feature is fine on
+// http/localhost; only live webhook delivery needs https.
+if (/^http:\/\//i.test(publicAppUrl)) {
+  console.warn(
+    [
+      "Heads up: PUBLIC_APP_URL uses http://.",
+      "SendGrid requires an https webhook URL and will reject provisioning",
+      "with 400 \"webhook url must use https\".",
+      "Set an https tunnel URL (e.g. ngrok/cloudflared) in PUBLIC_APP_URL and",
+      "restart the server before the live webhook UAT --",
+      "see docs/webhook-live-uat.md.",
+    ].join(" ")
+  );
+}
+
 console.log("Env check passed.");
 process.exit(0);
