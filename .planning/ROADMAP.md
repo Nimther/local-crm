@@ -268,7 +268,7 @@ _Wave 1:_
   3. Duplicate webhook deliveries (same sg_event_id) do not double-count or corrupt delivery statistics.
   4. A bounce, spam complaint, or unsubscribe automatically flips the contact's subscription status so subsequent sends skip that contact.
 
-**Plans**: 10/10 plans complete
+**Plans**: 11/11 plans complete
 **UI hint**: yes
 
 Plans:
@@ -309,7 +309,7 @@ _Wave 2 (blocked on 05-08):_
 
 _Wave 1:_
 
-- [ ] 05-11-PLAN.md — Reconnect self-heal: provisionEventWebhook treats a 404 PATCH of a stale stored sendgridWebhookId as "stale id" and falls through to createWebhook's reuse-or-create path so the new id is persisted; + regression tests (stored-id 404 -> CREATE, and signed-failure-after-fallback id preservation) (CR-01) (WBHK-01)
+- [x] 05-11-PLAN.md — Reconnect self-heal: provisionEventWebhook treats a 404 PATCH of a stale stored sendgridWebhookId as "stale id" and falls through to createWebhook's reuse-or-create path so the new id is persisted; + regression tests (stored-id 404 -> CREATE, and signed-failure-after-fallback id preservation) (CR-01) (WBHK-01)
 
 ### Phase 6: Flows (Triggered Chains)
 
@@ -371,6 +371,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 2. Contacts & Event Ingestion | 14/14 | Complete    | 2026-07-05 |
 | 3. Segmentation Engine | 8/8 | Complete    | 2026-07-06 |
 | 4. Broadcast Campaigns & Send Pipeline | 19/19 | Complete    | 2026-07-06 |
-| 5. Webhook Processing & Delivery Tracking | 10/10 | Complete   | 2026-07-09 |
+| 5. Webhook Processing & Delivery Tracking | 11/11 | Complete   | 2026-07-09 |
 | 6. Flows (Triggered Chains) | 0/5 | Not started | - |
 | 7. Analytics, Dashboard & Send Log | 0/5 | Not started | - |
