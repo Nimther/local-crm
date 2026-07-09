@@ -8,6 +8,7 @@ import { withTenant } from "../../../middleware/tenant-context.js";
 import { getWebhookEndpointByWorkspace } from "../webhook-endpoint.repository.js";
 
 const VALID_KEY = "SG.mock_webhook_health_key_1234567890abcdef";
+const WITH_WEBHOOK_SCOPE = ["mail.send", "user.webhooks.event.settings.update"];
 
 /**
  * GET /api/workspaces/:slug/webhook-health + POST
@@ -33,10 +34,10 @@ describe("Webhook health + reconnect routes (D-03)", () => {
     nock.cleanAll();
   });
 
-  function mockScopes(apiKey: string) {
+  function mockScopes(apiKey: string, scopes: string[] = WITH_WEBHOOK_SCOPE) {
     return nock("https://api.sendgrid.com", { reqheaders: { authorization: `Bearer ${apiKey}` } })
       .get("/v3/scopes")
-      .reply(200, { scopes: ["mail.send"] });
+      .reply(200, { scopes });
   }
 
   function mockVerifiedSenders(apiKey: string) {
@@ -132,7 +133,12 @@ describe("Webhook health + reconnect routes (D-03)", () => {
     });
 
     expect(res.statusCode, `GET health failed: ${res.body}`).toBe(200);
-    expect(res.json()).toEqual({ connected: false, provisionStatus: "pending", lastEventAt: null });
+    expect(res.json()).toEqual({
+      connected: false,
+      provisionStatus: "pending",
+      lastEventAt: null,
+      provisionError: null,
+    });
   });
 
   it("GET health returns connected:true/provisionStatus:'active' after a successful connect, and never leaks pathToken/publicKey", async () => {
@@ -149,6 +155,7 @@ describe("Webhook health + reconnect routes (D-03)", () => {
     const body = res.json();
     expect(body.connected).toBe(true);
     expect(body.provisionStatus).toBe("active");
+    expect(body.provisionError).toBeNull();
     expect(body).not.toHaveProperty("pathToken");
     expect(body).not.toHaveProperty("publicKey");
   });
@@ -215,7 +222,91 @@ describe("Webhook health + reconnect routes (D-03)", () => {
       headers: { cookie: ownerCookie },
     });
     expect(ownerRes.statusCode, `owner reconnect failed: ${ownerRes.body}`).toBe(200);
-    expect(ownerRes.json()).toEqual({ connected: true, provisionStatus: "active", lastEventAt: null });
+    expect(ownerRes.json()).toEqual({
+      connected: true,
+      provisionStatus: "active",
+      lastEventAt: null,
+      provisionError: null,
+    });
+  });
+
+  it("POST reconnect whose provisioning fails returns a 200 body with a non-null provisionError reason, and persists a matching provisionError enum", async () => {
+    const { cookie, workspace } = await verifiedOwner("reconnect-provision-fail");
+    await connectKey(cookie, workspace.slug);
+
+    nock("https://api.sendgrid.com", { reqheaders: { authorization: `Bearer ${VALID_KEY}` } })
+      .patch(`/v3/user/webhooks/event/settings/wh_health_1`)
+      .reply(403, { errors: [{ message: "Forbidden" }] });
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/workspaces/${workspace.slug}/webhook-reconnect`,
+      headers: { cookie },
+    });
+
+    expect(res.statusCode, `reconnect failed: ${res.body}`).toBe(200);
+    const body = res.json();
+    expect(body.connected).toBe(false);
+    expect(body.provisionStatus).toBe("error");
+    expect(typeof body.provisionError).toBe("string");
+
+    const endpoint = await withTenant(workspace.id, () => getWebhookEndpointByWorkspace());
+    expect(endpoint?.provisionStatus).toBe("error");
+    expect(endpoint?.provisionError).toBe("missing_scope");
+  });
+
+  it("POST reconnect preserves a created-but-unsigned webhook id when signed-verification fails (05-08 preserved-id fix flows through reconnect)", async () => {
+    const { cookie, workspace } = await verifiedOwner("reconnect-preserve-id");
+    await connectKey(cookie, workspace.slug);
+
+    nock("https://api.sendgrid.com", { reqheaders: { authorization: `Bearer ${VALID_KEY}` } })
+      .patch(`/v3/user/webhooks/event/settings/wh_health_1`)
+      .reply(200, { id: "wh_health_1" });
+    nock("https://api.sendgrid.com", { reqheaders: { authorization: `Bearer ${VALID_KEY}` } })
+      .patch(`/v3/user/webhooks/event/settings/signed/wh_health_1`)
+      .reply(403, { errors: [{ message: "Forbidden" }] });
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/workspaces/${workspace.slug}/webhook-reconnect`,
+      headers: { cookie },
+    });
+
+    expect(res.statusCode, `reconnect failed: ${res.body}`).toBe(200);
+    const body = res.json();
+    expect(body.provisionStatus).toBe("error");
+    expect(typeof body.provisionError).toBe("string");
+
+    const endpoint = await withTenant(workspace.id, () => getWebhookEndpointByWorkspace());
+    expect(endpoint?.sendgridWebhookId).toBe("wh_health_1");
+    expect(endpoint?.provisionStatus).toBe("error");
+  });
+
+  it("GET webhook-health for a workspace in the error state returns a non-null provisionError message", async () => {
+    const { cookie, workspace } = await verifiedOwner("health-error-state");
+    await connectKey(cookie, workspace.slug);
+
+    nock("https://api.sendgrid.com", { reqheaders: { authorization: `Bearer ${VALID_KEY}` } })
+      .patch(`/v3/user/webhooks/event/settings/wh_health_1`)
+      .reply(403, { errors: [{ message: "Forbidden" }] });
+
+    const reconnectRes = await app.inject({
+      method: "POST",
+      url: `/api/workspaces/${workspace.slug}/webhook-reconnect`,
+      headers: { cookie },
+    });
+    expect(reconnectRes.statusCode, `reconnect failed: ${reconnectRes.body}`).toBe(200);
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/webhook-health`,
+      headers: { cookie },
+    });
+
+    expect(res.statusCode, `GET health failed: ${res.body}`).toBe(200);
+    const body = res.json();
+    expect(body.provisionStatus).toBe("error");
+    expect(typeof body.provisionError).toBe("string");
   });
 
   it("POST reconnect PATCHes the existing sendgridWebhookId in place (reuses stored pathToken, no duplicate create)", async () => {

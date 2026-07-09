@@ -8,8 +8,33 @@ import { env } from "../../env.js";
 import { findActiveWorkspaceBySlug } from "../tenancy/workspace-lookup.js";
 import { getCallerRoles } from "../tenancy/member-roles.js";
 import { getKey } from "../tenancy/sendgrid-key.repository.js";
-import { provisionEventWebhook } from "./sendgrid-webhook-provision.js";
+import { provisionEventWebhook, type ProvisionEventWebhookError } from "./sendgrid-webhook-provision.js";
 import { getWebhookEndpointByWorkspace, upsertWebhookEndpoint } from "./webhook-endpoint.repository.js";
+import { webhookWarningFor } from "./webhook-warning-copy.js";
+
+const PROVISION_ERROR_REASONS: ReadonlySet<ProvisionEventWebhookError> = new Set([
+  "missing_scope",
+  "cap_reached",
+  "failed",
+]);
+
+function isProvisionEventWebhookError(value: string | null): value is ProvisionEventWebhookError {
+  return value !== null && PROVISION_ERROR_REASONS.has(value as ProvisionEventWebhookError);
+}
+
+/**
+ * Maps a stored `provisionStatus`/`provisionError` pair to the same curated
+ * Russian copy `sendgrid-key.ts` shows on connect/recheck (05-09,
+ * T-05-09-01) -- never returns the raw SendGrid body or api key, only the
+ * pre-mapped human-readable reason (or null outside the error state / for
+ * an unrecognized stored value).
+ */
+function provisionErrorMessage(provisionStatus: string, provisionError: string | null): string | null {
+  if (provisionStatus !== "error" || !isProvisionEventWebhookError(provisionError)) {
+    return null;
+  }
+  return webhookWarningFor(provisionError);
+}
 
 /**
  * Authenticated webhook health + reconnect surface (D-03, WBHK-01) --
@@ -46,8 +71,9 @@ export async function registerWebhookSettingsRoutes(fastify: FastifyInstance): P
           connected: endpoint.provisionStatus === "active",
           provisionStatus: endpoint.provisionStatus as WebhookHealthResponse["provisionStatus"],
           lastEventAt: endpoint.lastEventAt ? endpoint.lastEventAt.toISOString() : null,
+          provisionError: provisionErrorMessage(endpoint.provisionStatus, endpoint.provisionError),
         }
-      : { connected: false, provisionStatus: "pending", lastEventAt: null };
+      : { connected: false, provisionStatus: "pending", lastEventAt: null, provisionError: null };
 
     return reply.send(body);
   });
@@ -96,11 +122,17 @@ export async function registerWebhookSettingsRoutes(fastify: FastifyInstance): P
         if ("error" in result) {
           await upsertWebhookEndpoint({
             pathToken,
-            sendgridWebhookId: existing?.sendgridWebhookId ?? null,
+            sendgridWebhookId: result.webhookId ?? existing?.sendgridWebhookId ?? null,
             publicKey: existing?.publicKey ?? null,
             provisionStatus: "error",
+            provisionError: result.error,
           });
-          return { connected: false, provisionStatus: "error", lastEventAt: existing?.lastEventAt?.toISOString() ?? null };
+          return {
+            connected: false,
+            provisionStatus: "error",
+            lastEventAt: existing?.lastEventAt?.toISOString() ?? null,
+            provisionError: webhookWarningFor(result.error),
+          };
         }
 
         await upsertWebhookEndpoint({
@@ -108,8 +140,14 @@ export async function registerWebhookSettingsRoutes(fastify: FastifyInstance): P
           sendgridWebhookId: result.id,
           publicKey: result.publicKey,
           provisionStatus: "active",
+          provisionError: null,
         });
-        return { connected: true, provisionStatus: "active", lastEventAt: existing?.lastEventAt?.toISOString() ?? null };
+        return {
+          connected: true,
+          provisionStatus: "active",
+          lastEventAt: existing?.lastEventAt?.toISOString() ?? null,
+          provisionError: null,
+        };
       });
 
       if (!body) {
