@@ -209,13 +209,22 @@ async function createWebhook(
   return { id: created.id };
 }
 
+/**
+ * `patchWebhook`'s return shape widened with an optional `recoverable`
+ * marker (CR-01, round 3): a PATCH-by-stored-id that 404s means the id no
+ * longer exists on the account -- that specific failure is recoverable by
+ * falling through to `createWebhook`'s reuse-or-create path, unlike any
+ * other non-ok status.
+ */
+type PatchWebhookResult = { id: string } | { error: ProvisionEventWebhookError; recoverable?: boolean };
+
 /** PATCH in place (D-05, Pitfall 4) -- a reconnect never re-POSTs a create. */
 async function patchWebhook(
   apiKey: string,
   id: string,
   callbackUrl: string,
   workspaceId: string
-): Promise<{ id: string } | { error: ProvisionEventWebhookError }> {
+): Promise<PatchWebhookResult> {
   const res = await fetch(`https://api.sendgrid.com/v3/user/webhooks/event/settings/${id}`, {
     method: "PATCH",
     headers: authHeaders(apiKey),
@@ -228,7 +237,7 @@ async function patchWebhook(
   });
   if (!res.ok) {
     await logNonOkProvisionResponse("patch", res, apiKey);
-    return { error: errorForStatus(res.status) };
+    return { error: errorForStatus(res.status), recoverable: res.status === 404 };
   }
   const patched = (await res.json()) as SendGridWebhookIdResponse;
   return { id: patched.id };
@@ -269,9 +278,18 @@ export async function provisionEventWebhook(
   existingWebhookId?: string
 ): Promise<ProvisionEventWebhookResult> {
   try {
-    const webhookResult = existingWebhookId
-      ? await patchWebhook(apiKey, existingWebhookId, callbackUrl, workspaceId)
-      : await createWebhook(apiKey, callbackUrl, workspaceId);
+    let webhookResult: { id: string } | { error: ProvisionEventWebhookError };
+    if (existingWebhookId) {
+      const patchResult = await patchWebhook(apiKey, existingWebhookId, callbackUrl, workspaceId);
+      webhookResult =
+        "error" in patchResult && patchResult.recoverable
+          ? await createWebhook(apiKey, callbackUrl, workspaceId)
+          : "error" in patchResult
+            ? { error: patchResult.error }
+            : patchResult;
+    } else {
+      webhookResult = await createWebhook(apiKey, callbackUrl, workspaceId);
+    }
     if ("error" in webhookResult) {
       return webhookResult;
     }
