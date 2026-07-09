@@ -5,7 +5,8 @@ import { db, member, user } from "@mega-crm/db";
 import { buildServer } from "../../../server.js";
 import { ensureTestDbMigrated, getTestDatabaseUrl } from "../../../test/db-fixture.js";
 import { withTenant } from "../../../middleware/tenant-context.js";
-import { getWebhookEndpointByWorkspace } from "../webhook-endpoint.repository.js";
+import { getWebhookEndpointByWorkspace, upsertWebhookEndpoint } from "../webhook-endpoint.repository.js";
+import { WEBHOOK_INSECURE_URL_WARNING } from "../webhook-warning-copy.js";
 
 const VALID_KEY = "SG.mock_webhook_health_key_1234567890abcdef";
 const WITH_WEBHOOK_SCOPE = ["mail.send", "user.webhooks.event.settings.update"];
@@ -307,6 +308,34 @@ describe("Webhook health + reconnect routes (D-03)", () => {
     const body = res.json();
     expect(body.provisionStatus).toBe("error");
     expect(typeof body.provisionError).toBe("string");
+  });
+
+  it("GET webhook-health recognizes a stored insecure_url reason and surfaces the actionable copy (05-12)", async () => {
+    const { cookie, workspace } = await verifiedOwner("health-insecure-url");
+
+    await withTenant(workspace.id, () =>
+      upsertWebhookEndpoint({
+        pathToken: `seed-tok-${Date.now()}`,
+        sendgridWebhookId: null,
+        publicKey: null,
+        provisionStatus: "error",
+        provisionError: "insecure_url",
+      })
+    );
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/webhook-health`,
+      headers: { cookie },
+    });
+
+    expect(res.statusCode, `GET health failed: ${res.body}`).toBe(200);
+    const body = res.json();
+    expect(body.provisionStatus).toBe("error");
+    expect(body.provisionError).toBe(WEBHOOK_INSECURE_URL_WARNING);
+    expect(body.provisionError).toContain("https");
+    expect(body).not.toHaveProperty("pathToken");
+    expect(body).not.toHaveProperty("publicKey");
   });
 
   it("POST reconnect PATCHes the existing sendgridWebhookId in place (reuses stored pathToken, no duplicate create)", async () => {

@@ -16,6 +16,7 @@ const PROVISION_ERROR_REASONS: ReadonlySet<ProvisionEventWebhookError> = new Set
   "missing_scope",
   "cap_reached",
   "failed",
+  "insecure_url",
 ]);
 
 function isProvisionEventWebhookError(value: string | null): value is ProvisionEventWebhookError {
