@@ -336,16 +336,22 @@ _Wave 1:_
   3. Re-entry control (once ever / once per N days / every time) and quiet hours are honored: no email is sent inside the quiet window, and it is deferred until the window ends.
   4. Editing a live flow happens in a draft that only takes effect on publish; contacts already mid-flight continue on the version they entered, with no duplicate or skipped sends.
 
-**Plans**: TBD
+**Plans**: 11 plans
 **UI hint**: yes
 
 Plans:
 
-- [ ] 06-01: Flow data model + immutable published versioning
-- [ ] 06-02: Canvas builder UI (nodes, branches, connections, per-branch exit)
-- [ ] 06-03: Flow trigger evaluator (event/segment entry) + re-entry control semantics
-- [ ] 06-04: Flow execution engine — state machine, delays, branches, exit conditions, idempotent steps, reconciliation scan
-- [ ] 06-05: Quiet hours (dispatch-time) + draft/live/paused lifecycle & publish
+- [ ] 06-01-PLAN.md — Flow data model (5 tables) + send/contact/settings extensions + RLS migrations + [BLOCKING] db:migrate
+- [ ] 06-02-PLAN.md — flows-core contracts (definition schema + publish validator) + flow DTOs + kind:'flow' job schema
+- [ ] 06-03-PLAN.md — Send-pipeline flow extension: claimFlowSend + processSendJob kind:'flow' (idempotent, shared pipeline)
+- [ ] 06-04-PLAN.md — Flow API: draft CRUD, atomic validated publish + immutable versioning, pause/resume/duplicate, restrict-delete (D-24)
+- [ ] 06-05-PLAN.md — Execution engine core: run-advance state machine (send/exit) + exit conditions + reconciliation scan + pause-freeze
+- [ ] 06-06-PLAN.md — Event-trigger evaluator + re-entry control (once-ever/once-per-N/every-time) + one-active-run
+- [ ] 06-07-PLAN.md — Delays/wait-until + durable timers + dispatch-time quiet hours + timezone (contact/workspace) validation
+- [ ] 06-08-PLAN.md — Conditional branch node + segment-entry trigger (re-check + bounded sweep) + enroll-existing (D-04)
+- [ ] 06-09-PLAN.md — Run visibility ('N in flow, M on old versions') + eject + D-22 delete guard
+- [ ] 06-10-PLAN.md — Canvas builder UI (@xyflow/react, 5 node types, palette, autosave) + [SUS] package-legitimacy checkpoint
+- [ ] 06-11-PLAN.md — Flow list/detail UI + publish/enroll dialogs + re-entry/quiet-hours/timezone forms + settings + nav
 
 ### Phase 7: Analytics, Dashboard & Send Log
 
