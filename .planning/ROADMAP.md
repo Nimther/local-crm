@@ -268,7 +268,7 @@ _Wave 1:_
   3. Duplicate webhook deliveries (same sg_event_id) do not double-count or corrupt delivery statistics.
   4. A bounce, spam complaint, or unsubscribe automatically flips the contact's subscription status so subsequent sends skip that contact.
 
-**Plans**: 7/7 plans complete
+**Plans**: 7/10 plans complete (3 gap-closure plans pending from 05-UAT.md 2026-07-09)
 **UI hint**: yes
 
 Plans:
@@ -293,6 +293,17 @@ _Wave 1 (parallel):_
 
 - [x] 05-06-PLAN.md — Worker deterministic occurred_at: extractEventRow skips events with a non-finite/out-of-range timestamp (no wall-clock fallback) so redelivery dedups; + regression tests (WR-01/WR-02) (WBHK-03)
 - [x] 05-07-PLAN.md — Provisioning reuse fix: workspace-scoped webhook friendly_name + PATCH reused webhook's url to the caller's callbackUrl before returning; + repoint/cross-workspace regression tests (CR-01) (WBHK-01, WBHK-04)
+
+**Gap closure round 2** *(from 05-UAT.md 2026-07-09 — Test 1 major + Test 3 blocker: silent provisioning failure)*
+
+_Wave 1 (parallel):_
+
+- [ ] 05-08-PLAN.md — Diagnosable provisioning: log redacted SendGrid status+body, preserve created webhook id on signed-verification failure, + provision_error column/migration/repo threading (WBHK-01, WBHK-04)
+- [ ] 05-10-PLAN.md — Live-UAT operational docs: webhook-live-uat.md runbook (tunnel + PUBLIC_APP_URL + SendGrid Event Webhook key scope) + check-env.mjs localhost warning (WBHK-01)
+
+_Wave 2 (blocked on 05-08):_
+
+- [ ] 05-09-PLAN.md — Surface the reason end-to-end: connect-time webhook-scope detection + reconnect error propagation + provisionError on health contract + rendered UI (inline warning, reconnect error toast, health-card reason) (WBHK-01, WBHK-04)
 
 ### Phase 6: Flows (Triggered Chains)
 
