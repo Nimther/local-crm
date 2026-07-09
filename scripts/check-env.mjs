@@ -55,6 +55,13 @@ const baseRequired = [
   // root cause of UAT Tests 4/5). Presence-only check; apps/api/src/env.ts
   // and apps/worker/src/server.ts enforce the >=32-char strength contract.
   "UNSUBSCRIBE_TOKEN_SECRET",
+  // For a LIVE SendGrid webhook UAT this must be a publicly reachable https
+  // URL (e.g. an ngrok/cloudflared tunnel pointed at this API's port) --
+  // SendGrid delivers events by calling this URL directly from the public
+  // internet. A localhost value is fine for every other feature but breaks
+  // live webhook provisioning/delivery; see docs/webhook-live-uat.md for
+  // the full tunnel + SendGrid key-scope setup. Presence-only check here;
+  // the localhost heads-up below is a non-fatal warning, not a hard fail.
   "PUBLIC_APP_URL",
 ];
 
@@ -78,6 +85,22 @@ if (missing.length > 0) {
     ].join("\n")
   );
   process.exit(1);
+}
+
+// Non-fatal heads-up: a localhost PUBLIC_APP_URL is fine for local dev of
+// everything except live SendGrid webhook delivery (SendGrid cannot reach a
+// localhost URL from the public internet). Warn only -- do not fail the
+// check -- and point at the runbook. See docs/webhook-live-uat.md.
+const publicAppUrl = values.PUBLIC_APP_URL || "";
+if (/localhost|127\.0\.0\.1/.test(publicAppUrl)) {
+  console.warn(
+    [
+      "Heads up: PUBLIC_APP_URL points at localhost/127.0.0.1.",
+      "Live SendGrid webhook delivery cannot reach a localhost URL --",
+      "see docs/webhook-live-uat.md for tunnel (ngrok/cloudflared) setup",
+      "before running the live webhook UAT.",
+    ].join(" ")
+  );
 }
 
 console.log("Env check passed.");
