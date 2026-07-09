@@ -8,6 +8,7 @@ import { withTenant } from "../../../middleware/tenant-context.js";
 import { getWebhookEndpointByWorkspace } from "../../webhooks/webhook-endpoint.repository.js";
 
 const VALID_KEY = "SG.mock_webhook_provisioning_key_1234567890ab";
+const WITH_WEBHOOK_SCOPE = ["mail.send", "user.webhooks.event.settings.update"];
 
 /**
  * D-01/D-02/D-05: best-effort SendGrid Event Webhook auto-provisioning
@@ -34,10 +35,10 @@ describe("SendGrid key connect/recheck webhook provisioning (D-01/D-02/D-05)", (
     nock.cleanAll();
   });
 
-  function mockScopes(apiKey: string) {
+  function mockScopes(apiKey: string, scopes: string[] = ["mail.send"]) {
     return nock("https://api.sendgrid.com", { reqheaders: { authorization: `Bearer ${apiKey}` } })
       .get("/v3/scopes")
-      .reply(200, { scopes: ["mail.send"] });
+      .reply(200, { scopes });
   }
 
   function mockVerifiedSenders(apiKey: string) {
@@ -110,7 +111,7 @@ describe("SendGrid key connect/recheck webhook provisioning (D-01/D-02/D-05)", (
   it("connect best-effort provisions the platform's Event Webhook and persists {pathToken, sendgridWebhookId, publicKey, provisionStatus: 'active'}", async () => {
     const { cookie, workspace } = await verifiedOwner("provision-success");
 
-    mockScopes(VALID_KEY);
+    mockScopes(VALID_KEY, WITH_WEBHOOK_SCOPE);
     mockVerifiedSenders(VALID_KEY);
     mockWebhookListing(VALID_KEY);
     mockWebhookCreate(VALID_KEY, "wh_success_1");
@@ -131,13 +132,17 @@ describe("SendGrid key connect/recheck webhook provisioning (D-01/D-02/D-05)", (
     expect(endpoint?.sendgridWebhookId).toBe("wh_success_1");
     expect(endpoint?.publicKey).toBe("PUBLICKEYVALUE");
     expect(endpoint?.provisionStatus).toBe("active");
+    expect(endpoint?.provisionError).toBeNull();
     expect(endpoint?.pathToken).toMatch(/^[\w-]+$/);
   });
 
   it("a provisioning failure (403 missing scope) degrades gracefully -- connect still returns 200 with a webhookWarning, and provisionStatus 'error' persisted", async () => {
     const { cookie, workspace } = await verifiedOwner("provision-scope-fail");
 
-    mockScopes(VALID_KEY);
+    // The key DOES report the webhook scope at connect time (so the 05-09
+    // deterministic short-circuit does NOT fire) -- this test exercises the
+    // downstream SendGrid-side 403 on the actual CREATE call instead.
+    mockScopes(VALID_KEY, WITH_WEBHOOK_SCOPE);
     mockVerifiedSenders(VALID_KEY);
     nock("https://api.sendgrid.com", { reqheaders: { authorization: `Bearer ${VALID_KEY}` } })
       .get("/v3/user/webhooks/event/settings/all")
@@ -159,12 +164,64 @@ describe("SendGrid key connect/recheck webhook provisioning (D-01/D-02/D-05)", (
 
     const endpoint = await withTenant(workspace.id, () => getWebhookEndpointByWorkspace());
     expect(endpoint?.provisionStatus).toBe("error");
+    expect(endpoint?.provisionError).toBe("missing_scope");
+  });
+
+  it("a key lacking the webhook-management scope at connect time short-circuits deterministically -- no doomed SendGrid webhook call attempted", async () => {
+    const { cookie, workspace } = await verifiedOwner("provision-no-webhook-scope");
+
+    // Only mail.send -- no user.webhooks.event.settings* scope. No
+    // interceptor is registered for the webhook listing/create/patch/signed
+    // endpoints at all: if the code attempted that call despite the missing
+    // scope, nock would throw a "no match" error and fail the test.
+    mockScopes(VALID_KEY);
+    mockVerifiedSenders(VALID_KEY);
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/workspaces/${workspace.slug}/sendgrid-key`,
+      headers: { cookie },
+      payload: { apiKey: VALID_KEY },
+    });
+
+    expect(res.statusCode, `connect failed: ${res.body}`).toBe(200);
+    expect(res.json().connected).toBe(true);
+    expect(typeof res.json().webhookWarning).toBe("string");
+    expect(res.json().webhookWarning as string).toContain("нет прав на управление вебхуками");
+
+    const endpoint = await withTenant(workspace.id, () => getWebhookEndpointByWorkspace());
+    expect(endpoint?.provisionStatus).toBe("error");
+    expect(endpoint?.provisionError).toBe("missing_scope");
+  });
+
+  it("a key WITH the webhook-management scope provisions successfully with provisionError null", async () => {
+    const { cookie, workspace } = await verifiedOwner("provision-with-scope");
+
+    mockScopes(VALID_KEY, WITH_WEBHOOK_SCOPE);
+    mockVerifiedSenders(VALID_KEY);
+    mockWebhookListing(VALID_KEY);
+    mockWebhookCreate(VALID_KEY, "wh_with_scope_1");
+    mockSignedEnable(VALID_KEY, "wh_with_scope_1", "PUBLICKEYVALUE_SCOPE");
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/workspaces/${workspace.slug}/sendgrid-key`,
+      headers: { cookie },
+      payload: { apiKey: VALID_KEY },
+    });
+
+    expect(res.statusCode, `connect failed: ${res.body}`).toBe(200);
+    expect(res.json()).not.toHaveProperty("webhookWarning");
+
+    const endpoint = await withTenant(workspace.id, () => getWebhookEndpointByWorkspace());
+    expect(endpoint?.provisionStatus).toBe("active");
+    expect(endpoint?.provisionError).toBeNull();
   });
 
   it("recheck reuses the stored pathToken and PATCHes the existing sendgridWebhookId in place (no duplicate create)", async () => {
     const { cookie, workspace } = await verifiedOwner("provision-reconnect");
 
-    mockScopes(VALID_KEY);
+    mockScopes(VALID_KEY, WITH_WEBHOOK_SCOPE);
     mockVerifiedSenders(VALID_KEY);
     mockWebhookListing(VALID_KEY);
     mockWebhookCreate(VALID_KEY, "wh_reconnect_1");
@@ -186,7 +243,7 @@ describe("SendGrid key connect/recheck webhook provisioning (D-01/D-02/D-05)", (
     // registered (no listing, no create) -- if the code path incorrectly
     // re-POSTed a create, this would fall through to nock's no-match error
     // instead of succeeding, catching a regression of Pitfall 4.
-    mockScopes(VALID_KEY);
+    mockScopes(VALID_KEY, WITH_WEBHOOK_SCOPE);
     mockVerifiedSenders(VALID_KEY);
     mockWebhookPatch(VALID_KEY, "wh_reconnect_1");
     mockSignedEnable(VALID_KEY, "wh_reconnect_1", "PUBLICKEYVALUE_2");

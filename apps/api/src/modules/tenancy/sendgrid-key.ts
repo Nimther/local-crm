@@ -15,26 +15,15 @@ import {
   getWebhookEndpointByWorkspace,
   upsertWebhookEndpoint,
 } from "../webhooks/webhook-endpoint.repository.js";
+import { webhookWarningFor, WEBHOOK_PROVISION_FAILED_WARNING } from "../webhooks/webhook-warning-copy.js";
 
 const INVALID_KEY_ERROR =
   "SendGrid отклонил ключ: он недействителен или отозван. Проверьте ключ в настройках SendGrid и вставьте его заново.";
 const MISSING_SCOPE_ERROR =
   "Ключ действителен, но не имеет права mail.send. Создайте в SendGrid ключ с доступом Mail Send и подключите его.";
-const WEBHOOK_MISSING_SCOPE_WARNING =
-  "SendGrid ключ подключён, но у него нет прав на управление вебхуками, поэтому отслеживание доставки не настроено автоматически. Создайте ключ с правами Webhooks Settings или настройте вебхук вручную.";
-const WEBHOOK_CAP_REACHED_WARNING =
-  "SendGrid ключ подключён, но на аккаунте достигнут лимит Event Webhook'ов, поэтому отслеживание доставки не настроено автоматически. Освободите слот в настройках SendGrid.";
-const WEBHOOK_PROVISION_FAILED_WARNING =
-  "SendGrid ключ подключён, но не удалось автоматически настроить вебхук отслеживания доставки. Попробуйте переподключить ключ позже.";
 
 function errorCopyFor(reason: "invalid" | "missing_scope"): string {
   return reason === "missing_scope" ? MISSING_SCOPE_ERROR : INVALID_KEY_ERROR;
-}
-
-function webhookWarningFor(reason: "missing_scope" | "cap_reached" | "failed"): string {
-  if (reason === "missing_scope") return WEBHOOK_MISSING_SCOPE_WARNING;
-  if (reason === "cap_reached") return WEBHOOK_CAP_REACHED_WARNING;
-  return WEBHOOK_PROVISION_FAILED_WARNING;
 }
 
 /**
@@ -47,9 +36,29 @@ function webhookWarningFor(reason: "missing_scope" | "cap_reached" | "failed"): 
  * still cannot fail the key connect, D-01 fallback). Returns a non-fatal
  * warning string to surface to the caller, or `undefined` on success.
  */
-async function provisionWebhookBestEffort(workspaceId: string, apiKey: string): Promise<string | undefined> {
+async function provisionWebhookBestEffort(
+  workspaceId: string,
+  apiKey: string,
+  webhookScopePresent: boolean
+): Promise<string | undefined> {
   try {
     const existing = await getWebhookEndpointByWorkspace();
+
+    if (!webhookScopePresent) {
+      // 05-09: the key already lacks the webhook-management scope -- skip
+      // the doomed CREATE/PATCH call and persist a deterministic reason
+      // instead of attempting (and silently failing) it.
+      const pathToken = existing?.pathToken ?? randomBytes(32).toString("base64url");
+      await upsertWebhookEndpoint({
+        pathToken,
+        sendgridWebhookId: existing?.sendgridWebhookId ?? null,
+        publicKey: existing?.publicKey ?? null,
+        provisionStatus: "error",
+        provisionError: "missing_scope",
+      });
+      return webhookWarningFor("missing_scope");
+    }
+
     const pathToken = existing?.pathToken ?? randomBytes(32).toString("base64url");
     const callbackUrl = `${env.PUBLIC_APP_URL}/webhooks/sendgrid/${pathToken}`;
 
@@ -63,9 +72,10 @@ async function provisionWebhookBestEffort(workspaceId: string, apiKey: string): 
     if ("error" in result) {
       await upsertWebhookEndpoint({
         pathToken,
-        sendgridWebhookId: existing?.sendgridWebhookId ?? null,
+        sendgridWebhookId: result.webhookId ?? existing?.sendgridWebhookId ?? null,
         publicKey: existing?.publicKey ?? null,
         provisionStatus: "error",
+        provisionError: result.error,
       });
       return webhookWarningFor(result.error);
     }
@@ -75,6 +85,7 @@ async function provisionWebhookBestEffort(workspaceId: string, apiKey: string): 
       sendgridWebhookId: result.id,
       publicKey: result.publicKey,
       provisionStatus: "active",
+      provisionError: null,
     });
     return undefined;
   } catch {
@@ -167,7 +178,7 @@ export async function registerSendgridKeyRoutes(fastify: FastifyInstance): Promi
         });
         // D-01/D-02: best-effort, non-blocking -- a webhook provisioning
         // failure never turns this successful key connect into a failure.
-        return provisionWebhookBestEffort(workspace.id, parsed.data.apiKey);
+        return provisionWebhookBestEffort(workspace.id, parsed.data.apiKey, validation.webhookScopePresent);
       });
 
       return reply.send({
@@ -211,7 +222,9 @@ export async function registerSendgridKeyRoutes(fastify: FastifyInstance): Promi
         // D-01/D-02: only provision against a key that just re-validated as
         // active -- an invalid/revoked key has nothing live to provision
         // against, and the 422 branch below never reaches this warning.
-        return status === "active" ? provisionWebhookBestEffort(workspace.id, plaintext) : undefined;
+        return status === "active"
+          ? provisionWebhookBestEffort(workspace.id, plaintext, validation.valid ? validation.webhookScopePresent : false)
+          : undefined;
       });
 
       if (!validation.valid) {

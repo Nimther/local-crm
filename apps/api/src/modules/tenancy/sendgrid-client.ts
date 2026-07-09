@@ -17,8 +17,17 @@ export interface SendGridVerifiedSender {
 }
 
 export type ValidateTenantSendGridKeyResult =
-  | { valid: true; scopes: string[]; verifiedSenders: SendGridVerifiedSender[] }
+  | { valid: true; scopes: string[]; verifiedSenders: SendGridVerifiedSender[]; webhookScopePresent: boolean }
   | { valid: false; reason: "invalid" | "missing_scope" };
+
+/**
+ * Scope prefix SendGrid uses for Event Webhook management (05-09, UAT Test
+ * 1/3 gap-closure): a key can validate for `mail.send` yet lack this scope,
+ * in which case `provisionEventWebhook`'s CREATE/PATCH call is doomed to a
+ * 403. Detecting this at connect time lets the caller short-circuit
+ * deterministically instead of attempting (and silently failing) the call.
+ */
+export const WEBHOOK_EVENT_SETTINGS_SCOPE_PREFIX = "user.webhooks.event.settings";
 
 interface SendGridScopesResponse {
   scopes: string[];
@@ -53,6 +62,8 @@ export async function validateTenantSendGridKey(apiKey: string): Promise<Validat
     return { valid: false, reason: "missing_scope" };
   }
 
+  const webhookScopePresent = scopes.some((s) => s.startsWith(WEBHOOK_EVENT_SETTINGS_SCOPE_PREFIX));
+
   const sendersRes = await fetch("https://api.sendgrid.com/v3/verified_senders", {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
@@ -64,7 +75,7 @@ export async function validateTenantSendGridKey(apiKey: string): Promise<Validat
       }))
     : [];
 
-  return { valid: true, scopes, verifiedSenders };
+  return { valid: true, scopes, verifiedSenders, webhookScopePresent };
 }
 
 /**
