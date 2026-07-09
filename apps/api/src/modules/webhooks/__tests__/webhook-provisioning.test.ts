@@ -301,6 +301,60 @@ describe("provisionEventWebhook (D-01/D-02/D-05)", () => {
     expect(result).toEqual({ error: "missing_scope", webhookId: "wh_signed_fail_1" });
   });
 
+  it("a stale stored id (PATCH 404) falls through to CREATE and returns the NEW id, not the stale id", async () => {
+    let createAttempted = false;
+    route((method, url) => {
+      if (method === "PATCH" && url === "https://api.sendgrid.com/v3/user/webhooks/event/settings/wh_stale_1") {
+        return jsonResponse(404, { errors: [{ message: "Not Found" }] });
+      }
+      if (method === "GET" && url === "https://api.sendgrid.com/v3/user/webhooks/event/settings/all") {
+        return jsonResponse(200, { webhooks: [], max_allowed: 10 });
+      }
+      if (method === "POST" && url === "https://api.sendgrid.com/v3/user/webhooks/event/settings") {
+        createAttempted = true;
+        return jsonResponse(200, { id: "wh_recovered_1" });
+      }
+      if (
+        method === "PATCH" &&
+        url === "https://api.sendgrid.com/v3/user/webhooks/event/settings/signed/wh_recovered_1"
+      ) {
+        return jsonResponse(200, { id: "wh_recovered_1", public_key: "PUBLICKEYVALUE" });
+      }
+      return undefined;
+    });
+
+    const result = await provisionEventWebhook(API_KEY, CALLBACK_URL, TEST_WORKSPACE_ID, "wh_stale_1");
+
+    expect(result).toEqual({ id: "wh_recovered_1", publicKey: "PUBLICKEYVALUE" });
+    expect(createAttempted).toBe(true);
+    expect("id" in result && result.id === "wh_recovered_1").toBe(true);
+  });
+
+  it("a stale stored id (PATCH 404) + CREATE ok + signed 403 preserves the NEW webhookId (not the stale id) alongside the error", async () => {
+    route((method, url) => {
+      if (method === "PATCH" && url === "https://api.sendgrid.com/v3/user/webhooks/event/settings/wh_stale_1") {
+        return jsonResponse(404, { errors: [{ message: "Not Found" }] });
+      }
+      if (method === "GET" && url === "https://api.sendgrid.com/v3/user/webhooks/event/settings/all") {
+        return jsonResponse(200, { webhooks: [], max_allowed: 10 });
+      }
+      if (method === "POST" && url === "https://api.sendgrid.com/v3/user/webhooks/event/settings") {
+        return jsonResponse(200, { id: "wh_recovered_1" });
+      }
+      if (
+        method === "PATCH" &&
+        url === "https://api.sendgrid.com/v3/user/webhooks/event/settings/signed/wh_recovered_1"
+      ) {
+        return jsonResponse(403, { errors: [{ message: "Forbidden" }] });
+      }
+      return undefined;
+    });
+
+    const result = await provisionEventWebhook(API_KEY, CALLBACK_URL, TEST_WORKSPACE_ID, "wh_stale_1");
+
+    expect(result).toEqual({ error: "missing_scope", webhookId: "wh_recovered_1" });
+  });
+
   it("logs a redacted status+body for a non-ok CREATE response without leaking the api key (05-08 Task 1)", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     route((method, url) => {
