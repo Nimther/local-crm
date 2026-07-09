@@ -268,7 +268,7 @@ _Wave 1:_
   3. Duplicate webhook deliveries (same sg_event_id) do not double-count or corrupt delivery statistics.
   4. A bounce, spam complaint, or unsubscribe automatically flips the contact's subscription status so subsequent sends skip that contact.
 
-**Plans**: 5/7 plans complete (2 gap-closure — verification gaps_found 2026-07-08)
+**Plans**: 6/7 plans executed
 **UI hint**: yes
 
 Plans:
@@ -291,7 +291,7 @@ Plans:
 
 _Wave 1 (parallel):_
 
-- [ ] 05-06-PLAN.md — Worker deterministic occurred_at: extractEventRow skips events with a non-finite/out-of-range timestamp (no wall-clock fallback) so redelivery dedups; + regression tests (WR-01/WR-02) (WBHK-03)
+- [x] 05-06-PLAN.md — Worker deterministic occurred_at: extractEventRow skips events with a non-finite/out-of-range timestamp (no wall-clock fallback) so redelivery dedups; + regression tests (WR-01/WR-02) (WBHK-03)
 - [ ] 05-07-PLAN.md — Provisioning reuse fix: workspace-scoped webhook friendly_name + PATCH reused webhook's url to the caller's callbackUrl before returning; + repoint/cross-workspace regression tests (CR-01) (WBHK-01, WBHK-04)
 
 ### Phase 6: Flows (Triggered Chains)
@@ -354,6 +354,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 2. Contacts & Event Ingestion | 14/14 | Complete    | 2026-07-05 |
 | 3. Segmentation Engine | 8/8 | Complete    | 2026-07-06 |
 | 4. Broadcast Campaigns & Send Pipeline | 19/19 | Complete    | 2026-07-06 |
-| 5. Webhook Processing & Delivery Tracking | 5/7 | Gap closure | 2026-07-08 |
+| 5. Webhook Processing & Delivery Tracking | 6/7 | In Progress|  |
 | 6. Flows (Triggered Chains) | 0/5 | Not started | - |
 | 7. Analytics, Dashboard & Send Log | 0/5 | Not started | - |
