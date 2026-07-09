@@ -268,7 +268,7 @@ _Wave 1:_
   3. Duplicate webhook deliveries (same sg_event_id) do not double-count or corrupt delivery statistics.
   4. A bounce, spam complaint, or unsubscribe automatically flips the contact's subscription status so subsequent sends skip that contact.
 
-**Plans**: 11/11 plans complete
+**Plans**: 12 plans (11 complete + 05-12 gap closure round 4)
 **UI hint**: yes
 
 Plans:
@@ -310,6 +310,12 @@ _Wave 2 (blocked on 05-08):_
 _Wave 1:_
 
 - [x] 05-11-PLAN.md — Reconnect self-heal: provisionEventWebhook treats a 404 PATCH of a stale stored sendgridWebhookId as "stale id" and falls through to createWebhook's reuse-or-create path so the new id is persisted; + regression tests (stored-id 404 -> CREATE, and signed-failure-after-fallback id preservation) (CR-01) (WBHK-01)
+
+**Gap closure round 4** *(from 05-UAT.md 2026-07-09 — Test 1 major + Test 2 blocker: non-https PUBLIC_APP_URL → SendGrid 400 "webhook url must use https", silent absence)*
+
+_Wave 1:_
+
+- [ ] 05-12-PLAN.md — https enforcement: pre-flight insecure_url short-circuit in provisionEventWebhook (skips the doomed non-https create/patch on connect/recheck/reconnect) + actionable Russian copy pointing at PUBLIC_APP_URL/docs + health-card recognition + predev http:// warning + production boot https requirement; + tests (WBHK-01, WBHK-04)
 
 ### Phase 6: Flows (Triggered Chains)
 
