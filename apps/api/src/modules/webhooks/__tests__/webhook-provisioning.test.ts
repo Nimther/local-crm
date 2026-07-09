@@ -355,6 +355,29 @@ describe("provisionEventWebhook (D-01/D-02/D-05)", () => {
     expect(result).toEqual({ error: "missing_scope", webhookId: "wh_recovered_1" });
   });
 
+  it("a non-https callbackUrl short-circuits to { error: 'insecure_url' } with no fetch call (05-12)", async () => {
+    const result = await provisionEventWebhook(
+      API_KEY,
+      "http://host/webhooks/sendgrid/tok",
+      TEST_WORKSPACE_ID
+    );
+
+    expect(result).toEqual({ error: "insecure_url" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("a non-https callbackUrl with an existingWebhookId ALSO short-circuits to { error: 'insecure_url' } with no fetch call -- proves the reconnect/PATCH path is guarded too (05-12)", async () => {
+    const result = await provisionEventWebhook(
+      API_KEY,
+      "http://host/webhooks/sendgrid/tok",
+      TEST_WORKSPACE_ID,
+      "wh_existing_789"
+    );
+
+    expect(result).toEqual({ error: "insecure_url" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("logs a redacted status+body for a non-ok CREATE response without leaking the api key (05-08 Task 1)", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     route((method, url) => {
