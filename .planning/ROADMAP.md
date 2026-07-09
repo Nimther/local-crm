@@ -268,7 +268,7 @@ _Wave 1:_
   3. Duplicate webhook deliveries (same sg_event_id) do not double-count or corrupt delivery statistics.
   4. A bounce, spam complaint, or unsubscribe automatically flips the contact's subscription status so subsequent sends skip that contact.
 
-**Plans**: 9/10 plans executed
+**Plans**: 10/10 plans complete
 **UI hint**: yes
 
 Plans:
@@ -303,7 +303,7 @@ _Wave 1 (parallel):_
 
 _Wave 2 (blocked on 05-08):_
 
-- [ ] 05-09-PLAN.md — Surface the reason end-to-end: connect-time webhook-scope detection + reconnect error propagation + provisionError on health contract + rendered UI (inline warning, reconnect error toast, health-card reason) (WBHK-01, WBHK-04)
+- [x] 05-09-PLAN.md — Surface the reason end-to-end: connect-time webhook-scope detection + reconnect error propagation + provisionError on health contract + rendered UI (inline warning, reconnect error toast, health-card reason) (WBHK-01, WBHK-04)
 
 ### Phase 6: Flows (Triggered Chains)
 
@@ -365,6 +365,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 2. Contacts & Event Ingestion | 14/14 | Complete    | 2026-07-05 |
 | 3. Segmentation Engine | 8/8 | Complete    | 2026-07-06 |
 | 4. Broadcast Campaigns & Send Pipeline | 19/19 | Complete    | 2026-07-06 |
-| 5. Webhook Processing & Delivery Tracking | 9/10 | In Progress|  |
+| 5. Webhook Processing & Delivery Tracking | 10/10 | Complete   | 2026-07-09 |
 | 6. Flows (Triggered Chains) | 0/5 | Not started | - |
 | 7. Analytics, Dashboard & Send Log | 0/5 | Not started | - |

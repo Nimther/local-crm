@@ -5,16 +5,16 @@ milestone_name: milestone
 current_phase: 05
 current_phase_name: webhook-processing-delivery-tracking
 status: executing
-stopped_at: Completed 05-10-PLAN.md
-last_updated: "2026-07-09T12:28:31.658Z"
+stopped_at: Completed 05-09-PLAN.md
+last_updated: "2026-07-09T12:47:30.820Z"
 last_activity: 2026-07-09
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 7
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 58
-  completed_plans: 57
-  percent: 57
+  completed_plans: 58
+  percent: 71
 ---
 
 # Project State
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-07-06)
 ## Current Position
 
 Phase: 05 (webhook-processing-delivery-tracking) — EXECUTING
-Plan: 3 of 10
+Plan: 4 of 10
 Status: Ready to execute
 Last activity: 2026-07-09 — Phase 05 execution started
 
@@ -115,6 +115,7 @@ Progress: [████████████████████] 48/48 p
 | Phase 05 P07 | 12min | 2 tasks | 4 files |
 | Phase 05 P08 | 5min | 3 tasks | 6 files |
 | Phase 05 P10 | 10min | 2 tasks | 2 files |
+| Phase 05 P09 | 25min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -257,6 +258,9 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-08: provisionError left unwired from callers (sendgrid-key.ts, webhook-settings.routes.ts) by design -- wiring + UI surfacing deferred to wave-2 slice (05-09/05-10)
 - [Phase 05]: 05-10: PUBLIC_APP_URL localhost detection in check-env.mjs is a non-fatal warning only -- local dev of every other feature is fine on localhost; only live SendGrid webhook delivery requires a public tunnel
 - [Phase 05]: 05-10: docs/webhook-live-uat.md runbook uses placeholders only and explicitly instructs never to commit a real tenant SendGrid key (closes T-05-10-01)
+- [Phase 05]: 05-09: webhook-warning-copy.ts extracted as a new shared module so connect/recheck and health/reconnect map the same typed ProvisionEventWebhookError to identical Russian copy — Avoids the two surfaces drifting on wording
+- [Phase 05]: 05-09: webhookHealthDescription returns null (not a formatted string) outside the error state — Keeps the pure decision helper from replicating relativeTime/Intl.RelativeTimeFormat, which is inherently impure (depends on Date.now())
+- [Phase 05]: 05-09: test-file mockScopes helpers updated to include the webhook-management scope by default — Task 1's new connect-time scope check would otherwise short-circuit every pre-existing provisioning-success test path
 
 ### Pending Todos
 
@@ -283,6 +287,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-09T12:28:23.917Z
-Stopped at: Completed 05-10-PLAN.md
+Last session: 2026-07-09T12:47:30.792Z
+Stopped at: Completed 05-09-PLAN.md
 Resume file: None
