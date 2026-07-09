@@ -11,6 +11,7 @@ export interface WebhookEndpointRow {
   sendgridWebhookId: string | null;
   publicKey: string | null;
   provisionStatus: string;
+  provisionError: string | null;
   lastEventAt: Date | null;
 }
 
@@ -19,6 +20,7 @@ export interface UpsertWebhookEndpointInput {
   sendgridWebhookId: string | null;
   publicKey: string | null;
   provisionStatus: string;
+  provisionError?: string | null;
 }
 
 /**
@@ -87,7 +89,7 @@ export async function getWebhookEndpointByWorkspace(): Promise<WebhookEndpointRo
     const { rows } = await client.query<WebhookEndpointRow>(
       `SELECT path_token as "pathToken", sendgrid_webhook_id as "sendgridWebhookId",
               public_key as "publicKey", provision_status as "provisionStatus",
-              last_event_at as "lastEventAt"
+              provision_error as "provisionError", last_event_at as "lastEventAt"
        FROM workspace_webhook_endpoints
        WHERE workspace_id = current_setting('app.current_workspace_id', true)::uuid`
     );
@@ -113,16 +115,30 @@ export async function upsertWebhookEndpoint(row: UpsertWebhookEndpointInput): Pr
       await client.query(
         `UPDATE workspace_webhook_endpoints
          SET path_token = $2, sendgrid_webhook_id = $3, public_key = $4,
-             provision_status = $5, updated_at = now()
+             provision_status = $5, provision_error = $6, updated_at = now()
          WHERE workspace_id = $1`,
-        [workspaceId, row.pathToken, row.sendgridWebhookId, row.publicKey, row.provisionStatus]
+        [
+          workspaceId,
+          row.pathToken,
+          row.sendgridWebhookId,
+          row.publicKey,
+          row.provisionStatus,
+          row.provisionError ?? null,
+        ]
       );
     } else {
       await client.query(
         `INSERT INTO workspace_webhook_endpoints
-           (workspace_id, path_token, sendgrid_webhook_id, public_key, provision_status)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [workspaceId, row.pathToken, row.sendgridWebhookId, row.publicKey, row.provisionStatus]
+           (workspace_id, path_token, sendgrid_webhook_id, public_key, provision_status, provision_error)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [
+          workspaceId,
+          row.pathToken,
+          row.sendgridWebhookId,
+          row.publicKey,
+          row.provisionStatus,
+          row.provisionError ?? null,
+        ]
       );
     }
   });

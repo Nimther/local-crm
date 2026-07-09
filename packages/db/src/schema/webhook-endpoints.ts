@@ -24,6 +24,7 @@ export const workspaceWebhookEndpoints = pgTable(
     sendgridWebhookId: text("sendgrid_webhook_id"),
     publicKey: text("public_key"),
     provisionStatus: text("provision_status").notNull().default("pending"),
+    provisionError: text("provision_error"),
     lastEventAt: timestamp("last_event_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
