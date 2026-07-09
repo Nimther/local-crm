@@ -47,13 +47,18 @@ function webhookWarningFor(reason: "missing_scope" | "cap_reached" | "failed"): 
  * still cannot fail the key connect, D-01 fallback). Returns a non-fatal
  * warning string to surface to the caller, or `undefined` on success.
  */
-async function provisionWebhookBestEffort(apiKey: string): Promise<string | undefined> {
+async function provisionWebhookBestEffort(workspaceId: string, apiKey: string): Promise<string | undefined> {
   try {
     const existing = await getWebhookEndpointByWorkspace();
     const pathToken = existing?.pathToken ?? randomBytes(32).toString("base64url");
     const callbackUrl = `${env.PUBLIC_APP_URL}/webhooks/sendgrid/${pathToken}`;
 
-    const result = await provisionEventWebhook(apiKey, callbackUrl, existing?.sendgridWebhookId ?? undefined);
+    const result = await provisionEventWebhook(
+      apiKey,
+      callbackUrl,
+      workspaceId,
+      existing?.sendgridWebhookId ?? undefined
+    );
 
     if ("error" in result) {
       await upsertWebhookEndpoint({
@@ -162,7 +167,7 @@ export async function registerSendgridKeyRoutes(fastify: FastifyInstance): Promi
         });
         // D-01/D-02: best-effort, non-blocking -- a webhook provisioning
         // failure never turns this successful key connect into a failure.
-        return provisionWebhookBestEffort(parsed.data.apiKey);
+        return provisionWebhookBestEffort(workspace.id, parsed.data.apiKey);
       });
 
       return reply.send({
@@ -206,7 +211,7 @@ export async function registerSendgridKeyRoutes(fastify: FastifyInstance): Promi
         // D-01/D-02: only provision against a key that just re-validated as
         // active -- an invalid/revoked key has nothing live to provision
         // against, and the 422 branch below never reaches this warning.
-        return status === "active" ? provisionWebhookBestEffort(plaintext) : undefined;
+        return status === "active" ? provisionWebhookBestEffort(workspace.id, plaintext) : undefined;
       });
 
       if (!validation.valid) {

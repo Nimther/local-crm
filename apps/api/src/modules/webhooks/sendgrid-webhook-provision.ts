@@ -7,13 +7,24 @@
  * this module never imports platform-mail, reads no env var directly (the
  * key is always passed in, already decrypted by the caller), and has a
  * completely different function signature (`provisionEventWebhook(apiKey,
- * callbackUrl, existingWebhookId?)` vs. platformMail's `{ to, subject, html
- * }`-shaped senders) so a type error, not a runtime mix-up, would catch any
- * accidental cross-use.
+ * callbackUrl, workspaceId, existingWebhookId?)` vs. platformMail's `{ to,
+ * subject, html }`-shaped senders) so a type error, not a runtime mix-up,
+ * would catch any accidental cross-use.
  */
 
 /** D-05: our own independently-named webhook, never touching a tenant's pre-existing ones. */
-const WEBHOOK_FRIENDLY_NAME = "Mega CRM Delivery Tracking";
+const WEBHOOK_FRIENDLY_NAME_BASE = "Mega CRM Delivery Tracking";
+
+/**
+ * Workspace-scoped friendly_name (CR-01 / T-05-G2-01): one BYO SendGrid key
+ * can be connected to multiple workspaces, so a single global friendly_name
+ * would let workspace B's provisioning match/adopt/repoint workspace A's
+ * webhook. Appending a short workspace discriminator keeps each workspace's
+ * match/create/patch scoped to only its OWN webhook.
+ */
+function webhookFriendlyName(workspaceId: string): string {
+  return `${WEBHOOK_FRIENDLY_NAME_BASE} (${workspaceId.slice(0, 8)})`;
+}
 
 const EVENT_FLAGS = {
   delivered: true,
@@ -99,14 +110,19 @@ async function listExistingWebhooks(
   };
 }
 
-async function postCreate(apiKey: string, url: string, callbackUrl: string): Promise<Response> {
+async function postCreate(
+  apiKey: string,
+  url: string,
+  callbackUrl: string,
+  workspaceId: string
+): Promise<Response> {
   return fetch(url, {
     method: "POST",
     headers: authHeaders(apiKey),
     body: JSON.stringify({
       enabled: true,
       url: callbackUrl,
-      friendly_name: WEBHOOK_FRIENDLY_NAME,
+      friendly_name: webhookFriendlyName(workspaceId),
       ...EVENT_FLAGS,
     }),
   });
@@ -116,18 +132,30 @@ async function postCreate(apiKey: string, url: string, callbackUrl: string): Pro
  * CREATE (Open Question #1 / Assumption A3): attempts the documented path
  * first, falling back to `.../settings/all` on a 404/405 response. Guarded
  * by `listExistingWebhooks` so a reconnect that ever lost its stored
- * `sendgridWebhookId` reuses the platform's own webhook by `friendly_name`
- * instead of creating a duplicate, and a plan `max_allowed` cap is surfaced
- * as a typed error before ever POSTing (Pitfall 4).
+ * `sendgridWebhookId` reuses the platform's own webhook by the
+ * workspace-scoped `friendly_name` instead of creating a duplicate, and a
+ * plan `max_allowed` cap is surfaced as a typed error before ever POSTing
+ * (Pitfall 4). CR-01 / T-05-G2-02: when the matched webhook's `url` no
+ * longer equals the caller's `callbackUrl` (e.g. its stored id was
+ * recovered after a lost DB row, so the pathToken changed), the reused
+ * webhook is PATCHed to the new callbackUrl before being returned as
+ * active -- otherwise it would keep pointing at a now-404ing stale URL
+ * while reporting `provisionStatus: 'active'`.
  */
 async function createWebhook(
   apiKey: string,
-  callbackUrl: string
+  callbackUrl: string,
+  workspaceId: string
 ): Promise<{ id: string } | { error: ProvisionEventWebhookError }> {
   const listing = await listExistingWebhooks(apiKey);
   if (listing) {
-    const existing = listing.webhooks.find((webhook) => webhook.friendly_name === WEBHOOK_FRIENDLY_NAME);
+    const existing = listing.webhooks.find(
+      (webhook) => webhook.friendly_name === webhookFriendlyName(workspaceId)
+    );
     if (existing) {
+      if (existing.url !== callbackUrl) {
+        return patchWebhook(apiKey, existing.id, callbackUrl, workspaceId);
+      }
       return { id: existing.id };
     }
     if (listing.webhooks.length >= listing.maxAllowed) {
@@ -135,10 +163,20 @@ async function createWebhook(
     }
   }
 
-  let res = await postCreate(apiKey, "https://api.sendgrid.com/v3/user/webhooks/event/settings", callbackUrl);
+  let res = await postCreate(
+    apiKey,
+    "https://api.sendgrid.com/v3/user/webhooks/event/settings",
+    callbackUrl,
+    workspaceId
+  );
   if (res.status === 404 || res.status === 405) {
     // A3 fallback: retry against the `.../settings/all` path.
-    res = await postCreate(apiKey, "https://api.sendgrid.com/v3/user/webhooks/event/settings/all", callbackUrl);
+    res = await postCreate(
+      apiKey,
+      "https://api.sendgrid.com/v3/user/webhooks/event/settings/all",
+      callbackUrl,
+      workspaceId
+    );
   }
   if (!res.ok) {
     return { error: errorForStatus(res.status) };
@@ -151,7 +189,8 @@ async function createWebhook(
 async function patchWebhook(
   apiKey: string,
   id: string,
-  callbackUrl: string
+  callbackUrl: string,
+  workspaceId: string
 ): Promise<{ id: string } | { error: ProvisionEventWebhookError }> {
   const res = await fetch(`https://api.sendgrid.com/v3/user/webhooks/event/settings/${id}`, {
     method: "PATCH",
@@ -159,7 +198,7 @@ async function patchWebhook(
     body: JSON.stringify({
       enabled: true,
       url: callbackUrl,
-      friendly_name: WEBHOOK_FRIENDLY_NAME,
+      friendly_name: webhookFriendlyName(workspaceId),
       ...EVENT_FLAGS,
     }),
   });
@@ -200,12 +239,13 @@ async function enableSignedVerification(
 export async function provisionEventWebhook(
   apiKey: string,
   callbackUrl: string,
+  workspaceId: string,
   existingWebhookId?: string
 ): Promise<ProvisionEventWebhookResult> {
   try {
     const webhookResult = existingWebhookId
-      ? await patchWebhook(apiKey, existingWebhookId, callbackUrl)
-      : await createWebhook(apiKey, callbackUrl);
+      ? await patchWebhook(apiKey, existingWebhookId, callbackUrl, workspaceId)
+      : await createWebhook(apiKey, callbackUrl, workspaceId);
     if ("error" in webhookResult) {
       return webhookResult;
     }

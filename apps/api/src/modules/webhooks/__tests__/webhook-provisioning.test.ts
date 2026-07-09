@@ -3,6 +3,8 @@ import { provisionEventWebhook } from "../sendgrid-webhook-provision.js";
 
 const API_KEY = "SG.mock_provisioning_key_1234567890abcdef";
 const CALLBACK_URL = "https://api.test.local/webhooks/sendgrid/tok-abc123";
+const TEST_WORKSPACE_ID = "11111111-2222-3333-4444-555555555555";
+const EXPECTED_FRIENDLY_NAME = `Mega CRM Delivery Tracking (${TEST_WORKSPACE_ID.slice(0, 8)})`;
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -57,7 +59,7 @@ describe("provisionEventWebhook (D-01/D-02/D-05)", () => {
       return undefined;
     });
 
-    const result = await provisionEventWebhook(API_KEY, CALLBACK_URL);
+    const result = await provisionEventWebhook(API_KEY, CALLBACK_URL, TEST_WORKSPACE_ID);
 
     expect(result).toEqual({ id: "wh_new_123", publicKey: "PUBLICKEYVALUE" });
   });
@@ -81,9 +83,9 @@ describe("provisionEventWebhook (D-01/D-02/D-05)", () => {
       return undefined;
     });
 
-    await provisionEventWebhook(API_KEY, CALLBACK_URL);
+    await provisionEventWebhook(API_KEY, CALLBACK_URL, TEST_WORKSPACE_ID);
 
-    expect(createBody?.friendly_name).toBe("Mega CRM Delivery Tracking");
+    expect(createBody?.friendly_name).toBe(EXPECTED_FRIENDLY_NAME);
     expect(createBody?.group_unsubscribe).toBe(true);
   });
 
@@ -108,11 +110,11 @@ describe("provisionEventWebhook (D-01/D-02/D-05)", () => {
       return undefined;
     });
 
-    const result = await provisionEventWebhook(API_KEY, CALLBACK_URL, "wh_existing_789");
+    const result = await provisionEventWebhook(API_KEY, CALLBACK_URL, TEST_WORKSPACE_ID, "wh_existing_789");
 
     expect(result).toEqual({ id: "wh_existing_789", publicKey: "PUBLICKEYVALUE" });
     expect(createCalled).toBe(false);
-    expect(patchBody?.friendly_name).toBe("Mega CRM Delivery Tracking");
+    expect(patchBody?.friendly_name).toBe(EXPECTED_FRIENDLY_NAME);
     expect(patchBody?.group_unsubscribe).toBe(true);
     expect(patchBody?.url).toBe(CALLBACK_URL);
   });
@@ -125,7 +127,7 @@ describe("provisionEventWebhook (D-01/D-02/D-05)", () => {
       return undefined;
     });
 
-    const result = await provisionEventWebhook(API_KEY, CALLBACK_URL, "wh_scope_1");
+    const result = await provisionEventWebhook(API_KEY, CALLBACK_URL, TEST_WORKSPACE_ID, "wh_scope_1");
 
     expect(result).toEqual({ error: "missing_scope" });
   });
@@ -146,7 +148,7 @@ describe("provisionEventWebhook (D-01/D-02/D-05)", () => {
       return undefined;
     });
 
-    const result = await provisionEventWebhook(API_KEY, CALLBACK_URL);
+    const result = await provisionEventWebhook(API_KEY, CALLBACK_URL, TEST_WORKSPACE_ID);
 
     expect(result).toEqual({ error: "cap_reached" });
     expect(createCalled).toBe(false);
@@ -176,7 +178,7 @@ describe("provisionEventWebhook (D-01/D-02/D-05)", () => {
       return undefined;
     });
 
-    const result = await provisionEventWebhook(API_KEY, CALLBACK_URL);
+    const result = await provisionEventWebhook(API_KEY, CALLBACK_URL, TEST_WORKSPACE_ID);
 
     expect(primaryAttempted).toBe(true);
     expect(fallbackAttempted).toBe(true);
@@ -188,7 +190,7 @@ describe("provisionEventWebhook (D-01/D-02/D-05)", () => {
       throw new Error(`network unreachable, key=${API_KEY}`);
     });
 
-    const result = await provisionEventWebhook(API_KEY, CALLBACK_URL, "wh_boom");
+    const result = await provisionEventWebhook(API_KEY, CALLBACK_URL, TEST_WORKSPACE_ID, "wh_boom");
 
     expect(result).toEqual({ error: "failed" });
   });

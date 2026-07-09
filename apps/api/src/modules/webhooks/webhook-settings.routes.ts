@@ -86,7 +86,12 @@ export async function registerWebhookSettingsRoutes(fastify: FastifyInstance): P
         const pathToken = existing?.pathToken ?? randomBytes(32).toString("base64url");
         const callbackUrl = `${env.PUBLIC_APP_URL}/webhooks/sendgrid/${pathToken}`;
 
-        const result = await provisionEventWebhook(plaintext, callbackUrl, existing?.sendgridWebhookId ?? undefined);
+        const result = await provisionEventWebhook(
+          plaintext,
+          callbackUrl,
+          workspace.id,
+          existing?.sendgridWebhookId ?? undefined
+        );
 
         if ("error" in result) {
           await upsertWebhookEndpoint({
