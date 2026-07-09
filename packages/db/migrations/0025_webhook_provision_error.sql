@@ -1,0 +1,1 @@
+ALTER TABLE "workspace_webhook_endpoints" ADD COLUMN "provision_error" text;

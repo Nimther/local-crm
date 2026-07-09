@@ -176,6 +176,13 @@
       "when": 1783520734845,
       "tag": "0024_campaigns_delivery_counters",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1783599563468,
+      "tag": "0025_webhook_provision_error",
+      "breakpoints": true
     }
   ]
 }
