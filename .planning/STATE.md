@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 05
-current_phase_name: webhook-processing-delivery-tracking
-status: executing
-stopped_at: Completed 05-12-PLAN.md
-last_updated: "2026-07-09T17:32:00.840Z"
+current_phase: 6
+current_phase_name: Triggered Chains
+status: ready-to-plan
+stopped_at: Phase 05 complete, ready to discuss/plan Phase 6
+last_updated: "2026-07-09T18:07:35.180Z"
 last_activity: 2026-07-09
-last_activity_desc: Phase 05 execution started
+last_activity_desc: Phase 05 complete, transitioned to Phase 6
 progress:
   total_phases: 7
   completed_phases: 5
@@ -21,25 +21,25 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-07-06)
+See: .planning/PROJECT.md (updated 2026-07-09)
 
 **Core value:** Маркетолог настраивает триггерную цепочку или кампанию — и письма надёжно и вовремя доходят до нужных контактов, со сквозным отслеживанием статусов (delivered/opened/clicked/bounced).
-**Current focus:** Phase 05 — webhook-processing-delivery-tracking
+**Current focus:** Phase 6 — Flows (Triggered Chains)
 
 ## Current Position
 
-Phase: 05 (webhook-processing-delivery-tracking) — EXECUTING
-Plan: 2 of 13
+Phase: 6 — Flows (Triggered Chains)
+Plan: Not started
 Status: Ready to execute
-Last activity: 2026-07-09 — Phase 05 execution started
+Last activity: 2026-07-09 — Phase 05 complete, transitioned to Phase 6
 
-Progress: [████████████████████] 48/48 plans (100%)
+Progress: [████████████████████] 61/61 plans (100%)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 48
+- Total plans completed: 61
 - Average duration: — min
 - Total execution time: 0 hours
 
@@ -51,6 +51,7 @@ Progress: [████████████████████] 48/48 p
 | 02 | 14 | - | - |
 | 03 | 8 | - | - |
 | 04 | 19 | - | - |
+| 05 | 13 | - | - |
 
 **Recent Trend:**
 
@@ -280,7 +281,8 @@ Research flags to carry into planning:
 
 - [Phase 3 → 4] Segments ship as on-the-fly evaluation bounded by statement_timeout (2s preview / 15s save-eval, 57014 → degraded/4xx) — the 100k–1M-contact benchmark is still outstanding; revisit materialized membership if Phase 4 broadcast audience selects hit the timeout at scale.
 - Phase 4: load-test triggered-vs-broadcast priority under a large broadcast (target: triggered sends within minutes).
-- Phase 5: integration test that replays a real signed SendGrid payload through the full HTTP stack (raw-body verification).
+- Phase 5 (carried past completion): integration test that replays a real signed SendGrid payload through the full HTTP stack (raw-body verification) — worker-layer attribution test exists (05-13), HTTP-signature-layer replay does not.
+- Phase 5 → hardening follow-up (05-REVIEW WR-01, now in PROJECT.md Active): worker ignores flattened workspace_id — with one BYO SendGrid key backing multiple workspaces, sibling workspaces' raw event payloads are persisted into each other's send_events (attribution unaffected; data-isolation concern).
 - Phase 6: define quiet-hours timezone source and once-per-N-days re-entry semantics; simulate late-stage flow edits mid-execution.
 - Operational prerequisite (any fresh environment): PLATFORM_SENDGRID_API_KEY / PLATFORM_MAIL_FROM in .env must be a real SendGrid key + verified sender before verification/reset/invite emails work — placeholders cause a 500 on resend (hit and resolved during Phase 1 UAT; all 01-03/01-04/01-05/01-07 deferred manual checks now passed in phase UAT 2026-07-04).
 - Operational prerequisite (any fresh environment): REDIS_URL=redis://localhost:6379 required in .env before npm run dev boots api+worker (working in local runtime — Phase 2 CSV/event UAT passed; confirm .env.example documents it, since executor tools are hard-denied on .env* paths).
@@ -295,6 +297,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-09T17:32:00.813Z
-Stopped at: Completed 05-12-PLAN.md
+Last session: 2026-07-09T18:15:00Z
+Stopped at: Phase 05 complete (UAT round 6 passed 2/2, SECURITY.md verified), ready to discuss/plan Phase 6
 Resume file: None

@@ -28,14 +28,15 @@ Multi-tenant SaaS-платформа marketing automation для B2C-компа�
 - [x] Broadcast-кампании: создание (сегмент + Dynamic Template), тестовое письмо, запуск/планирование, state machine draft → scheduled → sending → sent, live-прогресс — Validated in Phase 4: verification 5/5, полный send loop подтверждён
 - [x] Отправка через SendGrid v3 mail/send + Dynamic Templates от имени тенанта (BYO key, send-половина) — Validated in Phase 4: расшифровка tenant key → mail/send с template_id + dynamic_template_data, one-click List-Unsubscribe header, working unsubscribe endpoint (включая RFC 8058 urlencoded POST, gap-closure 04-14)
 - [x] Очередь отправки с контролем RPS: разделённые очереди email:triggered / email:broadcast, per-tenant token bucket (rate-limiter-flexible), идемпотентность отправок на ретраях, suppression-фильтрация перед отправкой — Validated in Phase 4
+- [x] SendGrid Event Webhook: обработка delivered/opened/clicked/bounced/unsubscribed/spam/dropped — Validated in Phase 5: per-tenant signed webhook (ECDSA по raw body до парсинга), дедупликация по sg_event_id, статусы на каждом send + счётчики кампаний, авто-provisioning вебхука при подключении ключа (Klaviyo-модель) с self-healing Reconnect; live UAT round 6 подтвердил инкремент delivered/opened метрик
+- [x] Статус подписки: платформа ведёт свой subscription status — Validated in Phase 5: bounce/spam/unsubscribe из webhook автоматически переводят контакт в suppressed/unsubscribed (введён в Phase 2, pre-send gate и one-click unsubscribe в Phase 4, webhook-driven suppression в Phase 5)
 
 ### Active
 
-- [ ] Статус подписки: платформа ведёт свой subscription status (введён в Phase 2; suppression-фильтрация перед отправкой и one-click unsubscribe выполнены в Phase 4), остаётся обработка unsubscribe из SendGrid webhook (Phase 5)
 - [ ] Триггерные цепочки: визуальный canvas-редактор с drag-and-drop (узлы, ветвления, соединения)
 - [ ] Правила цепочек: exit conditions, контроль повторного входа (once ever / once per N days / every time), quiet hours, глобальный frequency cap на контакт
-- [ ] SendGrid Event Webhook: обработка delivered/opened/clicked/bounced/unsubscribed
-- [ ] Аналитика: метрики по кампаниям и шагам цепочек (sent/delivered/opened/clicked/bounced/unsubscribed), timeline активности в карточке контакта, сводный дашборд воркспейса, по-письмовый лог отправок с фильтрами
+- [ ] Аналитика: метрики по кампаниям и шагам цепочек (sent/delivered/opened/clicked/bounced/unsubscribed), timeline активности в карточке контакта, сводный дашборд воркспейса, по-письмовый лог отправок с фильтрами (счётчики кампаний уже на детальной странице — Phase 5)
+- [ ] Webhook hardening (из 05-REVIEW WR-01): при общем BYO SendGrid-ключе на несколько воркспейсов отбрасывать события чужого workspace (сейчас сырые payload'ы соседнего workspace сохраняются в его send_events; атрибуция не страдает — resolution workspace-scoped)
 
 ### Out of Scope
 
@@ -74,7 +75,8 @@ Multi-tenant SaaS-платформа marketing automation для B2C-компа�
 | Canvas drag-and-drop редактор цепочек в v1 | Ключевой дифференциатор UX, как Klaviyo/n8n; принято осознанно несмотря на стоимость | — Pending |
 | Свободная схема событий (имя + JSON) | Минимум трения при интеграции, модель Klaviyo; типы появляются в UI по мере поступления | ✓ Phase 2: события с произвольным JSON-payload принимаются, отображаются в feed; reserved-key denylist защищает системные свойства |
 | external_id + email, upsert контакта из события | Стабильная идентификация при смене email; событие может создать контакт | ✓ Phase 2: shared upsert (contacts-core) используется API, CSV-воркером и event-воркером; конфликты email → D-04 hard error |
-| Собственный subscription status + фильтрация перед отправкой | Статус виден в платформе и участвует в сегментации; не полагаемся только на SendGrid suppression | ✓ Phase 4 (send-половина): pre-send gate проверяет subscription status + suppression перед каждой отправкой; webhook-driven suppression — Phase 5 |
+| Собственный subscription status + фильтрация перед отправкой | Статус виден в платформе и участвует в сегментации; не полагаемся только на SendGrid suppression | ✓ Phase 4+5: pre-send gate перед каждой отправкой (Phase 4); bounce/spam/unsubscribe из webhook автоматически переводят контакт в suppressed/unsubscribed (Phase 5) — цикл замкнут |
+| Авто-provisioning Event Webhook (Klaviyo-модель, D-01/D-02) | Маркетолог не настраивает вебхук вручную — платформа сама создаёт/чинит его ключом тенанта | ✓ Phase 5: provisioning на connect/recheck, workspace-scoped friendly_name, PATCH-in-place, self-healing Reconnect, типизированные диагностируемые ошибки с курируемой копией |
 | Поведенческая сегментация в v1 | Ядро ценности Klaviyo-подобного продукта; без неё триггерные сценарии слабые | ✓ Phase 3: единый компилятор SegmentDefinition → SQL (EXISTS-подзапросы по событиям, count/timeframe), on-the-fly вычисление со statement_timeout вместо материализации; движок общий для кампаний (Phase 4) и цепочек (Phase 6) |
 | Сегменты вычисляются on-the-fly (без материализации membership) | Проще и всегда актуально; DoS-риск ограничен statement_timeout + degraded-ответом | ✓ Phase 3: preview-count 2s / save-eval 15s timeout, 57014 → degraded/4xx; бенчмарк на 100k–1M контактов остаётся открытым флагом |
 | Очередь + RPS-троттлинг в MVP | Rate limits SendGrid; broadcast не должен блокировать триггерные письма | ✓ Phase 4: две BullMQ-очереди (email:triggered / email:broadcast) с отдельными воркерами, per-tenant token bucket через rate-limiter-flexible, идемпотентный dispatch без дублей на ретраях |
@@ -99,4 +101,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-08 after Phase 4 transition (UAT завершён 74/74: все 4 диагностированных гэпа закрыты и re-verified вживую — доставка тестового письма и broadcast (04-16 predev-миграции + env fail-fast), test-send 4xx observability + UX-копия (04-17), D-03 save-time gate (04-18), unsubscribe token UUID fix (04-19); SECURITY.md verified, 70 threats / 0 open; фаза 4 отмечена завершённой, переход к Phase 5)*
+*Last updated: 2026-07-09 after Phase 5 transition (13/13 планов, 5 gap-closure раундов; финальный гэп — flattened custom-arg attribution (05-13) — закрыт и подтверждён live UAT round 6 (2/2 passed: метрики кампании инкрементируются, scope-limited key предупреждает при подключении); verification passed 5/5 truths; SECURITY.md verified, 37 threats / 0 open; code review: 0 Critical / 10 Warning — WR-01 (cross-tenant raw payload при общем ключе) вынесен в Active как hardening follow-up; переход к Phase 6)*

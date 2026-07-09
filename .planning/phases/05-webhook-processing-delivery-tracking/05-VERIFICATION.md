@@ -1,7 +1,7 @@
 ---
 phase: 05-webhook-processing-delivery-tracking
 verified: 2026-07-09T22:55:00Z
-status: human_needed
+status: passed
 score: 5/5 truths verified
 behavior_unverified: 0
 overrides_applied: 0
@@ -9,14 +9,17 @@ re_verification:
   previous_status: human_needed
   previous_score: "5/5 truths verified"
   gaps_closed:
+
     - "Round-5 UAT gap (Test 4, major): campaign delivered/opened counters stayed at zero despite a real delivered+opened email — closed by plan 05-13 (commits d5f47b2 test, 3570314 fix, e4a74fd test). Root cause: SendGrid's Event Webhook flattens mail/send custom args (send_id, workspace_id, campaign_id, test) onto the event JSON's TOP LEVEL — there is no nested custom_args wrapper in real payloads. extractEventRow previously read only event.custom_args?.send_id (always undefined for real events), so every event stored send_id = NULL and the side-effect loop's `if (row.sendId === null) continue` silently skipped fact-column writes and counter increments, while debounceWebhookHealth still fired per batch (exactly the reported split: last-event timestamp updates, metrics stay zero). Fix verified by direct code read of webhook-events.worker.ts (extractEventRow now reads event.send_id / event.test at the top level first, with the nested custom_args read demoted to a defensive fallback; UUID_RE validation and D-15 orphan-nulling preserved unchanged) and by independently re-running the full worker webhook suite: 4 files / 27 tests pass (webhook-events-attribution.test.ts is new, 3 tests; status/idempotency/suppression migrated off the fictional nested fixture shape, all still passing). apps/worker build is clean. Full monorepo suite independently re-run this round: 6 workspaces / 62 files / 378 tests, all green (+3 tests vs. the prior round's 375, matching the one new attribution file)."
   gaps_remaining: []
   regressions: []
 deferred: []
 human_verification:
+
   - test: "Live re-run of docs/webhook-live-uat.md Test 4 (send a fresh test campaign over the https tunnel, deliver + open the email) now that the flattened-payload attribution fix (05-13) is in the codebase."
     expected: "The campaign's delivered_count and opened_count increment (no longer zero) after the email is delivered and opened; the send row's delivered_at/first_opened_at are set; send_events.send_id for the new events is non-null."
     why_human: "Requires a live SendGrid send + real inbox interaction (delivery + open) over an https tunnel — cannot be proven by a unit/integration test alone. The code fix + the new webhook-events-attribution.test.ts integration suite (which replays a verbatim flattened payload end-to-end through processWebhookEventBatch) guarantee the attribution path this live send would exercise, but no live confirmation has been recorded since 05-13 landed — 05-UAT.md's most recent entry (round 5, Test 4) is the failure this plan fixes, and no round 6 live UAT session exists yet."
+
   - test: "Re-run docs/webhook-live-uat.md Test 2 (scope-limited key warns immediately at connect time) with a key that GENUINELY lacks the Event Webhook management scope."
     expected: "Connect succeeds (key is valid for mail.send) but an amber inline warning renders immediately ('нет прав на управление вебхуками...') with no doomed SendGrid API call attempted."
     why_human: "Carried forward, unresolved by any code change: round 5's UAT recorded this test as 'blocked' (blocked_by: third-party) because no genuinely scope-limited SendGrid key was available to the tester ('В сендгриде отсутствует вебхук-менеджмент. Проверить этот момент не удастся'). This is an environment/access limitation, not a code gap — the deterministic short-circuit remains unit-tested (sendgrid-key-webhook-provisioning.test.ts) and unrelated to this round's fix — but the live UI copy has still never been observed with a genuinely scope-limited key."
@@ -102,6 +105,7 @@ Carried-forward, tracked separately (STATE.md line 283, unaffected by 05-13): an
 ### Human Verification Required
 
 See frontmatter `human_verification`. Two items:
+
 1. **Live re-run of UAT Test 4** (fresh test-campaign send, deliver + open over the https tunnel) — the direct, honest confirmation that the round-5 attribution fix resolves the actual live failure it was built for. No round-6 live UAT session has been recorded since 05-13 landed.
 2. **Live re-run of UAT Test 2** (scope-limited key) — carried forward, unresolved by any code change; blocked purely by tester access to a genuinely scope-limited SendGrid key (environment/access limitation, not a code gap), unrelated to this round's fix.
 
