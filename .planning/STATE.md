@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 05
 current_phase_name: webhook-processing-delivery-tracking
 status: executing
-stopped_at: Completed 05-09-PLAN.md
-last_updated: "2026-07-09T13:34:14.221Z"
+stopped_at: Completed 05-12-PLAN.md
+last_updated: "2026-07-09T14:42:03.012Z"
 last_activity: 2026-07-09
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 7
   completed_phases: 5
-  total_plans: 59
-  completed_plans: 59
+  total_plans: 60
+  completed_plans: 60
   percent: 71
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-07-06)
 ## Current Position
 
 Phase: 05 (webhook-processing-delivery-tracking) — EXECUTING
-Plan: 2 of 11
+Plan: 2 of 12
 Status: Ready to execute
 Last activity: 2026-07-09 — Phase 05 execution started
 
@@ -117,6 +117,7 @@ Progress: [████████████████████] 48/48 p
 | Phase 05 P10 | 10min | 2 tasks | 2 files |
 | Phase 05 P09 | 25min | 3 tasks | 10 files |
 | Phase 05 P11 | 11min | 2 tasks | 2 files |
+| Phase 05 P12 | 8min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -263,6 +264,9 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-09: webhookHealthDescription returns null (not a formatted string) outside the error state — Keeps the pure decision helper from replicating relativeTime/Intl.RelativeTimeFormat, which is inherently impure (depends on Date.now())
 - [Phase 05]: 05-09: test-file mockScopes helpers updated to include the webhook-management scope by default — Task 1's new connect-time scope check would otherwise short-circuit every pre-existing provisioning-success test path
 - [Phase 05]: 05-11: patchWebhook's 404 marked recoverable internally (only for 404, not 401/403/5xx); provisionEventWebhook falls through to createWebhook on that signal, normalized away before returning -- closes CR-01, Reconnect can self-heal a stale/rotated webhook id with zero caller edits
+- [Phase ?]: [Phase 05]: 05-12: provisionEventWebhook's https pre-flight guard placed before the try block (before any listing/create/patch call) so connect/recheck/reconnect all route through one chokepoint
+- [Phase ?]: [Phase 05]: 05-12: webhookWarningFor's parameter widened to the exported ProvisionEventWebhookError type (not an inline literal union) so the copy map and provisioning error union can never drift apart
+- [Phase ?]: [Phase 05]: 05-12: apps/api/vitest.config.ts's PUBLIC_APP_URL test default changed to only accept an explicit TEST_PUBLIC_APP_URL override (mirroring TEST_DATABASE_URL/TEST_REDIS_URL) -- the new https guard made this var's scheme behavior-determining, so it could no longer silently inherit the real dev .env value
 
 ### Pending Todos
 
@@ -289,6 +293,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-09T13:32:39.992Z
-Stopped at: Completed 05-09-PLAN.md
+Last session: 2026-07-09T14:42:02.987Z
+Stopped at: Completed 05-12-PLAN.md
 Resume file: None
