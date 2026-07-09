@@ -23,12 +23,18 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { KeyStatusBadge } from "@/features/sendgrid-key/KeyStatusBadge";
 import { getWebhookHealth, reconnectWebhook } from "@/features/webhooks/webhook-health.api";
+import {
+  reconnectToastForHealth,
+  webhookHealthDescription,
+  webhookNoticeForKeyResponse,
+} from "@/features/sendgrid-key/webhook-notice";
 
 interface KeyMutationResponse {
   connected: true;
   keyMask: string;
   status: "active" | "error";
   verifiedSenders: VerifiedSender[];
+  webhookWarning?: string;
 }
 
 const GENERIC_ERROR = "Что-то пошло не так. Попробуйте ещё раз — если ошибка повторится, обновите страницу.";
@@ -78,9 +84,14 @@ function WebhookHealthCard({ slug, canManage }: { slug: string; canManage: boole
 
   const reconnectMutation = useMutation({
     mutationFn: () => reconnectWebhook(slug),
-    onSuccess: () => {
+    onSuccess: (data) => {
       void queryClient.invalidateQueries({ queryKey: webhookHealthQueryKey(slug) });
-      toast.success("Отслеживание доставки переподключено");
+      const result = reconnectToastForHealth(data);
+      if (result.variant === "error") {
+        toast.error(result.message);
+      } else {
+        toast.success(result.message);
+      }
     },
     onError: (error: unknown) => {
       toast.error(extractErrorMessage(error));
@@ -95,6 +106,13 @@ function WebhookHealthCard({ slug, canManage }: { slug: string; canManage: boole
   const connected = Boolean(health?.connected);
   const reconnectLabel = connected ? "Переподключить отслеживание" : "Включить отслеживание доставки";
   const badgeStatus = connected ? "active" : health?.provisionStatus === "error" ? "error" : "pending";
+  const errorDescription = health
+    ? webhookHealthDescription({
+        provisionStatus: health.provisionStatus,
+        provisionError: health.provisionError,
+        lastEventAt: health.lastEventAt,
+      })
+    : null;
 
   return (
     <Card>
@@ -105,9 +123,11 @@ function WebhookHealthCard({ slug, canManage }: { slug: string; canManage: boole
             <KeyStatusBadge status={badgeStatus} />
           </CardTitle>
           <CardDescription>
-            {health?.lastEventAt
-              ? `Последнее событие получено: ${relativeTime(health.lastEventAt)}`
-              : "События ещё не поступали"}
+            {errorDescription
+              ? errorDescription
+              : health?.lastEventAt
+                ? `Последнее событие получено: ${relativeTime(health.lastEventAt)}`
+                : "События ещё не поступали"}
           </CardDescription>
         </div>
         {canManage ? (
@@ -140,6 +160,7 @@ export function SendGridKeySettings() {
   const queryClient = useQueryClient();
   const [serverError, setServerError] = useState<string | null>(null);
   const [verifiedSenders, setVerifiedSenders] = useState<VerifiedSender[] | null>(null);
+  const [webhookWarning, setWebhookWarning] = useState<string | null>(null);
 
   const workspaceQuery = useQuery({
     queryKey: ["workspace", slug],
@@ -171,6 +192,11 @@ export function SendGridKeySettings() {
       form.reset({ apiKey: "" });
       void invalidateStatus();
       toast.success("SendGrid подключён");
+      const warning = webhookNoticeForKeyResponse(data);
+      setWebhookWarning(warning);
+      if (warning) {
+        toast.warning(warning);
+      }
     },
     onError: (error: unknown) => {
       setServerError(extractErrorMessage(error));
@@ -184,6 +210,11 @@ export function SendGridKeySettings() {
       setVerifiedSenders(data.verifiedSenders);
       void invalidateStatus();
       toast.success("Статус SendGrid обновлён");
+      const warning = webhookNoticeForKeyResponse(data);
+      setWebhookWarning(warning);
+      if (warning) {
+        toast.warning(warning);
+      }
     },
     onError: (error: unknown) => {
       setServerError(extractErrorMessage(error));
@@ -284,6 +315,7 @@ export function SendGridKeySettings() {
           </CardHeader>
           <CardContent className="space-y-4">
             {serverError ? <p className="text-sm font-medium text-destructive">{serverError}</p> : null}
+            {webhookWarning ? <p className="text-sm font-medium text-amber-600">{webhookWarning}</p> : null}
             {verifiedSenders && verifiedSenders.length > 0 ? (
               <Table>
                 <TableHeader>
