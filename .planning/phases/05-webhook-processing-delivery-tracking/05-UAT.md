@@ -1,5 +1,5 @@
 ---
-status: partial
+status: diagnosed
 phase: 05-webhook-processing-delivery-tracking
 source: [05-VERIFICATION.md]
 started: 2026-07-09T15:06:36Z
@@ -49,7 +49,19 @@ blocked: 1
   reason: "User reported: последнее событие обновляется, но в тестовой кампании события по нулям, хотя письмо дошло и было открыто."
   severity: major
   test: 4
-  root_cause: ""     # Filled by diagnosis
-  artifacts: []      # Filled by diagnosis
-  missing: []        # Filled by diagnosis
-  debug_session: ""  # Filled by diagnosis
+  root_cause: "SendGrid Event Webhook delivers mail/send custom args FLATTENED into the event JSON root (send_id, workspace_id, campaign_id, test as top-level fields — no nested custom_args object). extractEventRow in webhook-events.worker.ts reads event.custom_args?.send_id, which is always undefined for real events, so every event stores send_id = NULL and the side-effect loop skips attribution (if row.sendId === null continue). Fact columns on sends and counter increments on campaigns never run, while debounceWebhookHealth still fires per batch — exactly the reported split. Verified against live UAT data: 0 of 46 send_events rows have send_id resolved; the delivered/click payloads carry top-level send_id e5630c1e-… matching an existing sends row with NULL delivered_at. All webhook test fixtures encode the same wrong nested custom_args shape, so automated tests pass against a payload SendGrid never sends."
+  artifacts:
+    - path: "apps/worker/src/queues/webhook-events.worker.ts"
+      issue: "extractEventRow (lines 74-86) reads event.custom_args?.send_id and customArgs?.test — must read top-level event.send_id / event.test"
+    - path: "apps/worker/src/queues/__tests__/webhook-events-status.test.ts"
+      issue: "fixtures use nested custom_args object — a payload shape SendGrid never sends"
+    - path: "apps/worker/src/queues/__tests__/webhook-events-idempotency.test.ts"
+      issue: "same wrong nested fixture shape"
+    - path: "apps/worker/src/queues/__tests__/webhook-events-suppression.test.ts"
+      issue: "same wrong nested fixture shape"
+  missing:
+    - "Extract send_id from event.send_id (keep UUID validation) and isTest from event.test === 'true'; optionally keep nested custom_args read as defensive fallback"
+    - "Update all webhook test fixtures to the real flattened payload shape"
+    - "Add integration test replaying a verbatim captured SendGrid payload (two real samples exist in send_events.payload)"
+    - "Optional one-time backfill: re-attribute existing send_events rows where payload->>'send_id' resolves to a live send"
+  debug_session: ".planning/debug/campaign-metrics-zero-despite-events.md"
