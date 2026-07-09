@@ -48,7 +48,17 @@ export default defineConfig({
       // never real platform secrets.
       UNSUBSCRIBE_TOKEN_SECRET:
         process.env.UNSUBSCRIBE_TOKEN_SECRET ?? "test-only-unsubscribe-secret-at-least-32-bytes",
-      PUBLIC_APP_URL: process.env.PUBLIC_APP_URL ?? "https://api.test.local",
+      // 05-12: unlike the credential-shaped vars above (any value satisfies
+      // their schema and every outbound call is nock-intercepted regardless
+      // of the value), PUBLIC_APP_URL's *scheme* is now behavior-determining
+      // (provisionEventWebhook's https pre-flight guard). Falling back to
+      // the real dev .env's PUBLIC_APP_URL (which is exactly the kind of
+      // developer-machine-dependent http value the round-4 UAT gap was
+      // about) made the test suite's pass/fail outcome depend on the
+      // machine it ran on. Mirrors the TEST_DATABASE_URL/TEST_REDIS_URL
+      // pattern above -- only an explicit TEST_PUBLIC_APP_URL can override
+      // the deterministic https default.
+      PUBLIC_APP_URL: process.env.TEST_PUBLIC_APP_URL ?? "https://api.test.local",
     },
   },
 });

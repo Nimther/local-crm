@@ -37,7 +37,7 @@ const EVENT_FLAGS = {
   spam_report: true,
 } as const;
 
-export type ProvisionEventWebhookError = "missing_scope" | "cap_reached" | "failed";
+export type ProvisionEventWebhookError = "missing_scope" | "cap_reached" | "failed" | "insecure_url";
 
 export type ProvisionEventWebhookResult =
   | { id: string; publicKey: string }
@@ -277,6 +277,19 @@ export async function provisionEventWebhook(
   workspaceId: string,
   existingWebhookId?: string
 ): Promise<ProvisionEventWebhookResult> {
+  // 05-12 pre-flight guard (round-4 UAT root cause): SendGrid rejects a
+  // non-https Event Webhook URL with `400 "webhook url must use https"` on
+  // BOTH create and PATCH. Checking the scheme first -- before the try block,
+  // since a plain string test cannot throw -- means a misconfigured
+  // PUBLIC_APP_URL never drives a doomed outbound call at all, on connect,
+  // recheck, OR reconnect (this function is the single chokepoint all three
+  // route through). The caller gets a deterministic, actionable typed reason
+  // instead of the generic `failed` bucket a real 400 response would have
+  // collapsed into.
+  if (!callbackUrl.startsWith("https://")) {
+    return { error: "insecure_url" };
+  }
+
   try {
     let webhookResult: { id: string } | { error: ProvisionEventWebhookError };
     if (existingWebhookId) {
