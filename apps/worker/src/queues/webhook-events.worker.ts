@@ -71,19 +71,30 @@ function extractEventRow(raw: unknown): ExtractedEventRow | null {
   const rawSubtype = typeof event.type === "string" ? event.type : undefined;
   const reason = typeof event.reason === "string" ? event.reason : null;
 
+  // SendGrid's Event Webhook flattens the mail/send custom args directly
+  // onto the event object's TOP LEVEL -- there is no nested wrapper in real
+  // webhook payloads (confirmed against live UAT payloads; see
+  // .planning/debug/campaign-metrics-zero-despite-events.md). The nested
+  // read is retained only as a defensive fallback for any caller that still
+  // constructs the older nested shape.
   const customArgs =
     event.custom_args && typeof event.custom_args === "object"
       ? (event.custom_args as Record<string, unknown>)
       : undefined;
-  const rawSendId = typeof customArgs?.send_id === "string" ? customArgs.send_id : null;
-  // D-15: custom_args.send_id may point at a deleted/orphaned send, or be
+  const rawSendId =
+    typeof event.send_id === "string"
+      ? event.send_id
+      : typeof customArgs?.send_id === "string"
+        ? customArgs.send_id
+        : null;
+  // D-15: the send_id marker may point at a deleted/orphaned send, or be
   // absent entirely (a tenant's own webhook traffic bypassing the platform)
   // -- the FK is nullable (ON DELETE SET NULL) for exactly this reason. A
   // structurally-invalid value (not UUID-shaped) is nulled out defensively
   // rather than passed through to a uuid-typed column, which would throw
   // 22P02 and abort the whole batch insert.
   const sendId = rawSendId && UUID_RE.test(rawSendId) ? rawSendId : null;
-  const isTest = customArgs?.test === "true";
+  const isTest = event.test === "true" || customArgs?.test === "true";
 
   return {
     id: randomUUID(),
