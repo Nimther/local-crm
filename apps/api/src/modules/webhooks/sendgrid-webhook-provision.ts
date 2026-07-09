@@ -41,7 +41,7 @@ export type ProvisionEventWebhookError = "missing_scope" | "cap_reached" | "fail
 
 export type ProvisionEventWebhookResult =
   | { id: string; publicKey: string }
-  | { error: ProvisionEventWebhookError };
+  | { error: ProvisionEventWebhookError; webhookId?: string };
 
 interface SendGridWebhookSummary {
   id: string;
@@ -81,6 +81,28 @@ function errorForStatus(status: number): ProvisionEventWebhookError {
   return status === 401 || status === 403 ? "missing_scope" : "failed";
 }
 
+/**
+ * Redacts the tenant's decrypted API key from an arbitrary logged string
+ * (T-05-08-01) -- same substring-replace approach as `redactApiKey`, but
+ * for a plain string (a SendGrid response body) rather than an Error.
+ */
+function redactSecret(text: string, apiKey: string): string {
+  return text.split(apiKey).join("[REDACTED]");
+}
+
+/**
+ * Logs a non-ok SendGrid provisioning response's status + redacted body so
+ * an operator can diagnose WHY provisioning failed (closes the L2 silent
+ * failure gap from sendgrid-webhook-not-provisioned.md). Never logs the
+ * Authorization header or the raw (unredacted) body -- only the
+ * `redactSecret`-processed text.
+ */
+async function logNonOkProvisionResponse(context: string, res: Response, apiKey: string): Promise<void> {
+  const bodyText = await res.text();
+  // eslint-disable-next-line no-console
+  console.warn(`provisionEventWebhook [${context}] non-ok response:`, res.status, redactSecret(bodyText, apiKey));
+}
+
 function authHeaders(apiKey: string): Record<string, string> {
   return { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" };
 }
@@ -101,6 +123,7 @@ async function listExistingWebhooks(
     headers: { Authorization: `Bearer ${apiKey}` },
   });
   if (!res.ok) {
+    await logNonOkProvisionResponse("list", res, apiKey);
     return null;
   }
   const body = (await res.json()) as SendGridWebhookListResponse;
@@ -179,6 +202,7 @@ async function createWebhook(
     );
   }
   if (!res.ok) {
+    await logNonOkProvisionResponse("create", res, apiKey);
     return { error: errorForStatus(res.status) };
   }
   const created = (await res.json()) as SendGridWebhookIdResponse;
@@ -203,6 +227,7 @@ async function patchWebhook(
     }),
   });
   if (!res.ok) {
+    await logNonOkProvisionResponse("patch", res, apiKey);
     return { error: errorForStatus(res.status) };
   }
   const patched = (await res.json()) as SendGridWebhookIdResponse;
@@ -220,6 +245,7 @@ async function enableSignedVerification(
     body: JSON.stringify({ enabled: true }),
   });
   if (!res.ok) {
+    await logNonOkProvisionResponse("signed", res, apiKey);
     return { error: errorForStatus(res.status) };
   }
   const body = (await res.json()) as SendGridSignedWebhookResponse;
@@ -252,7 +278,7 @@ export async function provisionEventWebhook(
 
     const signedResult = await enableSignedVerification(apiKey, webhookResult.id);
     if ("error" in signedResult) {
-      return signedResult;
+      return { error: signedResult.error, webhookId: webhookResult.id };
     }
 
     return { id: signedResult.id, publicKey: signedResult.publicKey };

@@ -278,4 +278,51 @@ describe("provisionEventWebhook (D-01/D-02/D-05)", () => {
     expect(patchedSibling).toBe(false);
     expect(result).toEqual({ id: "wh_new_B", publicKey: "PUBLICKEYVALUE" });
   });
+
+  it("CREATE succeeds but signed-verification returns 403: preserves the created webhookId alongside the error (05-08 Task 1)", async () => {
+    route((method, url) => {
+      if (method === "GET" && url === "https://api.sendgrid.com/v3/user/webhooks/event/settings/all") {
+        return jsonResponse(200, { webhooks: [], max_allowed: 10 });
+      }
+      if (method === "POST" && url === "https://api.sendgrid.com/v3/user/webhooks/event/settings") {
+        return jsonResponse(200, { id: "wh_signed_fail_1" });
+      }
+      if (
+        method === "PATCH" &&
+        url === "https://api.sendgrid.com/v3/user/webhooks/event/settings/signed/wh_signed_fail_1"
+      ) {
+        return jsonResponse(403, { errors: [{ message: "Forbidden" }] });
+      }
+      return undefined;
+    });
+
+    const result = await provisionEventWebhook(API_KEY, CALLBACK_URL, TEST_WORKSPACE_ID);
+
+    expect(result).toEqual({ error: "missing_scope", webhookId: "wh_signed_fail_1" });
+  });
+
+  it("logs a redacted status+body for a non-ok CREATE response without leaking the api key (05-08 Task 1)", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    route((method, url) => {
+      if (method === "GET" && url === "https://api.sendgrid.com/v3/user/webhooks/event/settings/all") {
+        return jsonResponse(200, { webhooks: [], max_allowed: 10 });
+      }
+      if (method === "POST" && url === "https://api.sendgrid.com/v3/user/webhooks/event/settings") {
+        return new Response(JSON.stringify({ errors: [{ message: `Forbidden for key ${API_KEY}` }] }), {
+          status: 403,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return undefined;
+    });
+
+    const result = await provisionEventWebhook(API_KEY, CALLBACK_URL, TEST_WORKSPACE_ID);
+
+    expect(result).toEqual({ error: "missing_scope" });
+    expect(warnSpy).toHaveBeenCalled();
+    const loggedText = warnSpy.mock.calls.map((call) => call.join(" ")).join(" ");
+    expect(loggedText).toContain("403");
+    expect(loggedText).not.toContain(API_KEY);
+    warnSpy.mockRestore();
+  });
 });
