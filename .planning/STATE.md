@@ -5,16 +5,16 @@ milestone_name: milestone
 current_phase: 05
 current_phase_name: webhook-processing-delivery-tracking
 status: executing
-stopped_at: Completed 05-03-PLAN.md
-last_updated: "2026-07-09T06:25:08.456Z"
+stopped_at: Completed 05-07-PLAN.md
+last_updated: "2026-07-09T06:31:16.570Z"
 last_activity: 2026-07-09
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 7
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 55
-  completed_plans: 54
-  percent: 57
+  completed_plans: 55
+  percent: 71
 ---
 
 # Project State
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-07-06)
 ## Current Position
 
 Phase: 05 (webhook-processing-delivery-tracking) — EXECUTING
-Plan: 2 of 7
+Plan: 3 of 7
 Status: Ready to execute
 Last activity: 2026-07-09 — Phase 05 execution started
 
@@ -112,6 +112,7 @@ Progress: [████████████████████] 48/48 p
 | Phase 05 P04 | 15min | 3 tasks | 10 files |
 | Phase 05 P05 | 20min | 3 tasks | 9 files |
 | Phase 05 P06 | 6min | 2 tasks | 2 files |
+| Phase 05 P07 | 12min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -248,6 +249,8 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-05: onboarding checklist webhook-tracking done-state checks connected && provisionStatus==='active' explicitly for resilience even though the two are currently equivalent
 - [Phase 05]: 05-05: no shared component extracted for the five delivery-counter row -- duplicated in CampaignProgress.tsx and CampaignDetailPage.tsx SummaryView, matching the plan's exact files_modified list
 - [Phase ?]: [Phase 05]: 05-06: bounds check Math.abs(timestamp * 1000) <= 8.64e15 (ECMAScript max time value in ms) applied before constructing Date -- unusable timestamp treated identically to a missing sg_event_id (return null), never substituted with wall-clock time, so ON CONFLICT dedup fires on every redelivery
+- [Phase 05]: 05-07: workspace-scoped webhookFriendlyName(workspaceId) closes CR-01 cross-workspace webhook adoption; reuse-by-name branch now PATCHes a stale url before returning active
+- [Phase 05]: 05-07: stale-url repoint routes through existing patchWebhook helper (not a bespoke inline PATCH), keeping one source of truth for the PATCH body shape
 
 ### Pending Todos
 
@@ -274,6 +277,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-09T06:24:10.946Z
-Stopped at: Completed 05-03-PLAN.md
+Last session: 2026-07-09T06:31:16.538Z
+Stopped at: Completed 05-07-PLAN.md
 Resume file: None
