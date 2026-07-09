@@ -194,4 +194,88 @@ describe("provisionEventWebhook (D-01/D-02/D-05)", () => {
 
     expect(result).toEqual({ error: "failed" });
   });
+
+  it("reuse-by-name with a stale url PATCHes the webhook to the new callbackUrl before returning it active", async () => {
+    let createCalled = false;
+    let patchBody: Record<string, unknown> | undefined;
+    route((method, url, body) => {
+      if (method === "GET" && url === "https://api.sendgrid.com/v3/user/webhooks/event/settings/all") {
+        return jsonResponse(200, {
+          webhooks: [
+            {
+              id: "wh_reuse_1",
+              url: "https://api.test.local/webhooks/sendgrid/OLD-token",
+              friendly_name: EXPECTED_FRIENDLY_NAME,
+            },
+          ],
+          max_allowed: 10,
+        });
+      }
+      if (method === "POST") {
+        createCalled = true;
+        return jsonResponse(200, { id: "should-not-happen" });
+      }
+      if (method === "PATCH" && url === "https://api.sendgrid.com/v3/user/webhooks/event/settings/wh_reuse_1") {
+        patchBody = body as Record<string, unknown>;
+        return jsonResponse(200, { id: "wh_reuse_1" });
+      }
+      if (
+        method === "PATCH" &&
+        url === "https://api.sendgrid.com/v3/user/webhooks/event/settings/signed/wh_reuse_1"
+      ) {
+        return jsonResponse(200, { id: "wh_reuse_1", public_key: "PUBLICKEYVALUE" });
+      }
+      return undefined;
+    });
+
+    const result = await provisionEventWebhook(API_KEY, CALLBACK_URL, TEST_WORKSPACE_ID);
+
+    expect(createCalled).toBe(false);
+    expect(patchBody?.url).toBe(CALLBACK_URL);
+    expect(result).toEqual({ id: "wh_reuse_1", publicKey: "PUBLICKEYVALUE" });
+  });
+
+  it("a different workspace does not adopt a sibling's webhook (scoped friendly_name)", async () => {
+    const SIBLING_WORKSPACE_ID = "bbbb2222-0000-0000-0000-000000000000";
+    let createCalled = false;
+    let patchedSibling = false;
+    route((method, url, body) => {
+      if (method === "GET" && url === "https://api.sendgrid.com/v3/user/webhooks/event/settings/all") {
+        return jsonResponse(200, {
+          webhooks: [
+            {
+              id: "wh_sibling_A",
+              url: "https://sibling.example/webhooks/sendgrid/A-token",
+              friendly_name: "Mega CRM Delivery Tracking (aaaa1111)",
+            },
+          ],
+          max_allowed: 10,
+        });
+      }
+      if (method === "PATCH" && url === "https://api.sendgrid.com/v3/user/webhooks/event/settings/wh_sibling_A") {
+        patchedSibling = true;
+        return jsonResponse(200, { id: "wh_sibling_A" });
+      }
+      if (method === "POST" && url === "https://api.sendgrid.com/v3/user/webhooks/event/settings") {
+        createCalled = true;
+        expect((body as Record<string, unknown>).friendly_name).toBe(
+          "Mega CRM Delivery Tracking (bbbb2222)"
+        );
+        return jsonResponse(200, { id: "wh_new_B" });
+      }
+      if (
+        method === "PATCH" &&
+        url === "https://api.sendgrid.com/v3/user/webhooks/event/settings/signed/wh_new_B"
+      ) {
+        return jsonResponse(200, { id: "wh_new_B", public_key: "PUBLICKEYVALUE" });
+      }
+      return undefined;
+    });
+
+    const result = await provisionEventWebhook(API_KEY, CALLBACK_URL, SIBLING_WORKSPACE_ID);
+
+    expect(createCalled).toBe(true);
+    expect(patchedSibling).toBe(false);
+    expect(result).toEqual({ id: "wh_new_B", publicKey: "PUBLICKEYVALUE" });
+  });
 });
