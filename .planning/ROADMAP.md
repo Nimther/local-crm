@@ -340,17 +340,33 @@ _Wave 1:_
 **UI hint**: yes
 
 Plans:
+**Wave 1**
 
 - [ ] 06-01-PLAN.md — Flow data model (5 tables) + send/contact/settings extensions + RLS migrations + [BLOCKING] db:migrate
 - [ ] 06-02-PLAN.md — flows-core contracts (definition schema + publish validator) + flow DTOs + kind:'flow' job schema
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 06-03-PLAN.md — Send-pipeline flow extension: claimFlowSend + processSendJob kind:'flow' (idempotent, shared pipeline)
 - [ ] 06-04-PLAN.md — Flow API: draft CRUD, atomic validated publish + immutable versioning, pause/resume/duplicate, restrict-delete (D-24)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 06-05-PLAN.md — Execution engine core: run-advance state machine (send/exit) + exit conditions + reconciliation scan + pause-freeze
+- [ ] 06-10-PLAN.md — Canvas builder UI (@xyflow/react, 5 node types, palette, autosave) + [SUS] package-legitimacy checkpoint
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 06-06-PLAN.md — Event-trigger evaluator + re-entry control (once-ever/once-per-N/every-time) + one-active-run
 - [ ] 06-07-PLAN.md — Delays/wait-until + durable timers + dispatch-time quiet hours + timezone (contact/workspace) validation
-- [ ] 06-08-PLAN.md — Conditional branch node + segment-entry trigger (re-check + bounded sweep) + enroll-existing (D-04)
 - [ ] 06-09-PLAN.md — Run visibility ('N in flow, M on old versions') + eject + D-22 delete guard
-- [ ] 06-10-PLAN.md — Canvas builder UI (@xyflow/react, 5 node types, palette, autosave) + [SUS] package-legitimacy checkpoint
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 06-08-PLAN.md — Conditional branch node + segment-entry trigger (re-check + bounded sweep) + enroll-existing (D-04)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
 - [ ] 06-11-PLAN.md — Flow list/detail UI + publish/enroll dialogs + re-entry/quiet-hours/timezone forms + settings + nav
 
 ### Phase 7: Analytics, Dashboard & Send Log
