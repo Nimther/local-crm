@@ -1,6 +1,6 @@
 ---
 phase: 05-webhook-processing-delivery-tracking
-reviewed: 2026-07-08T15:14:05Z
+reviewed: 2026-07-09T06:43:37Z
 depth: standard
 files_reviewed: 52
 files_reviewed_list:
@@ -57,185 +57,141 @@ files_reviewed_list:
   - packages/shared-schemas/src/queues.ts
   - packages/shared-schemas/src/webhook.ts
 findings:
-  critical: 1
-  warning: 6
-  info: 8
-  total: 15
+  critical: 0
+  warning: 4
+  info: 5
+  total: 9
 status: issues_found
 ---
 
 # Phase 05: Code Review Report
 
-**Reviewed:** 2026-07-08T15:14:05Z
+**Reviewed:** 2026-07-09T06:43:37Z
 **Depth:** standard
 **Files Reviewed:** 52
 **Status:** issues_found
 
 ## Summary
 
-Reviewed the Phase 5 webhook-processing and delivery-tracking implementation: the public SendGrid Event Webhook receiver (raw-body signature verification), auto-provisioning via tenant BYO keys, the webhook-events BullMQ worker (dedup insert, fact columns, campaign counters, suppression state machine), supporting migrations/schemas, and the frontend health/progress surfaces.
+Fresh post-gap-closure review of the full Phase 5 scope (webhook processing + delivery tracking). All three prior findings are verified fixed in source and covered by tests:
 
-The core security posture is solid: the raw-body content-type parser is correctly scoped to the webhook plugin (never parsed before ECDSA verification), `workspaceId` is resolved from the pathToken before the payload is trusted, RLS covers `send_events`/`workspace_webhook_endpoints` including a correctly-mirrored runtime-lookup policy, decrypted API keys are redacted from thrown errors, and the `ON CONFLICT ... RETURNING` dedup gate for exactly-once side effects is well built and well tested.
+- **Prior CR-01 (cross-workspace webhook adoption): FIXED.** `sendgrid-webhook-provision.ts` now scopes `friendly_name` per workspace (`webhookFriendlyName`, lines 25-27), and the reuse-by-name path PATCHes a stale URL back to the caller's `callbackUrl` before returning active (lines 152-160). Both behaviors are asserted in `webhook-provisioning.test.ts` ("reuse-by-name with a stale url", "a different workspace does not adopt a sibling's webhook").
+- **Prior WR-01 (wall-clock `occurred_at` fallback defeating dedup): FIXED.** `extractEventRow` now skips events with a missing/non-numeric `timestamp` (webhook-events.worker.ts:61-67), asserted by the "redelivered event with a missing/invalid timestamp does not double-insert or double-count" test.
+- **Prior WR-02 (out-of-range timestamp crashing the batch): FIXED.** Bounds check against `MAX_DATE_TIME_VALUE_MS` (webhook-events.worker.ts:29, 61-64), asserted by the "out-of-range numeric timestamp ... does not fail the rest of the batch" test.
 
-The most significant defect is in the provisioning recovery path: reusing an existing SendGrid webhook by `friendly_name` never updates its callback URL, which silently breaks delivery tracking (and can cross-wire two workspaces sharing one SendGrid account) while reporting `provisionStatus: 'active'`. Several robustness gaps in the worker's batch extraction and a dead-end reconnect path round out the findings.
+The core pipeline is sound: raw-body capture before ECDSA verification (no JSON parser touches the webhook route), fail-closed 400 on bad signatures, whole-batch enqueue, `ON CONFLICT ... DO NOTHING RETURNING` dedup with first-write-wins fact columns and exactly-once counters, and all side effects in one tenant-scoped transaction. RLS coverage (including the `webhook_endpoint_runtime_lookup` SELECT-only policy and the NULLIF guard on the dual-policy table) is correct. Concurrent-worker safety of `setFactColumnOnce` holds under READ COMMITTED (a blocked UPDATE re-evaluates `WHERE <col> IS NULL` after the winner commits).
 
-## Critical Issues
+Four warnings remain, all in the provisioning/settings periphery rather than the event-processing core: an unrecoverable stale-webhook-id wedge in reconnect, a non-atomic per-workspace endpoint upsert with no DB uniqueness backstop, server-crafted `webhookWarning` copy silently dropped by the web UI, and no rate limiting on the unauthenticated public receiver.
 
-### CR-01: friendly_name webhook reuse never updates the callback URL — tracking silently breaks while status reports "active"
+## Structural Findings (fallow)
 
-**File:** `apps/api/src/modules/webhooks/sendgrid-webhook-provision.ts:127-136` (with `apps/api/src/modules/tenancy/sendgrid-key.ts:50-74`, `apps/api/src/modules/webhooks/webhook-settings.routes.ts:85-107`)
-**Issue:** When `createWebhook` finds an existing webhook whose `friendly_name` matches `"Mega CRM Delivery Tracking"`, it returns `{ id: existing.id }` immediately — it never PATCHes that webhook's `url` to the caller's `callbackUrl`. The callers then persist `provisionStatus: 'active'` with a freshly-generated `pathToken`, while the actual SendGrid webhook still points at whatever URL it had before. Two concrete failure modes:
+_No structural pre-pass was provided for this review._
 
-1. **Same SendGrid key connected in two workspaces** (agency/multi-brand accounts — nothing prevents this): workspace B's connect finds workspace A's webhook by friendly_name, adopts its id, stores B's fresh pathToken, and shows "active" — but all events keep flowing to A's URL; B records zero delivery data. Worse, if B later clicks "Переподключить", the reconnect path PATCHes the *shared* webhook to B's URL — silently killing workspace A's tracking while A still shows "active".
-2. **DB endpoint row lost but SendGrid webhook alive** (the exact recovery scenario this branch's comment claims to handle): the reused webhook keeps the old pathToken URL; the new pathToken stored in the DB never receives events (the old URL now 404s), yet the UI shows connected.
-
-Either way the platform's core value promise ("сквозное отслеживание статусов") fails silently with a false-positive health status.
-**Fix:** After matching an existing webhook by `friendly_name`, verify/repair its URL before returning:
-```typescript
-if (existing) {
-  if (existing.url !== callbackUrl) {
-    // Repoint the reused webhook at THIS workspace's callback URL --
-    // reuse-by-name without a URL patch leaves events flowing elsewhere.
-    return patchWebhook(apiKey, existing.id, callbackUrl);
-  }
-  return { id: existing.id };
-}
-```
-Additionally, to close the two-workspaces-one-account cross-wiring, make the friendly name (or a custom field) workspace-scoped, e.g. `Mega CRM Delivery Tracking (${workspaceId.slice(0, 8)})`, so each workspace provisions its own webhook instead of stealing a sibling's.
+## Narrative Findings (AI reviewer)
 
 ## Warnings
 
-### WR-01: `occurredAt` fallback to `new Date()` defeats the dedup key — duplicate side effects on redelivery
+### WR-01: Stale `sendgridWebhookId` permanently wedges provisioning — PATCH 404 never falls back to create
 
-**File:** `apps/worker/src/queues/webhook-events.worker.ts:49-52`
-**Issue:** For an event whose `timestamp` is missing or not a `number`, `occurredAt` falls back to `new Date().toISOString()`. `occurred_at` is part of the `(workspace_id, sg_event_id, occurred_at)` UNIQUE dedup key. The fallback is re-computed on **every processing attempt**, so a BullMQ redelivery (the queue is configured with `attempts: 5`, and SendGrid itself re-POSTs unacked batches) of the same event produces a *different* `occurred_at`, `ON CONFLICT` never fires, and the event is inserted again — with **duplicate counter increments and duplicate suppression side effects**, breaking the WBHK-03/D-09 exactly-once invariant the whole pipeline is built on. The entire dedup design depends on `occurred_at` being deterministic; the fallback silently violates that for exactly the events it applies to.
-**Fix:** Never use wall-clock time in the dedup key. Either skip events lacking a usable timestamp (return `null` from `extractEventRow`, same as a missing `sg_event_id`), or derive a deterministic stand-in (e.g. a fixed epoch sentinel) so replays collide:
-```typescript
-if (typeof event.timestamp !== "number") {
-  return null; // no deterministic occurred_at -> cannot be safely deduped
-}
+**File:** `apps/api/src/modules/webhooks/sendgrid-webhook-provision.ts:189-210, 246-248` (and callers `webhook-settings.routes.ts:89-104`, `sendgrid-key.ts:56-70`)
+**Issue:** When a stored `sendgridWebhookId` exists, `provisionEventWebhook` goes straight to `patchWebhook`. If the tenant deleted the platform's webhook in the SendGrid UI (or the id is otherwise stale), the PATCH returns 404, which `errorForStatus` maps to `"failed"`. Both callers' error branches then re-persist the SAME stale id (`sendgridWebhookId: existing?.sendgridWebhookId ?? null`), so every subsequent connect/recheck/reconnect retries the identical dead PATCH forever. The "Переподключить" button — the designated D-02 recovery path — can never recover; delivery tracking stays `provisionStatus: 'error'` until someone manually clears the DB row. The list-and-reuse/create logic that would self-heal this exists in `createWebhook` but is unreachable once an id is stored.
+**Fix:** In `provisionEventWebhook`, when `patchWebhook(existingWebhookId, ...)` fails specifically with a 404 (webhook no longer exists), fall back to `createWebhook(apiKey, callbackUrl, workspaceId)` instead of returning `{ error: "failed" }`:
+
+```ts
+// have patchWebhook expose the failing status:
+const patched = await patchWebhookWithStatus(apiKey, existingWebhookId, callbackUrl, workspaceId);
+const webhookResult =
+  "error" in patched && patched.status === 404
+    ? await createWebhook(apiKey, callbackUrl, workspaceId) // stale id: recreate/reuse-by-name
+    : patched;
 ```
 
-### WR-02: `extractEventRow` throws (crashing the whole batch) on an out-of-range numeric timestamp
+Alternatively, have the callers clear `sendgridWebhookId` (persist `null`) when provisioning fails so the next attempt takes the create/reuse-by-name path.
 
-**File:** `apps/worker/src/queues/webhook-events.worker.ts:49-52`
-**Issue:** `new Date(event.timestamp * 1000).toISOString()` throws `RangeError: Invalid time value` when `timestamp * 1000` exceeds the ECMAScript date range (±8.64e15 ms) — e.g. a JSON value like `1e20`. `extractEventRow` has no guard, so the `.map(extractEventRow)` at line 299 throws, the job fails, BullMQ retries 5 times, and the **entire already-acked batch** (including every well-formed event in it) is permanently dropped into the failed set. This directly contradicts the function's own contract: "one malformed event in a batch must not crash the whole batch."
-**Fix:** Validate the timestamp is finite and in range before constructing the Date:
-```typescript
-const ts = event.timestamp;
-const occurredAtDate =
-  typeof ts === "number" && Number.isFinite(ts) && Math.abs(ts * 1000) <= 8.64e15
-    ? new Date(ts * 1000)
-    : null;
-if (!occurredAtDate) return null; // pairs with WR-01's deterministic-key requirement
-const occurredAt = occurredAtDate.toISOString();
-```
+### WR-02: `upsertWebhookEndpoint` SELECT-then-branch race with no `UNIQUE(workspace_id)` backstop
 
-### WR-03: reconnect cannot recover from a webhook deleted on the SendGrid side — permanent dead-end
+**File:** `apps/api/src/modules/webhooks/webhook-endpoint.repository.ts:98-129` (constraint gap in `packages/db/migrations/0021_webhook_endpoints.sql:6-17`)
+**Issue:** The doc-comment asserts provisioning is "only ever triggered synchronously from a single connect/recheck HTTP request for a given workspace, never concurrently" — but nothing enforces that. `POST /sendgrid-key`, `POST /sendgrid-key/recheck`, and `POST /webhook-reconnect` are three independent routes; two Owner/Admin requests (two tabs, a double-click racing a recheck) can interleave the `SELECT id ...` / `INSERT` window and create two rows for one workspace (only `path_token` is unique, not `workspace_id`). Once duplicated: `getWebhookEndpointByWorkspace` returns an arbitrary row, and the next `UPDATE ... WHERE workspace_id = $1` attempts to set BOTH rows to the same `path_token`, violating `workspace_webhook_endpoints_path_token_unique` and failing every subsequent connect/recheck/reconnect for that workspace — a wedged state requiring manual DB repair.
+**Fix:** Add a migration with `ALTER TABLE workspace_webhook_endpoints ADD CONSTRAINT workspace_webhook_endpoints_workspace_unique UNIQUE (workspace_id);` and replace the SELECT-then-branch with an atomic upsert:
 
-**File:** `apps/api/src/modules/webhooks/sendgrid-webhook-provision.ts:151-171`, `apps/api/src/modules/webhooks/webhook-settings.routes.ts:89`
-**Issue:** Once `sendgridWebhookId` is stored, every reconnect/recheck takes the `patchWebhook` path. If the tenant deleted the platform's webhook in the SendGrid dashboard (a realistic user action), the PATCH returns 404, `errorForStatus(404)` maps it to `"failed"`, `provisionStatus` is set to `'error'` — and nothing ever clears the stale `sendgridWebhookId`, so every subsequent "Переподключить" click PATCHes the same dead id and fails again. There is no recovery path short of manual DB surgery; the UI's only remediation button is permanently broken for this state.
-**Fix:** In `provisionEventWebhook`, fall back to `createWebhook` when the PATCH of `existingWebhookId` returns 404:
-```typescript
-const webhookResult = existingWebhookId
-  ? await patchWebhookWithCreateFallback(apiKey, existingWebhookId, callbackUrl)
-  : await createWebhook(apiKey, callbackUrl);
-```
-where the fallback treats a 404 PATCH response (webhook gone) as "no existing webhook" and re-creates.
-
-### WR-04: `upsertWebhookEndpoint` SELECT-then-branch race can create two endpoint rows per workspace
-
-**File:** `apps/api/src/modules/webhooks/webhook-endpoint.repository.ts:105-129`
-**Issue:** There is no `UNIQUE(workspace_id)` constraint, and the upsert is a non-locked SELECT followed by INSERT/UPDATE in separate statements. The doc comment asserts provisioning is "never concurrent", but nothing enforces that: two Owner/Admin sessions clicking connect + reconnect simultaneously (or a double-submitted request) can both see zero rows and both INSERT, leaving two rows for one workspace with two different `pathToken`s. `getWebhookEndpointByWorkspace` then returns an arbitrary row (`rows[0]` with no ORDER BY), so health status, reconnect behavior, and which pathToken SendGrid actually points at can silently disagree — and both tokens remain live receivers.
-**Fix:** Add `UNIQUE (workspace_id)` to `workspace_webhook_endpoints` in a migration and replace the SELECT-then-branch with a single atomic statement:
 ```sql
 INSERT INTO workspace_webhook_endpoints (workspace_id, path_token, sendgrid_webhook_id, public_key, provision_status)
 VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (workspace_id) DO UPDATE
-  SET path_token = EXCLUDED.path_token, sendgrid_webhook_id = EXCLUDED.sendgrid_webhook_id,
-      public_key = EXCLUDED.public_key, provision_status = EXCLUDED.provision_status, updated_at = now()
+  SET path_token = EXCLUDED.path_token,
+      sendgrid_webhook_id = EXCLUDED.sendgrid_webhook_id,
+      public_key = EXCLUDED.public_key,
+      provision_status = EXCLUDED.provision_status,
+      updated_at = now()
 ```
 
-### WR-05: `webhookWarning` from connect/recheck is never rendered — degraded provisioning is invisible to the user
+### WR-03: Server-built `webhookWarning` is silently dropped by the web UI
 
-**File:** `apps/web/src/features/sendgrid-key/SendGridKeySettings.tsx:27-32, 165-192`
-**Issue:** The API deliberately returns a `webhookWarning` string on connect/recheck when webhook provisioning degrades (missing scope, plan cap, generic failure — three carefully-written Russian copy strings in `sendgrid-key.ts:23-28`). The frontend's `KeyMutationResponse` interface omits the field and neither mutation's `onSuccess` reads it: the user sees only "SendGrid подключён" success toast while delivery tracking silently failed to provision. The entire D-01 graceful-degradation UX contract (server-side copy surfaced to the marketer) is dead on arrival; the only hint is the health card's badge, which requires the user to notice it unprompted.
-**Fix:** Add `webhookWarning?: string` to `KeyMutationResponse` and surface it:
-```typescript
+**File:** `apps/web/src/features/sendgrid-key/SendGridKeySettings.tsx:27-32, 165-192` (source of the field: `apps/api/src/modules/tenancy/sendgrid-key.ts:23-28, 173-179, 226-232`)
+**Issue:** The connect/recheck routes deliberately return a user-facing `webhookWarning` string ("ключ подключён, но у него нет прав на управление вебхуками...", cap-reached, generic-failure variants) so the marketer knows delivery tracking was NOT set up despite a successful key connect. The web client's `KeyMutationResponse` interface omits the field, and both mutations' `onSuccess` handlers show an unconditional success toast ("SendGrid подключён"). `grep webhookWarning apps/web` confirms zero consumers. Result: a tenant whose key lacks webhook scopes sees pure success, and the only clue is a passive "pending/error" badge elsewhere — the exact confusion the three warning strings were written to prevent.
+**Fix:** Add `webhookWarning?: string` to `KeyMutationResponse` and surface it in both `onSuccess` handlers:
+
+```ts
 onSuccess: (data) => {
-  ...
+  // ...
   if (data.webhookWarning) {
     toast.warning(data.webhookWarning);
   } else {
     toast.success("SendGrid подключён");
   }
-  void queryClient.invalidateQueries({ queryKey: webhookHealthQueryKey(slug) });
-},
-```
-
-### WR-06: unchunked multi-row INSERT can exceed Postgres's 65,535 bind-parameter limit for large batches
-
-**File:** `apps/worker/src/queues/webhook-events.worker.ts:326-355`
-**Issue:** The batch insert binds 9 parameters per event with no chunking. The route accepts bodies up to 1 MB; with compact events (~130-150 bytes each) a signature-valid batch can exceed ~7,281 events, at which point the single INSERT exceeds the wire-protocol parameter limit and fails with a bind error. Because the failure repeats identically on all 5 retry attempts, the entire acked batch is permanently lost — a silent data-loss cliff triggered purely by batch size.
-**Fix:** Chunk the insert (e.g. 1,000 rows per statement) inside the same transaction:
-```typescript
-for (const chunk of chunks(resolvedRows, 1000)) {
-  // build placeholders/values per chunk, accumulate RETURNING ids
 }
 ```
 
+### WR-04: Public webhook receiver has no rate limiting despite doing per-request DB work
+
+**File:** `apps/api/src/modules/webhooks/webhooks.routes.ts:46-84` (limiter registered `global: false` in `apps/api/src/server.ts:47`)
+**Issue:** `POST /webhooks/sendgrid/:pathToken` is unauthenticated and reachable by anyone. Every request — including one with a garbage token — performs a dedicated pool checkout plus four Postgres round-trips (`BEGIN`, `set_config`, `SELECT`, `COMMIT`) in `findWebhookEndpointByToken` before any rejection. `@fastify/rate-limit` is registered with `global: false` and this route never opts in, so an attacker can cheaply pressure the API's DB pool (starving authenticated routes sharing it) by hammering the endpoint. CLAUDE.md explicitly lists `@fastify/rate-limit` as the mitigation for ingestion-endpoint abuse.
+**Fix:** Opt the route into a per-IP limit generous enough for genuine SendGrid burst delivery (SendGrid posts batches, not per-event):
+
+```ts
+fastify.post(
+  "/webhooks/sendgrid/:pathToken",
+  { config: { rateLimit: { max: 120, timeWindow: "1 minute" } } },
+  async (request, reply) => { /* ... */ }
+);
+```
+
+Consider additionally caching negative token lookups (or an in-memory LRU of known tokens) so repeated unknown-token probes skip the transaction entirely.
+
 ## Info
 
-### IN-01: dynamic column-name interpolation in `setFactColumnOnce`/`incrementCampaignCounter`
+### IN-01: `deriveCurrentStatus` is exported and tested but has no consumer
 
-**File:** `apps/worker/src/queues/webhook-events.worker.ts:99-112`
-**Issue:** Column names are string-interpolated into SQL. All current call sites pass hardcoded literals, so there is no injection today, but the signature (`column: string`) invites a future caller to pass tainted input.
-**Fix:** Type the parameter as a union of allowed literals (`column: "delivered_at" | "first_opened_at" | ...`) or map through a const whitelist object.
+**File:** `packages/delivery-core/src/send-status.ts:30-38` (export: `packages/delivery-core/src/index.ts:56`)
+**Issue:** `grep` across `apps/` and `packages/` finds no caller outside the module and its own test — the D-06 read-time helper ships as dead code this phase (presumably awaiting the per-send log UI). Unused exports rot: the priority rule can drift from what the eventual consumer needs without any integration signal.
+**Fix:** Either wire it into the first read surface that renders a per-send status, or annotate the export with the concrete planned consumer so the next phase picks it up deliberately.
 
-### IN-02: `DeliveryFacts.unsubscribedAt` declared but never consulted by `deriveCurrentStatus`
+### IN-02: Dynamic SQL identifiers in `setFactColumnOnce`/`incrementCampaignCounter`
 
-**File:** `packages/delivery-core/src/send-status.ts:19, 30-38`
-**Issue:** The interface exposes `unsubscribedAt` but the priority chain never inspects it — either dead field or an unimplemented status branch. A future caller passing it will silently get `delivered`/`opened` back.
-**Fix:** Either remove the field or document explicitly that unsubscribe is intentionally not a delivery status.
+**File:** `apps/worker/src/queues/webhook-events.worker.ts:108-128`
+**Issue:** `column` / `reasonColumn` / counter `column` are interpolated directly into SQL text. Today every call site passes a hardcoded literal (`"delivered_at"`, `"bounced_count"`, etc.), so this is not injectable — but the pattern is a classic footgun if a future caller ever derives the column name from event data.
+**Fix:** Constrain the parameters to a union of literal types, e.g. `column: "delivered_at" | "first_opened_at" | "first_clicked_at" | "bounced_at" | "dropped_at" | "spam_reported_at" | "unsubscribed_at"`, so the compiler rejects any non-literal identifier.
 
-### IN-03: caret version ranges break the exact-pin convention
+### IN-03: No timestamp-freshness check on webhook signature verification (indefinite replay window)
 
-**File:** `apps/api/package.json:26, 33`
-**Issue:** `@sendgrid/eventwebhook": "^8.0.0"` and `fastify-plugin": "^5.0.1"` use caret ranges while every sibling runtime dependency is exact-pinned.
-**Fix:** Pin both to exact versions for consistency.
+**File:** `apps/api/src/modules/webhooks/signature-verify.ts:15-35`, `apps/api/src/modules/webhooks/webhooks.routes.ts:58-65`
+**Issue:** The ECDSA signature covers `timestamp + body`, but the route never checks that the timestamp is recent, so a captured (signature, timestamp, body) triple verifies forever. Impact is well-contained — `sg_event_id` dedup makes replayed events side-effect-free — but each replay still enqueues a job, runs a batch transaction, and refreshes `last_event_at` via `debounceWebhookHealth`, letting a replayer keep a dead webhook's health indicator artificially "live".
+**Fix:** Reject requests whose `x-twilio-email-event-webhook-timestamp` is outside a tolerance window (e.g. ±10 minutes) before signature verification.
 
-### IN-04: `removeOnFail: false` accumulates failed webhook jobs in Redis unboundedly
+### IN-04: Multi-row `send_events` INSERT has no chunking against Postgres's 65,535 bind-parameter limit
 
-**File:** `apps/api/src/modules/webhooks/enqueue.ts:47`
-**Issue:** Failed jobs (after 5 attempts) are retained forever. Intentional for debuggability, but with no TTL or count cap this grows Redis without bound under a sustained failure (e.g. WR-02/WR-06 scenarios).
-**Fix:** Use `removeOnFail: { age: 7 * 86400 }` (or a count cap) once a dead-letter review process exists.
+**File:** `apps/worker/src/queues/webhook-events.worker.ts:342-370`
+**Issue:** At 9 parameters per row, a batch of more than ~7,281 extractable events would exceed the wire protocol's bind-parameter limit, failing the whole job (5 retries, then the failed set — with the HTTP batch already 200-acked). The route's 1MB `bodyLimit` makes this practically unreachable for genuine SendGrid events (each is well over 137 bytes), so this is a theoretical bound, not a live bug.
+**Fix:** Chunk `resolvedRows` into slices of e.g. 1,000 rows per INSERT inside the same transaction.
 
-### IN-05: no timestamp-freshness window on webhook signature verification
+### IN-05: Soft-bounce streak counts per event, not per send
 
-**File:** `apps/api/src/modules/webhooks/signature-verify.ts:15-35`
-**Issue:** A captured signed request can be replayed indefinitely (the ECDSA check covers timestamp+body but nothing bounds the timestamp's age). Impact is low because the worker's dedup makes replays side-effect-free — but note this mitigation itself depends on WR-01 being fixed.
-**Fix:** Optionally reject requests whose timestamp is older than e.g. 10 minutes.
-
-### IN-06: `provisionStatus` cast from unconstrained text column to enum type without validation
-
-**File:** `apps/api/src/modules/webhooks/webhook-settings.routes.ts:47`
-**Issue:** `endpoint.provisionStatus as WebhookHealthResponse["provisionStatus"]` blindly casts a DB `text` value into the `"pending" | "active" | "error"` union; a bad write would flow to the client unvalidated (the zod schema is not used to serialize).
-**Fix:** Validate with `webhookHealthResponseSchema.parse(body)` before sending, or add a CHECK constraint on the column.
-
-### IN-07: recheck re-provisions the webhook but the client never invalidates the webhook-health query
-
-**File:** `apps/web/src/features/sendgrid-key/SendGridKeySettings.tsx:180-192`
-**Issue:** `recheckMutation.onSuccess` invalidates only the sendgrid-key status query. If the recheck's best-effort provisioning changed `provisionStatus` (error -> active or vice versa), the already-mounted WebhookHealthCard keeps showing the stale badge until an unrelated refetch.
-**Fix:** Also `invalidateQueries({ queryKey: webhookHealthQueryKey(slug) })` in both connect and recheck `onSuccess`/`onError`.
-
-### IN-08: third copy of `buildRedisConnectionOptions`
-
-**File:** `apps/api/src/modules/webhooks/enqueue.ts:17-29`
-**Issue:** Identical connection-parsing logic now exists in `events-queue.ts`, `apps/worker/src/queues/connection.ts`, and here (the comment acknowledges it). Three copies of URL parsing is past the point where "config, not business logic" justifies duplication — a future auth/TLS option will need three edits.
-**Fix:** Move it into `@mega-crm/shared-schemas` or a small shared infra package.
+**File:** `apps/worker/src/queues/webhook-events.worker.ts:222-243`
+**Issue:** `consecutive_soft_bounces` increments on every genuinely-new `bounce`/`type:"blocked"` event. If SendGrid ever emits multiple distinct blocked events for the SAME send (distinct `sg_event_id`s across delivery attempts), a single message could contribute 2-3 streak increments and suppress a contact off one send. This matches D-10's literal wording ("each genuinely-new soft bounce event") and blocked events are typically once-per-message, so this is a semantics note rather than a defect.
+**Fix:** If per-send semantics are intended, gate the streak increment on per-send state (e.g. only increment when this send has not previously contributed a soft bounce, tracked via a `sends` marker column).
 
 ---
 
-_Reviewed: 2026-07-08T15:14:05Z_
+_Reviewed: 2026-07-09T06:43:37Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
