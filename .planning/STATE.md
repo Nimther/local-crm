@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 05
 current_phase_name: webhook-processing-delivery-tracking
 status: executing
-stopped_at: Completed 05-07-PLAN.md
-last_updated: "2026-07-09T12:22:35.570Z"
+stopped_at: Completed 05-10-PLAN.md
+last_updated: "2026-07-09T12:28:31.658Z"
 last_activity: 2026-07-09
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 7
   completed_phases: 4
   total_plans: 58
-  completed_plans: 56
+  completed_plans: 57
   percent: 57
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-07-06)
 ## Current Position
 
 Phase: 05 (webhook-processing-delivery-tracking) — EXECUTING
-Plan: 2 of 10
+Plan: 3 of 10
 Status: Ready to execute
 Last activity: 2026-07-09 — Phase 05 execution started
 
@@ -114,6 +114,7 @@ Progress: [████████████████████] 48/48 p
 | Phase 05 P06 | 6min | 2 tasks | 2 files |
 | Phase 05 P07 | 12min | 2 tasks | 4 files |
 | Phase 05 P08 | 5min | 3 tasks | 6 files |
+| Phase 05 P10 | 10min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -254,6 +255,8 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-07: stale-url repoint routes through existing patchWebhook helper (not a bespoke inline PATCH), keeping one source of truth for the PATCH body shape
 - [Phase 05]: 05-08: redactSecret(text, apiKey) added as a standalone string-redaction helper distinct from redactApiKey(err, apiKey) -- redacts a plain response-body string, not an Error
 - [Phase 05]: 05-08: provisionError left unwired from callers (sendgrid-key.ts, webhook-settings.routes.ts) by design -- wiring + UI surfacing deferred to wave-2 slice (05-09/05-10)
+- [Phase 05]: 05-10: PUBLIC_APP_URL localhost detection in check-env.mjs is a non-fatal warning only -- local dev of every other feature is fine on localhost; only live SendGrid webhook delivery requires a public tunnel
+- [Phase 05]: 05-10: docs/webhook-live-uat.md runbook uses placeholders only and explicitly instructs never to commit a real tenant SendGrid key (closes T-05-10-01)
 
 ### Pending Todos
 
@@ -280,6 +283,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-09T12:22:10.007Z
-Stopped at: Completed 05-07-PLAN.md
+Last session: 2026-07-09T12:28:23.917Z
+Stopped at: Completed 05-10-PLAN.md
 Resume file: None

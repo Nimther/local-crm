@@ -268,7 +268,7 @@ _Wave 1:_
   3. Duplicate webhook deliveries (same sg_event_id) do not double-count or corrupt delivery statistics.
   4. A bounce, spam complaint, or unsubscribe automatically flips the contact's subscription status so subsequent sends skip that contact.
 
-**Plans**: 8/10 plans executed
+**Plans**: 9/10 plans executed
 **UI hint**: yes
 
 Plans:
@@ -299,7 +299,7 @@ _Wave 1 (parallel):_
 _Wave 1 (parallel):_
 
 - [x] 05-08-PLAN.md — Diagnosable provisioning: log redacted SendGrid status+body, preserve created webhook id on signed-verification failure, + provision_error column/migration/repo threading (WBHK-01, WBHK-04)
-- [ ] 05-10-PLAN.md — Live-UAT operational docs: webhook-live-uat.md runbook (tunnel + PUBLIC_APP_URL + SendGrid Event Webhook key scope) + check-env.mjs localhost warning (WBHK-01)
+- [x] 05-10-PLAN.md — Live-UAT operational docs: webhook-live-uat.md runbook (tunnel + PUBLIC_APP_URL + SendGrid Event Webhook key scope) + check-env.mjs localhost warning (WBHK-01)
 
 _Wave 2 (blocked on 05-08):_
 
@@ -365,6 +365,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 2. Contacts & Event Ingestion | 14/14 | Complete    | 2026-07-05 |
 | 3. Segmentation Engine | 8/8 | Complete    | 2026-07-06 |
 | 4. Broadcast Campaigns & Send Pipeline | 19/19 | Complete    | 2026-07-06 |
-| 5. Webhook Processing & Delivery Tracking | 8/10 | In Progress|  |
+| 5. Webhook Processing & Delivery Tracking | 9/10 | In Progress|  |
 | 6. Flows (Triggered Chains) | 0/5 | Not started | - |
 | 7. Analytics, Dashboard & Send Log | 0/5 | Not started | - |
