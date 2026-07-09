@@ -124,6 +124,9 @@ describe("webhook-events worker: delivery facts + counters (WBHK-04, D-06/D-09)"
     );
   }
 
+  // SendGrid's Event Webhook flattens the mail/send markers directly onto
+  // the event object's TOP LEVEL (no nested wrapper) -- this fixture
+  // matches the real shape the corrected worker reads.
   function sendgridEvent(
     workspaceId: string,
     campaignId: string,
@@ -136,7 +139,9 @@ describe("webhook-events worker: delivery facts + counters (WBHK-04, D-06/D-09)"
       sg_event_id: `sg-${randomUUID()}`,
       sg_message_id: "abc.filterdrecv-x",
       timestamp: 1_700_000_000,
-      custom_args: { send_id: sendId, workspace_id: workspaceId, campaign_id: campaignId },
+      send_id: sendId,
+      workspace_id: workspaceId,
+      campaign_id: campaignId,
       ...overrides,
     };
   }
@@ -271,7 +276,8 @@ describe("webhook-events worker: delivery facts + counters (WBHK-04, D-06/D-09)"
         event: "delivered",
         sg_event_id: `sg-${randomUUID()}`,
         timestamp: 1_700_000_000,
-        custom_args: { send_id: sendId, workspace_id: workspaceId },
+        send_id: sendId,
+        workspace_id: workspaceId,
       },
     ];
 

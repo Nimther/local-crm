@@ -126,6 +126,9 @@ describe("webhook-events worker: suppression state machine (SUBS-02, D-10/D-11/D
     );
   }
 
+  // SendGrid's Event Webhook flattens the mail/send markers directly onto
+  // the event object's TOP LEVEL (no nested wrapper) -- this fixture
+  // matches the real shape the corrected worker reads.
   function sendgridEvent(
     workspaceId: string,
     campaignId: string,
@@ -137,7 +140,9 @@ describe("webhook-events worker: suppression state machine (SUBS-02, D-10/D-11/D
       event: "delivered",
       sg_event_id: `sg-${randomUUID()}`,
       timestamp: 1_700_000_000,
-      custom_args: { send_id: sendId, workspace_id: workspaceId, campaign_id: campaignId },
+      send_id: sendId,
+      workspace_id: workspaceId,
+      campaign_id: campaignId,
       ...overrides,
     };
   }
@@ -301,7 +306,7 @@ describe("webhook-events worker: suppression state machine (SUBS-02, D-10/D-11/D
     expect(await suppressionRows(workspaceId, contact.email)).toHaveLength(0);
   });
 
-  it("D-15/Pitfall 2: an event marked custom_args.test='true' is stored is_test=true and produces zero suppression/counter side effects", async () => {
+  it("D-15/Pitfall 2: an event marked test='true' is stored is_test=true and produces zero suppression/counter side effects", async () => {
     const workspaceId = await freshWorkspaceId("supp-test-marker");
     const campaignId = await createFixtureCampaign(workspaceId);
     const contact = await createFixtureContact(workspaceId);
@@ -315,7 +320,10 @@ describe("webhook-events worker: suppression state machine (SUBS-02, D-10/D-11/D
         reason: "550 hard fail",
         sg_event_id: `sg-${randomUUID()}`,
         timestamp: 1_700_000_000,
-        custom_args: { send_id: sendId, workspace_id: workspaceId, campaign_id: campaignId, test: "true" },
+        send_id: sendId,
+        workspace_id: workspaceId,
+        campaign_id: campaignId,
+        test: "true",
       },
     ];
 
@@ -337,7 +345,7 @@ describe("webhook-events worker: suppression state machine (SUBS-02, D-10/D-11/D
     expect(isTest).toBe(true);
   });
 
-  it("D-15: an event whose custom_args.send_id resolves to no live send is stored but suppresses nothing", async () => {
+  it("D-15: an event whose send_id resolves to no live send is stored but suppresses nothing", async () => {
     const workspaceId = await freshWorkspaceId("supp-orphan");
     const orphanSendId = randomUUID();
 
@@ -349,7 +357,8 @@ describe("webhook-events worker: suppression state machine (SUBS-02, D-10/D-11/D
         reason: "550 hard fail",
         sg_event_id: `sg-${randomUUID()}`,
         timestamp: 1_700_000_000,
-        custom_args: { send_id: orphanSendId, workspace_id: workspaceId },
+        send_id: orphanSendId,
+        workspace_id: workspaceId,
       },
     ];
 

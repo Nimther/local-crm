@@ -201,7 +201,9 @@ describe("webhook-events worker (WBHK-03, D-14)", () => {
 
     const events = [
       sendgridEvent({
-        custom_args: { send_id: sendId, workspace_id: workspaceId, campaign_id: campaignId },
+        send_id: sendId,
+        workspace_id: workspaceId,
+        campaign_id: campaignId,
       }),
     ];
 
@@ -228,7 +230,9 @@ describe("webhook-events worker (WBHK-03, D-14)", () => {
     const events = [
       sendgridEvent({
         timestamp: undefined,
-        custom_args: { send_id: sendId, workspace_id: workspaceId, campaign_id: campaignId },
+        send_id: sendId,
+        workspace_id: workspaceId,
+        campaign_id: campaignId,
       }),
     ];
 
