@@ -305,6 +305,12 @@ _Wave 2 (blocked on 05-08):_
 
 - [x] 05-09-PLAN.md — Surface the reason end-to-end: connect-time webhook-scope detection + reconnect error propagation + provisionError on health contract + rendered UI (inline warning, reconnect error toast, health-card reason) (WBHK-01, WBHK-04)
 
+**Gap closure round 3** *(from 05-VERIFICATION.md 2026-07-09 — gaps_found; CR-01 reconnect self-heal)*
+
+_Wave 1:_
+
+- [ ] 05-11-PLAN.md — Reconnect self-heal: provisionEventWebhook treats a 404 PATCH of a stale stored sendgridWebhookId as "stale id" and falls through to createWebhook's reuse-or-create path so the new id is persisted; + regression tests (stored-id 404 -> CREATE, and signed-failure-after-fallback id preservation) (CR-01) (WBHK-01)
+
 ### Phase 6: Flows (Triggered Chains)
 
 **Goal**: A marketer can visually build, publish, and run automated triggered chains that send the right email at the right time, reusing the proven send pipeline, suppression, and frequency cap.
