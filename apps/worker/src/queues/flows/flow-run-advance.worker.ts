@@ -7,6 +7,7 @@ import { FLOW_RUN_ADVANCE_QUEUE, flowRunAdvanceJobSchema, type FlowRunAdvanceJob
 import { evaluateExitConditions } from "./flow-exit-conditions.js";
 import { handleSendNode } from "./handlers/send-node.js";
 import { handleExitNode } from "./handlers/exit-node.js";
+import { handleDelayNode } from "./handlers/delay-node.js";
 
 interface FlowRunAdvanceRow {
   id: string;
@@ -20,6 +21,9 @@ interface FlowRunAdvanceRow {
   enteredAt: Date;
   flowStatus: string;
   exitConditions: FlowExitCondition[];
+  quietHoursMode: "inherit" | "override" | "disabled";
+  quietHoursStart: number | null;
+  quietHoursEnd: number | null;
 }
 
 /**
@@ -42,7 +46,10 @@ async function loadDueFlowRun(client: PoolClient, workspaceId: string, flowRunId
        fr.next_wake_at as "nextWakeAt",
        fr.entered_at as "enteredAt",
        f.status as "flowStatus",
-       f.exit_conditions as "exitConditions"
+       f.exit_conditions as "exitConditions",
+       f.quiet_hours_mode as "quietHoursMode",
+       f.quiet_hours_start as "quietHoursStart",
+       f.quiet_hours_end as "quietHoursEnd"
      FROM flow_runs fr
      JOIN flows f ON f.id = fr.flow_id
      WHERE fr.id = $1 AND fr.workspace_id = $2
@@ -119,9 +126,9 @@ async function appendFlowRunStep(
  * transaction this function opens (Pitfall 1 idempotency) -- a crash after
  * COMMIT can only ever redeliver a nudge that the guards above safely no-op.
  *
- * Only `send`/`exit` node types are handled in this plan (delay is 06-07,
- * branch is 06-08) -- any other node type at `current_node_id` throws,
- * surfacing a data-integrity error rather than silently stalling the run.
+ * `send`/`exit`/`delay` node types are handled (branch is 06-08) -- any
+ * other node type at `current_node_id` throws, surfacing a data-integrity
+ * error rather than silently stalling the run.
  */
 export async function processFlowRunAdvance(data: FlowRunAdvanceJob): Promise<void> {
   const { workspaceId, flowRunId } = flowRunAdvanceJobSchema.parse(data);
@@ -166,18 +173,44 @@ export async function processFlowRunAdvance(data: FlowRunAdvanceJob): Promise<vo
       }
 
       if (node.type === "send") {
-        const { nextNodeId } = await handleSendNode({
+        const result = await handleSendNode({
+          client,
           workspaceId,
           flowRunId,
           contactId: run.contactId,
           node,
           definition,
+          flow: {
+            quietHoursMode: run.quietHoursMode,
+            quietHoursStart: run.quietHoursStart,
+            quietHoursEnd: run.quietHoursEnd,
+          },
         });
 
-        if (nextNodeId) {
+        if (result.outcome === "deferred_quiet_hours") {
+          // D-14/Pitfall 4: checked at DISPATCH time, not schedule time --
+          // no send job was enqueued. D-10: `nextWakeAt` is
+          // `nextQuietWindowEnd` with NO added jitter/stagger; the deferred
+          // burst that releases together at the window end is smoothed
+          // only by the existing per-tenant token bucket + triggered lane.
+          await client.query(
+            `UPDATE flow_runs SET next_wake_at = $2, status = 'waiting' WHERE id = $1 AND workspace_id = $3`,
+            [flowRunId, result.nextWakeAt, workspaceId]
+          );
+          await appendFlowRunStep(client, {
+            workspaceId,
+            flowRunId,
+            nodeId: run.currentNodeId,
+            nodeType: "send",
+            outcome: "deferred_quiet_hours",
+          });
+          return;
+        }
+
+        if (result.nextNodeId) {
           await client.query(
             `UPDATE flow_runs SET current_node_id = $2, next_wake_at = now(), status = 'waiting' WHERE id = $1 AND workspace_id = $3`,
-            [flowRunId, nextNodeId, workspaceId]
+            [flowRunId, result.nextNodeId, workspaceId]
           );
         } else {
           // Defensive dead-end fallback (no outgoing edge) -- a publish-time
@@ -195,6 +228,40 @@ export async function processFlowRunAdvance(data: FlowRunAdvanceJob): Promise<vo
           nodeId: run.currentNodeId,
           nodeType: "send",
           outcome: "enqueued",
+        });
+        return;
+      }
+
+      if (node.type === "delay") {
+        const { nextNodeId, nextWakeAt } = await handleDelayNode({
+          client,
+          workspaceId,
+          flowRunId,
+          contactId: run.contactId,
+          node,
+          definition,
+        });
+
+        if (nextNodeId) {
+          await client.query(
+            `UPDATE flow_runs SET current_node_id = $2, next_wake_at = $3, status = 'waiting' WHERE id = $1 AND workspace_id = $4`,
+            [flowRunId, nextNodeId, nextWakeAt, workspaceId]
+          );
+        } else {
+          // Defensive dead-end fallback (no outgoing edge after a delay) --
+          // mirrors the send-node dead-end fallback above.
+          await client.query(
+            `UPDATE flow_runs SET status = 'completed', exited_at = now(), exit_reason = 'reached_exit' WHERE id = $1 AND workspace_id = $2`,
+            [flowRunId, workspaceId]
+          );
+        }
+
+        await appendFlowRunStep(client, {
+          workspaceId,
+          flowRunId,
+          nodeId: run.currentNodeId,
+          nodeType: "delay",
+          outcome: "waiting",
         });
         return;
       }

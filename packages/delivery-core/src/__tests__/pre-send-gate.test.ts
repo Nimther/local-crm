@@ -88,16 +88,44 @@ describe("evaluatePreSendGate (SUBS-03/SEND-04/D-04/D-14)", () => {
 });
 
 describe("getWorkspaceSendSettings (D-13 defaults)", () => {
-  it("returns the 3/24/null defaults when no settings row exists", async () => {
+  it("returns the 3/24/null defaults (plus 06-07's unset timezone/quiet-hours defaults) when no settings row exists", async () => {
     const client = stubClient([[]]);
     const settings = await getWorkspaceSendSettings(client, "ws-1");
-    expect(settings).toEqual({ frequencyCap: 3, frequencyWindowHours: 24, rpsLimit: null });
+    expect(settings).toEqual({
+      frequencyCap: 3,
+      frequencyWindowHours: 24,
+      rpsLimit: null,
+      defaultTimezone: null,
+      quietHoursStart: null,
+      quietHoursEnd: null,
+      quietHoursEnabled: false,
+    });
   });
 
   it("returns the persisted row when one exists", async () => {
-    const client = stubClient([[{ frequencyCap: 10, frequencyWindowHours: 12, rpsLimit: 5 }]]);
+    const client = stubClient([
+      [
+        {
+          frequencyCap: 10,
+          frequencyWindowHours: 12,
+          rpsLimit: 5,
+          defaultTimezone: "America/New_York",
+          quietHoursStart: 21 * 60,
+          quietHoursEnd: 8 * 60,
+          quietHoursEnabled: true,
+        },
+      ],
+    ]);
     const settings = await getWorkspaceSendSettings(client, "ws-1");
-    expect(settings).toEqual({ frequencyCap: 10, frequencyWindowHours: 12, rpsLimit: 5 });
+    expect(settings).toEqual({
+      frequencyCap: 10,
+      frequencyWindowHours: 12,
+      rpsLimit: 5,
+      defaultTimezone: "America/New_York",
+      quietHoursStart: 21 * 60,
+      quietHoursEnd: 8 * 60,
+      quietHoursEnabled: true,
+    });
   });
 });
 
