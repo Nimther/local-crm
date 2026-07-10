@@ -1,6 +1,6 @@
 import type { PoolClient } from "pg";
 import { computeNextWaitUntil, type FlowDefinition, type FlowDelayNode } from "@mega-crm/flows-core";
-import { getWorkspaceSendSettings, resolveTimezone } from "@mega-crm/delivery-core";
+import { getWorkspaceSendSettings, loadContactTimezone, resolveTimezone } from "@mega-crm/delivery-core";
 import { enqueueFlowRunAdvance } from "../flow-queues.js";
 import { resolveNextNodeId } from "./send-node.js";
 
@@ -16,14 +16,6 @@ export interface DelayNodeCtx {
 export interface DelayNodeResult {
   nextNodeId: string | null;
   nextWakeAt: Date;
-}
-
-async function loadContactTimezone(client: PoolClient, workspaceId: string, contactId: string): Promise<string | null> {
-  const { rows } = await client.query<{ timezone: string | null }>(
-    `SELECT timezone FROM contacts WHERE workspace_id = $1 AND id = $2`,
-    [contactId, workspaceId]
-  );
-  return rows[0]?.timezone ?? null;
 }
 
 function computeFixedWake(now: Date, amount: number, unit: "minutes" | "hours" | "days"): Date {

@@ -4,6 +4,7 @@ import type { FlowQuietHoursMode } from "@mega-crm/shared-schemas";
 import {
   getWorkspaceSendSettings,
   isInsideQuietHours,
+  loadContactTimezone,
   nextQuietWindowEnd,
   resolveTimezone,
   type QuietHoursWindow,
@@ -41,14 +42,6 @@ export type SendNodeResult =
 export function resolveNextNodeId(definition: FlowDefinition, nodeId: string): string | null {
   const edge = definition.edges.find((candidate) => candidate.source === nodeId);
   return edge?.target ?? null;
-}
-
-async function loadContactTimezone(client: PoolClient, workspaceId: string, contactId: string): Promise<string | null> {
-  const { rows } = await client.query<{ timezone: string | null }>(
-    `SELECT timezone FROM contacts WHERE workspace_id = $1 AND id = $2`,
-    [contactId, workspaceId]
-  );
-  return rows[0]?.timezone ?? null;
 }
 
 /**
