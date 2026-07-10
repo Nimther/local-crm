@@ -225,6 +225,13 @@
       "when": 1783685963473,
       "tag": "0031_flows_exit_conditions",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1783685963474,
+      "tag": "0032_flows_segment_sweep_scan_policy",
+      "breakpoints": true
     }
   ]
 }
