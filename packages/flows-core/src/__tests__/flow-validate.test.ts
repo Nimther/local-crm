@@ -107,6 +107,49 @@ describe("validateFlowDefinition -- D-17 hard errors", () => {
     const errors = validateFlowDefinition(flow);
     expect(errors).toEqual([]);
   });
+
+  it("06-17/CR-01: a cycle reachable from the trigger returns cycle_detected", () => {
+    const flow: FlowDefinition = {
+      nodes: [
+        { id: "trigger-1", type: "trigger", triggerType: "event", eventName: "placed_order", position: { x: 0, y: 0 } },
+        {
+          id: "send-A",
+          type: "send",
+          templateId: "d-a",
+          fromSenderId: "sender-1",
+          position: { x: 0, y: 100 },
+        },
+        {
+          id: "send-B",
+          type: "send",
+          templateId: "d-b",
+          fromSenderId: "sender-1",
+          position: { x: 0, y: 200 },
+        },
+      ],
+      edges: [
+        { id: "e1", source: "trigger-1", target: "send-A" },
+        { id: "e2", source: "send-A", target: "send-B" },
+        { id: "e3", source: "send-B", target: "send-A" },
+      ],
+    };
+
+    const errors = validateFlowDefinition(flow);
+    expect(errors).toContainEqual(expect.objectContaining({ code: "cycle_detected" }));
+  });
+
+  it("06-17/WR-02: a trigger with no outgoing edge returns no_entry", () => {
+    const flow: FlowDefinition = {
+      nodes: [
+        { id: "trigger-1", type: "trigger", triggerType: "event", eventName: "placed_order", position: { x: 0, y: 0 } },
+        { id: "exit-orphan", type: "exit", position: { x: 0, y: 200 } },
+      ],
+      edges: [],
+    };
+
+    const errors = validateFlowDefinition(flow);
+    expect(errors).toContainEqual({ code: "no_entry" });
+  });
 });
 
 describe("flowDefinitionSchema -- parsing", () => {

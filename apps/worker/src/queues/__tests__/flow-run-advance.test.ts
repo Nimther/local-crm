@@ -5,7 +5,7 @@ import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import type { FlowDefinition } from "@mega-crm/flows-core";
 import type { FlowExitCondition } from "@mega-crm/shared-schemas";
 import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool } from "../../test/db-fixture.js";
-import { processFlowRunAdvance } from "../flows/flow-run-advance.worker.js";
+import { processFlowRunAdvance, MAX_STEPS_PER_RUN } from "../flows/flow-run-advance.worker.js";
 import { emailTriggeredQueue, flowRunAdvanceQueue } from "../flows/flow-queues.js";
 import { upsertWorkspaceSendSettings } from "@mega-crm/delivery-core";
 
@@ -564,5 +564,37 @@ describe("flow-run-advance.worker.ts processFlowRunAdvance (FLOW-01/03/06/07)", 
     const workspaceHour = workspaceParts.find((p) => p.type === "hour")!.value;
     const workspaceMinute = workspaceParts.find((p) => p.type === "minute")!.value;
     expect(`${workspaceHour}:${workspaceMinute}`).not.toBe("10:00");
+  });
+
+  it("06-17/CR-01: a run at the step budget is terminated (exited/step_budget_exceeded) with no further dispatch", async () => {
+    const workspaceId = await freshWorkspaceId("flow-advance-step-budget");
+    const contactId = await createFixtureContact(workspaceId);
+    const { flowRunId, sendNodeId } = await seedFlowRun(workspaceId, contactId);
+
+    // Pre-insert exactly MAX_STEPS_PER_RUN flow_run_steps rows for this run
+    // in one statement -- the run is already AT the budget before this
+    // advance call, so the guard must fire before any further dispatch.
+    await withTenant(workspaceId, () =>
+      withTenantTransaction((client) =>
+        client.query(
+          `INSERT INTO flow_run_steps (workspace_id, flow_run_id, node_id, node_type, outcome)
+           SELECT $1, $2, 'send-1', 'send', 'enqueued'
+           FROM generate_series(1, $3)`,
+          [workspaceId, flowRunId, MAX_STEPS_PER_RUN]
+        )
+      )
+    );
+
+    await processFlowRunAdvance({ workspaceId, flowRunId });
+
+    const state = await getFlowRunState(workspaceId, flowRunId);
+    expect(state.status).toBe("exited");
+    expect(state.exitReason).toBe("step_budget_exceeded");
+
+    const steps = await getFlowRunSteps(workspaceId, flowRunId);
+    expect(steps).toHaveLength(MAX_STEPS_PER_RUN);
+
+    const job = await emailTriggeredQueue.getJob(`${flowRunId}-${sendNodeId}`);
+    expect(job, "no send job enqueued once the run is force-exited at the step budget").toBeUndefined();
   });
 });
