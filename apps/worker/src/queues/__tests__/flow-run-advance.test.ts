@@ -7,6 +7,13 @@ import type { FlowExitCondition } from "@mega-crm/shared-schemas";
 import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool } from "../../test/db-fixture.js";
 import { processFlowRunAdvance } from "../flows/flow-run-advance.worker.js";
 import { emailTriggeredQueue, flowRunAdvanceQueue } from "../flows/flow-queues.js";
+import { upsertWorkspaceSendSettings } from "@mega-crm/delivery-core";
+
+// 06-15/D-08/FLOW-05: two DST-free IANA zones with a large, stable wall-clock
+// separation (~15.5h) so assertions never depend on the exact wall-clock
+// minute the suite happens to run at.
+const CONTACT_TZ = "Asia/Kolkata"; // UTC+5:30, no DST
+const WORKSPACE_TZ = "Pacific/Honolulu"; // UTC-10, no DST
 
 /**
  * `flow-run-advance.worker.ts`'s `processFlowRunAdvance` (FLOW-01/03/06/07,
@@ -451,5 +458,111 @@ describe("flow-run-advance.worker.ts processFlowRunAdvance (FLOW-01/03/06/07)", 
 
     const sendJob = await emailTriggeredQueue.getJob(`${flowRunId}-${sendNodeId}`);
     expect(sendJob, "send job IS enqueued -- 'workspace_default' with quiet hours disabled applies no gate").toBeDefined();
+  });
+
+  it("06-15/D-08/FLOW-05: a custom quiet-hours window is evaluated in the CONTACT's timezone -- a send inside the contact's local window defers even when the workspace default timezone places now outside it", async () => {
+    const workspaceId = await freshWorkspaceId("flow-advance-contact-tz-quiet-hours");
+    const contactId = await createFixtureContact(workspaceId);
+
+    await withTenant(workspaceId, () =>
+      withTenantTransaction(async (client) => {
+        await client.query(`UPDATE contacts SET timezone = $1 WHERE workspace_id = $2 AND id = $3`, [
+          CONTACT_TZ,
+          workspaceId,
+          contactId,
+        ]);
+        await upsertWorkspaceSendSettings(client, workspaceId, { defaultTimezone: WORKSPACE_TZ });
+      })
+    );
+
+    // A 120-minute window (60 minutes of slack each side) centered on the
+    // contact's CURRENT local minute-of-day in CONTACT_TZ.
+    const contactParts = new Intl.DateTimeFormat("en-US", {
+      timeZone: CONTACT_TZ,
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(new Date());
+    const contactHour = Number(contactParts.find((p) => p.type === "hour")!.value);
+    const contactMinute = Number(contactParts.find((p) => p.type === "minute")!.value);
+    const localMinutes = contactHour * 60 + contactMinute;
+    const quietHoursStart = (localMinutes - 60 + 1440) % 1440;
+    const quietHoursEnd = (localMinutes + 60) % 1440;
+
+    const { flowRunId, sendNodeId } = await seedFlowRun(workspaceId, contactId, {});
+    await withTenant(workspaceId, () =>
+      withTenantTransaction((client) =>
+        client.query(`UPDATE flows SET quiet_hours_mode = 'custom', quiet_hours_start = $1, quiet_hours_end = $2 WHERE id = (SELECT flow_id FROM flow_runs WHERE id = $3)`, [
+          quietHoursStart,
+          quietHoursEnd,
+          flowRunId,
+        ])
+      )
+    );
+
+    await processFlowRunAdvance({ workspaceId, flowRunId });
+
+    const state = await getFlowRunState(workspaceId, flowRunId);
+    expect(state.status).toBe("waiting");
+    expect(state.currentNodeId).toBe(sendNodeId); // NOT advanced -- still at the deferred send node
+
+    const steps = await getFlowRunSteps(workspaceId, flowRunId);
+    expect(steps).toHaveLength(1);
+    expect(steps[0]).toMatchObject({ nodeId: sendNodeId, nodeType: "send", outcome: "deferred_quiet_hours" });
+
+    const sendJob = await emailTriggeredQueue.getJob(`${flowRunId}-${sendNodeId}`);
+    expect(sendJob, "no send job enqueued -- the contact's own timezone places now inside its quiet window").toBeUndefined();
+  });
+
+  it("06-15/D-08/FLOW-05: a wait_until delay computes next_wake_at at the contact's local time-of-day, not the workspace default timezone", async () => {
+    const workspaceId = await freshWorkspaceId("flow-advance-contact-tz-wait-until");
+    const contactId = await createFixtureContact(workspaceId);
+
+    await withTenant(workspaceId, () =>
+      withTenantTransaction(async (client) => {
+        await client.query(`UPDATE contacts SET timezone = $1 WHERE workspace_id = $2 AND id = $3`, [
+          CONTACT_TZ,
+          workspaceId,
+          contactId,
+        ]);
+        await upsertWorkspaceSendSettings(client, workspaceId, { defaultTimezone: WORKSPACE_TZ });
+      })
+    );
+
+    const { flowRunId } = await seedDelayFlowRun(workspaceId, contactId, {
+      id: "delay-1",
+      type: "delay",
+      delay: { kind: "wait_until", timeOfDay: 600 },
+      position: { x: 0, y: 50 },
+    });
+
+    await processFlowRunAdvance({ workspaceId, flowRunId });
+
+    const state = await getFlowRunState(workspaceId, flowRunId);
+    const nextWakeAt = new Date(state.nextWakeAt!);
+
+    const contactParts = new Intl.DateTimeFormat("en-US", {
+      timeZone: CONTACT_TZ,
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(nextWakeAt);
+    const contactHour = contactParts.find((p) => p.type === "hour")!.value;
+    const contactMinute = contactParts.find((p) => p.type === "minute")!.value;
+    expect(contactHour).toBe("10");
+    expect(contactMinute).toBe("00");
+
+    // Divergence proof: the same instant is NOT 10:00 in the workspace
+    // default timezone -- confirms the resolution actually used the
+    // contact's own timezone, not the workspace default.
+    const workspaceParts = new Intl.DateTimeFormat("en-US", {
+      timeZone: WORKSPACE_TZ,
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(nextWakeAt);
+    const workspaceHour = workspaceParts.find((p) => p.type === "hour")!.value;
+    const workspaceMinute = workspaceParts.find((p) => p.type === "minute")!.value;
+    expect(`${workspaceHour}:${workspaceMinute}`).not.toBe("10:00");
   });
 });
