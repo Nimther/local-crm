@@ -336,14 +336,14 @@ _Wave 1:_
   3. Re-entry control (once ever / once per N days / every time) and quiet hours are honored: no email is sent inside the quiet window, and it is deferred until the window ends.
   4. Editing a live flow happens in a draft that only takes effect on publish; contacts already mid-flight continue on the version they entered, with no duplicate or skipped sends.
 
-**Plans**: 1/11 plans executed
+**Plans**: 2/11 plans executed
 **UI hint**: yes
 
 Plans:
 **Wave 1**
 
 - [x] 06-01-PLAN.md — Flow data model (5 tables) + send/contact/settings extensions + RLS migrations + [BLOCKING] db:migrate
-- [ ] 06-02-PLAN.md — flows-core contracts (definition schema + publish validator) + flow DTOs + kind:'flow' job schema
+- [x] 06-02-PLAN.md — flows-core contracts (definition schema + publish validator) + flow DTOs + kind:'flow' job schema
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -406,5 +406,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 3. Segmentation Engine | 8/8 | Complete    | 2026-07-06 |
 | 4. Broadcast Campaigns & Send Pipeline | 19/19 | Complete    | 2026-07-06 |
 | 5. Webhook Processing & Delivery Tracking | 13/13 | Complete    | 2026-07-09 |
-| 6. Flows (Triggered Chains) | 1/11 | In Progress|  |
+| 6. Flows (Triggered Chains) | 2/11 | In Progress|  |
 | 7. Analytics, Dashboard & Send Log | 0/5 | Not started | - |

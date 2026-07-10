@@ -46,8 +46,8 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Flows (Triggered Chains)
 
 - [x] **FLOW-01**: Пользователь может построить цепочку в визуальном canvas-редакторе с drag-and-drop: узлы trigger, delay/wait, условная развилка, send email, явный exit/end на каждой ветке
-- [ ] **FLOW-02**: Цепочка запускается по событию или по входу контакта в сегмент
-- [ ] **FLOW-03**: Пользователь может задать exit conditions — контакт покидает цепочку при наступлении условия (например, «сделал заказ»)
+- [x] **FLOW-02**: Цепочка запускается по событию или по входу контакта в сегмент
+- [x] **FLOW-03**: Пользователь может задать exit conditions — контакт покидает цепочку при наступлении условия (например, «сделал заказ»)
 - [ ] **FLOW-04**: Пользователь может настроить re-entry control: once ever / once per N days / every time
 - [ ] **FLOW-05**: Пользователь может задать quiet hours — письма не отправляются в окно тишины, откладываются до его окончания
 - [x] **FLOW-06**: Цепочка имеет state machine: draft → live → paused; изменения вносятся в draft и применяются публикацией
@@ -165,8 +165,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | WBHK-04 | Phase 5 | Complete |
 | SUBS-02 | Phase 5 | Complete |
 | FLOW-01 | Phase 6 | Complete |
-| FLOW-02 | Phase 6 | Pending |
-| FLOW-03 | Phase 6 | Pending |
+| FLOW-02 | Phase 6 | Complete |
+| FLOW-03 | Phase 6 | Complete |
 | FLOW-04 | Phase 6 | Pending |
 | FLOW-05 | Phase 6 | Pending |
 | FLOW-06 | Phase 6 | Complete |
