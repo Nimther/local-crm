@@ -336,7 +336,7 @@ _Wave 1:_
   3. Re-entry control (once ever / once per N days / every time) and quiet hours are honored: no email is sent inside the quiet window, and it is deferred until the window ends.
   4. Editing a live flow happens in a draft that only takes effect on publish; contacts already mid-flight continue on the version they entered, with no duplicate or skipped sends.
 
-**Plans**: 11/11 plans complete
+**Plans**: 11/11 plans complete + 3 gap-closure plans (06-12…06-14)
 **UI hint**: yes
 
 Plans:
@@ -368,6 +368,17 @@ Plans:
 **Wave 6** *(blocked on Wave 5 completion)*
 
 - [x] 06-11-PLAN.md — Flow list/detail UI + publish/enroll dialogs + re-entry/quiet-hours/timezone forms + settings + nav
+
+**Gap closure** *(from 06-VERIFICATION.md 2026-07-10 — gaps_found, 1/4 truths; CR-01/CR-02/CR-03)*
+
+_Wave 1 (parallel — disjoint files):_
+
+- [ ] 06-12-PLAN.md — CR-01/WR-08: unique-per-wake advance jobId + no-shadow flowRunAdvanceQueue options + send/branch forward nudges + real Queue/Worker multi-step integration test (FLOW-02, FLOW-03)
+- [ ] 06-14-PLAN.md — CR-03/WR-03: gate draft trigger-column sync on status='draft' + re-derive triggers in publishFlow + live/paused publish-changes UI action + API regression test (FLOW-06)
+
+_Wave 2 (blocked on 06-12 — shares send-node.ts / flow-run-advance.worker.ts / flow-run-advance.test.ts):_
+
+- [ ] 06-13-PLAN.md — CR-02: one canonical quiet_hours_mode vocabulary (worker branches on 'custom') + [BLOCKING] schema default + 0034 data migration + worker deferral regression test (FLOW-05)
 
 ### Phase 7: Analytics, Dashboard & Send Log
 
