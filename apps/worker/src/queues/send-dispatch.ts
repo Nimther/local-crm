@@ -10,6 +10,7 @@ import {
   releaseDispatchClaim,
   recordSendResult,
   recordExcluded,
+  recordFlowStepResult,
   incrementCampaignSendCounter,
   tryCompleteCampaign,
   buildContactTemplateData,
@@ -21,8 +22,14 @@ import {
   type SendGridMailSendRequest,
   type SendTenantMailResult,
 } from "@mega-crm/delivery-core";
-import { emailBroadcastJobSchema, type EmailBroadcastJob, type EmailTriggeredJob } from "@mega-crm/shared-schemas";
+import {
+  emailBroadcastJobSchema,
+  emailTriggeredJobSchema,
+  type EmailBroadcastJob,
+  type EmailTriggeredJob,
+} from "@mega-crm/shared-schemas";
 import { consumeTenantToken, DEFAULT_TENANT_RPS } from "./rate-limiter.js";
+import { claimFlowSend } from "./flows/flow-send.js";
 
 /**
  * Effectively long-lived per RESEARCH.md Assumption A3 -- an old marketing
@@ -265,15 +272,34 @@ async function claimCampaignSend(
  * committed 'dispatching' claim -- never a duplicate SendGrid call, because
  * `claimCampaignSend`'s `interrupted` branch (unit 1) intercepts a
  * redelivered job before it ever reaches unit 2 again.
+ *
+ * `kind === "flow"` (06-03) rides this SAME queue/limiter/gate, with its own
+ * claim/prereqs helpers in `./flows/flow-send.ts` (`claimFlowSend`,
+ * `readFlowSendPrereqs`) -- branched on BEFORE `emailBroadcastJobSchema` is
+ * ever applied, since a flow job has no `campaignId` at all and would fail
+ * that schema's required field.
  */
 export async function processSendJob(
   data: EmailBroadcastJob | EmailTriggeredJob,
   deps: ProcessSendJobDeps = {}
 ): Promise<SendJobResult> {
-  const job = emailBroadcastJobSchema.parse(data);
-  const { workspaceId, campaignId, kind, contactId, testTo, testData } = job;
   const sendMail = deps.sendMail ?? sendTenantMailV3;
   const redisClient = deps.redisClient ?? getDefaultRedisClient();
+
+  if (data.kind === "flow") {
+    // T-06-02-01 type seam: a flow job's shape (flowRunId/nodeId, no
+    // campaignId) is validated with emailTriggeredJobSchema's flow variant,
+    // never with emailBroadcastJobSchema (which would reject it for a
+    // missing required campaignId).
+    const job = emailTriggeredJobSchema.parse(data);
+    if (job.kind !== "flow") {
+      throw new Error("processSendJob: kind='flow' branch received a non-flow job after re-parsing");
+    }
+    return processFlowSendJob(job, { sendMail, redisClient });
+  }
+
+  const job = emailBroadcastJobSchema.parse(data);
+  const { workspaceId, campaignId, kind, contactId, testTo, testData } = job;
 
   return withTenant(workspaceId, async () => {
     if (kind === "campaign") {
@@ -426,5 +452,83 @@ export async function processSendJob(
     }
 
     return { outcome: "sent", sendId, providerMessageId: response.messageId };
+  });
+}
+
+/**
+ * `kind === "flow"` dispatch (FLOW-01/FLOW-07, 06-03) -- rides the SAME
+ * email-triggered queue, per-tenant `consumeTenantToken` limiter, and
+ * `evaluatePreSendGate` gate as `kind === "campaign"`; no forked dispatch
+ * path, no second rate limiter (T-06-03-02). Same three-unit discipline as
+ * the campaign branch above: (1) `claimFlowSend`'s claim transaction commits
+ * BEFORE any network call, (2) the SendGrid call itself, outside any
+ * transaction, (3) `recordFlowStepResult` in a SEPARATE transaction only
+ * ever entered after SendGrid has responded. Template/sender come from the
+ * PINNED `flow_versions.definition` send-node config
+ * (`readFlowSendPrereqs`), never from a `campaigns` row.
+ */
+async function processFlowSendJob(
+  job: Extract<EmailTriggeredJob, { kind: "flow" }>,
+  deps: { sendMail: NonNullable<ProcessSendJobDeps["sendMail"]>; redisClient: Redis }
+): Promise<SendJobResult> {
+  const { workspaceId, flowRunId, nodeId, contactId } = job;
+  const { sendMail, redisClient } = deps;
+
+  return withTenant(workspaceId, async () => {
+    // Unit 1: claim transaction -- commits BEFORE any SendGrid call.
+    const claimResult = await withTenantTransaction((client) =>
+      claimFlowSend(client, { workspaceId, flowRunId, nodeId, contactId })
+    );
+
+    if (claimResult.kind === "excluded") {
+      return { outcome: "excluded", reason: claimResult.reason };
+    }
+    if (claimResult.kind === "skipped") {
+      return { outcome: "skipped" };
+    }
+    if (claimResult.kind === "failed") {
+      return { outcome: "failed", sendId: claimResult.sendId };
+    }
+
+    const { claim } = claimResult;
+
+    // SEND-02/SEND-03 sibling: the SAME per-tenant token bucket is consumed
+    // before EVERY SendGrid call, regardless of kind.
+    const rateResult = await consumeTenantToken(redisClient, workspaceId, claim.rps);
+    if (!rateResult.allowed) {
+      await withTenantTransaction((client) => releaseDispatchClaim(client, claim.sendId));
+      return { outcome: "rate_limited", rateLimitMs: rateResult.msBeforeNext };
+    }
+
+    // Unit 2: the external SendGrid call -- NOT inside any transaction.
+    // campaignId is omitted (06-03: a flow send has no campaigns row).
+    const payload = buildMailSendRequest({
+      to: claim.to,
+      templateId: claim.templateId,
+      fromEmail: claim.fromEmail,
+      dynamicTemplateData: claim.dynamicTemplateData,
+      listUnsubscribeUrl: claim.unsubscribeUrl,
+      sendId: claim.sendId,
+      workspaceId,
+      isTest: false,
+    });
+    const response = await sendMail(claim.apiKey, payload);
+
+    // Unit 3: record the terminal result in a SEPARATE transaction, only
+    // ever entered after SendGrid has responded.
+    if (response.status === 429 || response.status >= 500) {
+      await withTenantTransaction((client) => releaseDispatchClaim(client, claim.sendId));
+      return { outcome: "rate_limited", rateLimitMs: parseRetryAfter(response.headers) };
+    }
+
+    if (response.status >= 400) {
+      await withTenantTransaction((client) => recordFlowStepResult(client, claim.sendId, { status: "failed" }));
+      return { outcome: "failed", sendId: claim.sendId };
+    }
+
+    await withTenantTransaction((client) =>
+      recordFlowStepResult(client, claim.sendId, { status: "sent", providerMessageId: response.messageId })
+    );
+    return { outcome: "sent", sendId: claim.sendId, providerMessageId: response.messageId };
   });
 }

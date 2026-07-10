@@ -8,7 +8,12 @@ export interface SendGridMailSendRequest {
   personalizations: Array<{
     to: [{ email: string }];
     dynamic_template_data: Record<string, unknown>;
-    custom_args: { send_id: string; workspace_id: string; campaign_id: string; test?: "true" };
+    // 06-03: `campaign_id` is omitted entirely (not present, not an empty
+    // string) for a flow-step send -- there is no campaigns row to
+    // attribute to. Webhook attribution (05-03) resolves via `send_id`
+    // alone (a DB lookup of the `sends` row), so an absent `campaign_id`
+    // never breaks delivery-event processing.
+    custom_args: { send_id: string; workspace_id: string; campaign_id?: string; test?: "true" };
   }>;
   from: { email: string };
   template_id: string;
@@ -39,7 +44,8 @@ export interface BuildMailSendRequestParams {
   /** This send's `sends.id` -- also the token's `sendId` (RESEARCH.md Pitfall 5). */
   sendId: string;
   workspaceId: string;
-  campaignId: string;
+  /** Absent for a flow-step send (06-03) -- a flow send has no campaigns row to attribute to. */
+  campaignId?: string;
   /**
    * D-15 (Phase 5, closes Pitfall 2): when true, tags the outbound message
    * with a `test: "true"` custom_arg so webhook events for it can be
@@ -60,7 +66,7 @@ export function buildMailSendRequest(params: BuildMailSendRequestParams): SendGr
         custom_args: {
           send_id: params.sendId,
           workspace_id: params.workspaceId,
-          campaign_id: params.campaignId,
+          ...(params.campaignId !== undefined ? { campaign_id: params.campaignId } : {}),
           ...(params.isTest === true ? { test: "true" as const } : {}),
         },
       },
