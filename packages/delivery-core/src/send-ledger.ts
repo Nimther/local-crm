@@ -126,6 +126,123 @@ export async function recordExcluded(
 }
 
 /**
+ * Idempotent flow-step send-claim gate (FLOW-01/FLOW-07, sibling of
+ * `dispatchSendGate` for the campaign ledger). Inserts a `sends` row
+ * (`kind='flow'`) with `ON CONFLICT (workspace_id, flow_run_id, node_id)
+ * WHERE kind = 'flow' DO NOTHING` -- the conflict target matches the
+ * `sends_flow_run_node_unique` PARTIAL unique index (migration 0028), scoped
+ * to flow rows only so campaign/test sends (null `flow_run_id`) never
+ * contend with it. Mirrors `dispatchSendGate`'s three outcomes exactly:
+ *   - `"skipped"` when the existing row for this (workspace, flow_run,
+ *     node) is already terminal (`sent`, `failed`, or `excluded`) -- never
+ *     resend a redelivered flow-step job.
+ *   - `{ sendId, interrupted: true }` when the existing row is still
+ *     `dispatching` -- a prior attempt committed the claim and crashed
+ *     before reaching a terminal status; the caller must record this as
+ *     `failed` rather than re-calling SendGrid.
+ *   - `{ sendId }` (a fresh insert, no conflict) -- the caller proceeds to
+ *     send.
+ */
+export async function claimFlowSend(
+  client: PoolClient,
+  params: { workspaceId: string; flowRunId: string; nodeId: string; contactId: string }
+): Promise<DispatchSendGateResult> {
+  const { workspaceId, flowRunId, nodeId, contactId } = params;
+
+  const { rows } = await client.query<{ id: string }>(
+    `INSERT INTO sends (id, workspace_id, flow_run_id, node_id, contact_id, kind, status, queued_at)
+     VALUES (gen_random_uuid(), $1, $2, $3, $4, 'flow', 'dispatching', now())
+     ON CONFLICT (workspace_id, flow_run_id, node_id) WHERE kind = 'flow' DO NOTHING
+     RETURNING id`,
+    [workspaceId, flowRunId, nodeId, contactId]
+  );
+
+  let sendId = rows[0]?.id;
+  if (!sendId) {
+    const { rows: existing } = await client.query<{ id: string; status: string }>(
+      `SELECT id, status FROM sends
+       WHERE workspace_id = $1 AND flow_run_id = $2 AND node_id = $3 AND kind = 'flow'
+       FOR UPDATE`,
+      [workspaceId, flowRunId, nodeId]
+    );
+    const existingStatus = existing[0]?.status;
+    if (existingStatus === "sent" || existingStatus === "failed" || existingStatus === "excluded") {
+      return "skipped";
+    }
+    sendId = existing[0]?.id;
+    if (sendId && existingStatus === "dispatching") {
+      return { sendId, interrupted: true };
+    }
+  }
+
+  if (!sendId) {
+    throw new Error("claimFlowSend: failed to obtain a sends row id (insert and lookup both empty)");
+  }
+
+  return { sendId };
+}
+
+/**
+ * Advances a flow-step `sends` row (`kind='flow'`) to its terminal
+ * `sent`/`failed` status -- the flow-shaped sibling of `recordSendResult`.
+ * Callers use this instead of `recordSendResult` for flow sends so the
+ * function name at each call site documents which ledger shape it is
+ * updating; the underlying `sends` row (looked up by `id`, not by kind) is
+ * identical either way.
+ */
+export async function recordFlowStepResult(
+  client: PoolClient,
+  sendId: string,
+  result: { status: "sent" | "failed"; providerMessageId?: string | null }
+): Promise<void> {
+  // $2::send_status is cast explicitly at BOTH usages -- without the cast,
+  // Postgres deduces $2's type from its first use (assigned to the
+  // `send_status` enum column) and then rejects the second use (`= 'sent'`
+  // inside the CASE) as an inconsistent parameter type, throwing
+  // "inconsistent types deduced for parameter $2" at query time (mirrors
+  // recordSendResult's own comment/fix, 04-04).
+  await client.query(
+    `UPDATE sends
+     SET status = $2::send_status,
+         provider_message_id = $3,
+         sent_at = CASE WHEN $2::send_status = 'sent' THEN now() ELSE sent_at END
+     WHERE id = $1`,
+    [sendId, result.status, result.providerMessageId ?? null]
+  );
+}
+
+/**
+ * Records a contact as excluded from a flow-step send (D-05's frozen
+ * exclusion disposition -- suppressed/unsubscribed/frequency-capped is
+ * always a skip, never a defer, matching campaign behavior) instead of ever
+ * calling SendGrid for them. Flow-shaped sibling of `recordExcluded`,
+ * keyed by (workspace_id, flow_run_id, node_id) instead of
+ * (workspace_id, campaign_id, contact_id).
+ *
+ * Mirrors `recordExcluded`'s CR-07 guard: the ON CONFLICT ... DO UPDATE is
+ * guarded by `WHERE sends.status NOT IN ('sent', 'dispatching', 'failed')`
+ * so a redelivered exclusion re-walk can never demote an already-terminal
+ * 'sent'/'failed' row or an in-flight 'dispatching' claim back to
+ * 'excluded'. An existing 'excluded' row still has its exclusion_reason
+ * updated (re-classification).
+ */
+export async function recordFlowExcluded(
+  client: PoolClient,
+  params: { workspaceId: string; flowRunId: string; nodeId: string; contactId: string },
+  reason: string
+): Promise<void> {
+  await client.query(
+    `INSERT INTO sends (id, workspace_id, flow_run_id, node_id, contact_id, kind, status, exclusion_reason, queued_at)
+     VALUES (gen_random_uuid(), $1, $2, $3, $4, 'flow', 'excluded', $5, now())
+     ON CONFLICT (workspace_id, flow_run_id, node_id) WHERE kind = 'flow' DO UPDATE SET
+       status = 'excluded',
+       exclusion_reason = EXCLUDED.exclusion_reason
+     WHERE sends.status NOT IN ('sent', 'dispatching', 'failed')`,
+    [params.workspaceId, params.flowRunId, params.nodeId, params.contactId, reason]
+  );
+}
+
+/**
  * Atomically advances a campaign's live progress counter (CAMP-05, CR-05)
  * by 1 -- `sent_count` for a 'sent' terminal record, `failed_count` for a
  * 'failed' one -- guarded `WHERE status = 'sending'` (T-04-13-02) so a

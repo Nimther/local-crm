@@ -34,6 +34,9 @@ export {
   audienceExclusionBreakdown,
   incrementCampaignSendCounter,
   tryCompleteCampaign,
+  claimFlowSend,
+  recordFlowStepResult,
+  recordFlowExcluded,
   type DispatchSendGateResult,
   type AudienceExclusionBreakdown,
 } from "./send-ledger.js";
