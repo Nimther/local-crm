@@ -11,6 +11,16 @@ import { handleExitNode } from "./handlers/exit-node.js";
 import { handleDelayNode } from "./handlers/delay-node.js";
 import { handleBranchNode } from "./handlers/branch-node.js";
 
+/**
+ * 06-17/CR-01: defense-in-depth backstop against a cyclic definition that
+ * evades publish-time rejection (validateFlowDefinition's cycle_detected
+ * check) -- e.g. a run created before the fix, or via a future validator
+ * gap. A run's flow_run_steps count is checked BEFORE any node dispatch;
+ * once it reaches this budget the run is force-exited rather than allowed
+ * to hot-loop the worker/queue and grow flow_run_steps unboundedly.
+ */
+export const MAX_STEPS_PER_RUN = 1000;
+
 interface FlowRunAdvanceRow {
   id: string;
   workspaceId: string;
@@ -84,6 +94,14 @@ async function loadPinnedDefinition(
   return definition;
 }
 
+async function countFlowRunSteps(client: PoolClient, workspaceId: string, flowRunId: string): Promise<number> {
+  const { rows } = await client.query<{ count: string }>(
+    `SELECT count(*) FROM flow_run_steps WHERE flow_run_id = $1 AND workspace_id = $2`,
+    [flowRunId, workspaceId]
+  );
+  return Number(rows[0]?.count ?? 0);
+}
+
 async function appendFlowRunStep(
   client: PoolClient,
   params: { workspaceId: string; flowRunId: string; nodeId: string; nodeType: string; outcome: string }
@@ -144,6 +162,19 @@ export async function processFlowRunAdvance(data: FlowRunAdvanceJob): Promise<vo
       if (run.nextWakeAt !== null && new Date(run.nextWakeAt).getTime() > Date.now()) return; // not yet due
       if (run.flowStatus === "paused") return; // D-18: freeze in place, resumes on its own next tick (D-19)
       if (!run.currentNodeId) return; // nothing to resolve yet -- out of this plan's scope
+
+      // 06-17/CR-01: bounded per-run step budget -- a defensive backstop
+      // against a cyclic definition that evades publish-time rejection.
+      // Checked BEFORE any node dispatch; appends no flow_run_steps row and
+      // enqueues no advance/send if the run is already at (or over) budget.
+      const stepCount = await countFlowRunSteps(client, workspaceId, flowRunId);
+      if (stepCount >= MAX_STEPS_PER_RUN) {
+        await client.query(
+          `UPDATE flow_runs SET status = 'exited', exited_at = now(), exit_reason = 'step_budget_exceeded' WHERE id = $1 AND workspace_id = $2`,
+          [flowRunId, workspaceId]
+        );
+        return;
+      }
 
       const definition = await loadPinnedDefinition(client, workspaceId, run.flowVersionId);
       const node = definition.nodes.find((candidate) => candidate.id === run.currentNodeId);

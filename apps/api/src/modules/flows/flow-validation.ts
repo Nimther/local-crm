@@ -25,6 +25,10 @@ function copyForCode(code: FlowValidationErrorCode): string {
       return "Укажите шаблон письма и отправителя для узла отправки";
     case "branch_missing_exit":
       return "Оба исхода ветвления должны вести к узлу выхода";
+    case "cycle_detected":
+      return "Цепочка содержит цикл — уберите повторяющийся путь, чтобы контакт мог дойти до узла выхода.";
+    case "no_entry":
+      return "Триггер должен вести к следующему узлу — добавьте связь от триггера.";
     default:
       return "Некорректная конфигурация цепочки";
   }

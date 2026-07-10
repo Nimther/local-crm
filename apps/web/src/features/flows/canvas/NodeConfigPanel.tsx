@@ -34,6 +34,8 @@ export const PUBLISH_BLOCKER_MESSAGES: Record<FlowValidationErrorCode, string> =
   no_trigger: "Добавьте и настройте триггер — событие или сегмент, — чтобы опубликовать цепочку.",
   empty_send: "Заполните шаблон и отправителя в узле «Отправить письмо».",
   branch_missing_exit: "Каждая ветка должна заканчиваться узлом «Выход».",
+  cycle_detected: "Цепочка содержит цикл — уберите повторяющийся путь, чтобы контакт мог дойти до узла выхода.",
+  no_entry: "Триггер должен вести к следующему узлу — добавьте связь от триггера.",
 };
 
 export interface PublishBlocker extends FlowValidationError {
