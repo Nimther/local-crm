@@ -17,6 +17,24 @@ const DEFAULT_JOB_OPTIONS = {
   removeOnFail: false,
 };
 
+/**
+ * flowRunAdvanceQueue's OWN job options (CR-01 fix, 06-12) -- deliberately
+ * NOT the shared `DEFAULT_JOB_OPTIONS` above. Retry resilience (`attempts`/
+ * `backoff`) is unchanged, but retention differs: a completed advance job is
+ * removed immediately (`removeOnComplete: true`) so a future wake for the
+ * SAME run can never be shadowed by a still-retained completed job under a
+ * reused id (the CR-01 root cause -- BullMQ `Queue.add()` no-ops while a job
+ * with the given id exists in ANY state). Failed advance jobs are retained
+ * ~24h (`removeOnFail: { age: 86400 }`, not `false`/forever) so a failure is
+ * observable without growing Redis unboundedly.
+ */
+const FLOW_RUN_ADVANCE_JOB_OPTIONS = {
+  attempts: 5,
+  backoff: { type: "exponential" as const, delay: 2000 },
+  removeOnComplete: true,
+  removeOnFail: { age: 86400 },
+};
+
 function requireRedisUrl(): string {
   const redisUrl = process.env.REDIS_URL;
   if (!redisUrl) {
@@ -42,16 +60,37 @@ export const emailTriggeredQueue = new Queue<EmailTriggeredJob>(EMAIL_TRIGGERED_
 
 /**
  * Worker-side producer Queue for `FLOW_RUN_ADVANCE_QUEUE` -- the engine's
- * own per-run "tick". `flow-reconciliation.worker.ts`'s due-run backstop
- * enqueues here with `jobId: flowRunId` (Task 2), the SAME dedupe
- * convention `campaign-scheduler.worker.ts`'s kickoff enqueue uses, so a
- * burst of redelivered nudges for the SAME run can never stack up more than
- * one pending advance job.
+ * own per-run "tick". Uses `FLOW_RUN_ADVANCE_JOB_OPTIONS` (its own options,
+ * NOT the shared `DEFAULT_JOB_OPTIONS`) -- see that constant's doc comment
+ * for why (CR-01, 06-12). Every producer of a job on this queue MUST enqueue
+ * via `enqueueFlowRunAdvance` below, never `flowRunAdvanceQueue.add(...)`
+ * directly, so every wake gets a unique-per-wake jobId.
  */
 export const flowRunAdvanceQueue = new Queue<FlowRunAdvanceJob>(FLOW_RUN_ADVANCE_QUEUE, {
   connection: buildRedisConnectionOptions(requireRedisUrl()),
-  defaultJobOptions: DEFAULT_JOB_OPTIONS,
+  defaultJobOptions: FLOW_RUN_ADVANCE_JOB_OPTIONS,
 });
+
+/**
+ * The SOLE way to enqueue a `flowRunAdvanceQueue` job (CR-01 fix, 06-12).
+ * `jobId` is unique per wake (`${flowRunId}-${Date.now()}`) -- it embeds the
+ * flowRunId for greppability/observability, but the timestamp suffix
+ * guarantees an in-flight/completed/failed job for the same run can never
+ * shadow a future wake for that same run. Idempotency/safety is NOT provided
+ * by jobId dedup here -- it comes from `processFlowRunAdvance`'s
+ * queue-as-doorbell guards (status/next_wake_at re-check + `FOR UPDATE OF fr
+ * SKIP LOCKED`), so duplicate/stacked advance jobs for one run are harmless
+ * no-ops rather than double-executions.
+ */
+export async function enqueueFlowRunAdvance(
+  payload: FlowRunAdvanceJob,
+  opts?: { delay?: number }
+): Promise<void> {
+  await flowRunAdvanceQueue.add("advance", payload, {
+    jobId: `${payload.flowRunId}-${Date.now()}`,
+    ...(opts?.delay !== undefined ? { delay: opts.delay } : {}),
+  });
+}
 
 /**
  * Worker-side producer Queue for `FLOW_TRIGGER_EVALUATOR_QUEUE` (FLOW-02,

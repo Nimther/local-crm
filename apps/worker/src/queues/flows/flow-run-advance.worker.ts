@@ -5,6 +5,7 @@ import type { FlowDefinition } from "@mega-crm/flows-core";
 import type { FlowExitCondition } from "@mega-crm/shared-schemas";
 import { FLOW_RUN_ADVANCE_QUEUE, flowRunAdvanceJobSchema, type FlowRunAdvanceJob } from "@mega-crm/shared-schemas";
 import { evaluateExitConditions } from "./flow-exit-conditions.js";
+import { enqueueFlowRunAdvance } from "./flow-queues.js";
 import { handleSendNode } from "./handlers/send-node.js";
 import { handleExitNode } from "./handlers/exit-node.js";
 import { handleDelayNode } from "./handlers/delay-node.js";
@@ -230,6 +231,15 @@ export async function processFlowRunAdvance(data: FlowRunAdvanceJob): Promise<vo
           nodeType: "send",
           outcome: "enqueued",
         });
+
+        if (result.nextNodeId) {
+          // WR-08 fix (06-12): forward-nudge the run into the node it just
+          // advanced INTO. Previously this non-terminal transition enqueued
+          // NOTHING, leaning entirely on the 60s reconciliation backstop
+          // (also vulnerable to CR-01's jobId-shadowing) for all forward
+          // progress. The dead-end/terminal branch above never nudges.
+          await enqueueFlowRunAdvance({ workspaceId, flowRunId });
+        }
         return;
       }
 
@@ -297,6 +307,13 @@ export async function processFlowRunAdvance(data: FlowRunAdvanceJob): Promise<vo
           nodeType: "branch",
           outcome: branch === "yes" ? "branched_yes" : "branched_no",
         });
+
+        if (nextNodeId) {
+          // WR-08 fix (06-12): forward-nudge the run into the node it just
+          // branched INTO. See the identical send-node forward nudge above
+          // for rationale.
+          await enqueueFlowRunAdvance({ workspaceId, flowRunId });
+        }
         return;
       }
 
