@@ -60,14 +60,41 @@ export function serializeCanvas(nodes: CanvasNode[], edges: Edge[]): SerializedC
   return { definition: { nodes: parsedNodes, edges: parsedEdges }, incompleteNodeIds };
 }
 
-export type AutosaveState = "idle" | "saving";
+export type AutosaveState = "idle" | "saving" | "error";
+
+/**
+ * Pure derivation of the toolbar's autosave indicator (06-21/WR-05). Kept
+ * standalone (no hook state) so the "must not read saved after a failed
+ * save" behavior is pinned by a plain unit test with no jsdom/@testing-library
+ * install: an in-flight save always wins ("saving"); otherwise a failed save
+ * with unsaved changes still pending is "error" (never "idle"/«Сохранено»);
+ * anything else — including a stale error with nothing left unsaved — settles
+ * to "idle".
+ */
+export function deriveAutosaveState({
+  isPending,
+  isError,
+  dirty,
+}: {
+  isPending: boolean;
+  isError: boolean;
+  dirty: boolean;
+}): AutosaveState {
+  if (isPending) return "saving";
+  if (isError && dirty) return "error";
+  return "idle";
+}
+
+/** Bounded single delayed retry after a failed autosave (T-06-21-02: never a hot loop). */
+const RETRY_DELAY_MS = 4000;
 
 /**
  * Debounced (1s) draft autosave (06-UI-SPEC Canvas chrome): serializes the
  * current canvas into the shared flowDefinitionSchema shape and PATCHes
  * /flows/:id whenever the debounced serialization differs from the last
  * saved one. No manual save button — the toolbar renders `saveState` as
- * «Сохранено» (idle) / «Сохранение…» (saving), never a toast.
+ * «Сохранено» (idle) / «Сохранение…» (saving) / an honest not-saved/retrying
+ * state (error), never a toast.
  *
  * The mount-time serialization is the baseline: nothing is saved until the
  * user actually changes something.
@@ -116,5 +143,31 @@ export function useAutosaveDraft({
     );
   }, [debouncedJson]);
 
-  return { saveState: mutation.isPending ? "saving" : "idle", serialized };
+  const dirty = lastSavedRef.current !== json;
+
+  // T-06-21-01/WR-05: a failed save is not left un-retried until the user
+  // happens to make another edit — schedule a single bounded retry
+  // (T-06-21-02: never a hot loop) of the SAME target that just failed.
+  // Cleared on unmount or as soon as anything about the failure/target
+  // changes, so at most one retry is ever pending at a time.
+  useEffect(() => {
+    if (!mutation.isError || !dirty) return;
+    const target = debouncedJson;
+    const id = setTimeout(() => {
+      lastSavedRef.current = target;
+      mutateRef.current(
+        { definition: JSON.parse(target) as FlowDefinition },
+        {
+          onError: () => {
+            lastSavedRef.current = "";
+          },
+        }
+      );
+    }, RETRY_DELAY_MS);
+    return () => clearTimeout(id);
+  }, [mutation.isError, dirty, debouncedJson]);
+
+  const saveState = deriveAutosaveState({ isPending: mutation.isPending, isError: mutation.isError, dirty });
+
+  return { saveState, serialized };
 }

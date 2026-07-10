@@ -318,9 +318,15 @@ function FlowCanvasInner({
           <NodePalette />
           <Panel position="top-right">
             <div className="flex flex-col items-end gap-2">
-              {/* Autosave status — Label/meta text, never a toast (06-UI-SPEC). */}
-              <span className="rounded bg-white/90 px-2 py-1 text-sm text-muted-foreground">
-                {saveState === "saving" ? "Сохранение…" : "Сохранено"}
+              {/* Autosave status — Label/meta text, never a toast (06-UI-SPEC). WR-05: an
+                  errored-with-unsaved-changes state must read honestly, never «Сохранено». */}
+              <span
+                className={cn(
+                  "rounded bg-white/90 px-2 py-1 text-sm",
+                  saveState === "error" ? "text-destructive" : "text-muted-foreground"
+                )}
+              >
+                {saveState === "saving" ? "Сохранение…" : saveState === "error" ? "Не сохранено — повтор…" : "Сохранено"}
               </span>
               {uniqueBlockerMessages.length > 0 ? (
                 <div className="w-72 rounded-lg border border-neutral-200 bg-white p-3 shadow-sm">
