@@ -216,9 +216,17 @@ export interface UpdateFlowDraftInput {
  * prior draft was just published has `draft_version_id = NULL` (publishFlow
  * clears it, see below) -- the FIRST edit after publish lazily creates a
  * fresh flow_versions row copied from the live definition, then applies the
- * patch on top of it. `definition` changes also re-sync the flows row's own
- * trigger_* columns (extractTriggerColumns) so D-24's restrict-delete check
- * can query them directly without parsing jsonb.
+ * patch on top of it.
+ *
+ * CR-03: `definition` changes re-sync the flows row's own trigger_*
+ * columns (extractTriggerColumns) ONLY while the flow is still an
+ * unpublished draft (`status === 'draft'`) -- for that case the draft IS
+ * the flow's trigger, so D-24's restrict-delete check must see it
+ * immediately. For a live/paused flow, an autosaved draft edit must NOT
+ * change who is being enrolled right now: the trigger_* columns the
+ * flow-trigger-evaluator/flow-segment-sweep workers read stay pinned to the
+ * published definition until `publishFlow` (below) explicitly re-derives
+ * them from the version being published.
  */
 export async function updateFlowDraft(id: string, patch: UpdateFlowDraftInput): Promise<FlowRow> {
   return withTenantTransaction(async (client) => {
@@ -258,8 +266,12 @@ export async function updateFlowDraft(id: string, patch: UpdateFlowDraftInput): 
       );
     }
 
+    // CR-03: gate the trigger-column sync on the flow still being an
+    // unpublished draft -- see the doc comment above.
     const triggerColumns =
-      patch.definition !== undefined ? extractTriggerColumns(patch.definition) : null;
+      patch.definition !== undefined && existing.status === "draft"
+        ? extractTriggerColumns(patch.definition)
+        : null;
 
     const nextName = patch.name !== undefined ? patch.name : existing.name;
     const nextReentryMode = patch.reentryMode !== undefined ? patch.reentryMode : existing.reentryMode;
@@ -331,6 +343,15 @@ export interface PublishFlowResult {
  * this function itself never enqueues a BullMQ job or seeds the membership
  * snapshot (mirrors campaigns.routes.ts's launch-handler-enqueues,
  * not-the-repository convention).
+ *
+ * CR-03: this is the SINGLE point where a live flow's trigger_* columns
+ * change -- re-derives them via extractTriggerColumns from the definition
+ * being published (not from whatever updateFlowDraft last wrote, since that
+ * write is now gated to status='draft' only) and sets them in the same
+ * UPDATE that repoints live_version_id. First publish of a never-published
+ * draft is idempotent (updateFlowDraft already synced the same values);
+ * re-publishing a live/paused flow's accumulated draft promotes the draft's
+ * trigger to be the live trigger at exactly this moment, not before.
  */
 export async function publishFlow(id: string): Promise<PublishFlowResult> {
   return withTenantTransaction(async (client) => {
@@ -360,15 +381,27 @@ export async function publishFlow(id: string): Promise<PublishFlowResult> {
 
     await snapshotDraftToVersion(client, existing.draftVersionId);
 
+    const triggerColumns = extractTriggerColumns(definition);
+
     const { rows: updated } = await client.query<FlowRow>(
       `UPDATE flows SET
          live_version_id = $3,
          draft_version_id = NULL,
          status = 'live',
+         trigger_type = $4,
+         trigger_event_name = $5,
+         trigger_segment_id = $6,
          updated_at = now()
        WHERE workspace_id = $1 AND id = $2
        RETURNING ${FLOW_COLUMNS}`,
-      [workspaceId, id, existing.draftVersionId]
+      [
+        workspaceId,
+        id,
+        existing.draftVersionId,
+        triggerColumns.triggerType,
+        triggerColumns.triggerEventName,
+        triggerColumns.triggerSegmentId,
+      ]
     );
     const flow = updated[0];
     return {
