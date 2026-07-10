@@ -370,4 +370,92 @@ describe("06-08: branch node + segment-entry trigger (sweep + enroll-existing)",
     await runFlowSegmentSweepTick();
     expect(await getRunsForContact(workspaceId, flowId, memberA)).toHaveLength(0);
   });
+
+  // ---------------------------------------------------------------------
+  // 06-19/WR-04/FLOW-04: leave->rejoin re-entry regression -- the sweep must
+  // clear a contact's stale snapshot row on segment exit so a later rejoin
+  // is routed back through canEnterFlow (every_time re-enters, once_ever
+  // stays blocked).
+  // ---------------------------------------------------------------------
+
+  async function markRunTerminal(workspaceId: string, flowId: string, contactId: string): Promise<void> {
+    await withTenant(workspaceId, () =>
+      withTenantTransaction(async (client) => {
+        await client.query(
+          `UPDATE flow_runs SET status = 'completed', exited_at = now()
+           WHERE workspace_id = $1 AND flow_id = $2 AND contact_id = $3`,
+          [workspaceId, flowId, contactId]
+        );
+      })
+    );
+  }
+
+  async function setContactTier(workspaceId: string, contactId: string, tier: string): Promise<void> {
+    await withTenant(workspaceId, () =>
+      withTenantTransaction(async (client) => {
+        await client.query(`UPDATE contacts SET properties = $1 WHERE workspace_id = $2 AND id = $3`, [
+          JSON.stringify({ tier }),
+          workspaceId,
+          contactId,
+        ]);
+      })
+    );
+  }
+
+  it("06-19/WR-04/FLOW-04: a contact who leaves the trigger segment (sweep-detected) and rejoins re-enters when reentry_mode is every_time, and stays blocked for once_ever", async () => {
+    // every_time sub-scenario
+    const everyTimeWorkspaceId = await freshWorkspaceId("flow-segment-reentry-every-time");
+    const everyTimeSegmentId = await createFixtureSegment(everyTimeWorkspaceId, VIP_SEGMENT_DEFINITION);
+    const { flowId: everyTimeFlowId } = await seedLiveSegmentFlow(everyTimeWorkspaceId, everyTimeSegmentId, {
+      reentryMode: "every_time",
+    });
+    const everyTimeContactId = await createFixtureContact(everyTimeWorkspaceId, { tier: "vip" });
+
+    await runFlowSegmentSweepTick();
+    expect(await getRunsForContact(everyTimeWorkspaceId, everyTimeFlowId, everyTimeContactId)).toHaveLength(1);
+    expect(await getSnapshotSeen(everyTimeWorkspaceId, everyTimeFlowId, everyTimeContactId)).toBe(true);
+
+    // Mark the first run terminal so canEnterFlow's guard 1 (active-run
+    // block) does not prevent re-entry on rejoin.
+    await markRunTerminal(everyTimeWorkspaceId, everyTimeFlowId, everyTimeContactId);
+
+    // Leave the trigger segment.
+    await setContactTier(everyTimeWorkspaceId, everyTimeContactId, "regular");
+    await runFlowSegmentSweepTick();
+    // RED under current code: the snapshot row is never cleared on segment
+    // exit, so this stays true instead of false.
+    expect(await getSnapshotSeen(everyTimeWorkspaceId, everyTimeFlowId, everyTimeContactId)).toBe(false);
+
+    // Rejoin the trigger segment.
+    await setContactTier(everyTimeWorkspaceId, everyTimeContactId, "vip");
+    await runFlowSegmentSweepTick();
+    // RED under current code: the rejoin never re-enters, so this stays at
+    // length 1 instead of 2.
+    expect(await getRunsForContact(everyTimeWorkspaceId, everyTimeFlowId, everyTimeContactId)).toHaveLength(2);
+
+    // once_ever sub-scenario -- fresh workspace/segment/flow/contact so state
+    // is isolated from the every_time case above.
+    const onceEverWorkspaceId = await freshWorkspaceId("flow-segment-reentry-once-ever");
+    const onceEverSegmentId = await createFixtureSegment(onceEverWorkspaceId, VIP_SEGMENT_DEFINITION);
+    const { flowId: onceEverFlowId } = await seedLiveSegmentFlow(onceEverWorkspaceId, onceEverSegmentId, {
+      reentryMode: "once_ever",
+    });
+    const onceEverContactId = await createFixtureContact(onceEverWorkspaceId, { tier: "vip" });
+
+    await runFlowSegmentSweepTick();
+    expect(await getRunsForContact(onceEverWorkspaceId, onceEverFlowId, onceEverContactId)).toHaveLength(1);
+
+    await markRunTerminal(onceEverWorkspaceId, onceEverFlowId, onceEverContactId);
+
+    await setContactTier(onceEverWorkspaceId, onceEverContactId, "regular");
+    await runFlowSegmentSweepTick();
+
+    await setContactTier(onceEverWorkspaceId, onceEverContactId, "vip");
+    await runFlowSegmentSweepTick();
+
+    // once_ever stays blocked -- canEnterFlow denies because a prior run
+    // exists for this contact x flow, proving the fix restores
+    // canEnterFlow's authority rather than blindly re-enrolling.
+    expect(await getRunsForContact(onceEverWorkspaceId, onceEverFlowId, onceEverContactId)).toHaveLength(1);
+  });
 });
