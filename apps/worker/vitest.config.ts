@@ -29,6 +29,19 @@ export default defineConfig({
     environment: "node",
     testTimeout: 20_000,
     hookTimeout: 20_000,
+    // 06-12: flow-run-advance-integration.test.ts registers a REAL BullMQ
+    // Worker against the SAME shared FLOW_RUN_ADVANCE_QUEUE every other
+    // flow-engine test file enqueues onto (real Redis, no per-file
+    // namespacing -- that queue is a genuinely global singleton by design).
+    // With Vitest's default file-level parallelism, that worker can run
+    // concurrently with sibling test files and steal/process their advance
+    // jobs mid-test, silently mutating flow_runs rows those tests didn't
+    // expect touched (observed: a `waiting` run flipped to `completed`
+    // before its own test's assertion ran). Serializing file execution
+    // removes the overlap window entirely -- the worker only exists while
+    // ITS OWN file's beforeAll/afterAll are active, and no other file's
+    // tests execute during that window.
+    fileParallelism: false,
     exclude: [...configDefaults.exclude, "dist/**"],
     env: {
       DATABASE_URL: process.env.TEST_DATABASE_URL ?? "",

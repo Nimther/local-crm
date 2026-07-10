@@ -358,9 +358,11 @@ describe("flow-run-advance.worker.ts processFlowRunAdvance (FLOW-01/03/06/07)", 
     const sendJob = await emailTriggeredQueue.getJob(`${flowRunId}-${sendNodeId}`);
     expect(sendJob, "no send job enqueued -- the delay only advances the pointer, doesn't dispatch the next node").toBeUndefined();
 
-    // Durable timer: a BullMQ delayed advance nudge exists (jobId: flowRunId), not a setTimeout.
-    const advanceJob = await flowRunAdvanceQueue.getJob(flowRunId);
-    expect(advanceJob).toBeDefined();
+    // Durable timer: a BullMQ delayed advance nudge exists for this run, not
+    // a setTimeout. Located by data.flowRunId (not a fixed jobId, 06-12/CR-01
+    // -- jobId is now unique-per-wake, `${flowRunId}-${Date.now()}`).
+    const delayedJobs = await flowRunAdvanceQueue.getJobs(["delayed", "waiting"]);
+    expect(delayedJobs.some((j) => j.data.flowRunId === flowRunId)).toBe(true);
   });
 
   it("06-07/D-08/D-14/Pitfall 4: a send node inside its flow's override quiet-hours window defers -- NO send job, next_wake_at = window end", async () => {
@@ -399,7 +401,12 @@ describe("flow-run-advance.worker.ts processFlowRunAdvance (FLOW-01/03/06/07)", 
     const sendJob = await emailTriggeredQueue.getJob(`${flowRunId}-${sendNodeId}`);
     expect(sendJob, "no send job enqueued while inside the quiet-hours window").toBeUndefined();
 
-    const advanceJob = await flowRunAdvanceQueue.getJob(flowRunId);
-    expect(advanceJob, "a delayed advance nudge is enqueued for the window end").toBeDefined();
+    // Located by data.flowRunId (not a fixed jobId, 06-12/CR-01 -- jobId is
+    // now unique-per-wake, `${flowRunId}-${Date.now()}`).
+    const delayedJobs = await flowRunAdvanceQueue.getJobs(["delayed", "waiting"]);
+    expect(
+      delayedJobs.some((j) => j.data.flowRunId === flowRunId),
+      "a delayed advance nudge is enqueued for the window end"
+    ).toBe(true);
   });
 });

@@ -159,7 +159,10 @@ describe("flow-trigger-evaluator.worker.ts processFlowTriggerCheck (FLOW-02/FLOW
     expect(runs[0].flowVersionId).toBe(flowVersionId);
     expect(runs[0].status).toBe("waiting");
 
-    const job = await flowRunAdvanceQueue.getJob(runs[0].id);
+    // Located by data.flowRunId, not a fixed jobId (06-12/CR-01 -- jobId is
+    // now unique-per-wake, `${flowRunId}-${Date.now()}`).
+    const pendingJobs = await flowRunAdvanceQueue.getJobs(["waiting", "delayed", "active", "completed"]);
+    const job = pendingJobs.find((j) => j.data?.flowRunId === runs[0].id);
     expect(job).toBeDefined();
     expect(job?.data).toMatchObject({ workspaceId, flowRunId: runs[0].id });
   });

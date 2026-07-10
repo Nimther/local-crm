@@ -270,7 +270,10 @@ describe("06-08: branch node + segment-entry trigger (sweep + enroll-existing)",
     expect(runs[0].status).toBe("waiting");
     expect(await getSnapshotSeen(workspaceId, flowId, contactId)).toBe(true);
 
-    const advanceJob = await flowRunAdvanceQueue.getJob(runs[0].id);
+    // Located by data.flowRunId, not a fixed jobId (06-12/CR-01 -- jobId is
+    // now unique-per-wake, `${flowRunId}-${Date.now()}`).
+    const pendingJobs = await flowRunAdvanceQueue.getJobs(["waiting", "delayed", "active", "completed"]);
+    const advanceJob = pendingJobs.find((j) => j.data?.flowRunId === runs[0].id);
     expect(advanceJob).toBeDefined();
   });
 
