@@ -72,7 +72,7 @@ export type TestSendCampaignInput = z.infer<typeof testSendCampaignSchema>;
 /**
  * PUT /api/workspaces/:slug/send-settings (D-13) -- per-workspace frequency
  * cap + optional rps override, PLUS (06-07/D-08/D-09) the workspace default
- * timezone + quiet-hours window a flow's `quiet_hours_mode: 'inherit'`
+ * timezone + quiet-hours window a flow's `quiet_hours_mode: 'workspace_default'`
  * falls back to. frequencyWindowHours defaults to 24; rpsLimit null/omitted
  * means "use the platform default", resolved by delivery-core.
  *
