@@ -1,5 +1,6 @@
 import type { PoolClient } from "pg";
 import type { FlowDefinition, FlowSendNode } from "@mega-crm/flows-core";
+import type { FlowQuietHoursMode } from "@mega-crm/shared-schemas";
 import {
   getWorkspaceSendSettings,
   isInsideQuietHours,
@@ -9,9 +10,9 @@ import {
 } from "@mega-crm/delivery-core";
 import { emailTriggeredQueue, enqueueFlowRunAdvance } from "../flow-queues.js";
 
-/** D-08/D-09: a flow's own quiet-hours mode + (when `'override'`) its own window. */
+/** D-08/D-09: a flow's own quiet-hours mode + (when `'custom'`) its own window. */
 export interface FlowQuietHoursConfig {
-  quietHoursMode: "inherit" | "override" | "disabled";
+  quietHoursMode: FlowQuietHoursMode;
   quietHoursStart: number | null;
   quietHoursEnd: number | null;
 }
@@ -52,9 +53,11 @@ async function loadContactTimezone(client: PoolClient, workspaceId: string, cont
 
 /**
  * Resolves the EFFECTIVE quiet-hours window for this send (D-08/D-09):
- * `'disabled'` -> no gate at all; `'override'` -> the flow's own
- * start/end (defensively no-gate if either is somehow unset); `'inherit'`
- * -> the workspace default window, only when the workspace has
+ * `'disabled'` -> no gate at all; `'custom'` -> the flow's own
+ * start/end (defensively no-gate if either is somehow unset);
+ * `'workspace_default'` (and any unrecognized/legacy value, fail toward the
+ * workspace window rather than toward "no gate", T-06-13-01) -> the
+ * workspace default window, only when the workspace has
  * `quiet_hours_enabled` AND both bounds are set. Returns `null` when no
  * gate applies.
  */
@@ -70,7 +73,7 @@ async function resolveQuietHoursWindow(
 
   let startMinutes: number | null;
   let endMinutes: number | null;
-  if (flow.quietHoursMode === "override") {
+  if (flow.quietHoursMode === "custom") {
     startMinutes = flow.quietHoursStart;
     endMinutes = flow.quietHoursEnd;
   } else {

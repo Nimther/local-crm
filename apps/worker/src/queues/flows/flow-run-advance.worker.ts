@@ -2,7 +2,7 @@ import { Worker, type Job, type ConnectionOptions } from "bullmq";
 import type { PoolClient } from "pg";
 import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import type { FlowDefinition } from "@mega-crm/flows-core";
-import type { FlowExitCondition } from "@mega-crm/shared-schemas";
+import type { FlowExitCondition, FlowQuietHoursMode } from "@mega-crm/shared-schemas";
 import { FLOW_RUN_ADVANCE_QUEUE, flowRunAdvanceJobSchema, type FlowRunAdvanceJob } from "@mega-crm/shared-schemas";
 import { evaluateExitConditions } from "./flow-exit-conditions.js";
 import { enqueueFlowRunAdvance } from "./flow-queues.js";
@@ -23,7 +23,7 @@ interface FlowRunAdvanceRow {
   enteredAt: Date;
   flowStatus: string;
   exitConditions: FlowExitCondition[];
-  quietHoursMode: "inherit" | "override" | "disabled";
+  quietHoursMode: FlowQuietHoursMode;
   quietHoursStart: number | null;
   quietHoursEnd: number | null;
 }
