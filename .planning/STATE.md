@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 06
 current_phase_name: flows-triggered-chains
 status: executing
-stopped_at: Completed 06-07-PLAN.md
-last_updated: "2026-07-10T06:05:25.881Z"
+stopped_at: Completed 06-08-PLAN.md
+last_updated: "2026-07-10T06:34:00.016Z"
 last_activity: 2026-07-10
 last_activity_desc: Phase 06 execution started
 progress:
   total_phases: 7
   completed_phases: 5
   total_plans: 72
-  completed_plans: 70
+  completed_plans: 71
   percent: 71
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-07-09)
 ## Current Position
 
 Phase: 06 (flows-triggered-chains) — EXECUTING
-Plan: 10 of 11
+Plan: 11 of 11
 Status: Ready to execute
 Last activity: 2026-07-10 — Phase 06 execution started
 
@@ -129,6 +129,7 @@ Progress: [████████████████████] 61/61 p
 | Phase 06 P06 | 24min | 3 tasks | 6 files |
 | Phase 06 P07 | 32min | 3 tasks | 24 files |
 | Phase 06 P09 | 20min | 2 tasks | 5 files |
+| Phase 06 P08 | 25min | 3 tasks | 15 files |
 
 ## Accumulated Context
 
@@ -303,6 +304,9 @@ Recent decisions affecting current work:
 - [Phase 06]: 06-07: handleDelayNode and handleSendNode's quiet-hours deferral both enqueue their own BullMQ delayed nudge with jobId: flowRunId, the same dedup key flow-reconciliation.worker.ts's 60s backstop uses (06-05)
 - [Phase ?]: [Phase 06]: 06-09: eject/delete Owner/Admin gating reuses requirePermission('flow','publish') -- the flow resource's access-control statement only defines 'publish', matching pause/resume's existing reuse
 - [Phase ?]: [Phase 06]: 06-09: flowRunListQuerySchema/flowRunEjectSchema added to shared-schemas/src/flow.ts (Rule 2 gap-fill) -- every list/action route in this codebase validates via a matching zod schema
+- [Phase 06]: 06-08: every flow-trigger-check job unconditionally also runs the segment-entry re-check (D-02a) -- an ingested event always upserts the contact, so the same job doubles as the contact-changed signal for segment-triggered flows
+- [Phase 06]: 06-08: flow_segment_membership_snapshot is a permanent seen-marker, not a toggle -- once recorded, a contact leaving and re-entering the trigger segment later does not re-trigger entry
+- [Phase 06]: 06-08: both D-04 publish choices (back-fill vs seed-only) are handled by ONE worker/queue (flowEnrollExistingJobSchema.enrollExisting flag), keeping the publish route a thin enqueue-only call
 
 ### Pending Todos
 
@@ -330,6 +334,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-10T06:03:24.818Z
-Stopped at: Completed 06-07-PLAN.md
+Last session: 2026-07-10T06:33:59.986Z
+Stopped at: Completed 06-08-PLAN.md
 Resume file: None
