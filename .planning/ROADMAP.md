@@ -336,7 +336,7 @@ _Wave 1:_
   3. Re-entry control (once ever / once per N days / every time) and quiet hours are honored: no email is sent inside the quiet window, and it is deferred until the window ends.
   4. Editing a live flow happens in a draft that only takes effect on publish; contacts already mid-flight continue on the version they entered, with no duplicate or skipped sends.
 
-**Plans**: 15/16 plans executed
+**Plans**: 16/16 plans complete
 **UI hint**: yes
 
 Plans:
@@ -385,7 +385,7 @@ _Wave 2 (blocked on 06-12 — shares send-node.ts / flow-run-advance.worker.ts /
 _Wave 1 (parallel — disjoint files):_
 
 - [x] 06-15-PLAN.md — Timezone bind-order fix: consolidate loadContactTimezone into @mega-crm/delivery-core with correct [workspaceId, contactId] order + two contact-timezone regression tests (quiet hours + wait_until) (FLOW-05)
-- [ ] 06-16-PLAN.md — WR-04: publishFlow preserves 'paused' status on publish (no silent resume) + paused-aware publish dialog copy + API regression test (FLOW-06)
+- [x] 06-16-PLAN.md — WR-04: publishFlow preserves 'paused' status on publish (no silent resume) + paused-aware publish dialog copy + API regression test (FLOW-06)
 
 ### Phase 7: Analytics, Dashboard & Send Log
 
@@ -424,5 +424,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 3. Segmentation Engine | 8/8 | Complete    | 2026-07-06 |
 | 4. Broadcast Campaigns & Send Pipeline | 19/19 | Complete    | 2026-07-06 |
 | 5. Webhook Processing & Delivery Tracking | 13/13 | Complete    | 2026-07-09 |
-| 6. Flows (Triggered Chains) | 15/16 | In Progress|  |
+| 6. Flows (Triggered Chains) | 16/16 | Complete   | 2026-07-10 |
 | 7. Analytics, Dashboard & Send Log | 0/5 | Not started | - |
