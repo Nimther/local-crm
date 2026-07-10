@@ -240,6 +240,63 @@ describe("Flow lifecycle (FLOW-01/06/07, D-17/D-20/D-23/D-24)", () => {
     expect((renamedBody.definition as { nodes: unknown[] }).nodes.length).toBe(3);
   });
 
+  it("06-16/WR-04/D-18: publishing accumulated draft changes on a paused flow keeps it paused (does not silently resume)", async () => {
+    const { cookie, workspace } = await owner("flow-publish-paused");
+    const flow = await createFlow(cookie, workspace.slug, "Paused publish safety");
+
+    const firstPatch = await app.inject({
+      method: "PATCH",
+      url: `/api/workspaces/${workspace.slug}/flows/${flow.id}`,
+      headers: { cookie },
+      payload: { definition: validDefinition },
+    });
+    expect(firstPatch.statusCode, `patch failed: ${firstPatch.body}`).toBe(200);
+
+    const firstPublish = await app.inject({
+      method: "POST",
+      url: `/api/workspaces/${workspace.slug}/flows/${flow.id}/publish`,
+      headers: { cookie },
+    });
+    expect(firstPublish.statusCode, `publish failed: ${firstPublish.body}`).toBe(200);
+    expect((firstPublish.json() as { status: string }).status).toBe("live");
+
+    const paused = await app.inject({
+      method: "POST",
+      url: `/api/workspaces/${workspace.slug}/flows/${flow.id}/pause`,
+      headers: { cookie },
+    });
+    expect(paused.statusCode, `pause failed: ${paused.body}`).toBe(200);
+    expect((paused.json() as { status: string }).status).toBe("paused");
+
+    // Editing the draft again while paused (D-20 lazily recreates a working
+    // draft on the paused flow).
+    const secondPatch = await app.inject({
+      method: "PATCH",
+      url: `/api/workspaces/${workspace.slug}/flows/${flow.id}`,
+      headers: { cookie },
+      payload: { definition: validDefinition },
+    });
+    expect(secondPatch.statusCode, `patch failed: ${secondPatch.body}`).toBe(200);
+    expect((secondPatch.json() as { draftVersionId: string | null }).draftVersionId).not.toBeNull();
+
+    // WR-04: publishing the accumulated draft changes on a PAUSED flow must
+    // NOT silently resume enrollment/sends -- the flow stays paused (D-18/D-19).
+    const secondPublish = await app.inject({
+      method: "POST",
+      url: `/api/workspaces/${workspace.slug}/flows/${flow.id}/publish`,
+      headers: { cookie },
+    });
+    expect(secondPublish.statusCode, `publish failed: ${secondPublish.body}`).toBe(200);
+    const secondPublishBody = secondPublish.json() as {
+      status: string;
+      draftVersionId: string | null;
+      liveVersionId: string | null;
+    };
+    expect(secondPublishBody.status).toBe("paused");
+    expect(secondPublishBody.draftVersionId).toBeNull();
+    expect(secondPublishBody.liveVersionId).not.toBeNull();
+  });
+
   it("duplicate copies config + current definition into a fresh draft", async () => {
     const { cookie, workspace } = await owner("flow-duplicate");
     const flow = await createFlow(cookie, workspace.slug, "Cart abandon");
