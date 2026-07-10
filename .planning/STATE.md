@@ -6,15 +6,15 @@ current_phase: 06
 current_phase_name: flows-triggered-chains
 status: executing
 stopped_at: Completed 06-15-PLAN.md
-last_updated: "2026-07-10T14:45:40.642Z"
+last_updated: "2026-07-10T14:50:01.964Z"
 last_activity: 2026-07-10
 last_activity_desc: Phase 06 execution started
 progress:
   total_phases: 7
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 82
-  completed_plans: 81
-  percent: 71
+  completed_plans: 82
+  percent: 86
 ---
 
 # Project State
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-07-09)
 ## Current Position
 
 Phase: 06 (flows-triggered-chains) — EXECUTING
-Plan: 5 of 21
+Plan: 6 of 21
 Status: Ready to execute
 Last activity: 2026-07-10 — Phase 06 execution started
 
@@ -140,6 +140,7 @@ Progress: [████████████████████] 61/61 p
 | Phase 06 P18 | 15min | 2 tasks | 3 files |
 | Phase 06 P19 | 8min | 2 tasks | 2 files |
 | Phase 06 P20 | 12min | 2 tasks | 2 files |
+| Phase 06-flows-triggered-chains P21 | 2min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -334,6 +335,7 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 06]: 06-18: publishFlow gained opts?: { enrollExisting?: boolean }; the enrollExisting=false snapshot seed now runs atomically inside publishFlow's own transaction (INSERT...SELECT mirroring the worker's seedSnapshotOnly), closing CR-02's async-job race/loss window -- the publish route only enqueues flowEnrollExistingQueue for enrollExisting=true
 - [Phase 06]: 06-19: sweepOneFlow's stale-snapshot DELETE runs before the empty-membership early return (not after) so a fully-emptied segment still clears its stale flow_segment_membership_snapshot rows -- restores every_time/once_per_n_days re-entry for segment-triggered flows while once_ever stays correctly blocked by canEnterFlow
 - [Phase ?]: [Phase 06]: 06-20: deleteSegment wraps its DELETE in SAVEPOINT/ROLLBACK TO SAVEPOINT so the 23503 catch's flow re-check runs on a live transaction, restoring the intended SegmentConflictError (409) for canceled-campaign FK conflicts instead of a raw postgres 25P02 (closes WR-01)
+- [Phase ?]: 06-21: dirty computed as lastSavedRef.current !== json; auto-retry is a single bounded 4000ms setTimeout per failure/target, cleared on unmount/dep-change (T-06-21-02 hot-loop prevention)
 
 ### Pending Todos
 
@@ -361,6 +363,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-10T14:45:11.764Z
+Last session: 2026-07-10T14:49:23.835Z
 Stopped at: Completed 06-15-PLAN.md
 Resume file: None
