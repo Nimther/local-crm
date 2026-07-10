@@ -30,21 +30,27 @@ import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { CustomPropertyEditor } from "@/features/contacts/CustomPropertyEditor";
+import { TimezoneCombobox } from "@/features/contacts/TimezoneCombobox";
 
 const GENERIC_ERROR = "Что-то пошло не так. Попробуйте ещё раз — если ошибка повторится, обновите страницу.";
 const EMAIL_TAKEN_ERROR = "Этот email уже используется другим контактом. Укажите другой адрес или найдите существующий контакт.";
+const INVALID_TIMEZONE_ERROR = "Некорректный часовой пояс. Выберите значение из списка (например, Europe/Belgrade).";
 const SUPPRESSED_TOOLTIP =
   "Статус «в списке подавления» нельзя снять вручную — так мы защищаем репутацию отправки. Это происходит только автоматически.";
 
 /**
  * D-07: known server error codes map to the exact UI-SPEC copy; anything
  * else falls back to the raw server message (still meaningful, e.g. Zod
- * flatten output stringified) or the generic fallback.
+ * flatten output stringified) or the generic fallback. 06-07/06-11:
+ * "invalid_timezone" is defense-in-depth only -- TimezoneCombobox already
+ * constrains the field to Intl.supportedValuesOf, so this should be
+ * unreachable in practice.
  */
 function extractErrorMessage(error: unknown): string {
   if (error instanceof ApiError) {
     const body = error.body as { error?: unknown; code?: unknown } | undefined;
     if (body?.code === "email_taken") return EMAIL_TAKEN_ERROR;
+    if (body?.code === "invalid_timezone") return INVALID_TIMEZONE_ERROR;
     if (typeof body?.error === "string") return body.error;
   }
   return GENERIC_ERROR;
@@ -227,6 +233,7 @@ export function ContactForm({ slug, contact, showProperties = true, onSuccess }:
   const queryClient = useQueryClient();
   const [serverError, setServerError] = useState<string | null>(null);
   const [tags, setTags] = useState<string[]>(contact?.tags ?? []);
+  const [timezone, setTimezone] = useState<string | null>(contact?.timezone ?? null);
   const [properties, setProperties] = useState<Record<string, unknown>>(contact?.properties ?? {});
   const [subscriptionStatus, setSubscriptionStatus] = useState<"subscribed" | "unsubscribed">(
     contact?.subscriptionStatus === "unsubscribed" ? "unsubscribed" : "subscribed"
@@ -268,6 +275,9 @@ export function ContactForm({ slug, contact, showProperties = true, onSuccess }:
     const payload = {
       ...basePayload,
       tags,
+      // CR-04 convention: edit mode sends explicit null to clear; create mode
+      // simply omits an unset timezone.
+      ...(contact ? { timezone: timezone || null } : timezone ? { timezone } : {}),
       subscriptionStatus: contact?.subscriptionStatus === "suppressed" ? undefined : subscriptionStatus,
       ...(showProperties ? { properties } : {}),
     };
@@ -376,6 +386,10 @@ export function ContactForm({ slug, contact, showProperties = true, onSuccess }:
               </FormItem>
             )}
           />
+          <div className="space-y-2">
+            <Label>Часовой пояс</Label>
+            <TimezoneCombobox value={timezone} onChange={setTimezone} />
+          </div>
         </div>
 
         <div className="space-y-2">

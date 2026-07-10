@@ -41,6 +41,7 @@ const STANDARD_FIELD_OPTIONS: { value: string; label: string }[] = [
   { value: "phone", label: "Телефон" },
   { value: "city", label: "Город" },
   { value: "country", label: "Страна" },
+  { value: "timezone", label: "Часовой пояс" },
   { value: "tags", label: "Теги (через запятую)" },
   { value: "subscriptionStatus", label: "Статус подписки" },
 ];
@@ -70,6 +71,9 @@ function guessTarget(header: string): string {
     phone: "phone",
     city: "city",
     country: "country",
+    timezone: "timezone",
+    time_zone: "timezone",
+    tz: "timezone",
     tags: "tags",
     subscription_status: "subscriptionStatus",
   };
