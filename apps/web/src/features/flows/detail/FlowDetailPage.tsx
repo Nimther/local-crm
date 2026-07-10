@@ -155,6 +155,13 @@ export function FlowDetailPage() {
       </Button>
     );
 
+  // CR-03/WR-03: a live/paused flow may have accumulated an unpublished
+  // draft (canvas autosave) whose trigger edits are pinned away from live
+  // enrollment until published (flow.repository.ts publishFlow). Without
+  // this action there was no UI path at all to promote that draft.
+  const hasPublishableDraft =
+    (flow.status === "live" || flow.status === "paused") && flow.draftVersionId !== null;
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-neutral-200 p-6">
@@ -172,6 +179,20 @@ export function FlowDetailPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {hasPublishableDraft ? (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span tabIndex={0} className="inline-flex">
+                    <Button type="button" variant="outline" disabled={!canManage} onClick={() => setPublishOpen(true)}>
+                      Опубликовать изменения
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                {!canManage ? <TooltipContent>{MEMBER_TOOLTIP}</TooltipContent> : null}
+              </Tooltip>
+            </TooltipProvider>
+          ) : null}
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>

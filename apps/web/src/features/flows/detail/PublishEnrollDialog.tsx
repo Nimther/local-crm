@@ -96,7 +96,11 @@ export function PublishEnrollDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Опубликовать цепочку «{flow.name}»?</DialogTitle>
+          <DialogTitle>
+            {flow.status === "draft"
+              ? `Опубликовать цепочку «${flow.name}»?`
+              : `Опубликовать изменения в цепочке «${flow.name}»?`}
+          </DialogTitle>
           <DialogDescription>
             {isSegmentTriggered
               ? `В сегменте «${segmentName ?? "…"}» сейчас ~${
