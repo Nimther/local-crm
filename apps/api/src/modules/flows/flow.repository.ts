@@ -5,10 +5,20 @@ import {
   type FlowTriggerNode,
   type FlowValidationError,
 } from "@mega-crm/flows-core";
+import { compileSegmentDefinition, type SegmentDefinition } from "@mega-crm/segments-core";
 import type { FlowExitCondition, FlowQuietHoursMode, FlowReentryMode } from "@mega-crm/shared-schemas";
 import { getWorkspaceId, withTenantTransaction } from "../../middleware/tenant-context.js";
 import { snapshotDraftToVersion } from "./flow-version.repository.js";
 import { activeRunCount } from "./flow-run.repository.js";
+
+/**
+ * 06-18/CR-02: bounded statement timeout for the in-transaction
+ * enrollExisting=false snapshot seed below, matching
+ * flow-enroll-existing.worker.ts's ENROLL_STATEMENT_TIMEOUT_MS constant
+ * value exactly (kept as a separate local constant to avoid a new
+ * cross-module dependency between the API and worker packages).
+ */
+const PUBLISH_SEED_STATEMENT_TIMEOUT_MS = 60_000;
 
 export type FlowStatus = "draft" | "live" | "paused";
 
@@ -329,6 +339,48 @@ export interface PublishFlowResult {
   triggerSegmentId: string | null;
 }
 
+export interface PublishFlowOptions {
+  /** D-04: true = resumable batch back-fill (creates runs, handled async by flow-enroll-existing.worker.ts). Anything else (false/omitted) = the safe seed-only default performed atomically below. */
+  enrollExisting?: boolean;
+}
+
+/**
+ * 06-18/CR-02: mirrors flow-enroll-existing.worker.ts's `seedSnapshotOnly`
+ * verbatim in SQL shape/params, but runs INSIDE publishFlow's own
+ * transaction/client so the snapshot seed commits atomically with the flow
+ * going live -- no post-commit window exists in which a sweep tick or event
+ * re-check can observe a live segment-triggered flow with an empty snapshot.
+ * Never creates a `flow_runs` row. No-ops if the segment has since been
+ * deleted (definition load returns nothing) -- there is nothing to seed.
+ */
+async function seedMembershipSnapshotAtomic(
+  client: PoolClient,
+  workspaceId: string,
+  flowId: string,
+  segmentId: string
+): Promise<void> {
+  const { rows: segmentRows } = await client.query<{ definition: SegmentDefinition }>(
+    `SELECT definition FROM segments WHERE id = $1 AND workspace_id = $2`,
+    [segmentId, workspaceId]
+  );
+  const definition = segmentRows[0]?.definition;
+  if (!definition) return;
+
+  await client.query(`SELECT set_config('statement_timeout', $1, true)`, [
+    String(PUBLISH_SEED_STATEMENT_TIMEOUT_MS),
+  ]);
+
+  const { whereSql, params } = compileSegmentDefinition(definition, workspaceId);
+  await client.query(
+    `INSERT INTO flow_segment_membership_snapshot (workspace_id, flow_id, contact_id)
+     SELECT c.workspace_id, $${params.length + 1}, c.id
+     FROM contacts c
+     WHERE ${whereSql}
+     ON CONFLICT (workspace_id, flow_id, contact_id) DO NOTHING`,
+    [...params, flowId]
+  );
+}
+
 /**
  * FLOW-06/FLOW-07/D-17/Pitfall-3: re-runs validateFlowDefinition server-side
  * inside this transaction (NEVER trusts a client isValid flag) -- any D-17
@@ -352,8 +404,18 @@ export interface PublishFlowResult {
  * draft is idempotent (updateFlowDraft already synced the same values);
  * re-publishing a live/paused flow's accumulated draft promotes the draft's
  * trigger to be the live trigger at exactly this moment, not before.
+ *
+ * 06-18/CR-02: for a segment-triggered flow whose caller did NOT explicitly
+ * request the enrollExisting=true back-fill, the do-not-enroll membership
+ * snapshot is seeded HERE -- atomically, inside this same transaction,
+ * immediately after the flows UPDATE below -- so the snapshot is guaranteed
+ * fully populated by the time this transaction commits and the flow becomes
+ * live/discoverable. There is no window in which a sweep tick or event
+ * re-check can observe a live flow with an empty snapshot. The caller
+ * (flows.routes.ts) only enqueues the async flowEnrollExistingQueue job for
+ * the enrollExisting=true case; it must NOT enqueue anything for this branch.
  */
-export async function publishFlow(id: string): Promise<PublishFlowResult> {
+export async function publishFlow(id: string, opts?: PublishFlowOptions): Promise<PublishFlowResult> {
   return withTenantTransaction(async (client) => {
     const workspaceId = getWorkspaceId();
     const { rows } = await client.query<FlowRow>(
@@ -411,9 +473,17 @@ export async function publishFlow(id: string): Promise<PublishFlowResult> {
       ]
     );
     const flow = updated[0];
+    const segmentTriggered = flow.triggerType === "segment" && flow.triggerSegmentId !== null;
+
+    // 06-18/CR-02: the enrollExisting=false (default) branch's seed runs
+    // HERE, before this transaction commits -- see the doc comment above.
+    if (segmentTriggered && flow.triggerSegmentId && opts?.enrollExisting !== true) {
+      await seedMembershipSnapshotAtomic(client, workspaceId, flow.id, flow.triggerSegmentId);
+    }
+
     return {
       flow,
-      segmentTriggered: flow.triggerType === "segment" && flow.triggerSegmentId !== null,
+      segmentTriggered,
       triggerSegmentId: flow.triggerSegmentId,
     };
   });

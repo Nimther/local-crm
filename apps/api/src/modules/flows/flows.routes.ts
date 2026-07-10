@@ -279,23 +279,27 @@ export async function registerFlowsRoutes(fastify: FastifyInstance): Promise<voi
       }
 
       try {
+        const enrollExisting = parsed.data.enrollExisting ?? false;
         const body = await withTenant(workspace.id, async () => {
-          const result = await publishFlow(id);
+          const result = await publishFlow(id, { enrollExisting });
 
-          // D-04: the enroll-existing choice only ever applies to a
-          // segment-triggered flow -- an event-triggered flow's publish
-          // never touches the membership snapshot at all. Either choice
-          // (back-fill with runs, or seed-only for future entrants) is
-          // handled entirely inside flow-enroll-existing.worker.ts -- the
-          // route only enqueues, never mutates the snapshot itself.
-          if (result.segmentTriggered && result.triggerSegmentId) {
+          // D-04/06-18(CR-02): the enroll-existing choice only ever applies
+          // to a segment-triggered flow -- an event-triggered flow's publish
+          // never touches the membership snapshot at all. The
+          // enrollExisting=false (seed-only) branch is now performed
+          // ATOMICALLY inside publishFlow's own transaction (see
+          // flow.repository.ts), so the route enqueues the async
+          // flowEnrollExistingQueue job ONLY for the enrollExisting=true
+          // (resumable batch back-fill) case -- removing the async-job
+          // race/job-loss window entirely for the false case.
+          if (result.segmentTriggered && result.triggerSegmentId && enrollExisting) {
             await flowEnrollExistingQueue.add(
               "enroll-existing",
               {
                 workspaceId: workspace.id,
                 flowId: result.flow.id,
                 flowVersionId: result.flow.liveVersionId as string,
-                enrollExisting: parsed.data.enrollExisting ?? false,
+                enrollExisting: true,
               },
               { jobId: `${result.flow.id}-${result.flow.liveVersionId}-enroll-existing` }
             );
