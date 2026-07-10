@@ -172,7 +172,7 @@ describe("flow-run-advance.worker.ts processFlowRunAdvance (FLOW-01/03/06/07)", 
              (workspace_id, name, status, trigger_type, trigger_event_name, quiet_hours_mode, quiet_hours_start, quiet_hours_end, created_by_user_id)
            VALUES ($1, 'Fixture delay flow', 'live', 'event', 'fixture_event', $2, $3, $4, 'test-user')
            RETURNING id`,
-          [workspaceId, opts.quietHoursMode ?? "inherit", opts.quietHoursStart ?? null, opts.quietHoursEnd ?? null]
+          [workspaceId, opts.quietHoursMode ?? "workspace_default", opts.quietHoursStart ?? null, opts.quietHoursEnd ?? null]
         );
         const flowId = flowRows[0].id;
 
@@ -365,7 +365,7 @@ describe("flow-run-advance.worker.ts processFlowRunAdvance (FLOW-01/03/06/07)", 
     expect(delayedJobs.some((j) => j.data.flowRunId === flowRunId)).toBe(true);
   });
 
-  it("06-07/D-08/D-14/Pitfall 4: a send node inside its flow's override quiet-hours window defers -- NO send job, next_wake_at = window end", async () => {
+  it("06-07/06-13/D-08/D-14/Pitfall 4/CR-02: a send node inside its flow's custom quiet-hours window defers -- NO send job, next_wake_at = window end", async () => {
     const workspaceId = await freshWorkspaceId("flow-advance-quiet-hours");
     const contactId = await createFixtureContact(workspaceId);
 
@@ -378,9 +378,12 @@ describe("flow-run-advance.worker.ts processFlowRunAdvance (FLOW-01/03/06/07)", 
     const quietHoursEnd = (utcMinutes + 30) % 1440;
 
     const { flowRunId, sendNodeId } = await seedFlowRun(workspaceId, contactId, {});
+    // 'custom' is the exact value QuietHoursCard.tsx + flow.repository.ts
+    // persist for a per-flow window (CR-02) -- NOT the legacy 'override'
+    // value the worker used to branch on.
     await withTenant(workspaceId, () =>
       withTenantTransaction((client) =>
-        client.query(`UPDATE flows SET quiet_hours_mode = 'override', quiet_hours_start = $1, quiet_hours_end = $2 WHERE id = (SELECT flow_id FROM flow_runs WHERE id = $3)`, [
+        client.query(`UPDATE flows SET quiet_hours_mode = 'custom', quiet_hours_start = $1, quiet_hours_end = $2 WHERE id = (SELECT flow_id FROM flow_runs WHERE id = $3)`, [
           quietHoursStart,
           quietHoursEnd,
           flowRunId,
@@ -408,5 +411,45 @@ describe("flow-run-advance.worker.ts processFlowRunAdvance (FLOW-01/03/06/07)", 
       delayedJobs.some((j) => j.data.flowRunId === flowRunId),
       "a delayed advance nudge is enqueued for the window end"
     ).toBe(true);
+  });
+
+  it("06-13/CR-02 regression: quiet_hours_mode 'workspace_default' with the workspace default disabled does NOT defer -- only 'custom' engages a flow's own window", async () => {
+    const workspaceId = await freshWorkspaceId("flow-advance-quiet-hours-workspace-default");
+    const contactId = await createFixtureContact(workspaceId);
+
+    // Same window bounds as the 'custom' test above, but seeded on a flow
+    // whose quiet_hours_mode is 'workspace_default' (the DB/schema default,
+    // 06-13). The workspace has no quiet-hours settings row, so
+    // getWorkspaceSendSettings resolves quietHoursEnabled=false and no gate
+    // applies -- proving the fix keys off 'custom' specifically, not any
+    // truthy start/end pair.
+    const now = new Date();
+    const utcMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
+    const quietHoursStart = (utcMinutes - 30 + 1440) % 1440;
+    const quietHoursEnd = (utcMinutes + 30) % 1440;
+
+    const { flowRunId, sendNodeId, exitNodeId } = await seedFlowRun(workspaceId, contactId, {});
+    await withTenant(workspaceId, () =>
+      withTenantTransaction((client) =>
+        client.query(`UPDATE flows SET quiet_hours_mode = 'workspace_default', quiet_hours_start = $1, quiet_hours_end = $2 WHERE id = (SELECT flow_id FROM flow_runs WHERE id = $3)`, [
+          quietHoursStart,
+          quietHoursEnd,
+          flowRunId,
+        ])
+      )
+    );
+
+    await processFlowRunAdvance({ workspaceId, flowRunId });
+
+    const state = await getFlowRunState(workspaceId, flowRunId);
+    expect(state.status).toBe("waiting");
+    expect(state.currentNodeId).toBe(exitNodeId); // advanced past the send node -- not deferred
+
+    const steps = await getFlowRunSteps(workspaceId, flowRunId);
+    expect(steps).toHaveLength(1);
+    expect(steps[0]).toMatchObject({ nodeId: sendNodeId, nodeType: "send", outcome: "enqueued" });
+
+    const sendJob = await emailTriggeredQueue.getJob(`${flowRunId}-${sendNodeId}`);
+    expect(sendJob, "send job IS enqueued -- 'workspace_default' with quiet hours disabled applies no gate").toBeDefined();
   });
 });
