@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 06
 current_phase_name: flows-triggered-chains
 status: executing
-stopped_at: Completed 06-01-PLAN.md
-last_updated: "2026-07-10T03:49:41.702Z"
+stopped_at: Completed 06-03-PLAN.md
+last_updated: "2026-07-10T04:06:45.136Z"
 last_activity: 2026-07-10
 last_activity_desc: Phase 06 execution started
 progress:
   total_phases: 7
   completed_phases: 5
   total_plans: 72
-  completed_plans: 63
+  completed_plans: 64
   percent: 71
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-07-09)
 ## Current Position
 
 Phase: 06 (flows-triggered-chains) — EXECUTING
-Plan: 3 of 11
+Plan: 4 of 11
 Status: Ready to execute
 Last activity: 2026-07-10 — Phase 06 execution started
 
@@ -122,6 +122,7 @@ Progress: [████████████████████] 61/61 p
 | Phase 05 P13 | 12min | 3 tasks | 6 files |
 | Phase 06 P01 | 10min | 3 tasks | 15 files |
 | Phase 06 P02 | 5min | 3 tasks | 12 files |
+| Phase 06 P03 | 20min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -277,6 +278,8 @@ Recent decisions affecting current work:
 - [Phase 06]: 06-02: flow-definition schema's branch node distinguishes D-13's two outgoing edges via edge.sourceHandle ('yes'|'no'), not a node-level field
 - [Phase 06]: 06-02: shared-schemas/flow.ts imports flowDefinitionSchema directly from @mega-crm/flows-core (new workspace dependency) instead of redeclaring the node/edge shape
 - [Phase 06]: 06-02: emailTriggeredJobSchema's campaign/test variants kept byte-identical to emailBroadcastJobSchema; send-dispatch.ts's processSendJob untouched -- kind:'flow' dispatch deferred to 06-05
+- [Phase ?]: Made buildMailSendRequest's campaignId optional so flow-step sends' custom_args omit campaign_id entirely (webhook attribution resolves via send_id -> DB lookup, never custom_args.campaign_id) — Rule 2 auto-add: the plan's Task 2 required omitting campaignId for flow sends but send-mail.ts (not in files_modified) declared it required
+- [Phase ?]: createFixtureFlowRun test helper centralized in db-fixture.ts (not per-test-file) since every remaining flow-engine plan in phase 06 needs the same flows/flow_versions/flow_runs triplet shape
 
 ### Pending Todos
 
@@ -304,6 +307,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-10T03:48:21.670Z
-Stopped at: Completed 06-01-PLAN.md
+Last session: 2026-07-10T04:06:45.113Z
+Stopped at: Completed 06-03-PLAN.md
 Resume file: None

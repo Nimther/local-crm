@@ -336,7 +336,7 @@ _Wave 1:_
   3. Re-entry control (once ever / once per N days / every time) and quiet hours are honored: no email is sent inside the quiet window, and it is deferred until the window ends.
   4. Editing a live flow happens in a draft that only takes effect on publish; contacts already mid-flight continue on the version they entered, with no duplicate or skipped sends.
 
-**Plans**: 2/11 plans executed
+**Plans**: 3/11 plans executed
 **UI hint**: yes
 
 Plans:
@@ -347,7 +347,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 06-03-PLAN.md — Send-pipeline flow extension: claimFlowSend + processSendJob kind:'flow' (idempotent, shared pipeline)
+- [x] 06-03-PLAN.md — Send-pipeline flow extension: claimFlowSend + processSendJob kind:'flow' (idempotent, shared pipeline)
 - [ ] 06-04-PLAN.md — Flow API: draft CRUD, atomic validated publish + immutable versioning, pause/resume/duplicate, restrict-delete (D-24)
 
 **Wave 3** *(blocked on Wave 2 completion)*
@@ -406,5 +406,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 3. Segmentation Engine | 8/8 | Complete    | 2026-07-06 |
 | 4. Broadcast Campaigns & Send Pipeline | 19/19 | Complete    | 2026-07-06 |
 | 5. Webhook Processing & Delivery Tracking | 13/13 | Complete    | 2026-07-09 |
-| 6. Flows (Triggered Chains) | 2/11 | In Progress|  |
+| 6. Flows (Triggered Chains) | 3/11 | In Progress|  |
 | 7. Analytics, Dashboard & Send Log | 0/5 | Not started | - |
