@@ -336,7 +336,7 @@ _Wave 1:_
   3. Re-entry control (once ever / once per N days / every time) and quiet hours are honored: no email is sent inside the quiet window, and it is deferred until the window ends.
   4. Editing a live flow happens in a draft that only takes effect on publish; contacts already mid-flight continue on the version they entered, with no duplicate or skipped sends.
 
-**Plans**: 19/21 plans executed
+**Plans**: 20/21 plans executed
 **UI hint**: yes
 
 Plans:
@@ -394,7 +394,7 @@ _Wave 1 (parallel — disjoint files):_
 - [x] 06-17-PLAN.md — CR-01 + WR-02: cycle detection (cycle_detected) + no-outgoing-edge trigger (no_entry) in validateFlowDefinition + per-run MAX_STEPS_PER_RUN step budget in the advance worker + validation/step-budget regression tests (FLOW-01, FLOW-03)
 - [x] 06-18-PLAN.md — CR-02: atomic enrollExisting=false snapshot seed inside publishFlow's own transaction + route only enqueues the async job for enrollExisting=true + repository-level atomic-seed regression test (FLOW-02)
 - [x] 06-19-PLAN.md — Segment re-entry: sweep deletes stale membership-snapshot rows on segment exit so leave->rejoin re-enters subject to canEnterFlow + live-run leave/rejoin regression test (every_time re-enters, once_ever blocked) (FLOW-04)
-- [ ] 06-20-PLAN.md — WR-01: deleteSegment SAVEPOINT so the 23503 catch re-check runs on a live transaction (canceled-campaign reference returns 409 not 500) + repository regression test (FLOW-02)
+- [x] 06-20-PLAN.md — WR-01: deleteSegment SAVEPOINT so the 23503 catch re-check runs on a live transaction (canceled-campaign reference returns 409 not 500) + repository regression test (FLOW-02)
 - [ ] 06-21-PLAN.md — WR-05: honest autosave state (pure deriveAutosaveState + 'error' state + auto-retry) so the canvas never shows «Сохранено» after a failed save + pure-function regression test (FLOW-01)
 
 ### Phase 7: Analytics, Dashboard & Send Log
@@ -434,5 +434,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 3. Segmentation Engine | 8/8 | Complete    | 2026-07-06 |
 | 4. Broadcast Campaigns & Send Pipeline | 19/19 | Complete    | 2026-07-06 |
 | 5. Webhook Processing & Delivery Tracking | 13/13 | Complete    | 2026-07-09 |
-| 6. Flows (Triggered Chains) | 19/21 | In Progress|  |
+| 6. Flows (Triggered Chains) | 20/21 | In Progress|  |
 | 7. Analytics, Dashboard & Send Log | 0/5 | Not started | - |
