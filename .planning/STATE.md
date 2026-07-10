@@ -6,14 +6,14 @@ current_phase: 06
 current_phase_name: flows-triggered-chains
 status: executing
 stopped_at: Completed 06-03-PLAN.md
-last_updated: "2026-07-10T04:06:45.136Z"
+last_updated: "2026-07-10T04:28:45.909Z"
 last_activity: 2026-07-10
 last_activity_desc: Phase 06 execution started
 progress:
   total_phases: 7
   completed_phases: 5
   total_plans: 72
-  completed_plans: 64
+  completed_plans: 65
   percent: 71
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-07-09)
 ## Current Position
 
 Phase: 06 (flows-triggered-chains) — EXECUTING
-Plan: 4 of 11
+Plan: 5 of 11
 Status: Ready to execute
 Last activity: 2026-07-10 — Phase 06 execution started
 
@@ -123,6 +123,7 @@ Progress: [████████████████████] 61/61 p
 | Phase 06 P01 | 10min | 3 tasks | 15 files |
 | Phase 06 P02 | 5min | 3 tasks | 12 files |
 | Phase 06 P03 | 20min | 3 tasks | 9 files |
+| Phase 06 P04 | 30min | 3 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -280,6 +281,11 @@ Recent decisions affecting current work:
 - [Phase 06]: 06-02: emailTriggeredJobSchema's campaign/test variants kept byte-identical to emailBroadcastJobSchema; send-dispatch.ts's processSendJob untouched -- kind:'flow' dispatch deferred to 06-05
 - [Phase ?]: Made buildMailSendRequest's campaignId optional so flow-step sends' custom_args omit campaign_id entirely (webhook attribution resolves via send_id -> DB lookup, never custom_args.campaign_id) — Rule 2 auto-add: the plan's Task 2 required omitting campaignId for flow sends but send-mail.ts (not in files_modified) declared it required
 - [Phase ?]: createFixtureFlowRun test helper centralized in db-fixture.ts (not per-test-file) since every remaining flow-engine plan in phase 06 needs the same flows/flow_versions/flow_runs triplet shape
+- [Phase 06]: 06-04: flows.exit_conditions jsonb column added via new migration 0031 -- gap-fill for a 06-02 DTO field with no column to persist it
+- [Phase 06]: 06-04: publishFlow clears flows.draft_version_id to NULL (not eagerly recreated) -- resolved plan-prose ambiguity in favor of the literal acceptance criterion that updateFlowDraft lazily auto-creates the working draft on first post-publish edit (D-20)
+- [Phase 06]: 06-04: flows.routes.ts registered in apps/api/src/server.ts, not app.ts -- no app.ts exists in this codebase (mirrors 06-01's identical barrel-path correction)
+- [Phase 06]: 06-04: jsonb ARRAY columns (exit_conditions) must be JSON.stringify'd explicitly before binding as a pg param -- node-postgres serializes a raw JS array as a Postgres ARRAY literal, not JSON text, unlike jsonb OBJECT columns which pg JSON.stringifies automatically
+- [Phase 06]: 06-04: every flows.routes.ts handler builds its full response (including any withTenantTransaction-backed lookup like getPinnedVersion) inside one withTenant(...) closure -- AsyncLocalStorage tenant context exits the instant the outer callback's promise settles
 
 ### Pending Todos
 
@@ -307,6 +313,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-10T04:06:45.113Z
+Last session: 2026-07-10T04:26:12.940Z
 Stopped at: Completed 06-03-PLAN.md
 Resume file: None
