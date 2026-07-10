@@ -4,10 +4,12 @@ import type {
   FlowExitCondition,
   FlowQuietHoursMode,
   FlowReentryMode,
+  FlowRunStatus,
+  PublishFlowInput,
   UpdateFlowDraftInput,
 } from "@mega-crm/shared-schemas";
 import type { FlowDefinition } from "@mega-crm/flows-core";
-import { apiGet, apiPatch, apiPost } from "@/lib/api";
+import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api";
 
 /** FLOW-04..07: flow lifecycle status (mirrors apps/api's FlowRow['status'], D-18/D-22 — no terminal state in v1). */
 export type FlowStatus = "draft" | "live" | "paused";
@@ -47,6 +49,38 @@ export interface FlowListResponse {
   pageSize: number;
 }
 
+/** D-21/FLOW-07: per-run shape mirroring flows.routes.ts's toFlowRunSummaryResponse. */
+export interface FlowRunSummaryResponse {
+  id: string;
+  flowId: string;
+  flowVersionId: string;
+  contactId: string;
+  contactEmail: string | null;
+  contactFirstName: string | null;
+  contactLastName: string | null;
+  status: FlowRunStatus;
+  currentNodeId: string | null;
+  onOldVersion: boolean;
+  nextWakeAt: string | null;
+  enteredAt: string;
+  lastEntryAt: string;
+  exitedAt: string | null;
+  exitReason: string | null;
+}
+
+export interface FlowRunCounts {
+  active: number;
+  onOldVersions: number;
+}
+
+export interface FlowRunListResponse {
+  items: FlowRunSummaryResponse[];
+  total: number;
+  page: number;
+  pageSize: number;
+  counts: FlowRunCounts;
+}
+
 // ---------------------------------------------------------------------------
 // Thin per-endpoint fetch wrappers (campaigns/api.ts convention)
 // ---------------------------------------------------------------------------
@@ -83,9 +117,10 @@ export function updateFlowDraft(slug: string, id: string, body: UpdateFlowDraftI
  * The server re-runs validateFlowDefinition inside the publish transaction and
  * rejects with 422 {fields} — the client-computed blocker list is NEVER sent
  * or trusted (Pitfall 3); render the server-returned list on rejection.
+ * `enrollExisting` (D-04) only matters for a segment-triggered flow.
  */
-export function publishFlow(slug: string, id: string): Promise<FlowResponse> {
-  return apiPost<FlowResponse>(`/api/workspaces/${slug}/flows/${id}/publish`, {});
+export function publishFlow(slug: string, id: string, body: PublishFlowInput = {}): Promise<FlowResponse> {
+  return apiPost<FlowResponse>(`/api/workspaces/${slug}/flows/${id}/publish`, body);
 }
 
 /** POST /api/workspaces/:slug/flows/:id/pause (Owner/Admin-only, D-23). */
@@ -101,6 +136,39 @@ export function resumeFlow(slug: string, id: string): Promise<FlowResponse> {
 /** POST /api/workspaces/:slug/flows/:id/duplicate — new draft copy, Member-allowed (D-23). */
 export function duplicateFlow(slug: string, id: string): Promise<FlowResponse> {
   return apiPost<FlowResponse>(`/api/workspaces/${slug}/flows/${id}/duplicate`, {});
+}
+
+/** DELETE /api/workspaces/:slug/flows/:id (Owner/Admin-only, D-22/D-23 -- server re-verifies never-published-or-zero-active-runs). */
+export function deleteFlow(slug: string, id: string): Promise<{ deleted: boolean }> {
+  return apiDelete<{ deleted: boolean }>(`/api/workspaces/${slug}/flows/${id}`);
+}
+
+/** GET /api/workspaces/:slug/flows/:id/runs (D-21 run visibility, any member). */
+export function listFlowRuns(
+  slug: string,
+  id: string,
+  params: { page?: number; pageSize?: number; status?: FlowRunStatus } = {}
+): Promise<FlowRunListResponse> {
+  const search = new URLSearchParams();
+  if (params.page) search.set("page", String(params.page));
+  if (params.pageSize) search.set("pageSize", String(params.pageSize));
+  if (params.status) search.set("status", params.status);
+  const qs = search.toString();
+  return apiGet<FlowRunListResponse>(`/api/workspaces/${slug}/flows/${id}/runs${qs ? `?${qs}` : ""}`);
+}
+
+/** POST /api/workspaces/:slug/flows/:id/runs/eject — single (runIds) or bulk (contactIds), Owner/Admin-only (D-21/D-23). */
+export function ejectFlowRuns(
+  slug: string,
+  id: string,
+  body: { runIds?: string[]; contactIds?: string[] }
+): Promise<{ ejected: number }> {
+  return apiPost<{ ejected: number }>(`/api/workspaces/${slug}/flows/${id}/runs/eject`, body);
+}
+
+/** GET /api/workspaces/:slug/flows/:id/enroll-preview — D-04's "~N contacts" count for a segment-triggered flow. */
+export function getEnrollPreview(slug: string, id: string): Promise<{ count: number }> {
+  return apiGet<{ count: number }>(`/api/workspaces/${slug}/flows/${id}/enroll-preview`);
 }
 
 // ---------------------------------------------------------------------------
@@ -165,7 +233,8 @@ export function useUpdateFlowDraft(slug: string, id: string) {
 export function usePublishFlow(slug: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => publishFlow(slug, id),
+    mutationFn: ({ id, enrollExisting }: { id: string; enrollExisting?: boolean }) =>
+      publishFlow(slug, id, { enrollExisting }),
     onSuccess: async (published) => {
       queryClient.setQueryData(flowKeys.detail(slug, published.id), published);
       await queryClient.invalidateQueries({ queryKey: flowKeys.all(slug) });
@@ -203,5 +272,52 @@ export function useDuplicateFlow(slug: string) {
       queryClient.setQueryData(flowKeys.detail(slug, duplicated.id), duplicated);
       await queryClient.invalidateQueries({ queryKey: flowKeys.all(slug) });
     },
+  });
+}
+
+/** Owner/Admin-gated delete (D-22/D-23) -- invalidates the list so a deleted flow disappears. */
+export function useDeleteFlow(slug: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => deleteFlow(slug, id),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: flowKeys.all(slug) });
+    },
+  });
+}
+
+/** D-21 paginated run list + counts (keepPreviousData for stable pagination in FlowRunsTable). */
+export function useFlowRuns(
+  slug: string,
+  id: string,
+  params: { page?: number; pageSize?: number; status?: FlowRunStatus } = {}
+) {
+  const page = params.page ?? 1;
+  const pageSize = params.pageSize ?? 20;
+  return useQuery({
+    queryKey: [...flowKeys.detail(slug, id), "runs", page, pageSize, params.status ?? null],
+    queryFn: () => listFlowRuns(slug, id, { ...params, page, pageSize }),
+    placeholderData: keepPreviousData,
+    enabled: Boolean(slug && id),
+  });
+}
+
+/** Single/bulk eject (D-21/D-23) -- invalidates every cached run-list page for this flow. */
+export function useEjectRuns(slug: string, id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { runIds?: string[]; contactIds?: string[] }) => ejectFlowRuns(slug, id, body),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: [...flowKeys.detail(slug, id), "runs"] });
+    },
+  });
+}
+
+/** D-04 enroll-preview count -- `enabled` gated by the caller (only meaningful once the publish dialog is open for a segment-triggered flow). */
+export function useEnrollPreview(slug: string, id: string, enabled: boolean) {
+  return useQuery({
+    queryKey: [...flowKeys.detail(slug, id), "enroll-preview"],
+    queryFn: () => getEnrollPreview(slug, id),
+    enabled: Boolean(slug && id) && enabled,
   });
 }
