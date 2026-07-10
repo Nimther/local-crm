@@ -57,3 +57,11 @@ export {
 } from "./suppression-rules.js";
 
 export { deriveCurrentStatus, type DeliveryFacts, type CurrentStatus } from "./send-status.js";
+
+export {
+  isValidIanaTimezone,
+  resolveTimezone,
+  isInsideQuietHours,
+  nextQuietWindowEnd,
+  type QuietHoursWindow,
+} from "./quiet-hours.js";
