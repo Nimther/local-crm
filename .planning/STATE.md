@@ -6,14 +6,14 @@ current_phase: 06
 current_phase_name: flows-triggered-chains
 status: executing
 stopped_at: Completed 06-15-PLAN.md
-last_updated: "2026-07-10T14:29:20.864Z"
+last_updated: "2026-07-10T14:36:43.358Z"
 last_activity: 2026-07-10
 last_activity_desc: Phase 06 execution started
 progress:
   total_phases: 7
   completed_phases: 5
   total_plans: 82
-  completed_plans: 78
+  completed_plans: 79
   percent: 71
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-07-09)
 ## Current Position
 
 Phase: 06 (flows-triggered-chains) — EXECUTING
-Plan: 2 of 21
+Plan: 3 of 21
 Status: Ready to execute
 Last activity: 2026-07-10 — Phase 06 execution started
 
@@ -137,6 +137,7 @@ Progress: [████████████████████] 61/61 p
 | Phase 06 P15 | 12min | 2 tasks | 5 files |
 | Phase 06 P16 | 12min | 2 tasks | 3 files |
 | Phase 06 P17 | 15min | 2 tasks | 6 files |
+| Phase 06 P18 | 15min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -328,6 +329,7 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 06]: 06-15: consolidated loadContactTimezone into @mega-crm/delivery-core with correct [workspaceId, contactId] bind order -- both send-node.ts and delay-node.ts previously carried an identical private copy with swapped bind order, so contact timezone never resolved and quiet-hours/wait_until always fell back to the workspace default (violating D-08/FLOW-05)
 - [Phase 06]: 06-16: publishFlow's UPDATE writes a computed nextStatus (existing.status === 'paused' ? 'paused' : 'live') via a bound $7 parameter instead of the literal 'live' -- resumeFlow ('Возобновить') remains the sole path back to live from paused (D-18/D-19), closing WR-04
 - [Phase 06]: 06-17: cycle_detected + no_entry validation checks scoped to nodes reachable from the trigger (DFS with recursion stack); MAX_STEPS_PER_RUN=1000 worker-side step-budget backstop force-exits any run that evades publish-time rejection — Closes CR-01 (cyclic definition hot-loops the worker, never reaches exit) and WR-02 (dead-end trigger stalls a run at current_node_id=NULL) as defense-in-depth: publish-time rejection plus a bounded worker guard
+- [Phase ?]: [Phase 06]: 06-18: publishFlow gained opts?: { enrollExisting?: boolean }; the enrollExisting=false snapshot seed now runs atomically inside publishFlow's own transaction (INSERT...SELECT mirroring the worker's seedSnapshotOnly), closing CR-02's async-job race/loss window -- the publish route only enqueues flowEnrollExistingQueue for enrollExisting=true
 
 ### Pending Todos
 
@@ -355,6 +357,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-10T14:28:45.914Z
+Last session: 2026-07-10T14:36:07.913Z
 Stopped at: Completed 06-15-PLAN.md
 Resume file: None
