@@ -123,13 +123,20 @@ export async function registerFlowsRoutes(fastify: FastifyInstance): Promise<voi
     const workspace = await resolveWorkspaceMember(request, reply, slug);
     if (!workspace) return;
 
-    const result = await withTenant(workspace.id, () => listFlows(parsed.data));
-    return reply.send({
-      items: await Promise.all(result.items.map(toFlowResponse)),
-      total: result.total,
-      page: result.page,
-      pageSize: result.pageSize,
+    // NOTE: toFlowResponse's definition-fetch (getPinnedVersion) itself needs
+    // ambient tenant context -- it MUST run inside the same withTenant scope
+    // as the repository call, never after it resolves (AsyncLocalStorage
+    // exits the moment withTenant's callback promise settles).
+    const body = await withTenant(workspace.id, async () => {
+      const result = await listFlows(parsed.data);
+      return {
+        items: await Promise.all(result.items.map(toFlowResponse)),
+        total: result.total,
+        page: result.page,
+        pageSize: result.pageSize,
+      };
     });
+    return reply.send(body);
   });
 
   fastify.post("/api/workspaces/:slug/flows", async (request, reply) => {
@@ -147,10 +154,11 @@ export async function registerFlowsRoutes(fastify: FastifyInstance): Promise<voi
       return reply.code(401).send({ error: "Not authenticated" });
     }
 
-    const created = await withTenant(workspace.id, () =>
-      createFlow({ name: parsed.data.name, createdByUserId: session.user.id })
-    );
-    return reply.code(201).send(await toFlowResponse(created));
+    const created = await withTenant(workspace.id, async () => {
+      const flow = await createFlow({ name: parsed.data.name, createdByUserId: session.user.id });
+      return toFlowResponse(flow);
+    });
+    return reply.code(201).send(created);
   });
 
   fastify.get("/api/workspaces/:slug/flows/:id", async (request, reply) => {
@@ -158,11 +166,14 @@ export async function registerFlowsRoutes(fastify: FastifyInstance): Promise<voi
     const workspace = await resolveWorkspaceMember(request, reply, slug);
     if (!workspace) return;
 
-    const flow = await withTenant(workspace.id, () => getFlow(id));
-    if (!flow) {
+    const body = await withTenant(workspace.id, async () => {
+      const flow = await getFlow(id);
+      return flow ? toFlowResponse(flow) : null;
+    });
+    if (!body) {
       return reply.code(404).send({ error: "Flow not found" });
     }
-    return reply.send(await toFlowResponse(flow));
+    return reply.send(body);
   });
 
   fastify.patch("/api/workspaces/:slug/flows/:id", async (request, reply) => {
@@ -176,8 +187,11 @@ export async function registerFlowsRoutes(fastify: FastifyInstance): Promise<voi
     if (!workspace) return;
 
     try {
-      const updated = await withTenant(workspace.id, () => updateFlowDraft(id, parsed.data));
-      return reply.send(await toFlowResponse(updated));
+      const body = await withTenant(workspace.id, async () => {
+        const updated = await updateFlowDraft(id, parsed.data);
+        return toFlowResponse(updated);
+      });
+      return reply.send(body);
     } catch (err) {
       const mapped = mapFlowStateError(err);
       if (mapped) return reply.code(mapped.code).send(mapped.body);
@@ -197,8 +211,11 @@ export async function registerFlowsRoutes(fastify: FastifyInstance): Promise<voi
       }
 
       try {
-        const published = await withTenant(workspace.id, () => publishFlow(id));
-        return reply.send(await toFlowResponse(published));
+        const body = await withTenant(workspace.id, async () => {
+          const published = await publishFlow(id);
+          return toFlowResponse(published);
+        });
+        return reply.send(body);
       } catch (err) {
         const mapped = mapFlowStateError(err);
         if (mapped) return reply.code(mapped.code).send(mapped.body);
@@ -218,8 +235,11 @@ export async function registerFlowsRoutes(fastify: FastifyInstance): Promise<voi
       }
 
       try {
-        const paused = await withTenant(workspace.id, () => pauseFlow(id));
-        return reply.send(await toFlowResponse(paused));
+        const body = await withTenant(workspace.id, async () => {
+          const paused = await pauseFlow(id);
+          return toFlowResponse(paused);
+        });
+        return reply.send(body);
       } catch (err) {
         const mapped = mapFlowStateError(err);
         if (mapped) return reply.code(mapped.code).send(mapped.body);
@@ -239,8 +259,11 @@ export async function registerFlowsRoutes(fastify: FastifyInstance): Promise<voi
       }
 
       try {
-        const resumed = await withTenant(workspace.id, () => resumeFlow(id));
-        return reply.send(await toFlowResponse(resumed));
+        const body = await withTenant(workspace.id, async () => {
+          const resumed = await resumeFlow(id);
+          return toFlowResponse(resumed);
+        });
+        return reply.send(body);
       } catch (err) {
         const mapped = mapFlowStateError(err);
         if (mapped) return reply.code(mapped.code).send(mapped.body);
@@ -263,8 +286,11 @@ export async function registerFlowsRoutes(fastify: FastifyInstance): Promise<voi
     }
 
     try {
-      const duplicated = await withTenant(workspace.id, () => duplicateFlow(id, session.user.id));
-      return reply.code(201).send(await toFlowResponse(duplicated));
+      const body = await withTenant(workspace.id, async () => {
+        const duplicated = await duplicateFlow(id, session.user.id);
+        return toFlowResponse(duplicated);
+      });
+      return reply.code(201).send(body);
     } catch (err) {
       const mapped = mapFlowStateError(err);
       if (mapped) return reply.code(mapped.code).send(mapped.body);

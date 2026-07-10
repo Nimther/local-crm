@@ -75,6 +75,17 @@ export class FlowStateError extends Error {
 
 const EMPTY_DEFINITION: FlowDefinition = { nodes: [], edges: [] };
 
+/**
+ * node-postgres's own `prepareValue` special-cases a raw JS Array param into
+ * a Postgres ARRAY literal (`{...}`), not JSON text -- fine for `definition`
+ * (a plain object, which pg JSON.stringifies automatically) but wrong for
+ * `exit_conditions` (a jsonb ARRAY column). Must be explicitly stringified
+ * before binding so it round-trips as JSON, not a malformed text[] literal.
+ */
+function toJsonbArrayParam(value: FlowExitCondition[]): string {
+  return JSON.stringify(value);
+}
+
 /** Next sequential version_number for a flow's flow_versions rows (draft or published). */
 async function nextVersionNumber(client: PoolClient, workspaceId: string, flowId: string): Promise<number> {
   const { rows } = await client.query<{ max: string | null }>(
@@ -288,7 +299,7 @@ export async function updateFlowDraft(id: string, patch: UpdateFlowDraftInput): 
         nextQuietHoursMode,
         nextQuietHoursStart,
         nextQuietHoursEnd,
-        nextExitConditions,
+        toJsonbArrayParam(nextExitConditions),
         nextTriggerType,
         nextTriggerEventName,
         nextTriggerSegmentId,
@@ -453,7 +464,7 @@ export async function duplicateFlow(id: string, createdByUserId: string): Promis
         existing.quietHoursMode,
         existing.quietHoursStart,
         existing.quietHoursEnd,
-        existing.exitConditions,
+        toJsonbArrayParam(existing.exitConditions),
       ]
     );
     const flow = created[0];
