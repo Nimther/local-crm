@@ -7,7 +7,7 @@ import {
   resolveTimezone,
   type QuietHoursWindow,
 } from "@mega-crm/delivery-core";
-import { emailTriggeredQueue, flowRunAdvanceQueue } from "../flow-queues.js";
+import { emailTriggeredQueue, enqueueFlowRunAdvance } from "../flow-queues.js";
 
 /** D-08/D-09: a flow's own quiet-hours mode + (when `'override'`) its own window. */
 export interface FlowQuietHoursConfig {
@@ -105,8 +105,9 @@ async function resolveQuietHoursWindow(
  *    is `nextQuietWindowEnd` -- D-10: this is the ONLY time value used, no
  *    jitter/stagger is added on top (deferred sends smoothed only by the
  *    existing per-tenant token bucket + triggered lane). A BullMQ delayed
- *    advance nudge is enqueued here (same `jobId: flowRunId` convention as
- *    `delay-node.ts`) so the run wakes back up right at the window end.
+ *    advance nudge is enqueued here via `enqueueFlowRunAdvance` (CR-01,
+ *    06-12 -- unique-per-wake jobId, not a reused `flowRunId`) so the run
+ *    wakes back up right at the window end.
  *  - Outside the window (or no gate applies): enqueues a `kind: 'flow'`
  *    job onto the SAME `EMAIL_TRIGGERED_QUEUE` `email-triggered.worker.ts`
  *    already consumes -- no forked send lane, no second rate limiter, no
@@ -127,10 +128,9 @@ export async function handleSendNode(ctx: SendNodeCtx): Promise<SendNodeResult> 
     const now = new Date();
     if (isInsideQuietHours(now, window)) {
       const nextWakeAt = nextQuietWindowEnd(now, window);
-      await flowRunAdvanceQueue.add(
-        "advance",
+      await enqueueFlowRunAdvance(
         { workspaceId, flowRunId },
-        { jobId: flowRunId, delay: Math.max(0, nextWakeAt.getTime() - Date.now()) }
+        { delay: Math.max(0, nextWakeAt.getTime() - Date.now()) }
       );
       return { outcome: "deferred_quiet_hours", nextWakeAt };
     }

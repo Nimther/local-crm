@@ -9,7 +9,7 @@ import {
   type FlowTriggerCheckJob,
 } from "@mega-crm/shared-schemas";
 import { canEnterFlow } from "./flow-reentry.js";
-import { flowRunAdvanceQueue } from "./flow-queues.js";
+import { enqueueFlowRunAdvance } from "./flow-queues.js";
 import { resolveNextNodeId } from "./handlers/send-node.js";
 
 interface LiveEventFlowRow {
@@ -185,7 +185,7 @@ export async function enterSegmentTriggeredFlow(
 
     const flowRunId = rows[0]?.id;
     if (flowRunId) {
-      await flowRunAdvanceQueue.add("advance", { workspaceId, flowRunId }, { jobId: flowRunId });
+      await enqueueFlowRunAdvance({ workspaceId, flowRunId });
     }
   }
 
@@ -280,7 +280,7 @@ export async function processFlowTriggerCheck(data: FlowTriggerCheckJob): Promis
           const flowRunId = rows[0]?.id;
           if (!flowRunId) continue; // the one-active-run index caught a concurrent duplicate trigger
 
-          await flowRunAdvanceQueue.add("advance", { workspaceId, flowRunId }, { jobId: flowRunId });
+          await enqueueFlowRunAdvance({ workspaceId, flowRunId });
         }
       }
 

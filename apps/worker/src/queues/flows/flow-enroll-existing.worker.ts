@@ -8,7 +8,7 @@ import {
   type FlowEnrollExistingJob,
 } from "@mega-crm/shared-schemas";
 import { canEnterFlow } from "./flow-reentry.js";
-import { flowRunAdvanceQueue } from "./flow-queues.js";
+import { enqueueFlowRunAdvance } from "./flow-queues.js";
 import { loadEntryNodeId } from "./flow-trigger-evaluator.worker.js";
 
 /**
@@ -123,7 +123,7 @@ async function enrollBatch(
       );
       const flowRunId = runRows[0]?.id;
       if (flowRunId) {
-        await flowRunAdvanceQueue.add("advance", { workspaceId, flowRunId }, { jobId: flowRunId });
+        await enqueueFlowRunAdvance({ workspaceId, flowRunId });
       }
     }
 

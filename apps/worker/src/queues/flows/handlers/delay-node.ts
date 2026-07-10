@@ -1,7 +1,7 @@
 import type { PoolClient } from "pg";
 import { computeNextWaitUntil, type FlowDefinition, type FlowDelayNode } from "@mega-crm/flows-core";
 import { getWorkspaceSendSettings, resolveTimezone } from "@mega-crm/delivery-core";
-import { flowRunAdvanceQueue } from "../flow-queues.js";
+import { enqueueFlowRunAdvance } from "../flow-queues.js";
 import { resolveNextNodeId } from "./send-node.js";
 
 export interface DelayNodeCtx {
@@ -41,11 +41,12 @@ function computeFixedWake(now: Date, amount: number, unit: "minutes" | "hours" |
  * only the LOW-LATENCY wake path, with `flow-reconciliation.worker.ts`'s
  * 60s scan (06-05) as the durable backstop if it's ever lost.
  *
- * `jobId: flowRunId` -- the SAME deterministic id the reconciliation
- * worker's own nudge uses (`flow-queues.ts`) -- so a burst of redelivered
- * wake attempts for the SAME run can never stack up more than one pending
- * advance job, regardless of which mechanism (this handler or the
- * reconciliation scan) produced it.
+ * Enqueued via `enqueueFlowRunAdvance` (CR-01, 06-12) -- each wake is a
+ * distinct job (unique-per-wake jobId, not a reused `flowRunId`), so a
+ * duplicate/stacked advance job for the SAME run can never shadow a later
+ * wake. Duplicate/stacked jobs are harmless: `processFlowRunAdvance`
+ * re-reads run state and no-ops when the run is not due or has already
+ * advanced.
  *
  * Does NOT write to `flow_runs`/`flow_run_steps` itself -- mirrors
  * `handlers/send-node.ts`'s `handleSendNode` contract: the caller
@@ -68,10 +69,9 @@ export async function handleDelayNode(ctx: DelayNodeCtx): Promise<DelayNodeResul
 
   const nextNodeId = resolveNextNodeId(definition, node.id);
 
-  await flowRunAdvanceQueue.add(
-    "advance",
+  await enqueueFlowRunAdvance(
     { workspaceId, flowRunId },
-    { jobId: flowRunId, delay: Math.max(0, nextWakeAt.getTime() - Date.now()) }
+    { delay: Math.max(0, nextWakeAt.getTime() - Date.now()) }
   );
 
   return { nextNodeId, nextWakeAt };

@@ -1,7 +1,7 @@
 import { Queue, Worker, type ConnectionOptions } from "bullmq";
 import { pool, withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { FLOW_RECONCILIATION_QUEUE } from "@mega-crm/shared-schemas";
-import { flowRunAdvanceQueue } from "./flow-queues.js";
+import { enqueueFlowRunAdvance } from "./flow-queues.js";
 
 /** The reconciliation worker's own repeatable-tick queue -- self-produced and self-consumed within this file/process only. */
 const RECONCILIATION_INTERVAL_MS = 60_000;
@@ -81,10 +81,11 @@ async function transitionAndNudge(row: DueFlowRunRow): Promise<boolean> {
  * `flow_runs WHERE status='waiting' AND next_wake_at<=now()` every
  * `RECONCILIATION_INTERVAL_MS` (60s, matching `campaign-scheduler.worker.ts`'s
  * cadence), re-verifies each candidate per-tenant, and enqueues a
- * `FLOW_RUN_ADVANCE_QUEUE` job with `jobId: flowRunId` (the SAME
- * deterministic id `flow-run-advance.worker.ts`'s own consumer expects) --
- * a redelivered/duplicate nudge for the SAME run can never stack up more
- * than one pending advance job. This scan is a BACKSTOP, not the low-latency
+ * `FLOW_RUN_ADVANCE_QUEUE` job via `enqueueFlowRunAdvance` (CR-01, 06-12 --
+ * unique-per-wake jobId, not a reused `flowRunId`) -- a redelivered/duplicate
+ * nudge for the SAME run is harmless (the consumer's queue-as-doorbell
+ * guards no-op on a run that is not due or already advanced). This scan is a
+ * BACKSTOP, not the low-latency
  * path: once delay/wait-until nodes exist (06-07), a BullMQ delayed job set
  * at the moment a run enters a wait step is the low-latency wake mechanism;
  * this repeatable scan exists purely to catch a run whose delayed job was
@@ -111,7 +112,7 @@ export function createFlowReconciliationWorker(connection: ConnectionOptions): W
       for (const row of dueRuns) {
         const stillDue = await transitionAndNudge(row);
         if (!stillDue) continue; // already handled by a prior tick, or its flow is paused -- skip
-        await flowRunAdvanceQueue.add("advance", { workspaceId: row.workspaceId, flowRunId: row.id }, { jobId: row.id });
+        await enqueueFlowRunAdvance({ workspaceId: row.workspaceId, flowRunId: row.id });
       }
     },
     { connection }
