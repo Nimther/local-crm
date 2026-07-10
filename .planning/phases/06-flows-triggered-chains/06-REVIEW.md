@@ -1,282 +1,172 @@
 ---
 phase: 06-flows-triggered-chains
-reviewed: 2026-07-10T00:00:00Z
+reviewed: 2026-07-10T09:41:04Z
 depth: standard
-files_reviewed: 79
+files_reviewed: 21
 files_reviewed_list:
-  - apps/api/src/modules/campaigns/send-settings.routes.ts
-  - apps/api/src/modules/contacts/contact.repository.ts
-  - apps/api/src/modules/contacts/contacts.routes.ts
-  - apps/api/src/modules/flows/flow-queues.ts
-  - apps/api/src/modules/flows/flow-run.repository.ts
-  - apps/api/src/modules/flows/flow-validation.ts
-  - apps/api/src/modules/flows/flow-version.repository.ts
+  - apps/api/src/modules/flows/__tests__/flow-lifecycle.test.ts
   - apps/api/src/modules/flows/flow.repository.ts
-  - apps/api/src/modules/flows/flows.routes.ts
-  - apps/api/src/modules/segments/segment.repository.ts
-  - apps/api/src/server.ts
-  - apps/web/src/App.tsx
-  - apps/web/src/components/ui/switch.tsx
-  - apps/web/src/features/app-shell/AppShell.tsx
-  - apps/web/src/features/campaigns/SendSettingsPage.tsx
-  - apps/web/src/features/contacts/ContactForm.tsx
-  - apps/web/src/features/contacts/CsvImportWizard.tsx
-  - apps/web/src/features/contacts/TimezoneCombobox.tsx
-  - apps/web/src/features/flows/FlowStatusBadge.tsx
-  - apps/web/src/features/flows/api.ts
-  - apps/web/src/features/flows/canvas/FlowCanvas.tsx
-  - apps/web/src/features/flows/canvas/NodeConfigPanel.tsx
-  - apps/web/src/features/flows/canvas/NodePalette.tsx
-  - apps/web/src/features/flows/canvas/nodeTypes.tsx
-  - apps/web/src/features/flows/canvas/useAutosaveDraft.ts
   - apps/web/src/features/flows/detail/FlowDetailPage.tsx
-  - apps/web/src/features/flows/detail/FlowLifecycleSettings.tsx
-  - apps/web/src/features/flows/detail/FlowRunsTable.tsx
   - apps/web/src/features/flows/detail/PublishEnrollDialog.tsx
-  - apps/web/src/features/flows/detail/QuietHoursCard.tsx
-  - apps/web/src/features/flows/list/FlowsListPage.tsx
-  - apps/worker/src/queues/events-ingest.worker.ts
+  - apps/worker/src/queues/__tests__/flow-run-advance-integration.test.ts
+  - apps/worker/src/queues/__tests__/flow-run-advance.test.ts
+  - apps/worker/src/queues/__tests__/flow-segment-trigger.test.ts
+  - apps/worker/src/queues/__tests__/flow-trigger-evaluator.test.ts
   - apps/worker/src/queues/flows/flow-enroll-existing.worker.ts
-  - apps/worker/src/queues/flows/flow-exit-conditions.ts
   - apps/worker/src/queues/flows/flow-queues.ts
   - apps/worker/src/queues/flows/flow-reconciliation.worker.ts
-  - apps/worker/src/queues/flows/flow-reentry.ts
   - apps/worker/src/queues/flows/flow-run-advance.worker.ts
-  - apps/worker/src/queues/flows/flow-segment-sweep.worker.ts
-  - apps/worker/src/queues/flows/flow-send.ts
   - apps/worker/src/queues/flows/flow-trigger-evaluator.worker.ts
-  - apps/worker/src/queues/flows/handlers/branch-node.ts
   - apps/worker/src/queues/flows/handlers/delay-node.ts
-  - apps/worker/src/queues/flows/handlers/exit-node.ts
   - apps/worker/src/queues/flows/handlers/send-node.ts
-  - apps/worker/src/queues/send-dispatch.ts
-  - apps/worker/src/server.ts
-  - apps/worker/src/test/db-fixture.ts
-  - packages/contacts-core/src/contact-repository.ts
-  - packages/contacts-core/src/csv-mapping.ts
-  - packages/db/migrations/0026_flows.sql
-  - packages/db/migrations/0027_flows_scheduler_scan_policy.sql
-  - packages/db/migrations/0028_sends_flow_columns.sql
-  - packages/db/migrations/0029_contacts_timezone.sql
-  - packages/db/migrations/0030_workspace_send_settings_timezone_quiet_hours.sql
-  - packages/db/migrations/0031_flows_exit_conditions.sql
-  - packages/db/migrations/0032_flows_segment_sweep_scan_policy.sql
-  - packages/db/migrations/0033_flows_enroll_cursor.sql
-  - packages/db/src/index.ts
-  - packages/db/src/schema/contacts.ts
-  - packages/db/src/schema/flow-run-steps.ts
-  - packages/db/src/schema/flow-runs.ts
-  - packages/db/src/schema/flow-segment-membership-snapshot.ts
-  - packages/db/src/schema/flow-versions.ts
+  - apps/worker/vitest.config.ts
+  - packages/db/migrations/0034_flows_quiet_hours_mode_canonical.sql
+  - packages/db/migrations/meta/0034_snapshot.json
+  - packages/db/migrations/meta/_journal.json
   - packages/db/src/schema/flows.ts
-  - packages/db/src/schema/sends.ts
-  - packages/db/src/schema/workspace-send-settings.ts
-  - packages/delivery-core/src/index.ts
-  - packages/delivery-core/src/quiet-hours.ts
-  - packages/delivery-core/src/send-ledger.ts
-  - packages/delivery-core/src/send-mail.ts
-  - packages/delivery-core/src/send-settings.ts
-  - packages/flows-core/src/flow-definition-schema.ts
-  - packages/flows-core/src/flow-validate.ts
-  - packages/flows-core/src/index.ts
-  - packages/flows-core/src/wait-until.ts
   - packages/shared-schemas/src/campaign.ts
-  - packages/shared-schemas/src/contact.ts
-  - packages/shared-schemas/src/flow.ts
-  - packages/shared-schemas/src/index.ts
-  - packages/shared-schemas/src/queues.ts
 findings:
-  critical: 3
-  warning: 9
-  info: 7
-  total: 19
+  critical: 1
+  warning: 6
+  info: 5
+  total: 12
 status: issues_found
 ---
 
-# Phase 6: Code Review Report
+# Phase 6: Code Review Report — Gap-Closure Plans 06-12 / 06-13 / 06-14
 
-**Reviewed:** 2026-07-10
+**Reviewed:** 2026-07-10T09:41:04Z
 **Depth:** standard
-**Files Reviewed:** 79
+**Files Reviewed:** 21
 **Status:** issues_found
 
 ## Summary
 
-Phase 6 (triggered flows) was reviewed end-to-end: DB migrations 0026-0033, the flows-core validation package, the flow API (routes + repositories), the execution-engine workers (advance / reconciliation / trigger-evaluator / segment-sweep / enroll-existing), the send-pipeline extension (`kind: 'flow'`), and the @xyflow/react canvas UI.
+This pass reviews the three gap-closure plans that closed the prior review's CR-01 (advance-nudge jobId shadowing), CR-02 (quiet_hours_mode vocabulary mismatch), and CR-03 (draft trigger edits leaking into live enrollment).
 
-The strong points are real: tenant isolation is consistently double-enforced (RLS ENABLE+FORCE with the NULLIF guard from the first migration, plus explicit `workspace_id` predicates in every query, plus narrow SELECT-only `app.admin_scan` policies for the two cross-tenant discovery scans); the send path reuses the exact same pre-send gate / per-tenant token bucket / three-unit claim-send-record discipline as campaigns, with a partial unique index (`sends_flow_run_node_unique`) as the DB-level idempotency backstop; and version pinning (`flow_runs.flow_version_id`, never `live_version_id`) is honored everywhere in the engine.
+**What holds up:**
 
-However, three critical defects will cause incorrect production behavior:
+- **CR-01 (jobId shadowing) is correctly closed.** `enqueueFlowRunAdvance` is the sole producer path (verified by grep: no direct `flowRunAdvanceQueue.add` call sites remain in worker or API source), jobIds are unique per wake, `removeOnComplete: true` / `removeOnFail: {age: 86400}` are set only on the advance queue, and the WR-08 forward nudges were added for send and branch transitions. The new real-Queue/Worker integration test genuinely exercises the pre-fix stall scenarios, including the required 2+ delay chain.
+- **CR-02 (vocabulary) is closed at the mode level.** Migration 0034 fixes the DB default and normalizes legacy rows idempotently; the 0034 snapshot correctly covers all 27 tables with the new default; no `"inherit"`/`"override"` remnants remain in worker/API/shared-schema source; the unrecognized-value branch fails toward the workspace window (correct fail-safe direction). **However, CR-01 below shows the custom window is still evaluated in the wrong timezone for any contact with a stored timezone — CR-02's user-facing guarantee is only partially restored.**
+- **CR-03 (draft trigger leak) is correctly closed at the data layer.** The trigger-column sync is gated on `status === 'draft'`, `publishFlow` is the single re-derivation point inside the same UPDATE as the `live_version_id` repoint, and the feared D-24 regression does not exist — `findReferencingFlowName` (segment.repository.ts:303) also scans `flow_versions.definition` jsonb, so a segment referenced only by an unpublished draft is still delete-protected. The new lifecycle test covers the leak and the re-publish promotion. **However, the UI layer (06-14) still derives dialog behavior from the now-pinned live columns — see WR-02/WR-03.**
 
-1. **The engine's wake mechanism is self-blocking.** Every advance-nudge producer reuses `jobId: flowRunId` while the queue retains completed jobs for 24h (`removeOnComplete: { age: 86400 }`) and failed jobs forever (`removeOnFail: false`). BullMQ silently ignores an `add()` whose jobId still exists in *any* state — including active, completed, and failed. Multi-step runs therefore stall for up to 24h per step (permanently, after one poison job). Integration tests invoke `processFlowRunAdvance` directly and cannot catch this.
-2. **Per-flow custom quiet hours are silently ignored** because the API writes `quiet_hours_mode = 'custom'` while the worker branches on `'override'`.
-3. **Editing a live flow's draft trigger immediately changes live enrollment** because `updateFlowDraft` syncs `trigger_*` columns from the *draft* definition and the trigger evaluator matches live flows on those columns.
+Findings below: 1 critical, 6 warnings, 5 info.
 
 ## Critical Issues
 
-### CR-01: Advance-queue jobId reuse + retained completed/failed jobs silently drops wake nudges — multi-step runs stall up to 24h (or forever)
+### CR-01: `loadContactTimezone` binds parameters in swapped order — contact timezone is NEVER resolved, quiet-hours and wait_until evaluate in the wrong timezone
 
-**File:** `apps/worker/src/queues/flows/flow-queues.ts:13-18, 51-54`; `apps/worker/src/queues/flows/handlers/delay-node.ts:71-75`; `apps/worker/src/queues/flows/handlers/send-node.ts:130-134`; `apps/worker/src/queues/flows/flow-reconciliation.worker.ts:114`; `apps/worker/src/queues/flows/flow-trigger-evaluator.worker.ts:188, 283`; `apps/worker/src/queues/flows/flow-enroll-existing.worker.ts:126`
-
-**Issue:** All six producers of `FLOW_RUN_ADVANCE_QUEUE` jobs use the deterministic `jobId: flowRunId`, and the queue's `DEFAULT_JOB_OPTIONS` are `removeOnComplete: { age: 86400 }, removeOnFail: false`. In BullMQ, `Queue.add()` with a custom jobId is a **silent no-op if a job with that id exists in any state — active, delayed, waiting, completed, or failed** — until the old job is physically removed. Consequences:
-
-- **Delay nodes never get their low-latency wake.** The active advance job being processed usually *itself* has `jobId = flowRunId` (it came from the reconciliation scan, the trigger evaluator, or a prior delay). `handleDelayNode`'s `flowRunAdvanceQueue.add(..., { jobId: flowRunId, delay })` is therefore ignored while that job is active.
-- **The reconciliation backstop is also blocked.** After the advance job completes, its job hash lingers in the completed set for up to 24h. Every reconciliation tick's `add(..., { jobId: row.id })` (line 114) for that run is silently dropped for that entire window. A run that reaches a send/branch node (which sets `next_wake_at = now()` and enqueues nothing — see WR-08) or a delay node **stalls until the completed job ages out (~24h per step)**.
-- **Permanent stall on failure.** With `removeOnFail: false`, one advance job that exhausts its 5 attempts leaves a failed job with `jobId = flowRunId` in Redis forever — after which *no* mechanism (delay wake, quiet-hours wake, reconciliation) can ever enqueue another advance for that run. The run is bricked.
-- The quiet-hours deferral wake (`send-node.ts:130-134`, same `jobId: flowRunId`) is dropped for the same reason whenever the active/completed job shares the id.
-
-The engine's own tests pass because they call `processFlowRunAdvance(data)` directly, bypassing BullMQ's add-time dedupe entirely.
-
-**Fix:**
-```ts
-// flow-queues.ts — advance queue: never retain finished jobs, they only exist as one-shot nudges
-export const flowRunAdvanceQueue = new Queue<FlowRunAdvanceJob>(FLOW_RUN_ADVANCE_QUEUE, {
-  connection: buildRedisConnectionOptions(requireRedisUrl()),
-  defaultJobOptions: { ...DEFAULT_JOB_OPTIONS, removeOnComplete: true, removeOnFail: true },
-});
-```
-plus make the wake jobId unique per wake so an in-flight job with the same run id can never shadow a *future* wake:
-```ts
-// delay-node.ts / send-node.ts / reconciliation
-{ jobId: `${flowRunId}:${nextWakeAt.getTime()}`, delay: ... }
-```
-(The queue-as-doorbell design already makes duplicate nudges harmless — `loadDueFlowRun`'s guards no-op them — so dedupe only needs to prevent unbounded stacking, which BullMQ's `deduplication` option or the timestamped jobId both achieve without blocking future wakes.) Add an integration test that goes through a real `Queue`/`Worker` pair and asserts a two-delay run advances twice.
-
-### CR-02: `quiet_hours_mode` value mismatch between API and worker — per-flow custom quiet hours are never applied
-
-**File:** `packages/shared-schemas/src/flow.ts:17` (enum `["workspace_default", "custom", "disabled"]`); `apps/api/src/modules/flows/flow.repository.ts:132-134` (writes `'workspace_default'`); `apps/worker/src/queues/flows/flow-run-advance.worker.ts:25` and `apps/worker/src/queues/flows/handlers/send-node.ts:14, 67-80` (expects `"inherit" | "override" | "disabled"`); `packages/db/migrations/0026_flows.sql:23` / `packages/db/src/schema/flows.ts:40` (default `'inherit'`, comment documents `"inherit" | "override" | "disabled"`)
-
-**Issue:** Three different vocabularies exist for the same column. The API layer persists exactly what the UI sends: `'workspace_default'`, `'custom'`, or `'disabled'` (see `QuietHoursCard.tsx:57-69`). The worker's `resolveQuietHoursWindow` branches:
+**File:** `apps/worker/src/queues/flows/handlers/send-node.ts:46-51` and `apps/worker/src/queues/flows/handlers/delay-node.ts:21-26`
+**Issue:** Both copies of `loadContactTimezone` run:
 
 ```ts
-if (flow.quietHoursMode === "disabled") return null;
-if (flow.quietHoursMode === "override") { /* use flow's own window */ }
-else { /* inherit workspace default */ }
+`SELECT timezone FROM contacts WHERE workspace_id = $1 AND id = $2`,
+[contactId, workspaceId]   // $1 = contactId, $2 = workspaceId — SWAPPED
 ```
 
-A flow configured with a **custom** quiet-hours window (`'custom'`) never matches `"override"` and falls into the inherit branch — its own `quiet_hours_start/end` are ignored and the workspace default (or *no gate at all*, if workspace quiet hours are disabled) is used instead. The marketer's explicitly configured quiet window is silently violated: emails go out during it. `'workspace_default'` only works by accident (falls through to the inherit branch). The stored data itself is inconsistent: DB default is `'inherit'`, app-created rows are `'workspace_default'`.
+`workspace_id = <contactId>` matches zero rows, so the function always returns `null` and `resolveTimezone` silently falls back to the workspace default timezone. Consequences:
 
-**Fix:** Pick one canonical enum. Simplest: update the worker to the API vocabulary —
+1. **Quiet-hours gating (send-node.ts) evaluates the window in the wrong timezone** for every contact whose `contacts.timezone` differs from the workspace default — emails fire inside the contact's local quiet window (up to ±14h off). This directly undermines the guarantee CR-02 (06-13) was supposed to restore: the mode vocabulary now matches, but the custom window is checked against the wrong clock. The CR-02 regression tests pass only because fixture contacts carry no timezone (the fallback masks the bug).
+2. **`wait_until` delays (delay-node.ts) compute `next_wake_at` in the workspace default timezone**, never the contact's (D-08 contact-timezone-first requirement broken).
+
+This pre-dates the gap plans (06-07) but sits in two of the reviewed files and partially re-opens CR-02, so the gap closure is incomplete without it.
+
+**Fix:** Swap the parameter array in both files (and preferably consolidate the duplicated helper into one shared function so it cannot diverge again):
 ```ts
-if (flow.quietHoursMode === "disabled") return null;
-if (flow.quietHoursMode === "custom") { startMinutes = flow.quietHoursStart; endMinutes = flow.quietHoursEnd; }
-else { /* 'workspace_default' / legacy 'inherit' -> workspace window */ }
+`SELECT timezone FROM contacts WHERE workspace_id = $1 AND id = $2`,
+[workspaceId, contactId]
 ```
-update the `FlowRunAdvanceRow`/`FlowQuietHoursConfig` types, change the DB default from `'inherit'` to `'workspace_default'` in a follow-up migration (with an `UPDATE ... SET quiet_hours_mode='workspace_default' WHERE quiet_hours_mode='inherit'` backfill), and add a worker-side test using a `'custom'` flow row created through the actual API path.
-
-### CR-03: Draft edits leak into live behavior — `updateFlowDraft` syncs trigger columns from the unpublished draft while the flow is live
-
-**File:** `apps/api/src/modules/flows/flow.repository.ts:261-307` (trigger sync); `apps/worker/src/queues/flows/flow-trigger-evaluator.worker.ts:50-59, 91-103` (matches live flows on `flows.trigger_event_name`/`trigger_segment_id`); `apps/worker/src/queues/flows/flow-segment-sweep.worker.ts:52-58`
-
-**Issue:** `updateFlowDraft` unconditionally mirrors the *draft* definition's trigger node onto the `flows` row (`trigger_type`, `trigger_event_name`, `trigger_segment_id`) on every definition PATCH — including for a **live** flow (D-20 explicitly allows editing a live flow's draft; the canvas autosaves on every change). But the trigger evaluator and segment sweep select enrollment candidates via `WHERE status = 'live' AND trigger_event_name = $2` / `trigger_segment_id IS NOT NULL` against those same columns. The moment a marketer changes the trigger on the canvas of a live flow — *without publishing* — live enrollment switches to the new trigger while `live_version_id` still points at the old graph:
-
-- New contacts enroll on an event/segment the published version was never configured for (they then execute the *old* pinned definition — a mismatched trigger/graph pair).
-- Contacts matching the *published* trigger silently stop enrolling.
-- For segment triggers, the sweep starts diffing an entirely different segment's membership against the snapshot, mass-enrolling contacts the live version never targeted.
-
-This violates the FLOW-06/FLOW-07 publish-pinning contract that the rest of the phase is carefully built around.
-
-**Fix:** Sync trigger columns from the draft only while `status = 'draft'` (needed for the enroll-preview route); for live/paused flows, keep the columns pinned to the published definition and re-derive them inside `publishFlow` from the version being published:
-```ts
-const syncTrigger = patch.definition !== undefined && existing.status === "draft";
-```
-and in `publishFlow`, after validation, `extractTriggerColumns(definition)` → include in the publish UPDATE. The enroll-preview dialog for an unpublished trigger change can read the draft definition directly instead of the flows row.
+Add a regression test with a contact whose `timezone` places "now" inside its custom quiet window while the workspace default timezone places it outside (assert defer), which fails under the current code.
 
 ## Warnings
 
-### WR-01: Cycle in the graph passes `branch_missing_exit` validation, and the engine has no loop guard
+### WR-01: Forward-nudge (WR-08 fix) is enqueued inside the still-open transaction — under multi-worker concurrency the nudge can no-op against the uncommitted row and forward progress falls back to the 60s backstop
 
-**File:** `packages/flows-core/src/flow-validate.ts:104-124`; `apps/worker/src/queues/flows/flow-run-advance.worker.ts` (no revisit guard)
-**Issue:** `pathReachesExit` treats a revisited node as satisfied (`if (visited.has(nodeId)) return true`). A branch whose "yes" path is a pure cycle (e.g., delay → branch → back to delay) with no exit node anywhere validates clean and can be published. At runtime nothing detects revisits: a cyclic run re-executes delay nodes forever (a perpetual run that never terminates; send nodes in the cycle are only saved from re-sending by the `(flow_run_id, node_id)` claim dedupe). The schema and the canvas both permit constructing cycles (`isValidConnection` only blocks self-loops).
-**Fix:** In the DFS, distinguish "in current path" (cycle → return `false`) from "already proven" (memoized `true`). Optionally add an engine-side guard: if `flow_run_steps` already contains this `(run, node)` visit for a non-send node beyond a threshold, eject the run with a distinct `exit_reason` instead of looping.
+**File:** `apps/worker/src/queues/flows/flow-run-advance.worker.ts:241, 315` (also `handlers/send-node.ts:134`, `handlers/delay-node.ts:72`, but those enqueues carry a future delay that dwarfs commit time)
+**Issue:** `enqueueFlowRunAdvance({ workspaceId, flowRunId })` runs inside `withTenantTransaction`, before COMMIT. The nudge has no delay, so a second worker process (or a worker with concurrency > 1) can pick it up immediately, hit `FOR UPDATE OF fr SKIP LOCKED` on the row still locked by the enqueuing transaction, return `null`, and complete as a successful no-op (`removeOnComplete: true` — the job is gone, no retry). The run then advances only when the 60s reconciliation scan re-nudges it — per-step latency of up to 60s per hop, which is exactly the degradation WR-08/CR-01 set out to eliminate. The new integration test cannot catch this: it runs one worker with default concurrency 1, so the nudge is never picked before the processor's own transaction commits.
 
-### WR-02: An unconfigured trigger node passes server-side publish validation — live flow that can never enroll
+Correctness is preserved (the backstop guarantees eventual progress), but the fix's stated goal — reliable prompt advancement — silently degrades in exactly the multi-worker production topology.
 
-**File:** `packages/flows-core/src/flow-validate.ts:45-48`; `packages/flows-core/src/flow-definition-schema.ts:27-34` (`eventName`/`segmentId` optional)
-**Issue:** `validateFlowDefinition` only checks that exactly one trigger node exists — not that it is configured. A trigger with `triggerType: 'event'` and no `eventName` (or `'segment'` with no `segmentId`) is schema-valid, is serialized by the canvas, and publishes successfully; `flows.trigger_event_name` ends up NULL, `loadLiveEventTriggeredFlows` matches on `trigger_event_name = $2`, so the flow is live but never enrolls anyone — silently. The canvas *does* flag this client-side (`FlowCanvas.tsx:185-191`), but the server — the stated authority (Pitfall 3) — accepts it.
-**Fix:** Add a `trigger_unconfigured` (or extend `no_trigger`) hard error in `validateFlowDefinition` when `triggerType === 'event' && !eventName` or `triggerType === 'segment' && !segmentId`, and map it in `flow-validation.ts`.
+**Fix:** Enqueue the zero-delay forward nudge after the transaction commits (return a "nudge needed" flag from the transaction callback and enqueue in `processFlowRunAdvance` after `withTenantTransaction` resolves), or give the forward nudge a small delay (e.g., 250–500ms) so commit reliably precedes delivery.
 
-### WR-03: No UI path to publish an edited draft of a live/paused flow
+### WR-02: Publish dialog and enroll-preview derive trigger type/segment from the live-pinned columns — after CR-03, a republish whose draft changed the trigger renders the wrong dialog variant and skips (or mis-targets) the D-04 enroll-existing choice
 
-**File:** `apps/web/src/features/flows/detail/FlowDetailPage.tsx:143-156`
-**Issue:** The lifecycle button renders "Опубликовать" only for `status === 'draft'`; a live flow shows only "Приостановить" and a paused one only "Возобновить". Per D-20, editing a live flow's canvas lazily creates a new working draft (`draft_version_id` set), and `publishFlow` fully supports re-publishing it — but no UI control triggers it. Canvas edits to a live flow accumulate in a draft that can never go live from the app, which is also the only correct remediation path for CR-03.
-**Fix:** When `flow.draftVersionId !== null` on a live/paused flow, render a "Опубликовать изменения" action that opens the same `PublishEnrollDialog`.
+**File:** `apps/web/src/features/flows/detail/PublishEnrollDialog.tsx:62, 106-109`; `apps/api/src/modules/flows/flows.routes.ts:239-263` (enroll-preview)
+**Issue:** `isSegmentTriggered = flow.triggerType === "segment"` and the preview endpoint's `flow.triggerSegmentId` now read the columns CR-03 deliberately pins to the **published** definition. For a live/paused flow whose unpublished draft changed the trigger:
 
-### WR-04: `flows.enroll_cursor` is never reset — re-publish with "enroll existing" resumes from the previous pass's cursor
+- Event → segment: the dialog shows the simple event-confirm variant (describing the **old** event name), publishes with `enrollExisting: undefined`, and the route defaults to `false` — the marketer is never offered the enroll-existing back-fill for the newly segment-triggered flow, and existing segment members are silently seed-only'd.
+- Segment A → segment B: the dialog previews **segment A's** member count while "Зачислить и опубликовать" will actually enroll **segment B's** members.
 
-**File:** `apps/api/src/modules/flows/flow.repository.ts:363-372` (publish UPDATE omits `enroll_cursor`); `apps/worker/src/queues/flows/flow-enroll-existing.worker.ts:205-209, 139-142`; `packages/db/migrations/0033_flows_enroll_cursor.sql`
-**Issue:** The migration comment defines the cursor as scoped to "this flow's current enroll-existing pass", but nothing ever resets it. After a completed back-fill the cursor sits at the last contact id; a later re-publish (new `liveVersionId` → new jobId → the job runs again) reads the stale cursor and keyset-skips every contact whose uuid sorts at or below it. The 15-minute segment sweep eventually enrolls unseen matching contacts, so the impact is mostly a silent partial back-fill plus up to 15 minutes of unexpected latency — but the "Зачислить и опубликовать" choice does not do what it says on re-publish.
-**Fix:** `UPDATE flows SET enroll_cursor = NULL` inside `publishFlow`'s publish UPDATE (or at the start of a new enroll pass, keyed by `flowVersionId`).
+This is a direct, unhandled consequence of the CR-03 pinning inside 06-14's own UI addition.
 
-### WR-05: Segment-triggered enrollment is one-shot forever — snapshot rows are never pruned, so leave-and-re-enter never re-triggers and `every_time` is inert
+**Fix:** Derive the dialog's trigger facts from the draft being published — `flow.definition` (the API already returns the working-draft definition) contains the draft's trigger node; use its `triggerType`/`segmentId`/`eventName` when `flow.draftVersionId !== null`. The enroll-preview endpoint likewise needs a draft-aware variant (accept a `segmentId` derived from the draft, or resolve the draft's trigger server-side).
 
-**File:** `apps/worker/src/queues/flows/flow-trigger-evaluator.worker.ts:127-147, 206-217`; `apps/worker/src/queues/flows/flow-segment-sweep.worker.ts:110-115`
-**Issue:** Both the event-driven re-check and the sweep skip any contact present in `flow_segment_membership_snapshot`, and rows are inserted on first sight and never deleted when a contact leaves the segment. A contact who exits the trigger segment and later re-enters it will never enroll again — regardless of the flow's configured `reentry_mode`, including `every_time`. `enterSegmentTriggeredFlow` also marks "seen" when `canEnterFlow` denies for `active_run`, so a contact who was in-flow at first sighting is permanently excluded from future segment entries. The re-entry settings UI (`FlowLifecycleSettings`) offers all three modes for segment-triggered flows with no hint that they are effectively meaningless. If one-shot-per-contact is the intended D-02 semantic, the UI and `canEnterFlow` interplay should say so; if not, departed contacts must be removed from the snapshot (the sweep already computes current membership and could diff both directions).
-**Fix:** Either prune snapshot rows for contacts no longer in the segment during the sweep (making re-entry subject to `canEnterFlow` as the mode implies), or document/enforce one-shot semantics (hide re-entry modes for segment triggers in the UI).
+### WR-03: `duplicateFlow` copies live-pinned trigger columns alongside the draft definition — the duplicate's `trigger_*` mismatch its own graph until first edit/publish
 
-### WR-06: BullMQ jobs are enqueued inside open DB transactions
+**File:** `apps/api/src/modules/flows/flow.repository.ts:485-518`
+**Issue:** `duplicateFlow` copies `existing.triggerType/triggerEventName/triggerSegmentId` (post-CR-03: pinned to the source's **published** definition) but copies the **draft** definition (`existing.draftVersionId ?? existing.liveVersionId`). Duplicating a live flow whose draft changed the trigger produces a draft flow whose trigger columns describe a trigger its definition no longer contains: the flows list and publish dialog (WR-02) show the wrong trigger, and D-24 restrict-delete over-restricts on the stale segment. Pre-CR-03 the two were always in sync, so this inconsistency is new.
 
-**File:** `apps/worker/src/queues/flows/handlers/send-node.ts:130-143`; `handlers/delay-node.ts:71-75`; `flow-trigger-evaluator.worker.ts:188, 283` and `flow-enroll-existing.worker.ts:126` (inside `withTenantTransaction`)
-**Issue:** The queue add and the `flow_runs`/`flow_run_steps` writes are not atomic. If the transaction rolls back *after* the add (e.g., a later statement in the trigger-evaluator's multi-flow loop throws), the enqueued job survives: an orphan advance nudge fires for a run row that was never committed (no-ops, but with CR-01's jobId reuse it then *blocks* the retried insert's legitimate nudge), and an enqueued `email-triggered` send job for a rolled-back advance will still dispatch the email — the run's `current_node_id` was never moved, so the eventual re-advance re-processes the same send node and only the `claimFlowSend` ledger prevents a duplicate email. The convergence depends entirely on ledger idempotency rather than on ordering.
-**Fix:** Move queue adds after the transaction commits (return the intended enqueues from the transaction closure and add them outside), mirroring how `flow-reconciliation.worker.ts` already enqueues only after `transitionAndNudge`'s transaction returns.
+**Fix:** Derive the duplicate's trigger columns from the definition actually being copied:
+```ts
+const triggerColumns = extractTriggerColumns(definition);
+// use triggerColumns.* instead of existing.trigger* in the INSERT
+```
 
-### WR-07: `deleteSegment`'s 23503 fallback queries an aborted transaction — 500 instead of the intended 409
+### WR-04: Publishing changes on a paused flow silently flips it to `live` — the new 06-14 UI exposes this with no warning that enrollment resumes
 
-**File:** `apps/api/src/modules/segments/segment.repository.ts:370-403`
-**Issue:** When the DELETE trips a foreign-key violation (23503), the catch block calls `findReferencingFlowName(client, ...)` on the *same* client — but the transaction is already in the aborted state, so that SELECT throws `25P02: current transaction is aborted`, replacing the intended `SegmentConflictError` (409) with an unhandled 500. The canceled-campaign case this fallback was built for (pre-check passes, FK still fires) now always 500s, and the flow-disambiguation branch is unreachable.
-**Fix:** Wrap the DELETE in a `SAVEPOINT`/`ROLLBACK TO SAVEPOINT` (like `upsertContactByIdentity`'s CR-02 pattern in `packages/contacts-core/src/contact-repository.ts:247-283`), or perform the disambiguation queries on a fresh transaction after rollback.
+**File:** `apps/api/src/modules/flows/flow.repository.ts:386-396` (`status = 'live'` unconditional); `apps/web/src/features/flows/detail/FlowDetailPage.tsx:162-163` (`hasPublishableDraft` includes `paused`); `apps/web/src/features/flows/detail/PublishEnrollDialog.tsx:100-103`
+**Issue:** `publishFlow` unconditionally sets `status = 'live'`. Before 06-14 this path was API-only; now the "Опубликовать изменения" button is deliberately shown for paused flows, and neither the button nor the dialog copy mentions that publishing will **resume enrollment and frozen in-flight runs** — the opposite of what the pause dialog promised ("остановятся … до возобновления"). A marketer who paused a misbehaving flow, edited the draft, and clicked "publish changes" gets live sends immediately, without ever clicking "Возобновить". Risk: unintended email sends.
 
-### WR-08: Send/branch steps never enqueue the next advance — every hop leans on the 60s reconciliation scan
+**Fix:** Either preserve `paused` on publish when `existing.status === 'paused'` (publish the version, keep enrollment paused, let "Возобновить" stay the sole resume path), or add explicit dialog copy + confirmation for the paused case ("Цепочка возобновится и снова начнёт отправлять письма").
 
-**File:** `apps/worker/src/queues/flows/flow-run-advance.worker.ts:211-215, 279-283`
-**Issue:** After a send or branch node, the run is set to `next_wake_at = now(), status = 'waiting'` with **no** advance job enqueued; forward progress depends entirely on the reconciliation backstop (60s cadence). The reconciliation worker's own doc comment declares itself "a BACKSTOP, not the low-latency path", but for send→next and branch→next it *is* the only path: a 5-step flow incurs up to ~5 minutes of pure scheduling latency even when nothing is wrong (and, until CR-01 is fixed, stalls outright). This also concentrates all steady-state advancement into the single serial reconciliation tick loop.
-**Fix:** Enqueue an immediate advance nudge (post-commit, per WR-06) after the send/branch `UPDATE` when `next_wake_at` is `now()`.
+### WR-05: `flows.enroll_cursor` is never reset between publishes — a republished segment-triggered flow's "enroll existing" back-fill resumes from the previous pass's final cursor and skips lower-UUID contacts
 
-### WR-09: Autosave silently discards unconfigured nodes and their edges — user work lost on reload
+**File:** `apps/worker/src/queues/flows/flow-enroll-existing.worker.ts:205-209, 139-142`; `apps/api/src/modules/flows/flow.repository.ts:386-405` (publish UPDATE does not touch `enroll_cursor`)
+**Issue:** `processFlowEnrollExisting` seeds its keyset cursor from the persisted `flows.enroll_cursor`, which is only ever advanced (grep confirms no writer resets it). After a first full enroll pass the cursor sits at the max enrolled contact id. 06-14's republish UI makes a second `enrollExisting: true` publish a first-class path (including switching to a different trigger segment, per WR-02): the new back-fill only considers contacts with `id > stale_cursor` — in-segment contacts whose UUIDs sort at or below it are silently skipped by the explicit back-fill. The periodic segment sweep eventually enrolls them (they are in-segment and not in the snapshot), but the marketer's explicit "Зачислить и опубликовать" choice is partially deferred to the sweep cadence, non-deterministically by UUID ordering.
 
-**File:** `apps/web/src/features/flows/canvas/useAutosaveDraft.ts:28-61`
-**Issue:** `serializeCanvas` drops any node that fails `flowNodeSchema` (a freshly dragged delay with no delay config, a branch with no segment) plus every edge touching it, and the debounced PATCH persists that reduced definition. The dropped nodes exist only in local React state: a page reload, tab close, or navigating between flows loses them — and because the *pruned* definition was saved, positions/wiring around them are gone too. Nothing warns the user; the toolbar says "Сохранено".
-**Fix:** Persist incomplete nodes too (make config fields nullable in a draft-only envelope, or store the raw canvas alongside the validated definition), or at minimum surface "N узлов не сохранено — заполните настройки" instead of "Сохранено" while `incompleteNodeIds.length > 0`.
+**Fix:** Reset `enroll_cursor = NULL` in `publishFlow`'s UPDATE (each publish starts a fresh pass; the membership snapshot already makes re-scanning previously-processed contacts a cheap skip), or key the cursor per `live_version_id`.
+
+### WR-06: Unique-per-wake jobIds + 60s reconciliation = unbounded re-enqueue churn for a permanently failing run — no circuit breaker
+
+**File:** `apps/worker/src/queues/flows/flow-queues.ts:85-93`; `apps/worker/src/queues/flows/flow-reconciliation.worker.ts:108-119`
+**Issue:** A side effect of the CR-01 fix: pre-fix, the deterministic jobId capped a failing run at one (stuck) job; post-fix, a run whose advance always throws (e.g., the explicit `unsupported node type` data-integrity throw, or a corrupted pinned definition) stays `waiting` and due, so every 60s reconciliation tick enqueues a **fresh** 5-attempt job — ~1,440 jobs/day per stuck run, each retained 24h in the failed set, with continuous worker/Postgres churn and no terminal state ever reached. A handful of corrupted runs is fine; a bulk incident (bad definition published to a large flow) multiplies this by the run count.
+
+**Fix:** Add a failure escape hatch: after the final BullMQ attempt fails, mark the run (`status = 'failed'` or a `stalled_at`/`failure_count` column) so the reconciliation scan's `status = 'waiting'` filter stops re-picking it; surface failed runs in the D-21 runs table for manual eject/retry.
 
 ## Info
 
-### IN-01: `advancing` run status is never set by production code
+### IN-01: `jobId: ${flowRunId}-${Date.now()}` collides for two wakes of the same run within one millisecond — second `add()` silently no-ops
 
-**File:** `packages/db/src/schema/flow-runs.ts:20-26`; `apps/worker/src/queues/flows/flow-run-advance.worker.ts:142`
-**Issue:** The engine transitions runs among `waiting`/`completed`/`exited`/`ejected` only; `advancing` appears solely in guards, the partial unique index, and the test fixture (`db-fixture.ts:170`). Dead state today; if it is reserved for a future claim step, document that, otherwise drop it from guards to avoid implying a transition that never happens.
+**File:** `apps/worker/src/queues/flows/flow-queues.ts:90`
+**Issue:** Millisecond resolution means e.g. a trigger-evaluator nudge and a reconciliation nudge for the same run in the same ms drop one job. Harmless today (payloads are identical and the backstop re-covers), but a delayed wake colliding with an immediate wake would drop the immediate one.
+**Fix:** Append a monotonic counter or random suffix: `${flowRunId}-${Date.now()}-${nanoid(4)}`.
 
-### IN-02: `flow_run_steps.send_id` is never populated
+### IN-02: `void tickQueue.add(...)` floating promise — a Redis failure at worker boot becomes an unhandled rejection
 
-**File:** `packages/db/src/schema/flow-run-steps.ts:25`; `apps/worker/src/queues/flows/flow-run-advance.worker.ts:86-96`
-**Issue:** The column exists precisely to link a send-node step to its `sends` row, but `appendFlowRunStep` never accepts/sets it, so the per-step audit trail can't be joined to delivery status. Pass the deterministic ledger row (or look it up by `(flow_run_id, node_id)`) when recording the `enqueued` outcome.
+**File:** `apps/worker/src/queues/flows/flow-reconciliation.worker.ts:102-106`
+**Issue:** `void` discards the promise but does not handle rejection; if Redis is unavailable when the repeatable tick is registered, the process gets an unhandled rejection (fatal on modern Node) instead of a clear startup error.
+**Fix:** `await` it in the caller or chain `.catch()` with a logged fatal.
 
-### IN-03: Misleading step outcomes on dead-end fallbacks
+### IN-03: Integration test Scenario B's "different job id" assertion depends on BullMQ `getJobs` default descending order
 
-**File:** `apps/worker/src/queues/flows/flow-run-advance.worker.ts:216-232, 251-266`
-**Issue:** When a send/delay node has no outgoing edge, the run is completed (`reached_exit`) but the step log still records `outcome: "enqueued"` / `"waiting"` — the audit trail contradicts what actually happened. Record a distinct `dead_end_completed` outcome in the fallback branches.
+**File:** `apps/worker/src/queues/__tests__/flow-run-advance-integration.test.ts:288-291, 326-331`
+**Issue:** After hop 2, TWO delayed jobs for the run coexist (delay-1's and delay-2's); `getDelayedAdvanceJobIdForRun` returns the first match, which is delay-2's only because `Queue.getJobs` defaults to descending score order. If that default changes, `jobIdAfterDelay2` resolves to delay-1's job and the `not.toBe` assertion fails (or worse, silently inverts what is being proven).
+**Fix:** Filter for the job whose `delay`/`timestamp` is the newest, or exclude `jobIdAfterDelay1` explicitly: `jobs.find((j) => j.data?.flowRunId === flowRunId && j.id !== jobIdAfterDelay1)`.
 
-### IN-04: `once_per_n_days` fails open when `reentry_window_days` is NULL
+### IN-04: PublishEnrollDialog never resets mutation state — a stale 422 blocker list is reshown on reopen after the nodes were fixed
 
-**File:** `apps/worker/src/queues/flows/flow-reentry.ts:82` (`reentryWindowDays ?? 0`)
-**Issue:** A row with `reentry_mode = 'once_per_n_days'` and a NULL window (possible via direct writes or drift, since the DB has no CHECK and `updateFlowDraft` can't null it but older rows could) makes the window 0 days → always allowed. Fail closed (treat NULL window as `once_ever` or deny with a reason) to match the function's own "unknown mode: fail closed" posture.
+**File:** `apps/web/src/features/flows/detail/PublishEnrollDialog.tsx:90-93`
+**Issue:** `blockers` derives from `publishMutation.isError`, which persists across dialog close/reopen; after fixing the flagged nodes on the canvas and reopening, the old (now-invalid) blocker list still renders until the next publish attempt.
+**Fix:** Call `publishMutation.reset()` in `handleOpenChange` when `next === true` (or on close).
 
-### IN-05: Helper duplication
+### IN-05: Any non-definition PATCH (e.g., rename) of a live flow lazily creates a draft, making "Опубликовать изменения" appear for an unchanged graph
 
-**File:** `apps/web/src/features/flows/canvas/NodeConfigPanel.tsx:270-281`, `apps/web/src/features/flows/detail/QuietHoursCard.tsx:21-32`, `apps/web/src/features/campaigns/SendSettingsPage.tsx:31-42` (identical `minutesToHhMm`/`hhMmToMinutes` x3); `packages/delivery-core/src/quiet-hours.ts` vs `packages/flows-core/src/wait-until.ts` (identical `getZonedParts`/`offsetMsAt`/`zonedTimeToUtc`/`addCalendarDays`)
-**Issue:** Three copies of the time-string helpers in the web app (extract to a shared util), and the zone-math block is duplicated across two packages — the latter is documented as deliberate, but a DST bug now needs fixing in two places; a tiny shared `@mega-crm/time-core` (or moving `wait-until` into delivery-core) would remove the drift risk.
-
-### IN-06: Trigger-check jobId dedupe can drop a re-used eventId's flow check
-
-**File:** `apps/worker/src/queues/events-ingest.worker.ts:60-64`
-**Issue:** The flow-trigger job uses `jobId: ${workspaceId}-${eventId}-flow-trigger`, but the events table dedupes on `(workspace_id, id, occurred_at)` — a client re-sending the same `eventId` with a *different* `occurredAt` inserts a genuinely new event whose trigger evaluation is silently dropped while the prior job lingers (same BullMQ retention semantics as CR-01). Include `occurredAt` in the jobId.
-
-### IN-07: CSV import completion toast says success for a failed import
-
-**File:** `apps/web/src/features/contacts/CsvImportWizard.tsx:405-410`
-**Issue:** `toast.success("Импорт завершён")` fires for both `done` and `failed` statuses; a failed import gets a green success toast (the card below does show the failure). Use `toast.error` for `failed`.
+**File:** `apps/api/src/modules/flows/flow.repository.ts:243-260`; `apps/web/src/features/flows/detail/FlowDetailPage.tsx:162-163`
+**Issue:** `updateFlowDraft` creates a working draft on *any* patch, including pure `name`/settings edits that are not part of the versioned definition. `hasPublishableDraft` then shows the publish-changes button even though the draft definition is byte-identical to live; publishing bumps `live_version_id` to an identical copy (and flips `onOldVersions` counters for in-flight runs pinned to the prior version).
+**Fix:** Only lazily create the draft when `patch.definition !== undefined`, or suppress the button when the draft definition equals the live definition.
 
 ---
 
-_Reviewed: 2026-07-10_
+_Reviewed: 2026-07-10T09:41:04Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
