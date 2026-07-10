@@ -7,6 +7,8 @@ import { createEmailTriggeredWorker } from "./queues/email-triggered.worker.js";
 import { createCampaignKickoffWorker } from "./queues/campaign-kickoff.worker.js";
 import { createCampaignSchedulerWorker } from "./queues/campaign-scheduler.worker.js";
 import { createWebhookEventsWorker } from "./queues/webhook-events.worker.js";
+import { createFlowRunAdvanceWorker } from "./queues/flows/flow-run-advance.worker.js";
+import { createFlowReconciliationWorker } from "./queues/flows/flow-reconciliation.worker.js";
 
 /**
  * The worker process's runtime handle: a standalone shared ioredis
@@ -84,6 +86,11 @@ export async function buildWorker(): Promise<WorkerRuntime> {
     // WBHK-01/03: its own dedicated lane (not folded into events-ingest or
     // either send queue), per CLAUDE.md queue-isolation guidance.
     createWebhookEventsWorker(buildRedisConnectionOptions(redisUrl)),
+    // FLOW-01/03/06/07 (06-05): the flow execution engine -- the advance
+    // worker steps one flow_run one node at a time (send/exit this plan),
+    // the reconciliation worker is its durable due-run backstop scan.
+    createFlowRunAdvanceWorker(buildRedisConnectionOptions(redisUrl)),
+    createFlowReconciliationWorker(buildRedisConnectionOptions(redisUrl)),
   ];
 
   const close = async (): Promise<void> => {
@@ -115,7 +122,7 @@ async function main(): Promise<void> {
 
   // eslint-disable-next-line no-console
   console.log(
-    `apps/worker started (${runtime.workers.length} BullMQ worker(s) registered: events:ingest, imports:csv, email-broadcast, email-triggered, campaign-kickoff, campaign-scheduler, webhook-events)`
+    `apps/worker started (${runtime.workers.length} BullMQ worker(s) registered: events:ingest, imports:csv, email-broadcast, email-triggered, campaign-kickoff, campaign-scheduler, webhook-events, flow-run-advance, flow-reconciliation)`
   );
 }
 
