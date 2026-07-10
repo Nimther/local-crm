@@ -45,6 +45,10 @@ export const contacts = pgTable(
     // contact (reason soft_bounce_streak) via a single atomic row-locked
     // UPDATE ... RETURNING.
     consecutiveSoftBounces: integer("consecutive_soft_bounces").notNull().default(0),
+    // Phase 6 (06-01, FLOW-01): IANA timezone name (e.g. "America/New_York"),
+    // validated at the app layer only -- not enforced at the DB. Used by
+    // the flow engine's quiet-hours dispatch-time resolution (D-08/D-09).
+    timezone: text("timezone"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },

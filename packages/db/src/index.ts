@@ -15,6 +15,11 @@ import * as sendsSchema from "./schema/sends.js";
 import * as workspaceSendSettingsSchema from "./schema/workspace-send-settings.js";
 import * as sendEventsSchema from "./schema/send-events.js";
 import * as webhookEndpointsSchema from "./schema/webhook-endpoints.js";
+import * as flowsSchema from "./schema/flows.js";
+import * as flowVersionsSchema from "./schema/flow-versions.js";
+import * as flowRunsSchema from "./schema/flow-runs.js";
+import * as flowRunStepsSchema from "./schema/flow-run-steps.js";
+import * as flowSegmentMembershipSnapshotSchema from "./schema/flow-segment-membership-snapshot.js";
 
 const schema = {
   ...authSchema,
@@ -32,6 +37,11 @@ const schema = {
   ...workspaceSendSettingsSchema,
   ...sendEventsSchema,
   ...webhookEndpointsSchema,
+  ...flowsSchema,
+  ...flowVersionsSchema,
+  ...flowRunsSchema,
+  ...flowRunStepsSchema,
+  ...flowSegmentMembershipSnapshotSchema,
 };
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -64,4 +74,9 @@ export * from "./schema/sends.js";
 export * from "./schema/workspace-send-settings.js";
 export * from "./schema/send-events.js";
 export * from "./schema/webhook-endpoints.js";
+export * from "./schema/flows.js";
+export * from "./schema/flow-versions.js";
+export * from "./schema/flow-runs.js";
+export * from "./schema/flow-run-steps.js";
+export * from "./schema/flow-segment-membership-snapshot.js";
 export { TENANT_GUC_KEY } from "./rls.js";

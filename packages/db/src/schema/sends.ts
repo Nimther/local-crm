@@ -2,6 +2,7 @@ import { pgTable, text, timestamp, uuid, pgEnum, unique } from "drizzle-orm/pg-c
 import { organization } from "./auth.js";
 import { campaigns } from "./campaigns.js";
 import { contacts } from "./contacts.js";
+import { flowRuns } from "./flow-runs.js";
 
 /** Per-message send lifecycle (SEND-04/SEND-06). */
 export const sendStatusEnum = pgEnum("send_status", [
@@ -28,6 +29,14 @@ export const sendStatusEnum = pgEnum("send_status", [
  * NEVER overwritten by a later or replayed event (D-06 out-of-order
  * safety). `bounceReason`/`dropReason` carry the terminal reason string
  * alongside `bouncedAt`/`droppedAt`.
+ *
+ * Phase 6 flow-step columns (06-01, FLOW-01): `flowRunId`/`nodeId` identify
+ * WHICH flow run and WHICH send-node produced this row when `kind='flow'`.
+ * The flow-send idempotency guarantee lives in the
+ * `sends_flow_run_node_unique` PARTIAL unique index (migration 0028, raw
+ * SQL only -- Drizzle's `unique()` helper cannot express a partial index),
+ * scoped to `WHERE kind = 'flow'` so campaign/test rows with a null
+ * `flowRunId` never contend with it.
  */
 export const sends = pgTable(
   "sends",
@@ -55,6 +64,8 @@ export const sends = pgTable(
     spamReportedAt: timestamp("spam_reported_at", { withTimezone: true }),
     bounceReason: text("bounce_reason"),
     dropReason: text("drop_reason"),
+    flowRunId: uuid("flow_run_id").references(() => flowRuns.id, { onDelete: "cascade" }),
+    nodeId: text("node_id"),
   },
   (t) => [
     unique("sends_workspace_campaign_contact_unique").on(t.workspaceId, t.campaignId, t.contactId),
