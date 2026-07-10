@@ -31,10 +31,11 @@ Multi-tenant SaaS-платформа marketing automation для B2C-компа�
 - [x] SendGrid Event Webhook: обработка delivered/opened/clicked/bounced/unsubscribed/spam/dropped — Validated in Phase 5: per-tenant signed webhook (ECDSA по raw body до парсинга), дедупликация по sg_event_id, статусы на каждом send + счётчики кампаний, авто-provisioning вебхука при подключении ключа (Klaviyo-модель) с self-healing Reconnect; live UAT round 6 подтвердил инкремент delivered/opened метрик
 - [x] Статус подписки: платформа ведёт свой subscription status — Validated in Phase 5: bounce/spam/unsubscribe из webhook автоматически переводят контакт в suppressed/unsubscribed (введён в Phase 2, pre-send gate и one-click unsubscribe в Phase 4, webhook-driven suppression в Phase 5)
 
+- [x] Триггерные цепочки: визуальный canvas-редактор с drag-and-drop (узлы, ветвления, соединения) — Validated in Phase 6: canvas builder (@xyflow/react, 5 типов узлов, autosave с honest error state), atomic publish с immutable versioning (draft → live → paused), publish-time валидация графа (включая cycle_detected / no_entry, gap-closure round 3); verification 4/4
+- [x] Правила цепочек: exit conditions, контроль повторного входа (once ever / once per N days / every time), quiet hours, глобальный frequency cap на контакт — Validated in Phase 6: exit conditions + reconciliation, re-entry control (leave→rejoin для segment-triggered восстановлен в round 3), dispatch-time quiet hours с deferral, отправка через общий send pipeline с suppression и frequency cap
+
 ### Active
 
-- [ ] Триггерные цепочки: визуальный canvas-редактор с drag-and-drop (узлы, ветвления, соединения)
-- [ ] Правила цепочек: exit conditions, контроль повторного входа (once ever / once per N days / every time), quiet hours, глобальный frequency cap на контакт
 - [ ] Аналитика: метрики по кампаниям и шагам цепочек (sent/delivered/opened/clicked/bounced/unsubscribed), timeline активности в карточке контакта, сводный дашборд воркспейса, по-письмовый лог отправок с фильтрами (счётчики кампаний уже на детальной странице — Phase 5)
 - [ ] Webhook hardening (из 05-REVIEW WR-01): при общем BYO SendGrid-ключе на несколько воркспейсов отбрасывать события чужого workspace (сейчас сырые payload'ы соседнего workspace сохраняются в его send_events; атрибуция не страдает — resolution workspace-scoped)
 
@@ -101,4 +102,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-09 after Phase 5 transition (13/13 планов, 5 gap-closure раундов; финальный гэп — flattened custom-arg attribution (05-13) — закрыт и подтверждён live UAT round 6 (2/2 passed: метрики кампании инкрементируются, scope-limited key предупреждает при подключении); verification passed 5/5 truths; SECURITY.md verified, 37 threats / 0 open; code review: 0 Critical / 10 Warning — WR-01 (cross-tenant raw payload при общем ключе) вынесен в Active как hardening follow-up; переход к Phase 6)*
+*Last updated: 2026-07-10 after Phase 6 completion (21/21 планов, 3 gap-closure раунда; round 3 закрыл 3 blocking-гэпа — CR-01 cycle detection + step budget, CR-02 atomic enrollExisting=false seed, segment-triggered re-entry — и warnings WR-01/WR-02/WR-05; verification passed 4/4 must-haves, все регрессионные тесты RED→GREEN; code review после round 3: 0 Critical / 6 Warning / 7 Info — не блокируют; SECURITY.md для Phase 6 ещё не создан — secure-phase gate активен; переход к Phase 7)*
