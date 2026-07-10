@@ -101,6 +101,23 @@ async function sweepOneFlow(row: DueSegmentFlowRow): Promise<void> {
         String(BULK_QUERY_STATEMENT_TIMEOUT_MS),
       ]);
       const { whereSql, params } = compileSegmentDefinition(definition, row.workspaceId);
+
+      // 06-19/WR-04/FLOW-04: clear this flow's snapshot row for any contact
+      // who no longer matches the trigger segment -- "seen" must mean
+      // "currently inside this membership episode", not "ever considered".
+      // Bounded anti-join DELETE (not a per-contact loop), covered by the
+      // statement_timeout set above. Runs BEFORE the empty-membership early
+      // return below so a fully-emptied segment still clears its stale rows.
+      const deleteParams = [...params, row.workspaceId, row.id];
+      const workspaceParamIdx = params.length + 1;
+      const flowParamIdx = params.length + 2;
+      await client.query(
+        `DELETE FROM flow_segment_membership_snapshot s
+         WHERE s.workspace_id = $${workspaceParamIdx} AND s.flow_id = $${flowParamIdx}
+           AND NOT EXISTS (SELECT 1 FROM contacts c WHERE ${whereSql} AND c.id = s.contact_id)`,
+        deleteParams
+      );
+
       const { rows: matchingContacts } = await client.query<{ id: string }>(
         `SELECT c.id FROM contacts c WHERE ${whereSql}`,
         params
