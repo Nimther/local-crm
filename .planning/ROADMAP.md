@@ -18,7 +18,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 3: Segmentation Engine** - Dynamic profile + behavioral segments with live preview, on one shared evaluation engine (completed 2026-07-06)
 - [x] **Phase 4: Broadcast Campaigns & Send Pipeline** - First complete send loop: throttled, idempotent, suppression-aware broadcasts via SendGrid (verification: gaps found 2026-07-06) (completed 2026-07-06)
 - [x] **Phase 5: Webhook Processing & Delivery Tracking** - Verified, deduplicated delivery events that update message status and auto-suppress contacts (verification: gaps found 2026-07-08) (completed 2026-07-08)
-- [x] **Phase 6: Flows (Triggered Chains)** - Visual canvas builder and versioned execution engine for automated triggered chains (completed 2026-07-10)
+- [ ] **Phase 6: Flows (Triggered Chains)** - Visual canvas builder and versioned execution engine for automated triggered chains
 - [ ] **Phase 7: Analytics, Dashboard & Send Log** - End-to-end observability: campaign, flow-step, contact-timeline, dashboard, and per-message metrics
 
 ## Phase Details
