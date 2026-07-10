@@ -6,15 +6,15 @@ current_phase: 06
 current_phase_name: flows-triggered-chains
 status: executing
 stopped_at: Completed 06-08-PLAN.md
-last_updated: "2026-07-10T09:14:16.507Z"
+last_updated: "2026-07-10T09:28:23.070Z"
 last_activity: 2026-07-10
 last_activity_desc: Phase 06 execution started
 progress:
   total_phases: 7
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 75
-  completed_plans: 74
-  percent: 71
+  completed_plans: 75
+  percent: 86
 ---
 
 # Project State
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-07-09)
 ## Current Position
 
 Phase: 06 (flows-triggered-chains) — EXECUTING
-Plan: 3 of 14
+Plan: 4 of 14
 Status: Ready to execute
 Last activity: 2026-07-10 — Phase 06 execution started
 
@@ -133,6 +133,7 @@ Progress: [████████████████████] 61/61 p
 | Phase 06 P11 | 20min | 4 tasks | 15 files |
 | Phase 06 P12 | 25min | 3 tasks | 11 files |
 | Phase 06 P14 | 25 | 3 tasks | 4 files |
+| Phase 06 P13 | 20min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -318,6 +319,9 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 06]: 06-12: apps/worker/vitest.config.ts sets fileParallelism:false -- required once a real BullMQ Worker exists in the test suite against a queue shared globally across test files
 - [Phase ?]: updateFlowDraft's trigger-column sync gated on existing.status === 'draft' -- publish is the sole point a live/paused flow's trigger columns change
 - [Phase ?]: publish-changes UI action reuses the existing PublishEnrollDialog (no new dialog); title keys off flow.status !== 'draft'
+- [Phase 06]: 06-13: quiet_hours_mode canonical vocabulary is workspace_default|custom|disabled (matches what flow.repository.ts actually persists) -- the worker's legacy inherit|override vocabulary was retired to match, closing CR-02
+- [Phase 06]: 06-13: resolveQuietHoursWindow's else branch covers 'workspace_default' AND any unrecognized/legacy value, failing toward the workspace-default window rather than toward no gate (T-06-13-01)
+- [Phase 06]: 06-13: migration 0034 hand-written instead of using drizzle-kit generate's raw output -- meta/ has no snapshot for hand-written migrations 0026-0033, so generate diffed against the stale 0025 baseline and produced a full-table-recreate; only the actual incremental ALTER+data-migration was kept
 
 ### Pending Todos
 
@@ -345,6 +349,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-10T09:13:50.311Z
+Last session: 2026-07-10T09:26:50.428Z
 Stopped at: Completed 06-08-PLAN.md
 Resume file: None

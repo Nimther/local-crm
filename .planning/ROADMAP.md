@@ -336,7 +336,7 @@ _Wave 1:_
   3. Re-entry control (once ever / once per N days / every time) and quiet hours are honored: no email is sent inside the quiet window, and it is deferred until the window ends.
   4. Editing a live flow happens in a draft that only takes effect on publish; contacts already mid-flight continue on the version they entered, with no duplicate or skipped sends.
 
-**Plans**: 13/14 plans executed
+**Plans**: 14/14 plans complete
 **UI hint**: yes
 
 Plans:
@@ -378,7 +378,7 @@ _Wave 1 (parallel — disjoint files):_
 
 _Wave 2 (blocked on 06-12 — shares send-node.ts / flow-run-advance.worker.ts / flow-run-advance.test.ts):_
 
-- [ ] 06-13-PLAN.md — CR-02: one canonical quiet_hours_mode vocabulary (worker branches on 'custom') + [BLOCKING] schema default + 0034 data migration + worker deferral regression test (FLOW-05)
+- [x] 06-13-PLAN.md — CR-02: one canonical quiet_hours_mode vocabulary (worker branches on 'custom') + [BLOCKING] schema default + 0034 data migration + worker deferral regression test (FLOW-05)
 
 ### Phase 7: Analytics, Dashboard & Send Log
 
@@ -417,5 +417,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 3. Segmentation Engine | 8/8 | Complete    | 2026-07-06 |
 | 4. Broadcast Campaigns & Send Pipeline | 19/19 | Complete    | 2026-07-06 |
 | 5. Webhook Processing & Delivery Tracking | 13/13 | Complete    | 2026-07-09 |
-| 6. Flows (Triggered Chains) | 13/14 | In Progress|  |
+| 6. Flows (Triggered Chains) | 14/14 | Complete   | 2026-07-10 |
 | 7. Analytics, Dashboard & Send Log | 0/5 | Not started | - |
