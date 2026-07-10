@@ -18,7 +18,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 3: Segmentation Engine** - Dynamic profile + behavioral segments with live preview, on one shared evaluation engine (completed 2026-07-06)
 - [x] **Phase 4: Broadcast Campaigns & Send Pipeline** - First complete send loop: throttled, idempotent, suppression-aware broadcasts via SendGrid (verification: gaps found 2026-07-06) (completed 2026-07-06)
 - [x] **Phase 5: Webhook Processing & Delivery Tracking** - Verified, deduplicated delivery events that update message status and auto-suppress contacts (verification: gaps found 2026-07-08) (completed 2026-07-08)
-- [ ] **Phase 6: Flows (Triggered Chains)** - Visual canvas builder and versioned execution engine for automated triggered chains
+- [x] **Phase 6: Flows (Triggered Chains)** - Visual canvas builder and versioned execution engine for automated triggered chains (completed 2026-07-10)
 - [ ] **Phase 7: Analytics, Dashboard & Send Log** - End-to-end observability: campaign, flow-step, contact-timeline, dashboard, and per-message metrics
 
 ## Phase Details
@@ -336,7 +336,7 @@ _Wave 1:_
   3. Re-entry control (once ever / once per N days / every time) and quiet hours are honored: no email is sent inside the quiet window, and it is deferred until the window ends.
   4. Editing a live flow happens in a draft that only takes effect on publish; contacts already mid-flight continue on the version they entered, with no duplicate or skipped sends.
 
-**Plans**: 10/11 plans executed
+**Plans**: 11/11 plans complete
 **UI hint**: yes
 
 Plans:
@@ -367,7 +367,7 @@ Plans:
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
-- [ ] 06-11-PLAN.md — Flow list/detail UI + publish/enroll dialogs + re-entry/quiet-hours/timezone forms + settings + nav
+- [x] 06-11-PLAN.md — Flow list/detail UI + publish/enroll dialogs + re-entry/quiet-hours/timezone forms + settings + nav
 
 ### Phase 7: Analytics, Dashboard & Send Log
 
@@ -406,5 +406,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 3. Segmentation Engine | 8/8 | Complete    | 2026-07-06 |
 | 4. Broadcast Campaigns & Send Pipeline | 19/19 | Complete    | 2026-07-06 |
 | 5. Webhook Processing & Delivery Tracking | 13/13 | Complete    | 2026-07-09 |
-| 6. Flows (Triggered Chains) | 10/11 | In Progress|  |
+| 6. Flows (Triggered Chains) | 11/11 | Complete   | 2026-07-10 |
 | 7. Analytics, Dashboard & Send Log | 0/5 | Not started | - |

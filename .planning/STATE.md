@@ -4,17 +4,17 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 06
 current_phase_name: flows-triggered-chains
-status: executing
+status: verifying
 stopped_at: Completed 06-08-PLAN.md
-last_updated: "2026-07-10T06:34:00.016Z"
+last_updated: "2026-07-10T07:07:16.597Z"
 last_activity: 2026-07-10
 last_activity_desc: Phase 06 execution started
 progress:
   total_phases: 7
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 72
-  completed_plans: 71
-  percent: 71
+  completed_plans: 72
+  percent: 86
 ---
 
 # Project State
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-07-09)
 
 Phase: 06 (flows-triggered-chains) — EXECUTING
 Plan: 11 of 11
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-07-10 — Phase 06 execution started
 
 Progress: [████████████████████] 61/61 plans (100%)
@@ -130,6 +130,7 @@ Progress: [████████████████████] 61/61 p
 | Phase 06 P07 | 32min | 3 tasks | 24 files |
 | Phase 06 P09 | 20min | 2 tasks | 5 files |
 | Phase 06 P08 | 25min | 3 tasks | 15 files |
+| Phase 06 P11 | 20min | 4 tasks | 15 files |
 
 ## Accumulated Context
 
@@ -307,6 +308,9 @@ Recent decisions affecting current work:
 - [Phase 06]: 06-08: every flow-trigger-check job unconditionally also runs the segment-entry re-check (D-02a) -- an ingested event always upserts the contact, so the same job doubles as the contact-changed signal for segment-triggered flows
 - [Phase 06]: 06-08: flow_segment_membership_snapshot is a permanent seen-marker, not a toggle -- once recorded, a contact leaving and re-entering the trigger segment later does not re-trigger entry
 - [Phase 06]: 06-08: both D-04 publish choices (back-fill vs seed-only) are handled by ONE worker/queue (flowEnrollExistingJobSchema.enrollExisting flag), keeping the publish route a thin enqueue-only call
+- [Phase ?]: [Phase 06]: 06-11: isDeletableFlowStatus offers delete for never-published drafts OR any paused flow -- the paused-with-zero-active half of D-22 is enforced server-side (deleteFlow 409) and the server message surfaced verbatim
+- [Phase ?]: [Phase 06]: 06-11: FlowDetailPage is tab-organized (canvas/settings/runs) rather than status-branched like CampaignDetailPage -- a flow's draft stays editable in every status (D-20), so the canvas must remain reachable for live/paused flows
+- [Phase ?]: [Phase 06]: 06-11: FlowCanvas gained an optional focusNodeId prop (select + fitView) so the publish dialog's server-returned 422 blocker list can jump to the offending node; sidebar nav lives in features/app-shell/AppShell.tsx (plan's Sidebar.tsx path corrected)
 
 ### Pending Todos
 
@@ -334,6 +338,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-10T06:33:59.986Z
+Last session: 2026-07-10T07:06:38.871Z
 Stopped at: Completed 06-08-PLAN.md
 Resume file: None
