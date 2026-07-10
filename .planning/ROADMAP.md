@@ -336,7 +336,7 @@ _Wave 1:_
   3. Re-entry control (once ever / once per N days / every time) and quiet hours are honored: no email is sent inside the quiet window, and it is deferred until the window ends.
   4. Editing a live flow happens in a draft that only takes effect on publish; contacts already mid-flight continue on the version they entered, with no duplicate or skipped sends.
 
-**Plans**: 14/14 plans complete
+**Plans**: 14 complete + 2 gap-closure pending (06-15, 06-16)
 **UI hint**: yes
 
 Plans:
@@ -379,6 +379,13 @@ _Wave 1 (parallel — disjoint files):_
 _Wave 2 (blocked on 06-12 — shares send-node.ts / flow-run-advance.worker.ts / flow-run-advance.test.ts):_
 
 - [x] 06-13-PLAN.md — CR-02: one canonical quiet_hours_mode vocabulary (worker branches on 'custom') + [BLOCKING] schema default + 0034 data migration + worker deferral regression test (FLOW-05)
+
+**Gap closure — round 2** *(from 06-VERIFICATION.md re-verification 2026-07-10 — gaps_found, 3/4 truths; the loadContactTimezone swapped-bind defect + WR-04)*
+
+_Wave 1 (parallel — disjoint files):_
+
+- [ ] 06-15-PLAN.md — Timezone bind-order fix: consolidate loadContactTimezone into @mega-crm/delivery-core with correct [workspaceId, contactId] order + two contact-timezone regression tests (quiet hours + wait_until) (FLOW-05)
+- [ ] 06-16-PLAN.md — WR-04: publishFlow preserves 'paused' status on publish (no silent resume) + paused-aware publish dialog copy + API regression test (FLOW-06)
 
 ### Phase 7: Analytics, Dashboard & Send Log
 
