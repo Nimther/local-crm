@@ -1,5 +1,5 @@
 import type { PoolClient } from "pg";
-import type { FlowDefinition, FlowNode, FlowSendNode } from "@mega-crm/flows-core";
+import type { FlowDefinition, FlowSendNode } from "@mega-crm/flows-core";
 import {
   getWorkspaceSendSettings,
   isInsideQuietHours,
@@ -144,6 +144,3 @@ export async function handleSendNode(ctx: SendNodeCtx): Promise<SendNodeResult> 
 
   return { outcome: "enqueued", nextNodeId: resolveNextNodeId(definition, node.id) };
 }
-
-/** Re-exported so callers narrowing a generic `FlowNode` before dispatch can share the same type import. */
-export type { FlowNode };
