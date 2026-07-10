@@ -168,3 +168,7 @@ None - no external service configuration required. Migrations applied against th
 ---
 *Phase: 06-flows-triggered-chains*
 *Completed: 2026-07-10*
+
+## Self-Check: PASSED
+
+All 10 created files verified present on disk; all 3 task commit hashes (`b2d4e29`, `0bf8ece`, `ce98f23`) verified present in git log.

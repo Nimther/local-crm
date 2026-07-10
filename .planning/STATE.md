@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 6
-current_phase_name: Triggered Chains
-status: ready-to-plan
-stopped_at: Phase 6 UI-SPEC approved
-last_updated: "2026-07-09T19:02:59.498Z"
-last_activity: 2026-07-09
-last_activity_desc: Phase 05 complete, transitioned to Phase 6
+current_phase: 06
+current_phase_name: flows-triggered-chains
+status: executing
+stopped_at: Completed 06-01-PLAN.md
+last_updated: "2026-07-10T03:39:02.135Z"
+last_activity: 2026-07-10
+last_activity_desc: Phase 06 execution started
 progress:
   total_phases: 7
   completed_phases: 5
-  total_plans: 61
-  completed_plans: 61
+  total_plans: 72
+  completed_plans: 62
   percent: 71
 ---
 
@@ -24,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-09)
 
 **Core value:** Маркетолог настраивает триггерную цепочку или кампанию — и письма надёжно и вовремя доходят до нужных контактов, со сквозным отслеживанием статусов (delivered/opened/clicked/bounced).
-**Current focus:** Phase 6 — Flows (Triggered Chains)
+**Current focus:** Phase 06 — flows-triggered-chains
 
 ## Current Position
 
-Phase: 6 — Flows (Triggered Chains)
-Plan: Not started
+Phase: 06 (flows-triggered-chains) — EXECUTING
+Plan: 2 of 11
 Status: Ready to execute
-Last activity: 2026-07-09 — Phase 05 complete, transitioned to Phase 6
+Last activity: 2026-07-10 — Phase 06 execution started
 
 Progress: [████████████████████] 61/61 plans (100%)
 
@@ -120,6 +120,7 @@ Progress: [████████████████████] 61/61 p
 | Phase 05 P11 | 11min | 2 tasks | 2 files |
 | Phase 05 P12 | 8min | 3 tasks | 8 files |
 | Phase 05 P13 | 12min | 3 tasks | 6 files |
+| Phase 06 P01 | 10min | 3 tasks | 15 files |
 
 ## Accumulated Context
 
@@ -270,6 +271,8 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 05]: 05-12: webhookWarningFor's parameter widened to the exported ProvisionEventWebhookError type (not an inline literal union) so the copy map and provisioning error union can never drift apart
 - [Phase ?]: [Phase 05]: 05-12: apps/api/vitest.config.ts's PUBLIC_APP_URL test default changed to only accept an explicit TEST_PUBLIC_APP_URL override (mirroring TEST_DATABASE_URL/TEST_REDIS_URL) -- the new https guard made this var's scheme behavior-determining, so it could no longer silently inherit the real dev .env value
 - [Phase ?]: 05-13: extractEventRow reads send_id/test from event top level (SendGrid Event Webhook shape), nested custom_args kept as defensive fallback
+- [Phase ?]: 06-01: new flow schema files registered in packages/db/src/index.ts (the repo's actual barrel), not packages/db/src/schema/index.ts as the plan literally referenced -- no schema/index.ts file exists in this codebase
+- [Phase ?]: 06-01: flows.draft_version_id/live_version_id left as plain nullable uuid columns with no FK constraint to avoid a circular schema-file dependency between flows.ts and flow-versions.ts
 
 ### Pending Todos
 
@@ -297,6 +300,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-09T19:02:59.470Z
-Stopped at: Phase 6 UI-SPEC approved
-Resume file: .planning/phases/06-flows-triggered-chains/06-UI-SPEC.md
+Last session: 2026-07-10T03:39:02.108Z
+Stopped at: Completed 06-01-PLAN.md
+Resume file: None
