@@ -5,6 +5,7 @@ import type { FlowDefinition } from "@mega-crm/flows-core";
 import type { SegmentDefinition } from "@mega-crm/segments-core";
 import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool } from "../../test/db-fixture.js";
 import { processFlowRunAdvance } from "../flows/flow-run-advance.worker.js";
+import { processFlowTriggerCheck } from "../flows/flow-trigger-evaluator.worker.js";
 import { runFlowSegmentSweepTick } from "../flows/flow-segment-sweep.worker.js";
 import { processFlowEnrollExisting } from "../flows/flow-enroll-existing.worker.js";
 import { flowRunAdvanceQueue } from "../flows/flow-queues.js";
@@ -289,6 +290,23 @@ describe("06-08: branch node + segment-entry trigger (sweep + enroll-existing)",
     await runFlowSegmentSweepTick();
     const secondPassRuns = await getRunsForContact(workspaceId, flowId, contactId);
     expect(secondPassRuns).toHaveLength(1);
+  });
+
+  it("D-02a: the event-driven flow-trigger-check job also enrolls a contact newly matching a segment-triggered flow", async () => {
+    const workspaceId = await freshWorkspaceId("flow-segment-event-recheck");
+    const segmentId = await createFixtureSegment(workspaceId, VIP_SEGMENT_DEFINITION);
+    const { flowId } = await seedLiveSegmentFlow(workspaceId, segmentId);
+    const contactId = await createFixtureContact(workspaceId, { tier: "vip" });
+
+    // No event-triggered flow matches "unrelated_event" -- this job's ONLY
+    // effect should be the segment-entry re-check that runs on every
+    // flow-trigger-check job regardless of eventName (D-02a).
+    await processFlowTriggerCheck({ workspaceId, contactId, eventName: "unrelated_event" });
+
+    const runs = await getRunsForContact(workspaceId, flowId, contactId);
+    expect(runs).toHaveLength(1);
+    expect(runs[0].status).toBe("waiting");
+    expect(await getSnapshotSeen(workspaceId, flowId, contactId)).toBe(true);
   });
 
   // ---------------------------------------------------------------------
