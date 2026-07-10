@@ -37,7 +37,7 @@ export const flows = pgTable("flows", {
   liveVersionId: uuid("live_version_id"),
   reentryMode: text("reentry_mode").notNull().default("every_time"), // "once_ever" | "once_per_n_days" | "every_time"
   reentryWindowDays: integer("reentry_window_days"),
-  quietHoursMode: text("quiet_hours_mode").notNull().default("inherit"), // "inherit" | "override" | "disabled"
+  quietHoursMode: text("quiet_hours_mode").notNull().default("workspace_default"), // "workspace_default" | "custom" | "disabled"
   quietHoursStart: integer("quiet_hours_start"), // minutes from midnight
   quietHoursEnd: integer("quiet_hours_end"), // minutes from midnight
   // 06-04: D-15 flow-level exit conditions (segment membership or a

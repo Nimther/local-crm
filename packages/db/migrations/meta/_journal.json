@@ -239,6 +239,13 @@
       "when": 1783685963475,
       "tag": "0033_flows_enroll_cursor",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1783685963476,
+      "tag": "0034_flows_quiet_hours_mode_canonical",
+      "breakpoints": true
     }
   ]
 }
