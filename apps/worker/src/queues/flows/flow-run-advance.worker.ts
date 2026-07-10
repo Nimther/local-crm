@@ -8,6 +8,7 @@ import { evaluateExitConditions } from "./flow-exit-conditions.js";
 import { handleSendNode } from "./handlers/send-node.js";
 import { handleExitNode } from "./handlers/exit-node.js";
 import { handleDelayNode } from "./handlers/delay-node.js";
+import { handleBranchNode } from "./handlers/branch-node.js";
 
 interface FlowRunAdvanceRow {
   id: string;
@@ -126,9 +127,9 @@ async function appendFlowRunStep(
  * transaction this function opens (Pitfall 1 idempotency) -- a crash after
  * COMMIT can only ever redeliver a nudge that the guards above safely no-op.
  *
- * `send`/`exit`/`delay` node types are handled (branch is 06-08) -- any
- * other node type at `current_node_id` throws, surfacing a data-integrity
- * error rather than silently stalling the run.
+ * `send`/`exit`/`delay`/`branch` node types are all handled -- any other
+ * node type at `current_node_id` throws, surfacing a data-integrity error
+ * rather than silently stalling the run.
  */
 export async function processFlowRunAdvance(data: FlowRunAdvanceJob): Promise<void> {
   const { workspaceId, flowRunId } = flowRunAdvanceJobSchema.parse(data);
@@ -262,6 +263,39 @@ export async function processFlowRunAdvance(data: FlowRunAdvanceJob): Promise<vo
           nodeId: run.currentNodeId,
           nodeType: "delay",
           outcome: "waiting",
+        });
+        return;
+      }
+
+      if (node.type === "branch") {
+        const { branch, nextNodeId } = await handleBranchNode({
+          client,
+          workspaceId,
+          contactId: run.contactId,
+          node,
+          definition,
+        });
+
+        if (nextNodeId) {
+          await client.query(
+            `UPDATE flow_runs SET current_node_id = $2, next_wake_at = now(), status = 'waiting' WHERE id = $1 AND workspace_id = $3`,
+            [flowRunId, nextNodeId, workspaceId]
+          );
+        } else {
+          // Defensive dead-end fallback (no outgoing edge for this branch) --
+          // mirrors the send/delay-node dead-end fallbacks above.
+          await client.query(
+            `UPDATE flow_runs SET status = 'completed', exited_at = now(), exit_reason = 'reached_exit' WHERE id = $1 AND workspace_id = $2`,
+            [flowRunId, workspaceId]
+          );
+        }
+
+        await appendFlowRunStep(client, {
+          workspaceId,
+          flowRunId,
+          nodeId: run.currentNodeId,
+          nodeType: "branch",
+          outcome: branch === "yes" ? "branched_yes" : "branched_no",
         });
         return;
       }
