@@ -1,3 +1,4 @@
+import type { PoolClient } from "pg";
 import { getWorkspaceId, withTenantTransaction } from "../../middleware/tenant-context.js";
 import { CONTACT_COLUMNS, type ContactRow } from "@mega-crm/contacts-core";
 import { compileSegmentDefinition, type SegmentDefinition } from "@mega-crm/segments-core";
@@ -289,13 +290,59 @@ export async function updateSegment(
 }
 
 /**
- * D-03/D-14 (Phase 4): blocks deleting a segment still referenced by a
- * non-canceled campaign -- pre-checked in the same transaction as the
- * delete so there is no TOCTOU gap between the check and the DELETE. The
- * DB's `campaigns.segment_id` FK is ON DELETE RESTRICT as a backstop
- * (T-04-01-03), but this app-level check produces the actionable
- * `SegmentConflictError` the route needs to return a clear 409, rather than
- * surfacing a raw FK-violation 500.
+ * D-24 (Phase 6): does any flow reference this segment -- via its
+ * dedicated `trigger_segment_id` column, a flow-level exit condition
+ * (`flows.exit_conditions` jsonb array, D-15), or a branch/trigger node
+ * inside ANY of its `flow_versions` rows (draft or published; a branch
+ * condition can reference a segment without that flow ever having been
+ * published)? Returns the first referencing flow's name, or `null`. Used
+ * both as the app-level pre-check AND to disambiguate a DB-level 23503
+ * (only `trigger_segment_id` is a real FK -- exit_conditions/branch
+ * references inside jsonb are not DB-enforceable).
+ */
+async function findReferencingFlowName(
+  client: PoolClient,
+  workspaceId: string,
+  segmentId: string
+): Promise<string | null> {
+  const { rows: directRows } = await client.query<{ name: string }>(
+    `SELECT f.name FROM flows f
+     WHERE f.workspace_id = $1
+       AND (
+         f.trigger_segment_id = $2
+         OR EXISTS (
+           SELECT 1 FROM jsonb_array_elements(COALESCE(f.exit_conditions, '[]'::jsonb)) AS ec
+           WHERE (ec->>'segmentId') = $2::text
+         )
+       )
+     LIMIT 1`,
+    [workspaceId, segmentId]
+  );
+  if (directRows.length > 0) return directRows[0].name;
+
+  const { rows: versionRows } = await client.query<{ name: string }>(
+    `SELECT f.name FROM flow_versions fv
+     JOIN flows f ON f.id = fv.flow_id
+     WHERE fv.workspace_id = $1
+       AND EXISTS (
+         SELECT 1 FROM jsonb_array_elements(COALESCE(fv.definition->'nodes', '[]'::jsonb)) AS node
+         WHERE (node->>'segmentId') = $2::text
+       )
+     LIMIT 1`,
+    [workspaceId, segmentId]
+  );
+  return versionRows[0]?.name ?? null;
+}
+
+/**
+ * D-03/D-14 (Phase 4)/D-24 (Phase 6): blocks deleting a segment still
+ * referenced by a non-canceled campaign OR by any flow (trigger, branch, or
+ * exit condition) -- pre-checked in the same transaction as the delete so
+ * there is no TOCTOU gap between the check and the DELETE. The DB's
+ * `campaigns.segment_id`/`flows.trigger_segment_id` FKs are ON DELETE
+ * RESTRICT as a backstop (T-04-01-03), but this app-level check produces
+ * the actionable `SegmentConflictError` the route needs to return a clear
+ * 409, rather than surfacing a raw FK-violation 500.
  */
 export async function deleteSegment(id: string): Promise<boolean> {
   return withTenantTransaction(async (client) => {
@@ -309,6 +356,14 @@ export async function deleteSegment(id: string): Promise<boolean> {
       throw new SegmentConflictError(
         `Segment is referenced by campaign "${referencing[0].name}"`,
         "referenced_by_campaign"
+      );
+    }
+
+    const referencingFlowName = await findReferencingFlowName(client, workspaceId, id);
+    if (referencingFlowName) {
+      throw new SegmentConflictError(
+        `Segment is referenced by flow "${referencingFlowName}"`,
+        "referenced_by_flow"
       );
     }
 
@@ -327,6 +382,18 @@ export async function deleteSegment(id: string): Promise<boolean> {
       // constraint. Without this, that case surfaced as a raw 500
       // (postgres 23503) instead of the same actionable conflict error.
       if ((err as { code?: string } | undefined)?.code === "23503") {
+        // D-24: disambiguate which FK actually fired -- flows.trigger_segment_id
+        // is ALSO an unconditional RESTRICT FK (no status-based exemption the
+        // way campaigns' canceled state has), so re-check for a flow reference
+        // first and default to it when present, matching this function's own
+        // pre-check ordering (Rule-3 fix, mirrors the 04-05 campaign backstop).
+        const flowName = await findReferencingFlowName(client, workspaceId, id);
+        if (flowName) {
+          throw new SegmentConflictError(
+            `Segment is referenced by flow "${flowName}"`,
+            "referenced_by_flow"
+          );
+        }
         throw new SegmentConflictError(
           "Segment is referenced by a campaign (including canceled campaigns, which retain their audience reference for history)",
           "referenced_by_campaign"
