@@ -36,6 +36,22 @@ export const CAMPAIGN_KICKOFF_QUEUE = "campaign-kickoff";
 export const WEBHOOK_EVENTS_QUEUE = "webhook-events";
 
 /**
+ * Phase 6 flow-engine queues (FLOW-01..07): four dedicated lanes, hyphen
+ * separators (BullMQ rejects colons, see comment above). `FLOW_TRIGGER_EVALUATOR_QUEUE`
+ * evaluates an event/contact-change against live flows' event/segment
+ * triggers; `FLOW_RUN_ADVANCE_QUEUE` advances one flow_run one step at a
+ * time (delay/branch/send); `FLOW_RECONCILIATION_QUEUE` is the repeatable
+ * backstop scan for due delay/wait-until wakes (mirrors
+ * campaign-scheduler.worker.ts's pattern); `FLOW_SEGMENT_SWEEP_QUEUE` is the
+ * repeatable periodic re-check for segment-trigger/time-based exit
+ * conditions (D-02) that no single event can drive.
+ */
+export const FLOW_TRIGGER_EVALUATOR_QUEUE = "flow-trigger-evaluator";
+export const FLOW_RUN_ADVANCE_QUEUE = "flow-run-advance";
+export const FLOW_RECONCILIATION_QUEUE = "flow-reconciliation";
+export const FLOW_SEGMENT_SWEEP_QUEUE = "flow-segment-sweep";
+
+/**
  * events:ingest job payload (EVNT-02/EVNT-03, finalized in 02-06): the
  * SOLE context the worker trusts (Pattern 2) -- `workspaceId` is re-derived
  * from this payload inside the worker (never ambient state), `eventId` is
@@ -96,19 +112,66 @@ export const emailBroadcastJobSchema = z.object({
 export type EmailBroadcastJob = z.infer<typeof emailBroadcastJobSchema>;
 
 /**
- * email-triggered job payload (SEND-03): registered now so the reserved
- * priority lane exists ahead of its first real producer (Phase 6 flows);
- * mirrors emailBroadcastJobSchema's shape.
+ * email-triggered job payload (SEND-03, widened in 06-02 for Phase 6 flows):
+ * a discriminated union on `kind` -- the `campaign`/`test` variants mirror
+ * emailBroadcastJobSchema's shape exactly (a triggered send can still be a
+ * one-off campaign test-send routed onto the always-on lane), and the new
+ * `flow` variant carries `flowRunId`/`nodeId`/`contactId` instead of
+ * `campaignId` -- a flow-step send has no campaign at all. Unlike the flat
+ * shape this replaces, `campaignId` is no longer required for every kind;
+ * `processSendJob` (apps/worker/src/queues/send-dispatch.ts) branches on
+ * `kind` before touching any kind-specific field (T-06-02-01 type seam --
+ * the `kind === "flow"` dispatch branch itself lands in 06-05).
  */
-export const emailTriggeredJobSchema = z.object({
-  workspaceId: z.string().uuid(),
-  campaignId: z.string().uuid(),
-  kind: z.enum(["campaign", "test"]),
-  contactId: z.string().uuid().optional(),
-  testTo: z.string().email().optional(),
-  testData: z.record(z.string(), z.unknown()).optional(),
-});
+export const emailTriggeredJobSchema = z.discriminatedUnion("kind", [
+  z.object({
+    workspaceId: z.string().uuid(),
+    kind: z.literal("campaign"),
+    campaignId: z.string().uuid(),
+    contactId: z.string().uuid(),
+  }),
+  z.object({
+    workspaceId: z.string().uuid(),
+    kind: z.literal("test"),
+    campaignId: z.string().uuid(),
+    testTo: z.string().email(),
+    testData: z.record(z.string(), z.unknown()).optional(),
+  }),
+  z.object({
+    workspaceId: z.string().uuid(),
+    kind: z.literal("flow"),
+    flowRunId: z.string().uuid(),
+    nodeId: z.string(),
+    contactId: z.string().uuid(),
+  }),
+]);
 export type EmailTriggeredJob = z.infer<typeof emailTriggeredJobSchema>;
+
+/**
+ * flow-run-advance job payload: the flow engine's own per-run "tick" --
+ * `flowRunId` is the sole pointer, mirroring campaign-kickoff's
+ * re-derive-everything-from-the-row convention (the worker re-reads
+ * flow_runs/flow_versions for current_node_id, delay state, etc.).
+ */
+export const flowRunAdvanceJobSchema = z.object({
+  workspaceId: z.string().uuid(),
+  flowRunId: z.string().uuid(),
+});
+export type FlowRunAdvanceJob = z.infer<typeof flowRunAdvanceJobSchema>;
+
+/**
+ * flow-trigger-check job payload: enqueued after an event is ingested (or a
+ * contact is updated) so the flow-trigger-evaluator worker can check live
+ * flows' event/segment triggers for this one contact. `eventName` is
+ * present for an event-driven check and absent for a contact-change-driven
+ * segment re-check (D-02's event-driven half of the hybrid).
+ */
+export const flowTriggerCheckJobSchema = z.object({
+  workspaceId: z.string().uuid(),
+  contactId: z.string().uuid(),
+  eventName: z.string().min(1).optional(),
+});
+export type FlowTriggerCheckJob = z.infer<typeof flowTriggerCheckJobSchema>;
 
 /**
  * campaign-kickoff job payload: the due-campaign scheduler enqueues one of
