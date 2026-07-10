@@ -6,14 +6,14 @@ current_phase: 06
 current_phase_name: flows-triggered-chains
 status: executing
 stopped_at: Completed 06-07-PLAN.md
-last_updated: "2026-07-10T05:52:36.784Z"
+last_updated: "2026-07-10T06:05:25.881Z"
 last_activity: 2026-07-10
 last_activity_desc: Phase 06 execution started
 progress:
   total_phases: 7
   completed_phases: 5
   total_plans: 72
-  completed_plans: 69
+  completed_plans: 70
   percent: 71
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-07-09)
 ## Current Position
 
 Phase: 06 (flows-triggered-chains) — EXECUTING
-Plan: 9 of 11
+Plan: 10 of 11
 Status: Ready to execute
 Last activity: 2026-07-10 — Phase 06 execution started
 
@@ -128,6 +128,7 @@ Progress: [████████████████████] 61/61 p
 | Phase 06 P10 | 17min | 3 tasks | 9 files |
 | Phase 06 P06 | 24min | 3 tasks | 6 files |
 | Phase 06 P07 | 32min | 3 tasks | 24 files |
+| Phase 06 P09 | 20min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -300,6 +301,8 @@ Recent decisions affecting current work:
 - [Phase 06]: 06-07: contact/workspace timezone stored as opaque text (mirrors city/country) -- IANA-allowlist validation enforced only at write choke points with a response cycle (API create/update, CSV import), not the unattended event-ingestion upsert path
 - [Phase 06]: 06-07: packages/shared-schemas gained NO dependency on @mega-crm/delivery-core (bundled into apps/web via Vite; delivery-core is Node-only) -- timezone/defaultTimezone zod fields are format-only, real Intl.supportedValuesOf allowlist check runs server-side in apps/api only
 - [Phase 06]: 06-07: handleDelayNode and handleSendNode's quiet-hours deferral both enqueue their own BullMQ delayed nudge with jobId: flowRunId, the same dedup key flow-reconciliation.worker.ts's 60s backstop uses (06-05)
+- [Phase ?]: [Phase 06]: 06-09: eject/delete Owner/Admin gating reuses requirePermission('flow','publish') -- the flow resource's access-control statement only defines 'publish', matching pause/resume's existing reuse
+- [Phase ?]: [Phase 06]: 06-09: flowRunListQuerySchema/flowRunEjectSchema added to shared-schemas/src/flow.ts (Rule 2 gap-fill) -- every list/action route in this codebase validates via a matching zod schema
 
 ### Pending Todos
 
@@ -327,6 +330,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-10T05:52:36.754Z
+Last session: 2026-07-10T06:03:24.818Z
 Stopped at: Completed 06-07-PLAN.md
 Resume file: None
