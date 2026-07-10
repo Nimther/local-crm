@@ -367,6 +367,15 @@ export async function deleteSegment(id: string): Promise<boolean> {
       );
     }
 
+    // 06-20/WR-01: a SAVEPOINT wraps the DELETE so that if it trips the DB's
+    // FK RESTRICT (23503), the catch below can ROLLBACK TO SAVEPOINT and
+    // restore a live transaction before re-querying. Without this, the
+    // failed DELETE aborts the whole transaction and any subsequent query
+    // (the flow re-check below) fails with a raw postgres 25P02
+    // ("current transaction is aborted"), which propagates instead of the
+    // intended SegmentConflictError -- surfacing an opaque 500 rather than
+    // an actionable 409.
+    await client.query("SAVEPOINT seg_delete");
     try {
       const { rows } = await client.query(
         `DELETE FROM segments WHERE workspace_id = $1 AND id = $2 RETURNING id`,
@@ -382,6 +391,9 @@ export async function deleteSegment(id: string): Promise<boolean> {
       // constraint. Without this, that case surfaced as a raw 500
       // (postgres 23503) instead of the same actionable conflict error.
       if ((err as { code?: string } | undefined)?.code === "23503") {
+        // 06-20/WR-01: restore a live transaction before re-querying -- see
+        // the SAVEPOINT comment above.
+        await client.query("ROLLBACK TO SAVEPOINT seg_delete");
         // D-24: disambiguate which FK actually fired -- flows.trigger_segment_id
         // is ALSO an unconditional RESTRICT FK (no status-based exemption the
         // way campaigns' canceled state has), so re-check for a flow reference
