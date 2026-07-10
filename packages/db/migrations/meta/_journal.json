@@ -218,6 +218,13 @@
       "when": 1783685963472,
       "tag": "0030_workspace_send_settings_timezone_quiet_hours",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1783685963473,
+      "tag": "0031_flows_exit_conditions",
+      "breakpoints": true
     }
   ]
 }

@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, integer, pgEnum } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, uuid, integer, jsonb, pgEnum } from "drizzle-orm/pg-core";
 import { organization } from "./auth.js";
 import { segments } from "./segments.js";
 
@@ -40,6 +40,12 @@ export const flows = pgTable("flows", {
   quietHoursMode: text("quiet_hours_mode").notNull().default("inherit"), // "inherit" | "override" | "disabled"
   quietHoursStart: integer("quiet_hours_start"), // minutes from midnight
   quietHoursEnd: integer("quiet_hours_end"), // minutes from midnight
+  // 06-04: D-15 flow-level exit conditions (segment membership or a
+  // post-entry event) -- an array of flowExitConditionSchema-shaped objects
+  // (@mega-crm/shared-schemas), validated at the app layer only. Added here
+  // because updateFlowDraftSchema (06-02) already accepts this field but no
+  // column existed yet to persist it (Rule 2 gap-fill).
+  exitConditions: jsonb("exit_conditions").notNull().default([]),
   createdByUserId: text("created_by_user_id").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
