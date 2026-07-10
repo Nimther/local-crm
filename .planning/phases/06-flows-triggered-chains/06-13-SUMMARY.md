@@ -156,3 +156,15 @@ None - no external service configuration required.
 ---
 *Phase: 06-flows-triggered-chains*
 *Completed: 2026-07-10*
+
+## Self-Check: PASSED
+- FOUND: apps/worker/src/queues/flows/handlers/send-node.ts
+- FOUND: apps/worker/src/queues/flows/flow-run-advance.worker.ts
+- FOUND: packages/db/src/schema/flows.ts
+- FOUND: packages/db/migrations/0034_flows_quiet_hours_mode_canonical.sql
+- FOUND: apps/worker/src/queues/__tests__/flow-run-advance.test.ts
+- FOUND commit: fc183b8
+- FOUND commit: 3462cab
+- FOUND commit: e92fb69
+- FOUND commit: a3780be
+- FOUND commit: 6aa073d
