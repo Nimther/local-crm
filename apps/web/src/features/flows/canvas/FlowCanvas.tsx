@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { useParams } from "react-router";
 import {
   Background,
@@ -135,11 +135,35 @@ function initialCanvas(definition: FlowDefinition): { nodes: CanvasNode[]; edges
   };
 }
 
-function FlowCanvasInner({ slug, flow }: { slug: string; flow: FlowResponse }) {
+function FlowCanvasInner({
+  slug,
+  flow,
+  focusNodeId,
+}: {
+  slug: string;
+  flow: FlowResponse;
+  focusNodeId?: string | null;
+}) {
   const initial = initialCanvas(flow.definition);
   const [nodes, setNodes, onNodesChange] = useNodesState<CanvasNode>(initial.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initial.edges);
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, fitView } = useReactFlow();
+
+  // 06-11/T-06-11-02: the publish-blocker dialog (rendering the SERVER's
+  // 422 blocker list) lets the marketer jump straight to the offending node
+  // — select it and pan/zoom it into view. A non-matching id (e.g. the
+  // flow-scoped "trigger" key, which has no node id) safely no-ops.
+  useEffect(() => {
+    if (!focusNodeId) return;
+    setNodes((nds) => {
+      if (!nds.some((node) => node.id === focusNodeId)) return nds;
+      return nds.map((node) => ({ ...node, selected: node.id === focusNodeId }));
+    });
+    if (nodes.some((node) => node.id === focusNodeId)) {
+      fitView({ nodes: [{ id: focusNodeId }], duration: 300, maxZoom: 1 });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusNodeId]);
 
   // Debounced (1s) draft autosave against PATCH /flows/:id (06-04).
   const { saveState, serialized } = useAutosaveDraft({ slug, flowId: flow.id, nodes, edges });
@@ -324,8 +348,12 @@ function FlowCanvasInner({ slug, flow }: { slug: string; flow: FlowResponse }) {
  * best-current-editable definition via the draft API (06-04) and hands it to
  * the React Flow canvas. Remounts the canvas per flow id so local canvas
  * state never leaks between flows.
+ *
+ * `focusNodeId` (06-11): when embedded inside FlowDetailPage, the publish
+ * dialog's server-returned blocker list can pass a node id here to select +
+ * pan/zoom it into view — optional, defaults to no-op for any other caller.
  */
-export function FlowCanvas() {
+export function FlowCanvas({ focusNodeId }: { focusNodeId?: string | null } = {}) {
   const { slug = "", id = "" } = useParams<{ slug: string; id: string }>();
   const flowQuery = useFlow(slug, id);
 
@@ -349,9 +377,9 @@ export function FlowCanvas() {
   }
 
   return (
-    <div className="flex h-screen min-h-0">
+    <div className="flex h-full min-h-0">
       <ReactFlowProvider>
-        <FlowCanvasInner key={flowQuery.data.id} slug={slug} flow={flowQuery.data} />
+        <FlowCanvasInner key={flowQuery.data.id} slug={slug} flow={flowQuery.data} focusNodeId={focusNodeId} />
       </ReactFlowProvider>
     </div>
   );

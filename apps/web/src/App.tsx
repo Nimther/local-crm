@@ -29,6 +29,8 @@ import CampaignsListPage from "@/features/campaigns/CampaignsListPage";
 import CampaignBuilderPage from "@/features/campaigns/CampaignBuilderPage";
 import CampaignDetailPage from "@/features/campaigns/CampaignDetailPage";
 import SendSettingsPage from "@/features/campaigns/SendSettingsPage";
+import FlowsListPage from "@/features/flows/list/FlowsListPage";
+import FlowDetailPage from "@/features/flows/detail/FlowDetailPage";
 
 /**
  * Resolves "/" for a signed-in user: no workspace yet -> /create-workspace
@@ -86,6 +88,8 @@ export default function App() {
             <Route path="campaigns" element={<CampaignsListPage />} />
             <Route path="campaigns/new" element={<CampaignBuilderPage />} />
             <Route path="campaigns/:id" element={<CampaignDetailPage />} />
+            <Route path="flows" element={<FlowsListPage />} />
+            <Route path="flows/:id" element={<FlowDetailPage />} />
             <Route path="team" element={<TeamPage />} />
             <Route path="profile" element={<ProfilePage />} />
             <Route path="settings/sendgrid" element={<SendGridKeySettings />} />

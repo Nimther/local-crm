@@ -36,6 +36,9 @@ export function AppShell() {
           <NavLink to={`/w/${slug}/campaigns`} className={navLinkClassName}>
             Кампании
           </NavLink>
+          <NavLink to={`/w/${slug}/flows`} className={navLinkClassName}>
+            Цепочки
+          </NavLink>
           <NavLink to={`/w/${slug}/contacts/imports`} className={navLinkClassName}>
             Импорт CSV
           </NavLink>
