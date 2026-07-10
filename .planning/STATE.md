@@ -5,16 +5,16 @@ milestone_name: milestone
 current_phase: 06
 current_phase_name: flows-triggered-chains
 status: executing
-stopped_at: Completed 06-08-PLAN.md
-last_updated: "2026-07-10T09:28:23.070Z"
+stopped_at: Completed 06-15-PLAN.md
+last_updated: "2026-07-10T12:57:24.388Z"
 last_activity: 2026-07-10
 last_activity_desc: Phase 06 execution started
 progress:
   total_phases: 7
-  completed_phases: 6
-  total_plans: 75
+  completed_phases: 5
+  total_plans: 77
   completed_plans: 75
-  percent: 86
+  percent: 71
 ---
 
 # Project State
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-07-09)
 ## Current Position
 
 Phase: 06 (flows-triggered-chains) — EXECUTING
-Plan: 4 of 14
+Plan: 2 of 16
 Status: Ready to execute
 Last activity: 2026-07-10 — Phase 06 execution started
 
@@ -134,6 +134,7 @@ Progress: [████████████████████] 61/61 p
 | Phase 06 P12 | 25min | 3 tasks | 11 files |
 | Phase 06 P14 | 25 | 3 tasks | 4 files |
 | Phase 06 P13 | 20min | 3 tasks | 8 files |
+| Phase 06 P15 | 12min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -322,6 +323,7 @@ Recent decisions affecting current work:
 - [Phase 06]: 06-13: quiet_hours_mode canonical vocabulary is workspace_default|custom|disabled (matches what flow.repository.ts actually persists) -- the worker's legacy inherit|override vocabulary was retired to match, closing CR-02
 - [Phase 06]: 06-13: resolveQuietHoursWindow's else branch covers 'workspace_default' AND any unrecognized/legacy value, failing toward the workspace-default window rather than toward no gate (T-06-13-01)
 - [Phase 06]: 06-13: migration 0034 hand-written instead of using drizzle-kit generate's raw output -- meta/ has no snapshot for hand-written migrations 0026-0033, so generate diffed against the stale 0025 baseline and produced a full-table-recreate; only the actual incremental ALTER+data-migration was kept
+- [Phase ?]: [Phase 06]: 06-15: consolidated loadContactTimezone into @mega-crm/delivery-core with correct [workspaceId, contactId] bind order -- both send-node.ts and delay-node.ts previously carried an identical private copy with swapped bind order, so contact timezone never resolved and quiet-hours/wait_until always fell back to the workspace default (violating D-08/FLOW-05)
 
 ### Pending Todos
 
@@ -349,6 +351,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-10T09:26:50.428Z
-Stopped at: Completed 06-08-PLAN.md
+Last session: 2026-07-10T12:57:24.358Z
+Stopped at: Completed 06-15-PLAN.md
 Resume file: None
