@@ -46,6 +46,10 @@ export const flows = pgTable("flows", {
   // because updateFlowDraftSchema (06-02) already accepts this field but no
   // column existed yet to persist it (Rule 2 gap-fill).
   exitConditions: jsonb("exit_conditions").notNull().default([]),
+  // 06-08: D-04 resumable-cursor state for flow-enroll-existing.worker.ts's
+  // keyset-paginated batch enroll -- mirrors campaigns.snapshot_cursor.
+  // Nullable; NULL means no batch has run yet for the current pass.
+  enrollCursor: uuid("enroll_cursor"),
   createdByUserId: text("created_by_user_id").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),

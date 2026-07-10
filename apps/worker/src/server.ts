@@ -11,6 +11,7 @@ import { createFlowRunAdvanceWorker } from "./queues/flows/flow-run-advance.work
 import { createFlowReconciliationWorker } from "./queues/flows/flow-reconciliation.worker.js";
 import { createFlowTriggerEvaluatorWorker } from "./queues/flows/flow-trigger-evaluator.worker.js";
 import { createFlowSegmentSweepWorker } from "./queues/flows/flow-segment-sweep.worker.js";
+import { createFlowEnrollExistingWorker } from "./queues/flows/flow-enroll-existing.worker.js";
 
 /**
  * The worker process's runtime handle: a standalone shared ioredis
@@ -100,6 +101,10 @@ export async function buildWorker(): Promise<WorkerRuntime> {
     // FLOW-02 (06-08): the segment-entry periodic bulk-diff sweep (D-02b
     // safety net).
     createFlowSegmentSweepWorker(buildRedisConnectionOptions(redisUrl)),
+    // FLOW-02/D-04 (06-08): the publish route's enroll-existing resumable
+    // batch, fired once per publish when the marketer chooses to back-fill
+    // current segment members.
+    createFlowEnrollExistingWorker(buildRedisConnectionOptions(redisUrl)),
   ];
 
   const close = async (): Promise<void> => {
@@ -131,7 +136,7 @@ async function main(): Promise<void> {
 
   // eslint-disable-next-line no-console
   console.log(
-    `apps/worker started (${runtime.workers.length} BullMQ worker(s) registered: events:ingest, imports:csv, email-broadcast, email-triggered, campaign-kickoff, campaign-scheduler, webhook-events, flow-run-advance, flow-reconciliation, flow-trigger-evaluator, flow-segment-sweep)`
+    `apps/worker started (${runtime.workers.length} BullMQ worker(s) registered: events:ingest, imports:csv, email-broadcast, email-triggered, campaign-kickoff, campaign-scheduler, webhook-events, flow-run-advance, flow-reconciliation, flow-trigger-evaluator, flow-segment-sweep, flow-enroll-existing)`
   );
 }
 

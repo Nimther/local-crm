@@ -310,6 +310,13 @@ export async function updateFlowDraft(id: string, patch: UpdateFlowDraftInput): 
   });
 }
 
+export interface PublishFlowResult {
+  flow: FlowRow;
+  /** D-04: whether this flow is segment-triggered -- the ONLY case the enroll-existing choice is meaningful for. */
+  segmentTriggered: boolean;
+  triggerSegmentId: string | null;
+}
+
 /**
  * FLOW-06/FLOW-07/D-17/Pitfall-3: re-runs validateFlowDefinition server-side
  * inside this transaction (NEVER trusts a client isValid flag) -- any D-17
@@ -319,9 +326,13 @@ export async function updateFlowDraft(id: string, patch: UpdateFlowDraftInput): 
  * flows.live_version_id is repointed at it, status becomes 'live', and
  * draft_version_id is cleared to NULL (D-20: the next edit lazily creates a
  * fresh working draft via updateFlowDraft, rather than eagerly allocating an
- * unused draft row here).
+ * unused draft row here). Returns whether the flow is segment-triggered so
+ * the caller (flows.routes.ts) can act on the D-04 enroll-existing choice --
+ * this function itself never enqueues a BullMQ job or seeds the membership
+ * snapshot (mirrors campaigns.routes.ts's launch-handler-enqueues,
+ * not-the-repository convention).
  */
-export async function publishFlow(id: string): Promise<FlowRow> {
+export async function publishFlow(id: string): Promise<PublishFlowResult> {
   return withTenantTransaction(async (client) => {
     const workspaceId = getWorkspaceId();
     const { rows } = await client.query<FlowRow>(
@@ -359,7 +370,12 @@ export async function publishFlow(id: string): Promise<FlowRow> {
        RETURNING ${FLOW_COLUMNS}`,
       [workspaceId, id, existing.draftVersionId]
     );
-    return updated[0];
+    const flow = updated[0];
+    return {
+      flow,
+      segmentTriggered: flow.triggerType === "segment" && flow.triggerSegmentId !== null,
+      triggerSegmentId: flow.triggerSegmentId,
+    };
   });
 }
 

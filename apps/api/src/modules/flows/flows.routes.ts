@@ -4,6 +4,7 @@ import {
   flowListQuerySchema,
   flowRunEjectSchema,
   flowRunListQuerySchema,
+  publishFlowSchema,
   updateFlowDraftSchema,
 } from "@mega-crm/shared-schemas";
 import type { FlowDefinition } from "@mega-crm/flows-core";
@@ -12,6 +13,7 @@ import { requirePermission, toFetchHeaders } from "../../middleware/role-guard.j
 import { withTenant } from "../../middleware/tenant-context.js";
 import { findActiveWorkspaceBySlug, type ActiveWorkspace } from "../tenancy/workspace-lookup.js";
 import { getCallerRoles } from "../tenancy/member-roles.js";
+import { getSegment, countSegmentMembers } from "../segments/segment.repository.js";
 import {
   FlowStateError,
   createFlow,
@@ -28,6 +30,7 @@ import {
 import { getPinnedVersion } from "./flow-version.repository.js";
 import { ejectRuns, listRuns, type FlowRunRow } from "./flow-run.repository.js";
 import { shapeFlowValidationFields } from "./flow-validation.js";
+import { flowEnrollExistingQueue } from "./flow-queues.js";
 
 /**
  * Maps a FlowStateError to its HTTP status (D-06/D-18/D-17): `not_found`->404,
@@ -228,12 +231,48 @@ export async function registerFlowsRoutes(fastify: FastifyInstance): Promise<voi
     }
   });
 
+  // D-04: "~N contacts" preview for a segment-triggered flow's publish
+  // dialog. Meaningful only when the flow is currently segment-triggered
+  // (triggerType/triggerSegmentId are synced onto the flows row by
+  // updateFlowDraft whenever the draft definition changes) -- returns 400
+  // for an event-triggered (or not-yet-configured) flow.
+  fastify.get("/api/workspaces/:slug/flows/:id/enroll-preview", async (request, reply) => {
+    const { slug, id } = request.params as { slug: string; id: string };
+    const workspace = await resolveWorkspaceMember(request, reply, slug);
+    if (!workspace) return;
+
+    const body = await withTenant(workspace.id, async () => {
+      const flow = await getFlow(id);
+      if (!flow) return { status: 404 as const };
+      if (flow.triggerType !== "segment" || !flow.triggerSegmentId) {
+        return { status: 400 as const };
+      }
+      const segment = await getSegment(flow.triggerSegmentId);
+      if (!segment) return { status: 400 as const };
+      const count = await countSegmentMembers(segment.definition);
+      return { status: 200 as const, count };
+    });
+
+    if (body.status === 404) {
+      return reply.code(404).send({ error: "Flow not found" });
+    }
+    if (body.status === 400) {
+      return reply.code(400).send({ error: "Flow is not segment-triggered" });
+    }
+    return reply.send({ count: body.count });
+  });
+
   // D-23: publish/pause/resume are Owner/Admin-only.
   fastify.post(
     "/api/workspaces/:slug/flows/:id/publish",
     { preHandler: requirePermission("flow", "publish") },
     async (request, reply) => {
       const { slug, id } = request.params as { slug: string; id: string };
+      const parsed = publishFlowSchema.safeParse(request.body ?? {});
+      if (!parsed.success) {
+        return reply.code(400).send({ error: parsed.error.flatten() });
+      }
+
       const workspace = await findActiveWorkspaceBySlug(slug);
       if (!workspace) {
         return reply.code(404).send({ error: "Workspace not found" });
@@ -241,8 +280,28 @@ export async function registerFlowsRoutes(fastify: FastifyInstance): Promise<voi
 
       try {
         const body = await withTenant(workspace.id, async () => {
-          const published = await publishFlow(id);
-          return toFlowResponse(published);
+          const result = await publishFlow(id);
+
+          // D-04: the enroll-existing choice only ever applies to a
+          // segment-triggered flow -- an event-triggered flow's publish
+          // never touches the membership snapshot at all. Either choice
+          // (back-fill with runs, or seed-only for future entrants) is
+          // handled entirely inside flow-enroll-existing.worker.ts -- the
+          // route only enqueues, never mutates the snapshot itself.
+          if (result.segmentTriggered && result.triggerSegmentId) {
+            await flowEnrollExistingQueue.add(
+              "enroll-existing",
+              {
+                workspaceId: workspace.id,
+                flowId: result.flow.id,
+                flowVersionId: result.flow.liveVersionId as string,
+                enrollExisting: parsed.data.enrollExisting ?? false,
+              },
+              { jobId: `${result.flow.id}-${result.flow.liveVersionId}-enroll-existing` }
+            );
+          }
+
+          return toFlowResponse(result.flow);
         });
         return reply.send(body);
       } catch (err) {

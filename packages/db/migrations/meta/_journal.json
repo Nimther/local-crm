@@ -232,6 +232,13 @@
       "when": 1783685963474,
       "tag": "0032_flows_segment_sweep_scan_policy",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1783685963475,
+      "tag": "0033_flows_enroll_cursor",
+      "breakpoints": true
     }
   ]
 }

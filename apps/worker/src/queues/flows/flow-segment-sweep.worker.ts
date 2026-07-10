@@ -134,6 +134,21 @@ async function sweepOneFlow(row: DueSegmentFlowRow): Promise<void> {
 }
 
 /**
+ * The sweep's per-tick body -- discovers every live segment-triggered flow
+ * across every tenant and sweeps each one. Exported standalone (not only as
+ * a Worker's inline processor), mirroring every other worker's exported-
+ * processor convention in this codebase, so
+ * `flow-segment-trigger.test.ts` (Task 3) can invoke a single tick directly
+ * without waiting on `SWEEP_INTERVAL_MS`'s real 15-minute repeat interval.
+ */
+export async function runFlowSegmentSweepTick(): Promise<void> {
+  const dueFlows = await findLiveSegmentTriggeredFlows();
+  for (const row of dueFlows) {
+    await sweepOneFlow(row);
+  }
+}
+
+/**
  * Constructs the repeatable flow-segment-sweep Worker (D-02b): scans every
  * live segment-triggered flow across every tenant every `SWEEP_INTERVAL_MS`
  * (15 min) and enrolls any contact newly matching that flow's trigger
@@ -151,14 +166,5 @@ export function createFlowSegmentSweepWorker(connection: ConnectionOptions): Wor
     { repeat: { every: SWEEP_INTERVAL_MS }, jobId: "scan-segment-triggered-flows" }
   );
 
-  return new Worker(
-    FLOW_SEGMENT_SWEEP_QUEUE,
-    async () => {
-      const dueFlows = await findLiveSegmentTriggeredFlows();
-      for (const row of dueFlows) {
-        await sweepOneFlow(row);
-      }
-    },
-    { connection }
-  );
+  return new Worker(FLOW_SEGMENT_SWEEP_QUEUE, runFlowSegmentSweepTick, { connection });
 }

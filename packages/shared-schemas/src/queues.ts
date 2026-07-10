@@ -50,6 +50,13 @@ export const FLOW_TRIGGER_EVALUATOR_QUEUE = "flow-trigger-evaluator";
 export const FLOW_RUN_ADVANCE_QUEUE = "flow-run-advance";
 export const FLOW_RECONCILIATION_QUEUE = "flow-reconciliation";
 export const FLOW_SEGMENT_SWEEP_QUEUE = "flow-segment-sweep";
+/**
+ * 06-08/D-04: the publish route's "enroll existing segment members" choice
+ * enqueues one of these -- its own dedicated lane (not folded into
+ * FLOW_SEGMENT_SWEEP_QUEUE, a structurally different concern: a one-shot
+ * resumable batch fired once per publish, not a repeatable periodic scan).
+ */
+export const FLOW_ENROLL_EXISTING_QUEUE = "flow-enroll-existing";
 
 /**
  * events:ingest job payload (EVNT-02/EVNT-03, finalized in 02-06): the
@@ -172,6 +179,25 @@ export const flowTriggerCheckJobSchema = z.object({
   eventName: z.string().min(1).optional(),
 });
 export type FlowTriggerCheckJob = z.infer<typeof flowTriggerCheckJobSchema>;
+
+/**
+ * flow-enroll-existing job payload (D-04): the publish route enqueues ONE of
+ * these for every segment-triggered flow's publish -- `flowId`/`flowVersionId`
+ * are re-derive-everything-from-the-row pointers (mirrors campaign-kickoff's
+ * convention: the worker re-reads the flow's current trigger_segment_id/
+ * reentry settings from `flows`, and resolves the entry node from
+ * `flowVersionId`'s pinned definition). `enrollExisting` carries the D-04
+ * choice itself: `true` creates a run for every current segment member
+ * (subject to canEnterFlow); `false` marks them "seen" in the membership
+ * snapshot WITHOUT creating any run, so only future entrants enroll.
+ */
+export const flowEnrollExistingJobSchema = z.object({
+  workspaceId: z.string().uuid(),
+  flowId: z.string().uuid(),
+  flowVersionId: z.string().uuid(),
+  enrollExisting: z.boolean(),
+});
+export type FlowEnrollExistingJob = z.infer<typeof flowEnrollExistingJobSchema>;
 
 /**
  * campaign-kickoff job payload: the due-campaign scheduler enqueues one of

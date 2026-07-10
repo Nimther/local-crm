@@ -68,6 +68,21 @@ export const updateFlowDraftSchema = z
   });
 export type UpdateFlowDraftInput = z.infer<typeof updateFlowDraftSchema>;
 
+/**
+ * POST /api/workspaces/:slug/flows/:id/publish -- D-04's enroll-existing
+ * choice, meaningful only for a segment-triggered flow: `true` enqueues a
+ * resumable batch that creates runs for current segment members (subject to
+ * re-entry/frequency-cap/quiet-hours, same as any other entry path);
+ * `false`/omitted marks current members "seen" in the membership snapshot
+ * WITHOUT creating any run, so only future entrants enroll. Ignored (no-op)
+ * for an event-triggered flow. Optional/no-body-required so the existing
+ * bare `POST .../publish` call (no payload) keeps working unchanged.
+ */
+export const publishFlowSchema = z.object({
+  enrollExisting: z.boolean().optional(),
+});
+export type PublishFlowInput = z.infer<typeof publishFlowSchema>;
+
 /** GET /api/workspaces/:slug/flows */
 export const flowListQuerySchema = z.object({
   page: z.coerce.number().int().min(1).optional().default(1),
