@@ -336,7 +336,7 @@ _Wave 1:_
   3. Re-entry control (once ever / once per N days / every time) and quiet hours are honored: no email is sent inside the quiet window, and it is deferred until the window ends.
   4. Editing a live flow happens in a draft that only takes effect on publish; contacts already mid-flight continue on the version they entered, with no duplicate or skipped sends.
 
-**Plans**: 11/11 plans complete + 3 gap-closure plans (06-12…06-14)
+**Plans**: 12/14 plans executed
 **UI hint**: yes
 
 Plans:
@@ -373,7 +373,7 @@ Plans:
 
 _Wave 1 (parallel — disjoint files):_
 
-- [ ] 06-12-PLAN.md — CR-01/WR-08: unique-per-wake advance jobId + no-shadow flowRunAdvanceQueue options + send/branch forward nudges + real Queue/Worker multi-step integration test (FLOW-02, FLOW-03)
+- [x] 06-12-PLAN.md — CR-01/WR-08: unique-per-wake advance jobId + no-shadow flowRunAdvanceQueue options + send/branch forward nudges + real Queue/Worker multi-step integration test (FLOW-02, FLOW-03)
 - [ ] 06-14-PLAN.md — CR-03/WR-03: gate draft trigger-column sync on status='draft' + re-derive triggers in publishFlow + live/paused publish-changes UI action + API regression test (FLOW-06)
 
 _Wave 2 (blocked on 06-12 — shares send-node.ts / flow-run-advance.worker.ts / flow-run-advance.test.ts):_
@@ -417,5 +417,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 3. Segmentation Engine | 8/8 | Complete    | 2026-07-06 |
 | 4. Broadcast Campaigns & Send Pipeline | 19/19 | Complete    | 2026-07-06 |
 | 5. Webhook Processing & Delivery Tracking | 13/13 | Complete    | 2026-07-09 |
-| 6. Flows (Triggered Chains) | 11/11 | Complete   | 2026-07-10 |
+| 6. Flows (Triggered Chains) | 12/14 | In Progress|  |
 | 7. Analytics, Dashboard & Send Log | 0/5 | Not started | - |
