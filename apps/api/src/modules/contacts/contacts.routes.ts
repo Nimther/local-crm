@@ -6,6 +6,7 @@ import { findActiveWorkspaceBySlug, type ActiveWorkspace } from "../tenancy/work
 import { getCallerRoles } from "../tenancy/member-roles.js";
 import {
   ContactConflictError,
+  ContactValidationError,
   createContact,
   deleteContact,
   getContact,
@@ -38,6 +39,7 @@ function toContactResponse(row: ContactRow) {
     phone: row.phone,
     city: row.city,
     country: row.country,
+    timezone: row.timezone,
     tags: row.tags,
     properties: row.properties,
     subscriptionStatus: row.subscriptionStatus,
@@ -113,6 +115,9 @@ export async function registerContactsRoutes(fastify: FastifyInstance): Promise<
       const created = await withTenant(workspace.id, () => createContact(parsed.data));
       return reply.code(201).send(toContactResponse(created));
     } catch (err) {
+      if (err instanceof ContactValidationError) {
+        return reply.code(400).send({ error: err.message, code: err.code });
+      }
       if (err instanceof ContactConflictError) {
         return reply.code(409).send({ error: err.message, code: err.code });
       }
@@ -171,6 +176,9 @@ export async function registerContactsRoutes(fastify: FastifyInstance): Promise<
       }
       return reply.send(toContactResponse(updated));
     } catch (err) {
+      if (err instanceof ContactValidationError) {
+        return reply.code(400).send({ error: err.message, code: err.code });
+      }
       if (err instanceof ContactConflictError) {
         return reply.code(409).send({ error: err.message, code: err.code });
       }

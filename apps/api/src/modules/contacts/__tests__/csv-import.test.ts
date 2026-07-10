@@ -36,6 +36,28 @@ describe("applyCsvRowMapping subscriptionStatus validation (WR-05a)", () => {
 });
 
 /**
+ * 06-07/T-06-07-01/T-06-07-04: `timezone` is a standard field (mirrors
+ * city/country) -- mapping a column to it lands the value on the typed
+ * column, not in freeform `properties`, and an invalid IANA zone is
+ * rejected with a mapper error rather than ever reaching storage.
+ */
+describe("applyCsvRowMapping timezone standard-field validation (06-07)", () => {
+  const mapping = { external_id: "externalId", tz: "timezone" };
+
+  it("maps a valid IANA zone onto the standard timezone field, not properties", () => {
+    const result = applyCsvRowMapping({ external_id: "tz-1", tz: "Europe/Belgrade" }, mapping);
+    expect(result.error).toBeUndefined();
+    expect(result.input.timezone).toBe("Europe/Belgrade");
+    expect(result.input.properties).toEqual({});
+  });
+
+  it("rejects an invalid IANA zone with a mapper error", () => {
+    const result = applyCsvRowMapping({ external_id: "tz-2", tz: "Mars/Phobos" }, mapping);
+    expect(result.error).toBeTruthy();
+  });
+});
+
+/**
  * CSV contact import (CONT-02, D-15..D-20): the HTTP-observable half of the
  * pipeline -- upload (streamed staging + header/preview detection), dry-run
  * (D-17: whole-file validation that writes NO contact), the downloadable

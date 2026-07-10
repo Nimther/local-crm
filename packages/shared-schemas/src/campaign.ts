@@ -71,13 +71,28 @@ export type TestSendCampaignInput = z.infer<typeof testSendCampaignSchema>;
 
 /**
  * PUT /api/workspaces/:slug/send-settings (D-13) -- per-workspace frequency
- * cap + optional rps override. frequencyWindowHours defaults to 24;
- * rpsLimit null/omitted means "use the platform default", resolved by
- * delivery-core.
+ * cap + optional rps override, PLUS (06-07/D-08/D-09) the workspace default
+ * timezone + quiet-hours window a flow's `quiet_hours_mode: 'inherit'`
+ * falls back to. frequencyWindowHours defaults to 24; rpsLimit null/omitted
+ * means "use the platform default", resolved by delivery-core.
+ *
+ * `defaultTimezone` is format-checked here (non-empty string) only -- the
+ * actual `Intl.supportedValuesOf('timeZone')` allowlist check
+ * (`isValidIanaTimezone`) runs at the route layer in `apps/api`
+ * (T-06-07-01), NOT in this schema, since `@mega-crm/shared-schemas` is
+ * bundled into the browser (`apps/web`) and must never depend on
+ * `@mega-crm/delivery-core` (a Node-only package pulling in `pg`/KMS/
+ * SendGrid).
  */
 export const workspaceSendSettingsSchema = z.object({
   frequencyCap: z.number().int().min(1),
   frequencyWindowHours: z.number().int().min(1).default(24),
   rpsLimit: z.number().int().min(1).nullable().optional(),
+  defaultTimezone: z.string().trim().min(1).nullable().optional(),
+  /** Minutes since local midnight, 0-1439. */
+  quietHoursStart: z.number().int().min(0).max(1439).nullable().optional(),
+  /** Minutes since local midnight, 0-1439. */
+  quietHoursEnd: z.number().int().min(0).max(1439).nullable().optional(),
+  quietHoursEnabled: z.boolean().optional().default(false),
 });
 export type WorkspaceSendSettingsInput = z.infer<typeof workspaceSendSettingsSchema>;

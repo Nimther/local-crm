@@ -1,4 +1,5 @@
 import { getWorkspaceId, withTenantTransaction } from "../../middleware/tenant-context.js";
+import { isValidIanaTimezone } from "@mega-crm/delivery-core";
 import {
   CONTACT_COLUMNS,
   isEmailSuppressed,
@@ -37,6 +38,8 @@ export interface CreateContactInput {
   phone?: string | null;
   city?: string | null;
   country?: string | null;
+  /** IANA timezone name (06-07, FLOW-05/D-08) -- validated via `isValidIanaTimezone` before ever reaching storage (T-06-07-01). `null` explicitly clears it (CR-04 convention). */
+  timezone?: string | null;
   tags?: string[];
   properties?: Record<string, unknown>;
   subscriptionStatus?: SubscriptionStatus;
@@ -108,6 +111,30 @@ export class ContactConflictError extends Error {
   ) {
     super(message);
     this.name = "ContactConflictError";
+  }
+}
+
+/**
+ * 06-07/T-06-07-01: thrown when a provided `timezone` fails the
+ * `isValidIanaTimezone` allowlist check -- distinct from
+ * `ContactConflictError` (409 conflict) because this is a 400 input-
+ * validation failure, not a state conflict. contacts.routes.ts maps this to
+ * a 400 response.
+ */
+export class ContactValidationError extends Error {
+  constructor(
+    message: string,
+    public readonly code: "invalid_timezone"
+  ) {
+    super(message);
+    this.name = "ContactValidationError";
+  }
+}
+
+/** Shared by createContact/updateContact -- never stores an invalid IANA zone (T-06-07-01). `null`/`undefined` pass through untouched. */
+function assertValidTimezone(timezone: string | null | undefined): void {
+  if (timezone && !isValidIanaTimezone(timezone)) {
+    throw new ContactValidationError(`"${timezone}" is not a valid IANA timezone`, "invalid_timezone");
   }
 }
 
@@ -194,6 +221,8 @@ export async function getContact(id: string): Promise<ContactRow | null> {
  * "deleted -> reimported -> resubscribed".
  */
 export async function createContact(input: CreateContactInput): Promise<ContactRow> {
+  assertValidTimezone(input.timezone);
+
   return withTenantTransaction(async (client) => {
     const workspaceId = getWorkspaceId();
 
@@ -211,8 +240,8 @@ export async function createContact(input: CreateContactInput): Promise<ContactR
 
     const { rows } = await client.query<ContactRow>(
       `INSERT INTO contacts
-         (workspace_id, external_id, email, first_name, last_name, phone, city, country, tags, properties, subscription_status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+         (workspace_id, external_id, email, first_name, last_name, phone, city, country, timezone, tags, properties, subscription_status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        RETURNING ${CONTACT_COLUMNS}`,
       [
         workspaceId,
@@ -223,6 +252,7 @@ export async function createContact(input: CreateContactInput): Promise<ContactR
         input.phone ?? null,
         input.city ?? null,
         input.country ?? null,
+        input.timezone ?? null,
         input.tags ?? [],
         input.properties ?? {},
         subscriptionStatus,
@@ -246,6 +276,8 @@ export async function createContact(input: CreateContactInput): Promise<ContactR
  * bounce/webhook flow) may set it (T-02-01-02).
  */
 export async function updateContact(id: string, patch: UpdateContactInput): Promise<ContactRow | null> {
+  assertValidTimezone(patch.timezone);
+
   return withTenantTransaction(async (client) => {
     const workspaceId = getWorkspaceId();
     const { rows: existingRows } = await client.query<ContactRow>(
@@ -302,9 +334,10 @@ export async function updateContact(id: string, patch: UpdateContactInput): Prom
          phone = $7,
          city = $8,
          country = $9,
-         tags = $10,
-         properties = $11,
-         subscription_status = $12,
+         timezone = $10,
+         tags = $11,
+         properties = $12,
+         subscription_status = $13,
          updated_at = now()
        WHERE workspace_id = $1 AND id = $2
        RETURNING ${CONTACT_COLUMNS}`,
@@ -318,6 +351,7 @@ export async function updateContact(id: string, patch: UpdateContactInput): Prom
         patch.phone !== undefined ? patch.phone : existing.phone,
         patch.city !== undefined ? patch.city : existing.city,
         patch.country !== undefined ? patch.country : existing.country,
+        patch.timezone !== undefined ? patch.timezone : existing.timezone,
         patch.tags !== undefined ? patch.tags : existing.tags,
         nextProperties,
         nextStatus,

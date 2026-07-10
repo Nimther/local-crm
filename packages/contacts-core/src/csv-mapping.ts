@@ -1,3 +1,4 @@
+import { isValidIanaTimezone } from "@mega-crm/delivery-core";
 import type { UpsertContactIdentityInput } from "./contact-repository.js";
 
 /**
@@ -5,6 +6,11 @@ import type { UpsertContactIdentityInput } from "./contact-repository.js";
  * Any OTHER target string is treated as a custom-property key (D-19:
  * "create a new property on the fly" is simply choosing an unrecognized
  * mapping target -- no separate "create property" step exists).
+ *
+ * 06-07 (T-06-07-04): `timezone` is a standard field like `city`/`country`
+ * -- mapping a CSV column to it never lands the value in freeform
+ * `properties`. Unlike `city`/`country` it IS format-validated below (an
+ * invalid IANA zone must never be stored, T-06-07-01).
  */
 const STANDARD_FIELDS = new Set([
   "externalId",
@@ -14,6 +20,7 @@ const STANDARD_FIELDS = new Set([
   "phone",
   "city",
   "country",
+  "timezone",
   "tags",
   "subscriptionStatus",
 ]);
@@ -86,6 +93,13 @@ export function applyCsvRowMapping(
     // "suppressed" via CSV (D-12) -- neither may pass dry-run OR apply, so
     // this is the SAME mapper both call, keeping them in agreement.
     return { input, error: "Invalid subscription status" };
+  }
+
+  // T-06-07-01/T-06-07-04: an invalid IANA zone must never be stored -- both
+  // dry-run and apply reject the row via this SAME mapper, exactly like the
+  // email-format check below.
+  if (input.timezone !== undefined && !isValidIanaTimezone(input.timezone)) {
+    return { input, error: "Invalid timezone" };
   }
 
   if (!input.externalId && !input.email) {

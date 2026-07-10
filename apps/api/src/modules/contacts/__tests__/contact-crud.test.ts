@@ -384,4 +384,56 @@ describe("Contact CRUD (CONT-01, CONT-05)", () => {
     const idsInA = (listA.json().items as Array<{ id: string }>).map((c) => c.id);
     expect(idsInA).toContain(created.id);
   });
+
+  it("06-07/T-06-07-01: create with a valid IANA timezone persists it", async () => {
+    const { cookie, workspace } = await owner("crud-tz-create");
+    const created = await app.inject({
+      method: "POST",
+      url: contactsUrl(workspace.slug),
+      headers: { cookie },
+      payload: { email: `tz-create-${Date.now()}@example.com`, timezone: "Europe/Belgrade" },
+    });
+    expect(created.statusCode, `create failed: ${created.body}`).toBe(201);
+    expect(created.json().timezone).toBe("Europe/Belgrade");
+  });
+
+  it("06-07/T-06-07-01: create with an invalid timezone is rejected with 400, never stored", async () => {
+    const { cookie, workspace } = await owner("crud-tz-invalid-create");
+    const res = await app.inject({
+      method: "POST",
+      url: contactsUrl(workspace.slug),
+      headers: { cookie },
+      payload: { email: `tz-invalid-${Date.now()}@example.com`, timezone: "Mars/Phobos" },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().code).toBe("invalid_timezone");
+  });
+
+  it("06-07/T-06-07-01: update with an invalid timezone is rejected with 400, existing value untouched", async () => {
+    const { cookie, workspace } = await owner("crud-tz-invalid-update");
+    const created = (
+      await app.inject({
+        method: "POST",
+        url: contactsUrl(workspace.slug),
+        headers: { cookie },
+        payload: { email: `tz-update-${Date.now()}@example.com`, timezone: "America/New_York" },
+      })
+    ).json();
+
+    const updateRes = await app.inject({
+      method: "PATCH",
+      url: contactsUrl(workspace.slug, created.id),
+      headers: { cookie },
+      payload: { timezone: "Mars/Phobos" },
+    });
+    expect(updateRes.statusCode).toBe(400);
+    expect(updateRes.json().code).toBe("invalid_timezone");
+
+    const getRes = await app.inject({
+      method: "GET",
+      url: contactsUrl(workspace.slug, created.id),
+      headers: { cookie },
+    });
+    expect(getRes.json().timezone).toBe("America/New_York");
+  });
 });

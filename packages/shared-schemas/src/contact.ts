@@ -20,6 +20,12 @@ export const createContactSchema = z
     phone: z.string().trim().max(50).optional(),
     city: z.string().trim().max(255).optional(),
     country: z.string().trim().max(255).optional(),
+    // 06-07 (FLOW-05/D-08): IANA timezone name. Format (regex/length) is
+    // NOT enough to validate an IANA zone -- the actual `Intl.
+    // supportedValuesOf('timeZone')` allowlist check runs at the
+    // repository layer (`isValidIanaTimezone`, T-06-07-01), which rejects
+    // with a 400 before this ever reaches storage.
+    timezone: z.string().trim().min(1).optional(),
     tags: z.array(z.string().trim().min(1)).optional(),
     properties: propertiesSchema.optional(),
     subscriptionStatus: subscriptionStatusSchema.optional(),
@@ -49,6 +55,9 @@ export const updateContactSchema = z.object({
   phone: z.string().trim().max(50).nullable().optional(),
   city: z.string().trim().max(255).nullable().optional(),
   country: z.string().trim().max(255).nullable().optional(),
+  // 06-07: null explicitly clears the timezone (CR-04 convention); IANA
+  // format is validated at the repository layer (isValidIanaTimezone).
+  timezone: z.string().trim().min(1).nullable().optional(),
   tags: z.array(z.string().trim().min(1)).optional(),
   properties: propertiesSchema.optional(),
   subscriptionStatus: subscriptionStatusSchema.optional(),
@@ -76,6 +85,7 @@ export const contactResponseSchema = z.object({
   phone: z.string().nullable(),
   city: z.string().nullable(),
   country: z.string().nullable(),
+  timezone: z.string().nullable(),
   tags: z.array(z.string()),
   properties: z.record(z.string(), z.unknown()),
   subscriptionStatus: subscriptionStatusSchema,

@@ -14,6 +14,8 @@ export interface ContactRow {
   phone: string | null;
   city: string | null;
   country: string | null;
+  /** Phase 6 (06-01, FLOW-01): IANA timezone name -- validated at the app layer only (see apps/api's contact.repository.ts); stored as opaque text here, mirroring city/country. */
+  timezone: string | null;
   tags: string[];
   properties: Record<string, unknown>;
   subscriptionStatus: SubscriptionStatus;
@@ -32,6 +34,7 @@ export const CONTACT_COLUMNS = `
   phone,
   city,
   country,
+  timezone,
   tags,
   properties,
   subscription_status as "subscriptionStatus",
@@ -130,6 +133,8 @@ export interface UpsertContactIdentityInput {
   phone?: string;
   city?: string;
   country?: string;
+  /** IANA timezone name (06-07) -- callers (csv-mapping.ts) are responsible for IANA validation before this reaches storage; stored as opaque text here, mirroring city/country. */
+  timezone?: string;
   tags?: string[];
   properties?: Record<string, unknown>;
   subscriptionStatus?: SubscriptionStatus;
@@ -243,8 +248,8 @@ export async function upsertContactByIdentity(
     try {
       const { rows } = await client.query<{ id: string }>(
         `INSERT INTO contacts
-           (workspace_id, external_id, email, first_name, last_name, phone, city, country, tags, properties, subscription_status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+           (workspace_id, external_id, email, first_name, last_name, phone, city, country, timezone, tags, properties, subscription_status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
          RETURNING id`,
         [
           workspaceId,
@@ -255,6 +260,7 @@ export async function upsertContactByIdentity(
           input.phone ?? null,
           input.city ?? null,
           input.country ?? null,
+          input.timezone ?? null,
           input.tags ?? [],
           safeProperties,
           subscriptionStatus,
@@ -354,9 +360,10 @@ export async function upsertContactByIdentity(
        phone = $7,
        city = $8,
        country = $9,
-       tags = $10,
-       properties = $11,
-       subscription_status = $12,
+       timezone = $10,
+       tags = $11,
+       properties = $12,
+       subscription_status = $13,
        updated_at = now()
      WHERE workspace_id = $1 AND id = $2`,
     [
@@ -369,6 +376,7 @@ export async function upsertContactByIdentity(
       input.phone !== undefined ? input.phone : existing.phone,
       input.city !== undefined ? input.city : existing.city,
       input.country !== undefined ? input.country : existing.country,
+      input.timezone !== undefined ? input.timezone : existing.timezone,
       input.tags !== undefined ? input.tags : existing.tags,
       nextProperties,
       nextStatus,

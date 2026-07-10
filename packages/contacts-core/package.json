@@ -9,6 +9,7 @@
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@mega-crm/delivery-core": "0.1.0",
     "pg": "8.22.0",
     "pino": "10.3.1"
   },
