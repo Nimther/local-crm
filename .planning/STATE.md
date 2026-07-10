@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 06
 current_phase_name: flows-triggered-chains
 status: executing
-stopped_at: Completed 06-06-PLAN.md
-last_updated: "2026-07-10T05:23:41.906Z"
+stopped_at: Completed 06-07-PLAN.md
+last_updated: "2026-07-10T05:52:36.784Z"
 last_activity: 2026-07-10
 last_activity_desc: Phase 06 execution started
 progress:
   total_phases: 7
   completed_phases: 5
   total_plans: 72
-  completed_plans: 68
+  completed_plans: 69
   percent: 71
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-07-09)
 ## Current Position
 
 Phase: 06 (flows-triggered-chains) — EXECUTING
-Plan: 8 of 11
+Plan: 9 of 11
 Status: Ready to execute
 Last activity: 2026-07-10 — Phase 06 execution started
 
@@ -127,6 +127,7 @@ Progress: [████████████████████] 61/61 p
 | Phase 06 P05 | 20min | 3 tasks | 8 files |
 | Phase 06 P10 | 17min | 3 tasks | 9 files |
 | Phase 06 P06 | 24min | 3 tasks | 6 files |
+| Phase 06 P07 | 32min | 3 tasks | 24 files |
 
 ## Accumulated Context
 
@@ -296,6 +297,9 @@ Recent decisions affecting current work:
 - [Phase ?]: 06-06: canEnterFlow's one-active-run guard runs first for ALL three re-entry modes (D-07 applies uniformly), before any mode-specific check
 - [Phase ?]: 06-06: flowTriggerEvaluatorQueue producer added to flow-queues.ts (not a new file), mirroring the existing singleton-Queue-module convention
 - [Phase ?]: 06-06: events-ingest.worker.ts's transaction callback now returns { contactId } so the post-commit flow-trigger-check enqueue (outside the transaction) has what it needs
+- [Phase 06]: 06-07: contact/workspace timezone stored as opaque text (mirrors city/country) -- IANA-allowlist validation enforced only at write choke points with a response cycle (API create/update, CSV import), not the unattended event-ingestion upsert path
+- [Phase 06]: 06-07: packages/shared-schemas gained NO dependency on @mega-crm/delivery-core (bundled into apps/web via Vite; delivery-core is Node-only) -- timezone/defaultTimezone zod fields are format-only, real Intl.supportedValuesOf allowlist check runs server-side in apps/api only
+- [Phase 06]: 06-07: handleDelayNode and handleSendNode's quiet-hours deferral both enqueue their own BullMQ delayed nudge with jobId: flowRunId, the same dedup key flow-reconciliation.worker.ts's 60s backstop uses (06-05)
 
 ### Pending Todos
 
@@ -323,6 +327,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-10T05:23:41.876Z
-Stopped at: Completed 06-06-PLAN.md
+Last session: 2026-07-10T05:52:36.754Z
+Stopped at: Completed 06-07-PLAN.md
 Resume file: None

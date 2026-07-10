@@ -336,7 +336,7 @@ _Wave 1:_
   3. Re-entry control (once ever / once per N days / every time) and quiet hours are honored: no email is sent inside the quiet window, and it is deferred until the window ends.
   4. Editing a live flow happens in a draft that only takes effect on publish; contacts already mid-flight continue on the version they entered, with no duplicate or skipped sends.
 
-**Plans**: 7/11 plans executed
+**Plans**: 8/11 plans executed
 **UI hint**: yes
 
 Plans:
@@ -358,7 +358,7 @@ Plans:
 **Wave 4** *(blocked on Wave 3 completion)*
 
 - [x] 06-06-PLAN.md — Event-trigger evaluator + re-entry control (once-ever/once-per-N/every-time) + one-active-run
-- [ ] 06-07-PLAN.md — Delays/wait-until + durable timers + dispatch-time quiet hours + timezone (contact/workspace) validation
+- [x] 06-07-PLAN.md — Delays/wait-until + durable timers + dispatch-time quiet hours + timezone (contact/workspace) validation
 - [ ] 06-09-PLAN.md — Run visibility ('N in flow, M on old versions') + eject + D-22 delete guard
 
 **Wave 5** *(blocked on Wave 4 completion)*
@@ -406,5 +406,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 3. Segmentation Engine | 8/8 | Complete    | 2026-07-06 |
 | 4. Broadcast Campaigns & Send Pipeline | 19/19 | Complete    | 2026-07-06 |
 | 5. Webhook Processing & Delivery Tracking | 13/13 | Complete    | 2026-07-09 |
-| 6. Flows (Triggered Chains) | 7/11 | In Progress|  |
+| 6. Flows (Triggered Chains) | 8/11 | In Progress|  |
 | 7. Analytics, Dashboard & Send Log | 0/5 | Not started | - |
