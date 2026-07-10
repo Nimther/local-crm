@@ -325,6 +325,76 @@ describe("Flow lifecycle (FLOW-01/06/07, D-17/D-20/D-23/D-24)", () => {
     expect(memberDuplicate.statusCode, `member duplicate failed: ${memberDuplicate.body}`).toBe(201);
   });
 
+  it("CR-03: a live flow's unpublished draft trigger edit does not change trigger_* until re-published", async () => {
+    const { cookie, workspace } = await owner("flow-cr03-draft-leak");
+    const flow = await createFlow(cookie, workspace.slug, "Purchase follow-up");
+
+    // Publish an event-triggered flow (trigger event = "purchase").
+    const firstPatch = await app.inject({
+      method: "PATCH",
+      url: `/api/workspaces/${workspace.slug}/flows/${flow.id}`,
+      headers: { cookie },
+      payload: { definition: validDefinition },
+    });
+    expect(firstPatch.statusCode, `patch failed: ${firstPatch.body}`).toBe(200);
+    // Contrast case: a still-draft flow's PATCH reflects the new trigger
+    // immediately (the draft IS the flow's trigger pre-publish).
+    expect((firstPatch.json() as { triggerEventName: string | null }).triggerEventName).toBe("purchase");
+
+    const firstPublish = await app.inject({
+      method: "POST",
+      url: `/api/workspaces/${workspace.slug}/flows/${flow.id}/publish`,
+      headers: { cookie },
+    });
+    expect(firstPublish.statusCode, `publish failed: ${firstPublish.body}`).toBe(200);
+    expect((firstPublish.json() as { status: string; triggerEventName: string | null }).status).toBe("live");
+    expect((firstPublish.json() as { triggerEventName: string | null }).triggerEventName).toBe("purchase");
+
+    // Autosave a draft edit on the now-live flow that changes the trigger
+    // event to "signup" -- this must NOT re-target live enrollment.
+    const signupDefinition = {
+      nodes: validDefinition.nodes.map((node) =>
+        node.id === "t1" ? { ...node, eventName: "signup" } : node
+      ),
+      edges: validDefinition.edges,
+    };
+    const draftEdit = await app.inject({
+      method: "PATCH",
+      url: `/api/workspaces/${workspace.slug}/flows/${flow.id}`,
+      headers: { cookie },
+      payload: { definition: signupDefinition },
+    });
+    expect(draftEdit.statusCode, `draft edit failed: ${draftEdit.body}`).toBe(200);
+
+    const getAfterDraftEdit = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/flows/${flow.id}`,
+      headers: { cookie },
+    });
+    expect(getAfterDraftEdit.statusCode).toBe(200);
+    const afterDraftEditBody = getAfterDraftEdit.json() as { triggerEventName: string | null; status: string };
+    // CR-03 regression: the columns flow-trigger-evaluator/flow-segment-sweep
+    // read stay pinned to "purchase" -- the unpublished draft edit did not
+    // leak into live enrollment.
+    expect(afterDraftEditBody.triggerEventName).toBe("purchase");
+    expect(afterDraftEditBody.status).toBe("live");
+
+    // Re-publishing promotes the draft's new trigger to be the live trigger.
+    const secondPublish = await app.inject({
+      method: "POST",
+      url: `/api/workspaces/${workspace.slug}/flows/${flow.id}/publish`,
+      headers: { cookie },
+    });
+    expect(secondPublish.statusCode, `re-publish failed: ${secondPublish.body}`).toBe(200);
+
+    const getAfterRepublish = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/flows/${flow.id}`,
+      headers: { cookie },
+    });
+    expect((getAfterRepublish.json() as { triggerEventName: string | null }).triggerEventName).toBe("signup");
+  });
+
   it("D-24: a segment referenced by a flow trigger cannot be deleted", async () => {
     const { cookie, workspace } = await owner("flow-segment-restrict");
     const segment = await createSegment(cookie, workspace.slug, "Restrict-delete target");
