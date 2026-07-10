@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { validateFlowDefinition } from "../flow-validate.js";
 import type { FlowDefinition } from "../flow-definition-schema.js";
 
-const SEGMENT_ID = "11111111-1111-1111-1111-111111111111";
+const SEGMENT_ID = "11111111-1111-4111-8111-111111111111";
 
 /** trigger --> send(templateId+sender) --> exit: the well-formed baseline. */
 function wellFormedFlow(): FlowDefinition {
