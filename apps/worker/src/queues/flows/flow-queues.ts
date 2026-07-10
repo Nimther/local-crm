@@ -2,8 +2,10 @@ import { Queue } from "bullmq";
 import {
   EMAIL_TRIGGERED_QUEUE,
   FLOW_RUN_ADVANCE_QUEUE,
+  FLOW_TRIGGER_EVALUATOR_QUEUE,
   type EmailTriggeredJob,
   type FlowRunAdvanceJob,
+  type FlowTriggerCheckJob,
 } from "@mega-crm/shared-schemas";
 import { buildRedisConnectionOptions } from "../connection.js";
 
@@ -47,6 +49,18 @@ export const emailTriggeredQueue = new Queue<EmailTriggeredJob>(EMAIL_TRIGGERED_
  * one pending advance job.
  */
 export const flowRunAdvanceQueue = new Queue<FlowRunAdvanceJob>(FLOW_RUN_ADVANCE_QUEUE, {
+  connection: buildRedisConnectionOptions(requireRedisUrl()),
+  defaultJobOptions: DEFAULT_JOB_OPTIONS,
+});
+
+/**
+ * Worker-side producer Queue for `FLOW_TRIGGER_EVALUATOR_QUEUE` (FLOW-02,
+ * 06-06) -- `events-ingest.worker.ts` enqueues here once per ingested event,
+ * right after the event upsert commits, so `flow-trigger-evaluator.worker.ts`
+ * can match the event's name against live event-triggered flows. Same
+ * singleton-Queue-module convention as the other producers in this file.
+ */
+export const flowTriggerEvaluatorQueue = new Queue<FlowTriggerCheckJob>(FLOW_TRIGGER_EVALUATOR_QUEUE, {
   connection: buildRedisConnectionOptions(requireRedisUrl()),
   defaultJobOptions: DEFAULT_JOB_OPTIONS,
 });

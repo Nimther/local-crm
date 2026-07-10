@@ -2,6 +2,7 @@ import { Worker, type Job, type ConnectionOptions } from "bullmq";
 import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { upsertContactByIdentity } from "@mega-crm/contacts-core";
 import { EVENTS_INGEST_QUEUE, eventsIngestJobSchema, type EventsIngestJob } from "@mega-crm/shared-schemas";
+import { flowTriggerEvaluatorQueue } from "./flows/flow-queues.js";
 
 /**
  * The events:ingest job handler (EVNT-02/EVNT-03, Pattern 2): re-derives
@@ -24,12 +25,20 @@ import { EVENTS_INGEST_QUEUE, eventsIngestJobSchema, type EventsIngestJob } from
  * Exported standalone (not only as a Worker's inline processor) so
  * events-ingest-idempotency.test.ts can invoke it directly with a crafted
  * payload, without needing a live BullMQ Queue/Redis round-trip.
+ *
+ * FLOW-02 (06-06): once the events INSERT commits, enqueues a
+ * flow-trigger-check job onto `FLOW_TRIGGER_EVALUATOR_QUEUE` so
+ * `flow-trigger-evaluator.worker.ts` can match this event's name against
+ * live event-triggered flows for this contact. `jobId` is deterministic
+ * (`${workspaceId}-${eventId}-flow-trigger`) so a redelivered ingest job's
+ * re-enqueue is a safe no-op, mirroring this file's own events-INSERT
+ * idempotency discipline (Pitfall 1).
  */
 export async function processEventIngestJob(data: EventsIngestJob): Promise<void> {
   const { workspaceId, eventId, occurredAt, name, properties, externalId, email } =
     eventsIngestJobSchema.parse(data);
 
-  await withTenant(workspaceId, () =>
+  const { contactId } = await withTenant(workspaceId, () =>
     withTenantTransaction(async (client) => {
       const { contactId } = await upsertContactByIdentity(client, workspaceId, {
         externalId,
@@ -43,7 +52,15 @@ export async function processEventIngestJob(data: EventsIngestJob): Promise<void
          ON CONFLICT (workspace_id, id, occurred_at) DO NOTHING`,
         [eventId, workspaceId, contactId, name, properties, occurredAt]
       );
+
+      return { contactId };
     })
+  );
+
+  await flowTriggerEvaluatorQueue.add(
+    "check",
+    { workspaceId, contactId, eventName: name },
+    { jobId: `${workspaceId}-${eventId}-flow-trigger` }
   );
 }
 
