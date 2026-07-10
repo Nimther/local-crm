@@ -1,5 +1,11 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { createFlowSchema, flowListQuerySchema, updateFlowDraftSchema } from "@mega-crm/shared-schemas";
+import {
+  createFlowSchema,
+  flowListQuerySchema,
+  flowRunEjectSchema,
+  flowRunListQuerySchema,
+  updateFlowDraftSchema,
+} from "@mega-crm/shared-schemas";
 import type { FlowDefinition } from "@mega-crm/flows-core";
 import { auth } from "../auth/auth.js";
 import { requirePermission, toFetchHeaders } from "../../middleware/role-guard.js";
@@ -9,6 +15,7 @@ import { getCallerRoles } from "../tenancy/member-roles.js";
 import {
   FlowStateError,
   createFlow,
+  deleteFlow,
   duplicateFlow,
   getFlow,
   listFlows,
@@ -19,6 +26,7 @@ import {
   type FlowRow,
 } from "./flow.repository.js";
 import { getPinnedVersion } from "./flow-version.repository.js";
+import { ejectRuns, listRuns, type FlowRunRow } from "./flow-run.repository.js";
 import { shapeFlowValidationFields } from "./flow-validation.js";
 
 /**
@@ -74,6 +82,27 @@ async function toFlowResponse(row: FlowRow) {
     createdByUserId: row.createdByUserId,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+/** D-21: per-run shape for GET /flows/:id/runs -- the contact display fields + the onOldVersion flag (FLOW-07 immutability made visible). */
+function toFlowRunSummaryResponse(row: FlowRunRow) {
+  return {
+    id: row.id,
+    flowId: row.flowId,
+    flowVersionId: row.flowVersionId,
+    contactId: row.contactId,
+    contactEmail: row.contactEmail,
+    contactFirstName: row.contactFirstName,
+    contactLastName: row.contactLastName,
+    status: row.status,
+    currentNodeId: row.currentNodeId,
+    onOldVersion: row.onOldVersion,
+    nextWakeAt: row.nextWakeAt ? row.nextWakeAt.toISOString() : null,
+    enteredAt: row.enteredAt.toISOString(),
+    lastEntryAt: row.lastEntryAt.toISOString(),
+    exitedAt: row.exitedAt ? row.exitedAt.toISOString() : null,
+    exitReason: row.exitReason,
   };
 }
 
@@ -297,4 +326,94 @@ export async function registerFlowsRoutes(fastify: FastifyInstance): Promise<voi
       throw err;
     }
   });
+
+  // D-21: any workspace member can read the run list + counts (the flow
+  // detail page's "N in flow (M on old versions)" header).
+  fastify.get("/api/workspaces/:slug/flows/:id/runs", async (request, reply) => {
+    const { slug, id } = request.params as { slug: string; id: string };
+    const parsed = flowRunListQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: parsed.error.flatten() });
+    }
+
+    const workspace = await resolveWorkspaceMember(request, reply, slug);
+    if (!workspace) return;
+
+    const body = await withTenant(workspace.id, async () => {
+      const flow = await getFlow(id);
+      if (!flow) return null;
+
+      const result = await listRuns(id, parsed.data);
+      return {
+        items: result.items.map(toFlowRunSummaryResponse),
+        total: result.total,
+        page: result.page,
+        pageSize: result.pageSize,
+        counts: result.counts,
+      };
+    });
+    if (!body) {
+      return reply.code(404).send({ error: "Flow not found" });
+    }
+    return reply.send(body);
+  });
+
+  // D-21/D-23: eject (single via runIds, bulk via contactIds) is
+  // Owner/Admin-only -- it is a destructive intervention on a live run.
+  fastify.post(
+    "/api/workspaces/:slug/flows/:id/runs/eject",
+    { preHandler: requirePermission("flow", "publish") },
+    async (request, reply) => {
+      const { slug, id } = request.params as { slug: string; id: string };
+      const parsed = flowRunEjectSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: parsed.error.flatten() });
+      }
+
+      const workspace = await findActiveWorkspaceBySlug(slug);
+      if (!workspace) {
+        return reply.code(404).send({ error: "Workspace not found" });
+      }
+
+      const body = await withTenant(workspace.id, async () => {
+        const flow = await getFlow(id);
+        if (!flow) return null;
+        const ejected = await ejectRuns(id, {
+          runIds: parsed.data.runIds,
+          contactIds: parsed.data.contactIds,
+        });
+        return { ejected };
+      });
+      if (!body) {
+        return reply.code(404).send({ error: "Flow not found" });
+      }
+      return reply.send(body);
+    }
+  );
+
+  // D-22/D-23: delete is Owner/Admin-only and guarded -- never-published or
+  // paused-with-zero-active-runs only, else 409 (illegal_transition).
+  fastify.delete(
+    "/api/workspaces/:slug/flows/:id",
+    { preHandler: requirePermission("flow", "publish") },
+    async (request, reply) => {
+      const { slug, id } = request.params as { slug: string; id: string };
+      const workspace = await findActiveWorkspaceBySlug(slug);
+      if (!workspace) {
+        return reply.code(404).send({ error: "Workspace not found" });
+      }
+
+      try {
+        const deleted = await withTenant(workspace.id, () => deleteFlow(id));
+        if (!deleted) {
+          return reply.code(404).send({ error: "Flow not found" });
+        }
+        return reply.send({ deleted: true });
+      } catch (err) {
+        const mapped = mapFlowStateError(err);
+        if (mapped) return reply.code(mapped.code).send(mapped.body);
+        throw err;
+      }
+    }
+  );
 }

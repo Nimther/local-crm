@@ -74,3 +74,29 @@ export const flowListQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(EXHAUSTIVE_LOOKUP_PAGE_SIZE).optional().default(20),
 });
 export type FlowListQuery = z.infer<typeof flowListQuerySchema>;
+
+/** The `flow_runs.status` domain (06-01) -- reused here for the runs-list filter. */
+export const flowRunStatusSchema = z.enum(["waiting", "advancing", "completed", "exited", "ejected"]);
+export type FlowRunStatus = z.infer<typeof flowRunStatusSchema>;
+
+/** GET /api/workspaces/:slug/flows/:id/runs -- D-21 run visibility, optional status filter. */
+export const flowRunListQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).optional().default(1),
+  pageSize: z.coerce.number().int().min(1).max(EXHAUSTIVE_LOOKUP_PAGE_SIZE).optional().default(20),
+  status: flowRunStatusSchema.optional(),
+});
+export type FlowRunListQuery = z.infer<typeof flowRunListQuerySchema>;
+
+/**
+ * POST /api/workspaces/:slug/flows/:id/runs/eject -- D-21 single (runIds) or
+ * bulk (contactIds) eject; at least one non-empty array must be provided.
+ */
+export const flowRunEjectSchema = z
+  .object({
+    runIds: z.array(z.string().uuid()).optional(),
+    contactIds: z.array(z.string().uuid()).optional(),
+  })
+  .refine((val) => (val.runIds?.length ?? 0) > 0 || (val.contactIds?.length ?? 0) > 0, {
+    message: "At least one of runIds or contactIds must be provided",
+  });
+export type FlowRunEjectInput = z.infer<typeof flowRunEjectSchema>;

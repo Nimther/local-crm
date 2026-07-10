@@ -8,6 +8,7 @@ import {
 import type { FlowExitCondition, FlowQuietHoursMode, FlowReentryMode } from "@mega-crm/shared-schemas";
 import { getWorkspaceId, withTenantTransaction } from "../../middleware/tenant-context.js";
 import { snapshotDraftToVersion } from "./flow-version.repository.js";
+import { activeRunCount } from "./flow-run.repository.js";
 
 export type FlowStatus = "draft" | "live" | "paused";
 
@@ -483,5 +484,51 @@ export async function duplicateFlow(id: string, createdByUserId: string): Promis
       [workspaceId, versionRows[0].id, flow.id]
     );
     return updated[0];
+  });
+}
+
+/**
+ * D-22: a flow is deletable ONLY if it was NEVER published (live_version_id
+ * IS NULL AND status === 'draft') OR it is `paused` with ZERO active runs --
+ * any other case (live, or paused with in-flight runs) throws
+ * `illegal_transition` (409) rather than cascade-destroying in-flight runs.
+ * `FOR UPDATE` locks the flows row so a concurrent publish/enroll can't race
+ * the delete decision. On success the DELETE cascades to flow_versions/
+ * flow_runs/flow_run_steps per their `ON DELETE CASCADE` FKs (06-01).
+ * Returns `false` (not an error) when the flow id does not resolve, matching
+ * `deleteCampaign`'s not-found contract.
+ */
+export async function deleteFlow(id: string): Promise<boolean> {
+  return withTenantTransaction(async (client) => {
+    const workspaceId = getWorkspaceId();
+    const { rows } = await client.query<FlowRow>(
+      `SELECT ${FLOW_COLUMNS} FROM flows WHERE workspace_id = $1 AND id = $2 FOR UPDATE`,
+      [workspaceId, id]
+    );
+    const existing = rows[0];
+    if (!existing) return false;
+
+    const neverPublished = existing.liveVersionId === null && existing.status === "draft";
+    if (!neverPublished) {
+      if (existing.status !== "paused") {
+        throw new FlowStateError(
+          "Only a never-published draft or a paused flow with zero active runs can be deleted",
+          "illegal_transition"
+        );
+      }
+      const active = await activeRunCount(id);
+      if (active > 0) {
+        throw new FlowStateError(
+          "Cannot delete a paused flow with active runs -- eject them first",
+          "illegal_transition"
+        );
+      }
+    }
+
+    const { rows: deleted } = await client.query(
+      `DELETE FROM flows WHERE workspace_id = $1 AND id = $2 RETURNING id`,
+      [workspaceId, id]
+    );
+    return deleted.length > 0;
   });
 }
