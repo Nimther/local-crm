@@ -1,8 +1,8 @@
 ---
 phase: 06-flows-triggered-chains
-reviewed: 2026-07-10T13:21:32Z
+reviewed: 2026-07-10T15:06:08Z
 depth: standard
-files_reviewed: 108
+files_reviewed: 111
 files_reviewed_list:
   - apps/api/package.json
   - apps/api/src/modules/campaigns/__tests__/send-settings.test.ts
@@ -11,6 +11,7 @@ files_reviewed_list:
   - apps/api/src/modules/contacts/__tests__/csv-import.test.ts
   - apps/api/src/modules/contacts/contact.repository.ts
   - apps/api/src/modules/contacts/contacts.routes.ts
+  - apps/api/src/modules/flows/__tests__/flow-enroll-atomic.test.ts
   - apps/api/src/modules/flows/__tests__/flow-lifecycle.test.ts
   - apps/api/src/modules/flows/__tests__/flow-run-management.test.ts
   - apps/api/src/modules/flows/flow-queues.ts
@@ -19,6 +20,7 @@ files_reviewed_list:
   - apps/api/src/modules/flows/flow-version.repository.ts
   - apps/api/src/modules/flows/flow.repository.ts
   - apps/api/src/modules/flows/flows.routes.ts
+  - apps/api/src/modules/segments/__tests__/segment-delete-conflict.test.ts
   - apps/api/src/modules/segments/segment.repository.ts
   - apps/api/src/server.ts
   - apps/web/package.json
@@ -34,6 +36,7 @@ files_reviewed_list:
   - apps/web/src/features/flows/canvas/FlowCanvas.tsx
   - apps/web/src/features/flows/canvas/NodeConfigPanel.tsx
   - apps/web/src/features/flows/canvas/NodePalette.tsx
+  - apps/web/src/features/flows/canvas/__tests__/autosaveState.test.ts
   - apps/web/src/features/flows/canvas/nodeTypes.tsx
   - apps/web/src/features/flows/canvas/useAutosaveDraft.ts
   - apps/web/src/features/flows/detail/FlowDetailPage.tsx
@@ -113,123 +116,67 @@ files_reviewed_list:
   - packages/shared-schemas/src/index.ts
   - packages/shared-schemas/src/queues.ts
 findings:
-  critical: 2
-  warning: 7
-  info: 5
-  total: 14
+  critical: 0
+  warning: 6
+  info: 7
+  total: 13
 status: issues_found
 ---
 
-# Phase 06: Code Review Report (re-review after gap-closure rounds 06-12..06-16)
+# Phase 06: Code Review Report (re-review after gap-closure round 3, plans 06-17..06-21)
 
-**Reviewed:** 2026-07-10T13:21:32Z
+**Reviewed:** 2026-07-10T15:06:08Z
 **Depth:** standard
-**Files Reviewed:** 108
+**Files Reviewed:** 111
 **Status:** issues_found
 
 ## Summary
 
-Re-review of the Phase 06 flows/triggered-chains implementation after two gap-closure rounds. All five previously remediated defects were re-verified against current code and **hold**:
+Re-review after gap-closure round 3 (commits 8985fc3..26f7bd0). All six remediated findings from the previous round were re-verified against current code and **hold**:
 
-- **Advance-nudge delivery (old CR-01, plan 06-12):** `enqueueFlowRunAdvance` is the sole producer with a unique-per-wake jobId (`${flowRunId}-${Date.now()}`), `flowRunAdvanceQueue` uses `removeOnComplete: true`, and send/branch handlers forward-nudge non-terminal transitions. Covered by `flow-run-advance-integration.test.ts` with a real Queue/Worker pair.
-- **Quiet-hours vocabulary (old CR-02, plan 06-13):** worker branches on the canonical `workspace_default`/`custom`/`disabled`; migration 0034 normalizes legacy `inherit`/`override` rows and the DB/Drizzle default; regression tests cover both `custom` and `workspace_default`-with-disabled-workspace paths.
-- **Draft-trigger isolation (old CR-03, plan 06-14):** `updateFlowDraft` syncs `trigger_*` columns only while `status === 'draft'`; `publishFlow` is the single point re-deriving them for live/paused flows. Covered by the CR-03 regression test in `flow-lifecycle.test.ts`.
-- **Contact-timezone bind order (plan 06-15):** the shared `loadContactTimezone` helper (`packages/delivery-core/src/contact-timezone.ts`) is used by both `send-node.ts` and `delay-node.ts` with correct `(workspaceId, contactId)` parameter order; divergence-proof tests exist.
-- **Paused-flow publish (old WR-04, plan 06-16):** `publishFlow` computes `nextStatus = paused ? 'paused' : 'live'`; `PublishEnrollDialog` warns; covered by the 06-16 test.
+- **CR-01 (cycle detection + hot-loop backstop, plan 06-17):** `validateFlowDefinition` now runs a recursion-stack DFS from the trigger (`findCycleReachableFrom`, `flow-validate.ts:104-127`) and emits `cycle_detected`; `processFlowRunAdvance` independently enforces `MAX_STEPS_PER_RUN = 1000` before any node dispatch, force-exiting a run with `exit_reason = 'step_budget_exceeded'` (`flow-run-advance.worker.ts:170-177`). Both layers are test-pinned (`flow-validate.test.ts` cycle case; `flow-run-advance.test.ts` step-budget case pre-seeds exactly `MAX_STEPS_PER_RUN` rows and asserts the guard fires with no further dispatch).
+- **CR-02 (atomic enrollExisting=false seed, plan 06-18):** `seedMembershipSnapshotAtomic` now runs *inside* `publishFlow`'s own transaction, immediately after the flows UPDATE and before commit (`flow.repository.ts:356-382, 480-482`), with a 60s bounded statement timeout. The route (`flows.routes.ts:295-306`) enqueues the async `flow-enroll-existing` job **only** for the `enrollExisting=true` back-fill. The race window and job-loss failure mode are both eliminated. Pinned by `flow-enroll-atomic.test.ts` (seed populated synchronously with no worker running, zero runs, non-matching contact untouched).
+- **WR-01 (aborted-transaction 409, plan 06-20):** `deleteSegment` wraps the DELETE in `SAVEPOINT seg_delete` and does `ROLLBACK TO SAVEPOINT` in the 23503 catch before re-querying (`segment.repository.ts:378-415`), so the canceled-campaign/flow-FK 409 path works instead of surfacing a 25P02 500. Pinned by `segment-delete-conflict.test.ts`.
+- **WR-02 (no_entry validation, plan 06-17):** a trigger with no outgoing edge now fails publish with `no_entry` (`flow-validate.ts:71-75`); `no_trigger` and `no_entry` are mutually exclusive, so the shared `"trigger"` field key in `shapeFlowValidationFields` cannot collide. UI copy exists in both `flow-validation.ts` and `NodeConfigPanel.tsx`.
+- **WR-04 (segment re-entry snapshot staleness, plan 06-19):** the sweep now runs a bounded anti-join DELETE clearing snapshot rows for contacts who left the trigger segment, *before* the empty-membership early return (`flow-segment-sweep.worker.ts:106-119`), restoring leave→rejoin re-entry under `canEnterFlow`'s authority. Pinned by the two-scenario regression in `flow-segment-trigger.test.ts` (every_time re-enters; once_ever stays blocked).
+- **WR-05 (autosave error state, plan 06-21):** `deriveAutosaveState` never reads "saved" while a failed save has unsaved changes pending; the toolbar renders «Не сохранено — повтор…» and a 4s delayed retry re-attempts the failed target without requiring a user edit (`useAutosaveDraft.ts:74-172`, `FlowCanvas.tsx:321-330`). The pure derivation is test-pinned (`autosaveState.test.ts`).
 
-The fresh adversarial pass found **two new critical defects** in the engine/enrollment layer (a publishable graph cycle that produces an unbounded hot loop in the advance worker, and a non-atomic snapshot seed that can mass-enroll an entire segment the marketer explicitly chose *not* to enroll), plus seven warnings and five informational items.
-
-## Critical Issues
-
-### CR-01: Graph cycles pass publish validation and the advance engine has no loop bound — unbounded hot loop per enrolled run
-
-**File:** `packages/flows-core/src/flow-validate.ts:98-125`, `apps/worker/src/queues/flows/flow-run-advance.worker.ts:135-337`
-**Issue:** `validateFlowDefinition` performs exactly three checks and none of them rejects a cycle. A definition like `trigger → send-A → send-B → send-A` validates clean (exactly one trigger, both sends configured, no branch nodes, so check 3 never runs; `pathReachesExit` additionally treats any revisited node as "already satisfied", so even branch paths that loop forever without an exit pass). The canvas permits drawing this cycle: `isValidConnection` (`FlowCanvas.tsx:233-242`) only blocks self-loops and duplicate `(source, sourceHandle)` edges — `A→B, B→A` is allowed — and the PATCH API accepts arbitrary schema-valid definitions regardless of the canvas.
-
-Once published and a run enters the cycle, `processFlowRunAdvance` executes an **unbounded hot loop**: each send-node hop sets `next_wake_at = now()` and immediately forward-nudges (`flow-run-advance.worker.ts:235-242`), the next hop does the same, forever. Duplicate *emails* are prevented by the deterministic send jobId and the `sends_flow_run_node_unique` ledger claim, but per iteration the loop inserts a `flow_run_steps` row, runs several queries under `FOR UPDATE`, and enqueues a fresh advance job — at full worker speed, per enrolled contact. Consequences: unbounded `flow_run_steps` growth, Redis/queue saturation, worker CPU pinning, and runs that can never complete. There is no hop counter, no per-run step budget, and no cycle rejection anywhere in the path.
-**Fix:** Two independent layers (do both — publish validation alone doesn't protect against definitions written before the fix or future validator gaps):
-
-1. Reject cycles reachable from the trigger at publish time in `validateFlowDefinition` (DFS with a recursion stack; new error code e.g. `cycle_detected`).
-2. Add a defensive per-run budget in `processFlowRunAdvance`, e.g.:
-
-```ts
-// inside the transaction, before node dispatch
-const { rows } = await client.query<{ count: string }>(
-  `SELECT count(*) FROM flow_run_steps WHERE flow_run_id = $1 AND workspace_id = $2`,
-  [flowRunId, workspaceId]
-);
-if (Number(rows[0].count) >= MAX_STEPS_PER_RUN) { // e.g. 1000
-  await client.query(
-    `UPDATE flow_runs SET status = 'exited', exited_at = now(), exit_reason = 'step_budget_exceeded'
-     WHERE id = $1 AND workspace_id = $2`,
-    [flowRunId, workspaceId]
-  );
-  return;
-}
-```
-
-### CR-02: `enrollExisting=false` snapshot seed is asynchronous and can fail open — the sweep can mass-enroll the entire existing segment the marketer chose NOT to enroll
-
-**File:** `apps/api/src/modules/flows/flows.routes.ts:291-301`, `apps/worker/src/queues/flows/flow-enroll-existing.worker.ts:157-217`, `apps/worker/src/queues/flows/flow-segment-sweep.worker.ts:94-149`
-**Issue:** When the marketer publishes a segment-triggered flow choosing «Опубликовать только для новых» (`enrollExisting=false`), the *only* thing that prevents every current segment member from being enrolled is `seedSnapshotOnly` marking them "seen" — and that seed runs in a **separate BullMQ job after the publish transaction commits**. Two failure modes turn this choice into its opposite:
-
-1. **Race:** the flow becomes discoverable by `flow-segment-sweep` (and by `checkSegmentEntryForContact` on every ingested event) the instant `publishFlow` commits. If a sweep tick is running (or fires) in the window before `seedSnapshotOnly` commits, `sweepOneFlow` diffs the full membership against an *empty* snapshot and enrolls **all current members**, each of which immediately dispatches the flow's first send.
-2. **Job loss:** if the `flow-enroll-existing` job exhausts its 5 attempts (Redis blip, DB slowness, worker crash-loop), the snapshot is never seeded and the next sweep tick (≤15 min later) mass-enrolls the whole segment.
-
-For an email-marketing platform this is a compliance/reputation-grade failure: potentially 100k+ unsolicited flow emails sent against the operator's explicit choice, with no way to undo the sends. The `enrollExisting=true` path is safe under the same race (both paths dedupe via `canEnterFlow` + the partial unique index), which makes the asymmetry easy to miss.
-**Fix:** Make the `enrollExisting=false` seed synchronous and atomic with publish: `seedSnapshotOnly` is a single bounded `INSERT ... SELECT` — run it inside the `publishFlow` transaction (or in the route's `withTenant` scope immediately after publish, *before* the flow can be swept) when `enrollExisting !== true`, and drop the job for that branch. Alternatively, gate the sweep/event re-check on a `flows.enroll_seeded_at` column set by the seed — but the synchronous seed is simpler and removes both failure modes.
+No new critical defects were found in the fixes themselves. The adversarial pass did surface **two new warnings in the validation/dispatch seam** (dangling edge targets are publishable; a `fromSenderId`-only send node validates but can never dispatch), one operational warning introduced by the CR-01 backstop (unindexed hot-path count), and confirmed that three warnings and five info items from the previous round remain unaddressed (they were not in scope for plans 06-17..06-21 and are carried forward below with fresh IDs).
 
 ## Warnings
 
-### WR-01: `deleteSegment`'s 23503 catch block queries an aborted transaction — guaranteed 25P02 and a 500 instead of the intended 409
+### WR-01: Edges to nonexistent nodes pass both the Zod schema and publish validation — a dangling entry edge yields a run that throws on every advance, re-nudged by reconciliation every 60s forever
 
-**File:** `apps/api/src/modules/segments/segment.repository.ts:376-402`
-**Issue:** After the DELETE trips a 23503 (the canceled-campaign FK case the Rule-1 fix exists for, or a concurrent flow-reference race), the transaction is aborted. The catch block then calls `findReferencingFlowName(client, ...)` on the **same aborted connection** — Postgres rejects every further statement with `25P02 current transaction is aborted`, so the intended `SegmentConflictError` (409) is never thrown; the 25P02 error propagates and the route returns a raw 500. `withTenantTransaction` (`packages/tenant-context/src/index.ts`) uses no savepoints, so this re-query can never succeed. The D-24 flow re-check added in this phase regressed the previously working canceled-campaign 409 path.
-**Fix:** Don't query inside the aborted transaction. Either (a) resolve the flow name *before* the DELETE and use the cached value in the catch, or (b) wrap the DELETE in a `SAVEPOINT`/`ROLLBACK TO SAVEPOINT` so the catch block's queries run in a live transaction:
+**File:** `packages/flows-core/src/flow-definition-schema.ts:107-113`, `packages/flows-core/src/flow-validate.ts:154-181`, `apps/worker/src/queues/flows/flow-trigger-evaluator.worker.ts:70-84`, `apps/worker/src/queues/flows/flow-run-advance.worker.ts:180-185`
+**Issue:** `flowEdgeSchema` accepts any non-empty `source`/`target` string with no referential-integrity check against `nodes`, and `validateFlowDefinition` never verifies edge targets exist — worse, `pathReachesExit` explicitly treats a missing node as satisfied (`if (!node) return true`, line 164), so a dangling target also subverts `branch_missing_exit`. The canvas can't produce this (`serializeCanvas` filters edges to kept nodes), but the PATCH API accepts any schema-valid definition from any ordinary workspace member. A published `trigger → <ghost-id>` definition passes all five checks (`no_trigger`/`no_entry`/`empty_send`/`branch_missing_exit`/`cycle_detected`); `loadEntryNodeId` → `resolveNextNodeId` happily returns the ghost id; every enrolled contact gets a `flow_runs` row with `current_node_id` pointing at a node that doesn't exist. `processFlowRunAdvance` then throws `current_node_id ... not found in pinned definition` on every attempt — the BullMQ job fails through its 5 retries, the run stays `waiting` with a due `next_wake_at`, and the 60s reconciliation scan re-enqueues a fresh advance (which throws again) **every tick, forever, per enrolled contact**. The runs never reach a terminal state (blocking flow deletion) and pollute the failed-job set continuously.
+**Fix:** Add edge referential integrity as a publish-time hard error in `validateFlowDefinition` (it already builds `nodesById`):
 
 ```ts
-await client.query("SAVEPOINT seg_delete");
-try {
-  const { rows } = await client.query(`DELETE FROM segments ...`);
-  return rows.length > 0;
-} catch (err) {
-  if ((err as { code?: string })?.code === "23503") {
-    await client.query("ROLLBACK TO SAVEPOINT seg_delete");
-    const flowName = await findReferencingFlowName(client, workspaceId, id);
-    // ... existing conflict mapping
+for (const edge of def.edges) {
+  if (!nodesById.has(edge.source) || !nodesById.has(edge.target)) {
+    errors.push({ code: "dangling_edge", nodeId: edge.id });
   }
-  throw err;
 }
 ```
 
-### WR-02: A trigger with no outgoing edge is publishable — enrolled runs are created with `current_node_id = NULL` and reconciliation nudges them forever
+and change `pathReachesExit`'s missing-node branch from `return true` to `return false` (fail closed). Optionally also enforce it in `flowDefinitionSchema` via `superRefine` so drafts can't persist dangling edges at all.
 
-**File:** `packages/flows-core/src/flow-validate.ts:34-71`, `apps/worker/src/queues/flows/flow-trigger-evaluator.worker.ts:174-190`, `apps/worker/src/queues/flows/flow-reconciliation.worker.ts:97-120`
-**Issue:** `validateFlowDefinition` never checks that the trigger has an outgoing edge (a trigger-plus-orphan-exit definition passes all three checks). `loadEntryNodeId` then returns `null`, but `enterSegmentTriggeredFlow`/`processFlowTriggerCheck`/`enrollBatch` **still insert the `flow_runs` row** with `current_node_id = NULL`, `status = 'waiting'`, `next_wake_at = now()`. `processFlowRunAdvance` no-ops on `!run.currentNodeId` without touching the row, so the run is permanently "waiting and due": the 60s reconciliation scan re-selects it and enqueues a fresh no-op advance job **every tick, forever, per enrolled contact**. The runs also never reach a terminal state (blocking flow deletion until manually ejected) and count as "active" in the D-21 header.
-**Fix:** (1) Add a publish-time hard error when the trigger node has no outgoing edge (e.g. a `no_entry` code). (2) Defensively, when `entryNodeId` is `null`, skip the `flow_runs` INSERT entirely (still mark the snapshot seen) or insert the run directly as `status='completed', exit_reason='no_entry_node'` so it never enters the reconciliation scan.
+### WR-02: A send node configured with `fromSenderId` but no `fromEmail` passes `empty_send` validation but can never dispatch — the email silently never sends while the run advances past it
 
-### WR-03: `flows.enroll_cursor` is never reset between enroll-existing passes — a re-publish back-fill silently skips most of the segment
+**File:** `packages/flows-core/src/flow-validate.ts:58-65`, `apps/worker/src/queues/flows/flow-send.ts:92-98`, `apps/web/src/features/flows/canvas/NodeConfigPanel.tsx:443-453`
+**Issue:** The validator accepts `fromSenderId OR fromEmail` (`hasSender = Boolean(node.fromSenderId || node.fromEmail)`), but the dispatcher (`readFlowSendPrereqs`) requires `node.templateId && node.fromEmail` and **throws** otherwise — it never resolves `fromSenderId` to an address. A `fromSenderId`-only node is therefore publishable-but-undeliverable: at dispatch time `handleSendNode` has already enqueued the send job and advanced the run (step recorded as `outcome: "enqueued"`), then the `email-triggered` job fails all 5 attempts and the email is **never sent**, with no user-visible signal anywhere (the flow_run_steps log claims the step succeeded). The UI normally writes `fromEmail` alongside `fromSenderId`, but `SendConfigSection`'s `fromEmail: sender?.fromEmail ?? config.fromEmail` yields `undefined` whenever the senders lookup cache misses the picked id, and the PATCH API accepts the shape directly regardless.
+**Fix:** Align the validator to the dispatcher: require `fromEmail` (not `fromSenderId || fromEmail`) in the `empty_send` check — or make `readFlowSendPrereqs` resolve `fromSenderId` → verified-sender email at dispatch time. Either side works; today they contradict each other across the trust boundary.
 
-**File:** `apps/worker/src/queues/flows/flow-enroll-existing.worker.ts:138-144, 205-228`, `packages/db/migrations/0033_flows_enroll_cursor.sql`
-**Issue:** `enrollBatch` persists the keyset cursor on the flows row and nothing ever resets it. After the first enroll-existing pass completes, `enroll_cursor` holds the segment's highest matched contact UUID. When the flow is later re-published with «Зачислить и опубликовать» (new `flowVersionId` → new jobId, so the job *does* run), `processFlowEnrollExisting` resumes from that stale cursor: the first batch's `c.id > $cursor` predicate matches almost nothing, `processed === 0`, and the loop exits immediately — contacts who joined the segment since the first publish but whose UUIDs sort below the cursor are **never back-filled by the explicit enroll action**. The 15-minute sweep eventually enrolls them, but the marketer's "enroll now" choice is silently a partial no-op, and the behavior contradicts migration 0033's own documented semantics ("NULL means no batch has run yet for this flow's **current** enroll-existing pass").
-**Fix:** Reset the cursor when a new pass starts — e.g. `UPDATE flows SET enroll_cursor = NULL` inside `publishFlow` (or in the publish route before enqueuing), or key the cursor by pass (store the pass's version id alongside and treat a mismatch as `NULL`).
+### WR-03: `flows.enroll_cursor` is never reset between enroll-existing passes — a re-publish with «Зачислить и опубликовать» silently skips most of the segment
 
-### WR-04: Segment-triggered flows can never re-enroll a contact — the snapshot is never cleared on segment exit, making the re-entry settings dead controls for this trigger type
+**File:** `apps/worker/src/queues/flows/flow-enroll-existing.worker.ts:138-144, 205-228`, `apps/api/src/modules/flows/flow.repository.ts:418-490`, `packages/db/migrations/0033_flows_enroll_cursor.sql`
+**Issue:** Carried over from the previous round (unaddressed by plans 06-17..06-21; verified still present — no `enroll_cursor` reset exists anywhere in `apps/` or `packages/`). `enrollBatch` persists the keyset cursor on the flows row; after the first pass completes it holds the segment's highest matched contact UUID. A later re-publish with `enrollExisting=true` produces a new jobId (new `liveVersionId`), the job runs, but `processFlowEnrollExisting` resumes from the stale cursor — the first batch's `c.id > $cursor` matches almost nothing, `processed === 0`, and the loop exits immediately. Contacts who joined the segment since the first publish but whose UUIDs sort below the cursor are never back-filled by the explicit enroll action (only the ≤15-min sweep eventually catches them). This contradicts migration 0033's documented semantics ("NULL means no batch has run yet for this flow's **current** enroll-existing pass").
+**Fix:** Reset the cursor when a new pass starts — `UPDATE flows SET enroll_cursor = NULL` inside `publishFlow`'s transaction (it already holds the row `FOR UPDATE`), or key the cursor by pass (store the pass's version id alongside; treat a mismatch as NULL).
 
-**File:** `apps/worker/src/queues/flows/flow-trigger-evaluator.worker.ts:127-147, 206-217`, `apps/worker/src/queues/flows/flow-segment-sweep.worker.ts:110-131`
-**Issue:** `flow_segment_membership_snapshot` rows are only ever inserted, never deleted. A contact who leaves the trigger segment and later re-enters it is still `hasSeenSnapshot === true` and is skipped by both the event-driven re-check and the sweep — **regardless of the flow's `reentry_mode`**. Consequently `every_time` and `once_per_n_days` are unreachable for segment-triggered flows (the `canEnterFlow` re-entry logic on that path can only ever run once per contact per flow, ever), while `FlowLifecycleSettings` still presents all three re-entry modes for such flows as if they worked. The in-code comment frames this as "one-shot per D-02's snapshot semantics", but the shipped semantics make a documented, user-visible configuration surface a silent no-op.
-**Fix:** Either (a) have the sweep also delete snapshot rows for contacts no longer matching the segment (making "seen" mean "currently in this membership episode", restoring leave→rejoin re-entry subject to `canEnterFlow`), or (b) if one-shot is genuinely the v1 contract, hide/disable the re-entry controls for segment-triggered flows in the UI and document the limitation.
+### WR-04: `deleteFlow` opens a nested pooled transaction while holding `FOR UPDATE` — pool-exhaustion stall pattern plus a TOCTOU count
 
-### WR-05: Autosave shows «Сохранено» after a failed save and never retries without a further edit — silent draft loss
-
-**File:** `apps/web/src/features/flows/canvas/useAutosaveDraft.ts:101-119`
-**Issue:** `saveState` is derived solely from `mutation.isPending`, so the moment a PATCH **fails**, the toolbar flips back to «Сохранено» — asserting the opposite of reality. The `onError` handler clears `lastSavedRef`, but the retry only fires when `debouncedJson` next *changes*; if the user makes no further edits (finish editing, watch the indicator, close the tab), the failed save is never retried and the canvas changes are lost while the UI claimed they were saved.
-**Fix:** Track an error state: render a "not saved, retrying" indicator when the last mutation failed and schedule an automatic retry (retry counter / timeout) instead of waiting for the next user edit. At minimum, `saveState` must not read "saved" while `mutation.isError` and `lastSavedRef.current !== json`.
-
-### WR-06: `deleteFlow` opens a nested pooled transaction while holding `FOR UPDATE` — pool-exhaustion stall pattern plus a TOCTOU count
-
-**File:** `apps/api/src/modules/flows/flow.repository.ts:557-590`, `apps/api/src/modules/flows/flow-run.repository.ts:172-181`
-**Issue:** Inside `deleteFlow`'s `withTenantTransaction` (which holds the `flows` row `FOR UPDATE`), it calls `activeRunCount(id)` — which itself calls `withTenantTransaction`, checking out a **second** connection from the same pool. Under concurrent load, N in-flight `deleteFlow` calls each hold one connection while waiting for another; with pg's default `Pool` (no acquisition timeout) this can stall the whole pool once N reaches `max`. Additionally, the count runs in a *different* transaction from the DELETE, so it observes a different snapshot than the transaction that acts on it — undermining the purpose of the `FOR UPDATE` lock the function takes.
+**File:** `apps/api/src/modules/flows/flow.repository.ts:627-660`, `apps/api/src/modules/flows/flow-run.repository.ts:172-181`
+**Issue:** Carried over (still present). Inside `deleteFlow`'s `withTenantTransaction` (holding the flows row `FOR UPDATE`), `activeRunCount(id)` opens a **second** `withTenantTransaction`, checking out another connection from the same pool. N concurrent `deleteFlow` calls each hold one connection while waiting for a second; once N reaches the pool max, the pool deadlocks (pg's default Pool has no acquisition timeout). The count also runs in a different transaction snapshot from the DELETE that acts on it, undermining the `FOR UPDATE` lock's purpose.
 **Fix:** Query the count on the already-open `client`:
 
 ```ts
@@ -239,48 +186,64 @@ const { rows: countRows } = await client.query<{ count: string }>(
 );
 ```
 
-(Extract an `activeRunCountWithClient(client, workspaceId, flowId)` helper if reuse is wanted.)
-
-### WR-07: `enroll-preview` runs an unbounded segment count on a user-facing route — the statement-timeout DoS bound applied everywhere else is missing here
+### WR-05: `enroll-preview` runs an unbounded segment count on a member-accessible route — the statement-timeout DoS bound applied everywhere else is missing here
 
 **File:** `apps/api/src/modules/flows/flows.routes.ts:252`
-**Issue:** The D-04 enroll-preview route calls `countSegmentMembers(segment.definition)` with **no** `statementTimeoutMs`, unlike the segments module's own preview/save paths which explicitly bound evaluation (D-08/WR-03/T-03-04). A pathological segment definition (or a very large contact table) holds a pooled RLS connection for the full query duration on an ordinary-member-accessible endpoint, and the publish dialog fires this on every open.
-**Fix:** Pass the same bound the segments routes use, e.g. `countSegmentMembers(segment.definition, { statementTimeoutMs: 15_000 })`, and surface a "count unavailable" fallback in the dialog on timeout.
+**Issue:** Carried over (still present). The D-04 enroll-preview route calls `countSegmentMembers(segment.definition)` with no `statementTimeoutMs`, unlike the segments module's own preview/save paths which bound evaluation (the option exists on the function signature and is simply not passed). A pathological segment definition holds a pooled RLS connection for the full query duration on an ordinary-member endpoint, and the publish dialog fires this on every open.
+**Fix:** `countSegmentMembers(segment.definition, { statementTimeoutMs: 15_000 })` and a "count unavailable" fallback in the dialog on timeout.
+
+### WR-06: The CR-01 step-budget guard counts an unindexed, unbounded append-only table on every single advance — the backstop meant to protect engine liveness becomes its bottleneck
+
+**File:** `apps/worker/src/queues/flows/flow-run-advance.worker.ts:97-103, 170-171`, `packages/db/migrations/0026_flows.sql:101-111`
+**Issue:** `countFlowRunSteps` runs `SELECT count(*) FROM flow_run_steps WHERE flow_run_id = $1 AND workspace_id = $2` on **every** advance, but `flow_run_steps` has no index on `flow_run_id` (migration 0026 creates only the PK; 0027-0034 add none) — Postgres FKs do not auto-index the referencing side. Every advance therefore sequential-scans the fastest-growing table in the flow engine (one row per node visit per run, append-only, never pruned). At the platform's stated target (hundreds of thousands of sends/day) this degrades every advance linearly with total history, delaying `next_wake_at` deadlines platform-wide — late emails are a direct violation of the core "вовремя доходят" requirement, and the guard added specifically to prevent worker stalls becomes the thing stalling it. The missing index also makes `deleteFlow`'s `ON DELETE CASCADE` into `flow_run_steps` a per-run seq scan.
+**Fix:** Add a migration: `CREATE INDEX idx_flow_run_steps_workspace_run ON flow_run_steps (workspace_id, flow_run_id);`. Alternatively (cheaper still), replace the per-advance `count(*)` with a `step_count` integer on `flow_runs` incremented in the same UPDATE that moves the pointer.
 
 ## Info
 
 ### IN-01: `getRunCounts` is exported but has no callers
 
 **File:** `apps/api/src/modules/flows/flow-run.repository.ts:78-83`
-**Issue:** `listRuns` uses the internal `queryRunCounts`; the exported `getRunCounts` wrapper is referenced nowhere in `apps/` source.
-**Fix:** Remove the export, or wire the FlowDetailPage header to a dedicated counts endpoint using it instead of the current `pageSize: 1` runs fetch.
+**Issue:** Carried over (verified: no non-dist references outside this file). `listRuns` uses the internal `queryRunCounts`; the exported wrapper is dead code.
+**Fix:** Remove the export, or wire the FlowDetailPage header (currently a `pageSize: 1` runs fetch) to a dedicated counts endpoint using it.
 
 ### IN-02: Contact email-uniqueness pre-checks race the unique constraint — concurrent duplicate create surfaces as a raw 500
 
 **File:** `apps/api/src/modules/contacts/contact.repository.ts:229-234, 291-299`
-**Issue:** `isEmailTaken` + INSERT/UPDATE is not atomic; two concurrent creates with the same email both pass the check and the loser hits `contacts_workspace_email_unique` (23505), which the routes don't map — the client gets a 500 instead of the `email_taken` 409.
-**Fix:** Catch 23505 in `createContact`/`updateContact` and rethrow as `ContactConflictError("...", "email_taken")`.
+**Issue:** Carried over (still present). `isEmailTaken` + INSERT/UPDATE is not atomic; the loser of a concurrent race hits `contacts_workspace_email_unique` (23505), which `createContact`/`updateContact` don't map — the client gets a 500 instead of the `email_taken` 409.
+**Fix:** Catch 23505 and rethrow as `ContactConflictError("...", "email_taken")`.
 
-### IN-03: `handleSendNode` enqueues the email job inside the open advance transaction
+### IN-03: Flow handlers enqueue BullMQ jobs inside the open advance transaction
 
-**File:** `apps/worker/src/queues/flows/handlers/send-node.ts:135-139`
-**Issue:** The `emailTriggeredQueue.add` side effect happens before the surrounding transaction commits; a rollback after the enqueue leaves a dispatched send job with no committed step/pointer advance. The `claimFlowSend` ledger prevents duplicate SendGrid calls, so impact is limited to bookkeeping drift (a send can be dispatched for a step whose `flow_run_steps` row was rolled back).
-**Fix:** Acceptable as-is given the ledger; if hardening, return an "enqueue send" instruction from the handler and perform the Redis add in the caller after the transaction commits.
+**File:** `apps/worker/src/queues/flows/handlers/send-node.ts:126-139`, `apps/worker/src/queues/flows/handlers/delay-node.ts:64-67`
+**Issue:** Carried over. The `emailTriggeredQueue.add` / `enqueueFlowRunAdvance` side effects happen before the surrounding transaction commits; a rollback after the enqueue leaves a dispatched job with no committed state change. The `claimFlowSend` ledger and the queue-as-doorbell guards make both harmless in practice (bookkeeping drift only).
+**Fix:** Acceptable as-is; if hardening, return enqueue instructions from the handlers and perform the Redis adds after commit.
 
-### IN-04: `void tickQueue.add(...)` swallows the repeatable-registration promise — a rejection becomes an unhandled rejection
+### IN-04: `void tickQueue.add(...)` swallows the repeatable-registration promise — a boot-time Redis failure becomes an unhandled rejection
 
-**File:** `apps/worker/src/queues/flows/flow-reconciliation.worker.ts:102-106`, `apps/worker/src/queues/flows/flow-segment-sweep.worker.ts:163-167`
-**Issue:** If registering the repeatable tick fails (Redis unavailable at boot), the rejected promise is discarded with `void` and surfaces as an unhandled rejection (fatal by default on Node 22) instead of a logged, retryable failure.
-**Fix:** Append `.catch((err) => console.error("failed to register repeatable tick", err))` (or await it in `buildWorker`).
+**File:** `apps/worker/src/queues/flows/flow-reconciliation.worker.ts:102-106`, `apps/worker/src/queues/flows/flow-segment-sweep.worker.ts:180-184`
+**Issue:** Carried over (still present in both workers). A rejected registration promise is discarded with `void` and surfaces as an unhandled rejection (fatal by default on Node 22) instead of a logged, retryable failure.
+**Fix:** Append `.catch((err) => console.error("failed to register repeatable tick", err))` or await it in `buildWorker`.
 
-### IN-05: The enroll-existing worker never re-checks flow status — batches keep enrolling into a paused flow
+### IN-05: The enroll-existing worker never re-checks flow status — batches keep enrolling into a paused flow, and publishing a paused flow with «Зачислить и опубликовать» enrolls the whole segment into a paused flow
 
-**File:** `apps/worker/src/queues/flows/flow-enroll-existing.worker.ts:32-40, 187-229`
-**Issue:** `loadFlow` reads trigger/reentry config but not `status`; a flow paused (or in the process of being deleted) mid-back-fill continues to receive `flow_runs` inserts batch after batch. The runs correctly freeze (D-18 guard in the advance worker) and D-22's delete guard counts them, but the operator's pause does not stop the enrollment they may have paused specifically to prevent.
-**Fix:** Include `status` in `loadFlow` and re-check it per batch, stopping (without clearing the cursor) when the flow is no longer `live`.
+**File:** `apps/worker/src/queues/flows/flow-enroll-existing.worker.ts:32-40, 187-229`, `apps/api/src/modules/flows/flows.routes.ts:295-306`
+**Issue:** Carried over, with a new interplay: `loadFlow` reads trigger/reentry config but not `status`, so a flow paused mid-back-fill keeps receiving `flow_runs` inserts batch after batch. Additionally, since 06-16 keeps a paused flow paused on publish, the publish route still enqueues the enroll job for a paused segment-triggered flow when `enrollExisting=true` — the entire current segment is enrolled into a **paused** flow (runs frozen by the D-18 guard, all releasing at once on resume). The dialog's paused-copy («публикация не возобновит отправку») does not mention that enrollment itself still happens.
+**Fix:** Include `status` in `loadFlow` and stop (without clearing the cursor) when the flow is no longer `live`; either suppress the enroll option for a paused flow's publish dialog or state explicitly that contacts will be enrolled now and mailed on resume.
+
+### IN-06: Autosave residual honesty gaps — «Сохранено» during the pre-debounce dirty window, and the "single bounded retry" is actually an every-4s retry loop
+
+**File:** `apps/web/src/features/flows/canvas/useAutosaveDraft.ts:74-172`
+**Issue:** (a) `deriveAutosaveState` returns `idle` («Сохранено») when `!isPending && !isError` even while `dirty` is true — i.e. for up to ~1s of debounce after every edit the toolbar asserts the canvas is saved when it isn't; a user who edits and immediately closes the tab loses that edit while the UI claimed otherwise. (b) The retry effect's comment claims "a single bounded retry", but each failed retry re-triggers the effect (isError flips false→true per mutate cycle), producing an indefinite retry every ~4s while the tab is open — safe (never a hot loop) but mislabeled; a permanently-rejected payload will PATCH forever. (c) Concurrent in-flight PATCHes are possible (a new debounced save can start while a slow prior one is pending), so an out-of-order arrival can transiently persist a stale draft server-side; the next change re-converges.
+**Fix:** (a) treat `dirty && !isPending` as a distinct "pending" (or reuse "saving") state; (b) either cap retries or fix the comment; (c) acceptable at 1s debounce, note only.
+
+### IN-07: The atomic CR-02 seed runs a potentially 60-second INSERT inside the publish HTTP request while holding the flows row lock
+
+**File:** `apps/api/src/modules/flows/flow.repository.ts:356-382, 480-482`
+**Issue:** The accepted cost of the (correct) CR-02 fix: for a large segment (100k-1M contacts) the `INSERT ... SELECT` seed runs inside `publishFlow`'s transaction — the publish request holds a pooled RLS connection plus the `FOR UPDATE` lock on the flows row for up to `PUBLISH_SEED_STATEMENT_TIMEOUT_MS` (60s), during which any concurrent draft-update/pause/publish on the same flow blocks and the HTTP client waits. On statement timeout the whole publish correctly rolls back (fail closed), but the marketer just sees a generic error.
+**Fix:** No change required for correctness. Operationally: monitor publish latency; if it becomes a problem, the documented alternative (a `flows.enroll_seeded_at` gate on the sweep/event re-check plus an async seed) preserves atomicity semantics without the in-request wait.
 
 ---
 
-_Reviewed: 2026-07-10T13:21:32Z_
+_Reviewed: 2026-07-10T15:06:08Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
