@@ -22,6 +22,7 @@ import { registerCsvImportRoutes } from "./modules/contacts/csv-import.routes.js
 import { registerSegmentsRoutes } from "./modules/segments/segments.routes.js";
 import { registerUnsubscribeRoutes } from "./modules/delivery/unsubscribe.routes.js";
 import { registerCampaignsRoutes } from "./modules/campaigns/campaigns.routes.js";
+import { registerFlowsRoutes } from "./modules/flows/flows.routes.js";
 import { registerSendSettingsRoutes } from "./modules/campaigns/send-settings.routes.js";
 import { registerWebhookRoutes } from "./modules/webhooks/webhooks.routes.js";
 import { registerWebhookSettingsRoutes } from "./modules/webhooks/webhook-settings.routes.js";
@@ -83,6 +84,7 @@ export async function buildServer() {
   await app.register(registerSegmentsRoutes);
   await app.register(registerUnsubscribeRoutes);
   await app.register(registerCampaignsRoutes);
+  await app.register(registerFlowsRoutes);
   await app.register(registerSendSettingsRoutes);
   await app.register(registerWebhookRoutes);
   await app.register(registerWebhookSettingsRoutes);
