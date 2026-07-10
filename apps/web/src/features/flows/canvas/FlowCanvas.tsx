@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { useParams } from "react-router";
 import {
   Background,
@@ -7,6 +7,7 @@ import {
   Controls,
   EdgeLabelRenderer,
   MiniMap,
+  Panel,
   ReactFlow,
   ReactFlowProvider,
   addEdge,
@@ -25,7 +26,9 @@ import type { FlowDefinition } from "@mega-crm/flows-core";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { useFlow, type FlowResponse } from "../api";
+import { INCOMPLETE_NODE_MESSAGES, NodeConfigPanel, computePublishBlockers } from "./NodeConfigPanel";
 import { NodePalette, PALETTE_DND_MIME } from "./NodePalette";
+import { useAutosaveDraft } from "./useAutosaveDraft";
 import {
   NODE_TYPE_META,
   NodeActionsContext,
@@ -132,11 +135,64 @@ function initialCanvas(definition: FlowDefinition): { nodes: CanvasNode[]; edges
   };
 }
 
-function FlowCanvasInner({ flow }: { slug: string; flow: FlowResponse }) {
+function FlowCanvasInner({ slug, flow }: { slug: string; flow: FlowResponse }) {
   const initial = initialCanvas(flow.definition);
   const [nodes, setNodes, onNodesChange] = useNodesState<CanvasNode>(initial.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initial.edges);
   const { screenToFlowPosition } = useReactFlow();
+
+  // Debounced (1s) draft autosave against PATCH /flows/:id (06-04).
+  const { saveState, serialized } = useAutosaveDraft({ slug, flowId: flow.id, nodes, edges });
+
+  // Instant D-17 feedback via the SAME validateFlowDefinition the server
+  // re-runs at publish time — client validity is never a trusted flag.
+  const blockers = useMemo(() => computePublishBlockers(serialized.definition), [serialized]);
+
+  const invalidByNodeId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const blocker of blockers) {
+      if (blocker.nodeId) map.set(blocker.nodeId, blocker.message);
+    }
+    for (const node of nodes) {
+      if (map.has(node.id) || !node.type) continue;
+      const incompleteMessage = INCOMPLETE_NODE_MESSAGES[node.type as FlowCanvasNodeType];
+      if (serialized.incompleteNodeIds.includes(node.id) && incompleteMessage) {
+        map.set(node.id, incompleteMessage);
+      } else if (node.type === "trigger") {
+        const { config } = node.data;
+        const configured =
+          (config.triggerType === "event" && Boolean(config.eventName)) ||
+          (config.triggerType === "segment" && Boolean(config.segmentId));
+        if (!configured && incompleteMessage) map.set(node.id, incompleteMessage);
+      }
+    }
+    return map;
+  }, [blockers, serialized, nodes]);
+
+  /** Nodes with the computed invalid ring/tooltip injected (state itself stays clean). */
+  const displayNodes = useMemo(
+    () =>
+      nodes.map((node) => ({
+        ...node,
+        data: { ...node.data, invalidMessage: invalidByNodeId.get(node.id) ?? null },
+      })),
+    [nodes, invalidByNodeId]
+  );
+
+  const uniqueBlockerMessages = useMemo(() => [...new Set(blockers.map((blocker) => blocker.message))], [blockers]);
+
+  const selectedNode = useMemo(() => displayNodes.find((node) => node.selected) ?? null, [displayNodes]);
+
+  const onConfigChange = useCallback(
+    (nodeId: string, config: CanvasNodeConfig) => {
+      setNodes((nds) => nds.map((node) => (node.id === nodeId ? { ...node, data: { ...node.data, config } } : node)));
+    },
+    [setNodes]
+  );
+
+  const deselectAll = useCallback(() => {
+    setNodes((nds) => nds.map((node) => (node.selected ? { ...node, selected: false } : node)));
+  }, [setNodes]);
 
   const onConnect = useCallback(
     (connection: Connection) => {
@@ -214,7 +270,7 @@ function FlowCanvasInner({ flow }: { slug: string; flow: FlowResponse }) {
     <NodeActionsContext.Provider value={{ deleteNode, duplicateNode }}>
       <div className="h-full min-h-0 flex-1">
         <ReactFlow
-          nodes={nodes}
+          nodes={displayNodes}
           edges={edges}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
@@ -236,8 +292,29 @@ function FlowCanvasInner({ flow }: { slug: string; flow: FlowResponse }) {
           <Controls position="bottom-left" />
           <MiniMap position="bottom-right" />
           <NodePalette />
+          <Panel position="top-right">
+            <div className="flex flex-col items-end gap-2">
+              {/* Autosave status — Label/meta text, never a toast (06-UI-SPEC). */}
+              <span className="rounded bg-white/90 px-2 py-1 text-sm text-muted-foreground">
+                {saveState === "saving" ? "Сохранение…" : "Сохранено"}
+              </span>
+              {uniqueBlockerMessages.length > 0 ? (
+                <div className="w-72 rounded-lg border border-neutral-200 bg-white p-3 shadow-sm">
+                  <p className="text-sm font-semibold">Блокирует публикацию</p>
+                  <ul className="mt-1 space-y-1">
+                    {uniqueBlockerMessages.map((message) => (
+                      <li key={message} className="text-sm text-destructive">
+                        {message}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </div>
+          </Panel>
         </ReactFlow>
       </div>
+      <NodeConfigPanel slug={slug} node={selectedNode} onConfigChange={onConfigChange} onClose={deselectAll} />
     </NodeActionsContext.Provider>
   );
 }
