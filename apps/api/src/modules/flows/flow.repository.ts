@@ -383,11 +383,17 @@ export async function publishFlow(id: string): Promise<PublishFlowResult> {
 
     const triggerColumns = extractTriggerColumns(definition);
 
+    // WR-04/D-18/D-19: publishing a paused flow's accumulated draft must
+    // publish the new version WITHOUT silently resuming enrollment/sends --
+    // the only path back to "live" from "paused" is the explicit resumeFlow
+    // above. A draft or already-live flow still publishes to "live".
+    const nextStatus = existing.status === "paused" ? "paused" : "live";
+
     const { rows: updated } = await client.query<FlowRow>(
       `UPDATE flows SET
          live_version_id = $3,
          draft_version_id = NULL,
-         status = 'live',
+         status = $7,
          trigger_type = $4,
          trigger_event_name = $5,
          trigger_segment_id = $6,
@@ -401,6 +407,7 @@ export async function publishFlow(id: string): Promise<PublishFlowResult> {
         triggerColumns.triggerType,
         triggerColumns.triggerEventName,
         triggerColumns.triggerSegmentId,
+        nextStatus,
       ]
     );
     const flow = updated[0];

@@ -107,6 +107,13 @@ export function PublishEnrollDialog({
                   enrollPreviewQuery.data ? enrollPreviewQuery.data.count.toLocaleString("ru-RU") : "…"
                 } контактов. Зачислить их в цепочку сейчас, или запускать только для тех, кто попадёт в сегмент после публикации?`
               : `Цепочка начнёт запускаться по событию «${flow.triggerEventName ?? ""}». Новые подходящие контакты будут входить в неё автоматически.`}
+            {flow.status === "paused" ? (
+              <>
+                {" "}
+                Цепочка останется приостановленной — публикация не возобновит отправку; чтобы возобновить, нажмите
+                «Возобновить».
+              </>
+            ) : null}
           </DialogDescription>
         </DialogHeader>
 
