@@ -6,14 +6,14 @@ current_phase: 06
 current_phase_name: flows-triggered-chains
 status: executing
 stopped_at: Completed 06-03-PLAN.md
-last_updated: "2026-07-10T04:45:53.937Z"
+last_updated: "2026-07-10T05:13:52.701Z"
 last_activity: 2026-07-10
 last_activity_desc: Phase 06 execution started
 progress:
   total_phases: 7
   completed_phases: 5
   total_plans: 72
-  completed_plans: 66
+  completed_plans: 67
   percent: 71
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-07-09)
 ## Current Position
 
 Phase: 06 (flows-triggered-chains) — EXECUTING
-Plan: 6 of 11
+Plan: 7 of 11
 Status: Ready to execute
 Last activity: 2026-07-10 — Phase 06 execution started
 
@@ -125,6 +125,7 @@ Progress: [████████████████████] 61/61 p
 | Phase 06 P03 | 20min | 3 tasks | 9 files |
 | Phase 06 P04 | 30min | 3 tasks | 12 files |
 | Phase 06 P05 | 20min | 3 tasks | 8 files |
+| Phase 06 P10 | 17min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -288,6 +289,9 @@ Recent decisions affecting current work:
 - [Phase 06]: 06-04: jsonb ARRAY columns (exit_conditions) must be JSON.stringify'd explicitly before binding as a pg param -- node-postgres serializes a raw JS array as a Postgres ARRAY literal, not JSON text, unlike jsonb OBJECT columns which pg JSON.stringifies automatically
 - [Phase 06]: 06-04: every flows.routes.ts handler builds its full response (including any withTenantTransaction-backed lookup like getPinnedVersion) inside one withTenant(...) closure -- AsyncLocalStorage tenant context exits the instant the outer callback's promise settles
 - [Phase ?]: [Phase 06]: 06-05: no self-nudge after a non-terminal send->next-node transition -- the 60s reconciliation scan is the sole continuation mechanism for non-delay chains in this plan's scope, matching the plan's literal one-call-one-node-dispatch contract
+- [Phase ?]: 06-10: @xyflow/react pinned exactly 12.11.2 after blocking-human legitimacy checkpoint (repository.url = xyflow/xyflow); reactflow never installed
+- [Phase ?]: 06-10: flow send-node config persists fromEmail alongside fromSenderId because flow-send.ts dispatches from node.templateId + node.fromEmail
+- [Phase ?]: 06-10: canvas autosave serializes only the schema-valid node subset (per-node flowNodeSchema.safeParse) — schema-incomplete nodes stay canvas-local with a destructive ring until configured
 
 ### Pending Todos
 
@@ -315,6 +319,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-10T04:45:23.742Z
+Last session: 2026-07-10T05:13:14.020Z
 Stopped at: Completed 06-03-PLAN.md
 Resume file: None

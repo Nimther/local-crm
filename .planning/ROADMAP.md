@@ -336,7 +336,7 @@ _Wave 1:_
   3. Re-entry control (once ever / once per N days / every time) and quiet hours are honored: no email is sent inside the quiet window, and it is deferred until the window ends.
   4. Editing a live flow happens in a draft that only takes effect on publish; contacts already mid-flight continue on the version they entered, with no duplicate or skipped sends.
 
-**Plans**: 5/11 plans executed
+**Plans**: 6/11 plans executed
 **UI hint**: yes
 
 Plans:
@@ -353,7 +353,7 @@ Plans:
 **Wave 3** *(blocked on Wave 2 completion)*
 
 - [x] 06-05-PLAN.md — Execution engine core: run-advance state machine (send/exit) + exit conditions + reconciliation scan + pause-freeze
-- [ ] 06-10-PLAN.md — Canvas builder UI (@xyflow/react, 5 node types, palette, autosave) + [SUS] package-legitimacy checkpoint
+- [x] 06-10-PLAN.md — Canvas builder UI (@xyflow/react, 5 node types, palette, autosave) + [SUS] package-legitimacy checkpoint
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
@@ -406,5 +406,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 3. Segmentation Engine | 8/8 | Complete    | 2026-07-06 |
 | 4. Broadcast Campaigns & Send Pipeline | 19/19 | Complete    | 2026-07-06 |
 | 5. Webhook Processing & Delivery Tracking | 13/13 | Complete    | 2026-07-09 |
-| 6. Flows (Triggered Chains) | 5/11 | In Progress|  |
+| 6. Flows (Triggered Chains) | 6/11 | In Progress|  |
 | 7. Analytics, Dashboard & Send Log | 0/5 | Not started | - |
