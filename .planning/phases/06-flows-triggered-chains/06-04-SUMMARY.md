@@ -210,3 +210,7 @@ None - no external service configuration required. Migration 0031 applied agains
 ---
 *Phase: 06-flows-triggered-chains*
 *Completed: 2026-07-10*
+
+## Self-Check: PASSED
+
+All 7 created files verified present on disk (flow.repository.ts, flow-version.repository.ts, flow-validation.ts, flows.routes.ts, flow-lifecycle.test.ts, 0031_flows_exit_conditions.sql, this SUMMARY); all 5 task commit hashes (b43993e, e752fb2, 4583cd3, 6d58516, 1bb2c70) verified present in git log.
