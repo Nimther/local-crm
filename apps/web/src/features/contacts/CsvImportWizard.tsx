@@ -22,6 +22,7 @@ import { Progress } from "@/components/ui/progress";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { TimezoneCombobox } from "./TimezoneCombobox";
 
 const GENERIC_ERROR = "Что-то пошло не так. Попробуйте ещё раз — если ошибка повторится, обновите страницу.";
 const WRONG_TYPE_ERROR = "Не удалось прочитать файл. Загрузите CSV в кодировке UTF-8 или Windows-1251.";
@@ -193,6 +194,7 @@ function MappingStep({
     upload.headers.map((header) => ({ header, target: guessTarget(header), newPropertyName: "" }))
   );
   const [duplicatePolicy, setDuplicatePolicy] = useState<DuplicatePolicy>("update");
+  const [defaultTimezone, setDefaultTimezone] = useState<string | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
 
   const registry = registryQuery.data ?? [];
@@ -217,6 +219,7 @@ function MappingStep({
       const summary = await apiPost<CsvDryRunSummary>(`/api/workspaces/${slug}/imports/${upload.importId}/dry-run`, {
         mapping,
         duplicatePolicy,
+        ...(defaultTimezone ? { defaultTimezone } : {}),
       });
       return { mapping, summary };
     },
@@ -292,6 +295,16 @@ function MappingStep({
               </Label>
             </div>
           </RadioGroup>
+        </div>
+
+        <div className="space-y-2">
+          <Label>Часовой пояс по умолчанию</Label>
+          <p className="text-xs text-muted-foreground">
+            Применяется к импортируемым строкам, у которых нет собственного значения часового пояса.
+          </p>
+          <div className="max-w-xs">
+            <TimezoneCombobox value={defaultTimezone} onChange={setDefaultTimezone} />
+          </div>
         </div>
 
         {upload.previewRows.length > 0 ? (
