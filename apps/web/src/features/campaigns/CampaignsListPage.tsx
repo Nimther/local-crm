@@ -26,6 +26,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { EXHAUSTIVE_LOOKUP_PAGE_SIZE } from "@mega-crm/shared-schemas";
 import { cn } from "@/lib/utils";
+import { computeRate } from "@/lib/rates";
 import {
   deleteCampaign,
   duplicateCampaign,
@@ -34,6 +35,11 @@ import {
 } from "@/features/campaigns/api";
 import { listSegments } from "@/features/segments/api";
 import { CampaignStatusBadge } from "@/features/campaigns/CampaignStatusBadge";
+
+/** D-06: «—» for a zero-denominator rate, never NaN%/Infinity% (mirrors CampaignProgress.tsx's rateLabel). */
+function rateLabel(rate: number | null): string {
+  return rate === null ? "—" : `${rate}%`;
+}
 
 const PAGE_SIZE = 20;
 const GENERIC_ERROR = "Что-то пошло не так. Попробуйте ещё раз — если ошибка повторится, обновите страницу.";
@@ -145,12 +151,23 @@ export function CampaignsListPage() {
                   <TableHead>Название</TableHead>
                   <TableHead>Статус</TableHead>
                   <TableHead>Аудитория</TableHead>
+                  <TableHead className="text-right">Отправлено</TableHead>
+                  <TableHead className="text-right">Доставлено</TableHead>
+                  <TableHead className="text-right">Открыто</TableHead>
+                  <TableHead className="text-right">Клики</TableHead>
                   <TableHead>Обновлена</TableHead>
                   <TableHead className="text-right" />
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {items.map((campaign) => (
+                {items.map((campaign) => {
+                  // D-06: per-row comparison metrics, same D-01 denominators
+                  // CampaignProgress.tsx uses (delivery/bounce from-sent,
+                  // open/click from-delivered).
+                  const deliveredRate = computeRate(campaign.deliveredCount, campaign.sentCount);
+                  const openedRate = computeRate(campaign.openedCount, campaign.deliveredCount);
+                  const clickedRate = computeRate(campaign.clickedCount, campaign.deliveredCount);
+                  return (
                   <TableRow
                     key={campaign.id}
                     className="h-12 cursor-pointer"
@@ -161,6 +178,10 @@ export function CampaignsListPage() {
                       <CampaignStatusBadge status={campaign.status} />
                     </TableCell>
                     <TableCell>{segmentNameById.get(campaign.segmentId) ?? "—"}</TableCell>
+                    <TableCell className="text-right tabular-nums">{campaign.sentCount}</TableCell>
+                    <TableCell className="text-right tabular-nums">{rateLabel(deliveredRate)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{rateLabel(openedRate)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{rateLabel(clickedRate)}</TableCell>
                     <TableCell>{new Date(campaign.updatedAt).toLocaleString("ru-RU")}</TableCell>
                     <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                       <DropdownMenu>
@@ -191,7 +212,8 @@ export function CampaignsListPage() {
                       </DropdownMenu>
                     </TableCell>
                   </TableRow>
-                ))}
+                  );
+                })}
               </TableBody>
             </Table>
           </CardContent>
