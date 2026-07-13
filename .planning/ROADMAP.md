@@ -336,7 +336,7 @@ _Wave 1:_
   3. Re-entry control (once ever / once per N days / every time) and quiet hours are honored: no email is sent inside the quiet window, and it is deferred until the window ends.
   4. Editing a live flow happens in a draft that only takes effect on publish; contacts already mid-flight continue on the version they entered, with no duplicate or skipped sends.
 
-**Plans**: 23/24 plans executed
+**Plans**: 24/24 plans complete
 **UI hint**: yes
 
 Plans:
@@ -406,7 +406,7 @@ _Wave 1 (parallel — disjoint files):_
 
 _Wave 2 (blocked on 06-22 — needs the defaultTimezone dry-run contract field):_
 
-- [ ] 06-23-PLAN.md — Test 10 UI: render the constrained TimezoneCombobox in the CSV column-mapping step as the «default timezone for rows without one» control + thread defaultTimezone into the dry-run request (FLOW-05)
+- [x] 06-23-PLAN.md — Test 10 UI: render the constrained TimezoneCombobox in the CSV column-mapping step as the «default timezone for rows without one» control + thread defaultTimezone into the dry-run request (FLOW-05)
 
 ### Phase 7: Analytics, Dashboard & Send Log
 
@@ -445,5 +445,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 3. Segmentation Engine | 8/8 | Complete    | 2026-07-06 |
 | 4. Broadcast Campaigns & Send Pipeline | 19/19 | Complete    | 2026-07-06 |
 | 5. Webhook Processing & Delivery Tracking | 13/13 | Complete    | 2026-07-09 |
-| 6. Flows (Triggered Chains) | 23/24 | In Progress|  |
+| 6. Flows (Triggered Chains) | 24/24 | Complete   | 2026-07-13 |
 | 7. Analytics, Dashboard & Send Log | 0/5 | Not started | - |
