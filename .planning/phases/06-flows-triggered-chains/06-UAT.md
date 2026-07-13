@@ -1,9 +1,9 @@
 ---
-status: complete
+status: diagnosed
 phase: 06-flows-triggered-chains
 source: 06-01-SUMMARY.md, 06-02-SUMMARY.md, 06-03-SUMMARY.md, 06-04-SUMMARY.md, 06-05-SUMMARY.md, 06-06-SUMMARY.md, 06-07-SUMMARY.md, 06-08-SUMMARY.md, 06-09-SUMMARY.md, 06-10-SUMMARY.md, 06-11-SUMMARY.md, 06-12-SUMMARY.md, 06-13-SUMMARY.md, 06-14-SUMMARY.md, 06-15-SUMMARY.md, 06-16-SUMMARY.md, 06-17-SUMMARY.md, 06-18-SUMMARY.md, 06-19-SUMMARY.md, 06-20-SUMMARY.md, 06-21-SUMMARY.md
 started: 2026-07-13T09:04:39.797Z
-updated: 2026-07-13T15:45:32.844Z
+updated: 2026-07-13T15:59:09.077Z
 mode: mvp
 user_story: "As a marketer, I want to visually build, publish, and run automated triggered chains that reuse the proven send pipeline, suppression, and frequency cap, so that the right email reaches the right contact at the right time."
 ---
@@ -566,17 +566,31 @@ Malformed coverage blocks detected by uat.classify-coverage (entries kept as hum
   reason: "User reported: выпадающий список со списком часовых поясов отсутствует"
   severity: major
   test: 10
-  root_cause: ""
-  artifacts: []
-  missing: []
-  debug_session: ""
+  root_cause: "Claim-vs-implementation gap on the CSV column-mapping surface: CsvImportWizard.tsx never renders a TimezoneCombobox — it only offers a timezone target-field option in the column-mapping Select (line 44) plus header auto-guesses. 06-11-SUMMARY overstated the claim (combobox wired into CSV mapping); verification was grep-only, never render-level. SendSettingsPage.tsx:177 and ContactForm.tsx:391 DO render the combobox unconditionally."
+  artifacts:
+    - path: "apps/web/src/features/contacts/CsvImportWizard.tsx"
+      issue: "no timezone combobox on the mapping surface, despite the UAT truth/06-11 claim promising one"
+    - path: ".planning/phases/06-flows-triggered-chains/06-11-SUMMARY.md"
+      issue: "key claim overstates what shipped (wired into … CSV mapping)"
+  missing:
+    - "Wire the constrained timezone UI into the CSV mapping step (e.g. a default-timezone-for-rows-without-one control), OR realign the contract to server-side per-row IANA validation at dry-run (csv-mapping.ts:101) surfaced in the dry-run error report, and re-verify Test 10 on settings/sending + contact form where the combobox exists"
+    - "Consider a jsdom component test lane so combobox rendering is verified, not just grepped"
+  debug_session: ".planning/debug/timezone-combobox-missing.md"
 
 - truth: "On a failed draft autosave the canvas toolbar shows an honest error/retrying state (not a stuck «Сохранение…» and not «Сохранено»), and the automatic retry re-fires the PATCH once connectivity is restored"
   status: failed
   reason: "User reported: ошибка не показывается. Просто висит статус «Сохранение...»"
   severity: major
   test: 11
-  root_cause: ""
-  artifacts: []
-  missing: []
-  debug_session: ""
+  root_cause: "TanStack Query v5 default networkMode:'online' pauses the autosave mutation while offline — the PATCH mutationFn is never invoked, the mutation sits at isPending:true/isPaused:true/isError:false forever. deriveAutosaveState (useAutosaveDraft.ts:74-86) does not model isPaused, so isPending wins and the toolbar renders «Сохранение…» indefinitely. WR-05's unit test only covered settled errors (online 4xx/5xx) — an input shape that never occurs during an offline pause. Secondary: with API stopped but browser online the error briefly shows, but the 4s retry re-fires mutate() and any offline transition re-pauses it."
+  artifacts:
+    - path: "apps/web/src/features/flows/canvas/useAutosaveDraft.ts"
+      issue: "deriveAutosaveState has no isPaused input; line 170 never reads mutation.isPaused — offline-paused mutation maps to saving instead of honest error/retrying"
+    - path: "apps/web/src/lib/queryClient.ts"
+      issue: "no networkMode override — TanStack default online governs mutations (contributing config)"
+    - path: "apps/web/src/features/flows/canvas/__tests__/autosaveState.test.ts"
+      issue: "test gap — no case for the paused-offline input shape"
+  missing:
+    - "Feed mutation.isPaused into deriveAutosaveState and map paused-with-unsaved-changes to the honest error/retrying state (TanStack auto-resumes paused mutations on reconnect), OR set networkMode:'always' on useUpdateFlowDraft so offline fetches settle to isError and the existing 4s bounded retry owns reconnection"
+    - "Extend autosaveState.test.ts with the paused input shape"
+  debug_session: ".planning/debug/autosave-error-state-stuck.md"
