@@ -6,14 +6,14 @@ current_phase: 07
 current_phase_name: analytics-dashboard-send-log
 status: executing
 stopped_at: Completed 07-01-PLAN.md
-last_updated: "2026-07-13T21:35:28.573Z"
+last_updated: "2026-07-13T21:47:57.435Z"
 last_activity: 2026-07-13
 last_activity_desc: Phase 07 execution started
 progress:
   total_phases: 7
   completed_phases: 6
   total_plans: 92
-  completed_plans: 87
+  completed_plans: 88
   percent: 86
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-07-14)
 ## Current Position
 
 Phase: 07 (analytics-dashboard-send-log) — EXECUTING
-Plan: 3 of 7
+Plan: 4 of 7
 Status: Ready to execute
 Last activity: 2026-07-13 — Phase 07 execution started
 
@@ -147,6 +147,7 @@ Progress: [████████████████████] 85/85 p
 | Phase 06 P23 | 6min | 1 tasks | 1 files |
 | Phase 07 P01 | 30min | 3 tasks | 13 files |
 | Phase 07 P03 | 15min | 2 tasks | 7 files |
+| Phase 07 P02 | 20min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -350,6 +351,9 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 07]: 07-01: applySuppression/applyUnsubscribe now SELECT prior subscription_status before UPDATE (RETURNING only exposes the post-update row) so recordSubscriptionStatusChange gets an accurate old->new pair
 - [Phase ?]: 07-03: exclusion_reason values (suppressed/unsubscribed/no_email/frequency_cap) bucketed client-side into exactly two UI rows -- frequency_cap its own bucket, everything else folds into subscription/suppression
 - [Phase ?]: 07-03: CampaignDetailPage's terminal SummaryView left un-enriched (out of this plan's files_modified scope) -- still shows raw counts only, no D-01 rates/excluded breakdown; flagged for phase UAT
+- [Phase 07]: 07-02: «Статусы» timeline filter buckets BOTH status_change and flow_entry_exit kinds together -- the UI-SPEC defines exactly 4 filter values for 4 underlying kinds
+- [Phase 07]: 07-02: send row's exclusion_reason/bounce_reason/drop_reason folded into one 'reason' detail field via the same CASE priority as status
+- [Phase 07]: 07-02: flow_entry_exit row's occurred_at is entered_at (not exited_at) -- exit info travels inside detail
 
 ### Pending Todos
 
@@ -376,6 +380,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-13T21:34:18.847Z
+Last session: 2026-07-13T21:47:24.751Z
 Stopped at: Completed 07-01-PLAN.md
 Resume file: None
