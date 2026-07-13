@@ -422,7 +422,7 @@ _Wave 2 (blocked on 06-22 — needs the defaultTimezone dry-run contract field):
   4. A workspace dashboard shows send / deliver / open trends over a chosen period and contact-base growth.
   5. A user can browse a per-message send log filtered by contact, campaign/flow, status, and period.
 
-**Plans**: 5/7 plans executed
+**Plans**: 6/7 plans executed
 **UI hint**: yes
 
 Plans:
@@ -438,7 +438,7 @@ Plans:
 
 **Wave 3** *(parallel — blocked on Wave 2)*
 
-- [ ] 07-04-PLAN.md — Per-flow-step metrics: flow-analytics endpoint (by nodeId across versions) + canvas node badges + «Аналитика» table tab (ANLT-02)
+- [x] 07-04-PLAN.md — Per-flow-step metrics: flow-analytics endpoint (by nodeId across versions) + canvas node badges + «Аналитика» table tab (ANLT-02)
 - [x] 07-05-PLAN.md — Per-message send log: filtered list + computed-status multi-select + per-message drawer + «Журнал отправок» nav (ANLT-05)
 
 **Wave 4** *(blocked on Wave 3)*
@@ -458,4 +458,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 4. Broadcast Campaigns & Send Pipeline | 19/19 | Complete    | 2026-07-06 |
 | 5. Webhook Processing & Delivery Tracking | 13/13 | Complete    | 2026-07-09 |
 | 6. Flows (Triggered Chains) | 24/24 | Complete    | 2026-07-13 |
-| 7. Analytics, Dashboard & Send Log | 5/7 | In Progress|  |
+| 7. Analytics, Dashboard & Send Log | 6/7 | In Progress|  |

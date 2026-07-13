@@ -6,14 +6,14 @@ current_phase: 07
 current_phase_name: analytics-dashboard-send-log
 status: executing
 stopped_at: Completed 07-01-PLAN.md
-last_updated: "2026-07-13T22:14:07.539Z"
+last_updated: "2026-07-13T22:26:26.393Z"
 last_activity: 2026-07-13
 last_activity_desc: Phase 07 execution started
 progress:
   total_phases: 7
   completed_phases: 6
   total_plans: 92
-  completed_plans: 90
+  completed_plans: 91
   percent: 86
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-07-14)
 ## Current Position
 
 Phase: 07 (analytics-dashboard-send-log) — EXECUTING
-Plan: 6 of 7
+Plan: 7 of 7
 Status: Ready to execute
 Last activity: 2026-07-13 — Phase 07 execution started
 
@@ -150,6 +150,7 @@ Progress: [████████████████████] 85/85 p
 | Phase 07 P02 | 20min | 2 tasks | 6 files |
 | Phase 07 P05 | 25min | 2 tasks | 12 files |
 | Phase 07 P06 | 25min | 3 tasks | 11 files |
+| Phase 07 P04 | 25min | 2 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -360,6 +361,8 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 07]: 07-05: contact/campaign/flow send-log filters are URL-param-driven deep-link chips, not open comboboxes -- 07-UI-SPEC's inventory lists only status multi-select + period presets as interactive controls on this page
 - [Phase ?]: 07-06: reconciliation bounced_count filter widened to bounced_at OR dropped_at OR spam_reported_at (not bounced_at alone) to match the incremental path's D-08 grouping and avoid reconciliation silently regressing a correctly-raised count
 - [Phase ?]: 07-06: reconciliation opened_count/clicked_count are unique-recipient (first_opened_at/first_clicked_at based) while the incremental path is repeat-event based -- an accepted definitional gap since reconciliation only scans sends, never send_events
+- [Phase 07]: 07-04: getFlowNodeAnalytics runs two separate queries (node-visit COUNT(DISTINCT contact_id) + send-fact COUNT(*) FILTER) joined by nodeId in application code rather than one LEFT JOIN, avoiding fan-out double-counting risk between flow_run_steps and sends
+- [Phase 07]: 07-04: FlowCanvas/FlowDetailPage fetch GET /flows/:id/analytics once via useFlowAnalytics; the canvas badge overlay and FlowAnalyticsTable both resolve to the same TanStack Query cache entry
 
 ### Pending Todos
 
@@ -386,6 +389,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-13T22:13:47.353Z
+Last session: 2026-07-13T22:26:09.141Z
 Stopped at: Completed 07-01-PLAN.md
 Resume file: None
