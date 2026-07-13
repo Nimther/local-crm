@@ -117,6 +117,11 @@ export function getCampaignTestSample(slug: string, id: string): Promise<{ sampl
   return apiGet<{ sample: Record<string, unknown> }>(`/api/workspaces/${slug}/campaigns/${id}/test-sample`);
 }
 
+export interface CampaignProgressExcludedBreakdownItem {
+  reason: string | null;
+  count: number;
+}
+
 export interface CampaignProgress {
   status: CampaignStatus;
   sentCount: number;
@@ -134,6 +139,8 @@ export interface CampaignProgress {
     excluded: number;
     dispatching: number;
   };
+  /** D-07: excluded sends grouped by exclusion_reason, for the «Пропущено» breakdown row. */
+  excludedBreakdown: CampaignProgressExcludedBreakdownItem[];
 }
 
 /** GET /api/workspaces/:slug/campaigns/:id/progress -- CAMP-05 polling target (04-08: refetchInterval 3000, gated on status='sending'). */

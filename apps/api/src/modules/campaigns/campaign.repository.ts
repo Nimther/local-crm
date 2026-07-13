@@ -373,6 +373,11 @@ export async function deleteCampaign(id: string): Promise<boolean> {
   });
 }
 
+export interface CampaignExcludedBreakdownItem {
+  reason: string | null;
+  count: number;
+}
+
 export interface CampaignProgress {
   status: CampaignStatus;
   sentCount: number;
@@ -390,6 +395,8 @@ export interface CampaignProgress {
     excluded: number;
     dispatching: number;
   };
+  /** D-07: excluded sends grouped by exclusion_reason, for the «Пропущено» breakdown row. Empty array when none. */
+  excludedBreakdown: CampaignExcludedBreakdownItem[];
 }
 
 /**
@@ -423,6 +430,20 @@ export async function getCampaignProgress(id: string): Promise<CampaignProgress 
       }
     }
 
+    // D-07: excluded-reason breakdown for the campaign summary's «Пропущено»
+    // row. Parameterized + scoped by workspace_id, same tenant-scoped path
+    // as the ledger re-aggregation above (T-07-03-01).
+    const { rows: excludedRows } = await client.query<{ reason: string | null; count: string }>(
+      `SELECT exclusion_reason as reason, count(*)::text as count FROM sends
+       WHERE workspace_id = $1 AND campaign_id = $2 AND status = 'excluded'
+       GROUP BY exclusion_reason`,
+      [workspaceId, id]
+    );
+    const excludedBreakdown: CampaignExcludedBreakdownItem[] = excludedRows.map((row) => ({
+      reason: row.reason,
+      count: Number(row.count),
+    }));
+
     return {
       status: campaign.status,
       sentCount: campaign.sentCount,
@@ -435,6 +456,7 @@ export async function getCampaignProgress(id: string): Promise<CampaignProgress 
       bouncedCount: campaign.bouncedCount,
       unsubscribedCount: campaign.unsubscribedCount,
       ledger,
+      excludedBreakdown,
     };
   });
 }
