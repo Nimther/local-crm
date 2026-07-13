@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 7
-current_phase_name: Analytics, Dashboard & Send Log
+current_phase: 07
+current_phase_name: analytics-dashboard-send-log
 status: executing
-stopped_at: Phase 7 UI-SPEC approved
-last_updated: "2026-07-13T20:56:49.712Z"
-last_activity: 2026-07-14
-last_activity_desc: Phase 06 complete (UAT 13/13, security verified), transitioned to Phase 7
+stopped_at: Completed 07-01-PLAN.md
+last_updated: "2026-07-13T21:24:21.372Z"
+last_activity: 2026-07-13
+last_activity_desc: Phase 07 execution started
 progress:
   total_phases: 7
   completed_phases: 6
-  total_plans: 85
-  completed_plans: 85
+  total_plans: 92
+  completed_plans: 86
   percent: 86
 ---
 
@@ -24,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-14)
 
 **Core value:** Маркетолог настраивает триггерную цепочку или кампанию — и письма надёжно и вовремя доходят до нужных контактов, со сквозным отслеживанием статусов (delivered/opened/clicked/bounced).
-**Current focus:** Phase 7 — Analytics, Dashboard & Send Log
+**Current focus:** Phase 07 — analytics-dashboard-send-log
 
 ## Current Position
 
-Phase: 7 — Analytics, Dashboard & Send Log
-Plan: Not started
+Phase: 07 (analytics-dashboard-send-log) — EXECUTING
+Plan: 2 of 7
 Status: Ready to execute
-Last activity: 2026-07-14 — Phase 06 complete (UAT 13/13, security verified), transitioned to Phase 7
+Last activity: 2026-07-13 — Phase 07 execution started
 
 Progress: [████████████████████] 85/85 plans (100%)
 
@@ -145,6 +145,7 @@ Progress: [████████████████████] 85/85 p
 | Phase 06 P22 | 10min | 3 tasks | 9 files |
 | Phase 06 P24 | 5min | 1 tasks | 2 files |
 | Phase 06 P23 | 6min | 1 tasks | 1 files |
+| Phase 07 P01 | 30min | 3 tasks | 13 files |
 
 ## Accumulated Context
 
@@ -344,6 +345,8 @@ Recent decisions affecting current work:
 - [Phase 06]: 06-22: default only fills input.timezone when still undefined after the mapping loop -- a mapped per-row value (valid or invalid) is never overridden by the default
 - [Phase 06]: 06-24: modeled mutation.isPaused in deriveAutosaveState (before isPending check) to close UAT Test 11 offline-paused autosave gap -- TanStack's default networkMode 'online' pauses the mutation (isPending:true, isPaused:true, isError:false) without firing the PATCH; resume-on-reconnect left to TanStack's built-in behavior rather than networkMode 'always'
 - [Phase ?]: [Phase 06]: 06-23: reused TimezoneCombobox verbatim as the CSV mapping step's default-timezone control; defaultTimezone spread into dry-run body only when set (backward-compatible)
+- [Phase ?]: [Phase 07]: 07-01: Test C (webhook_suppression history write) tested at the repository/helper level in apps/api since apps/api has no dependency path to apps/worker's process; real call site verified end-to-end via extended webhook-events-suppression.test.ts
+- [Phase ?]: [Phase 07]: 07-01: applySuppression/applyUnsubscribe now SELECT prior subscription_status before UPDATE (RETURNING only exposes the post-update row) so recordSubscriptionStatusChange gets an accurate old->new pair
 
 ### Pending Todos
 
@@ -370,6 +373,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-13T20:23:41.719Z
-Stopped at: Phase 7 UI-SPEC approved
-Resume file: .planning/phases/07-analytics-dashboard-send-log/07-UI-SPEC.md
+Last session: 2026-07-13T21:24:21.344Z
+Stopped at: Completed 07-01-PLAN.md
+Resume file: None

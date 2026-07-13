@@ -82,9 +82,9 @@ Requirements for initial release. Each maps to roadmap phases.
 
 - [ ] **ANLT-01**: Пользователь видит метрики кампании: sent / delivered / opened / clicked / bounced / unsubscribed (счётчики и проценты)
 - [ ] **ANLT-02**: Пользователь видит метрики каждого шага цепочки — какой шаг недорабатывает
-- [ ] **ANLT-03**: В карточке контакта отображается timeline: кастомные события, отправленные письма, открытия, клики, смены статуса подписки
+- [x] **ANLT-03**: В карточке контакта отображается timeline: кастомные события, отправленные письма, открытия, клики, смены статуса подписки
 - [ ] **ANLT-04**: Сводный дашборд воркспейса: динамика отправок/доставок/открытий за период, рост базы контактов
-- [ ] **ANLT-05**: По-письмовый send log с текущим статусом каждого письма и фильтрами (контакт, кампания/цепочка, статус, период)
+- [x] **ANLT-05**: По-письмовый send log с текущим статусом каждого письма и фильтрами (контакт, кампания/цепочка, статус, период)
 
 ## v2 Requirements
 
@@ -173,9 +173,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FLOW-07 | Phase 6 | Complete |
 | ANLT-01 | Phase 7 | Pending |
 | ANLT-02 | Phase 7 | Pending |
-| ANLT-03 | Phase 7 | Pending |
+| ANLT-03 | Phase 7 | Complete |
 | ANLT-04 | Phase 7 | Pending |
-| ANLT-05 | Phase 7 | Pending |
+| ANLT-05 | Phase 7 | Complete |
 
 **Coverage:**
 
