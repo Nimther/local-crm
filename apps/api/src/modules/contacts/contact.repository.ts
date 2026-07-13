@@ -4,6 +4,7 @@ import {
   CONTACT_COLUMNS,
   isEmailSuppressed,
   isEmailTaken,
+  recordSubscriptionStatusChange,
   registerObservedProperties,
   upsertContactByIdentity,
   type ContactRow,
@@ -357,6 +358,19 @@ export async function updateContact(id: string, patch: UpdateContactInput): Prom
         nextStatus,
       ]
     );
+
+    // D-09 (07-01): record the status transition -- gated on an actual
+    // value change so updating a contact to its current status writes zero
+    // history rows.
+    if (nextStatus !== existing.subscriptionStatus) {
+      await recordSubscriptionStatusChange(client, {
+        workspaceId,
+        contactId: existing.id,
+        oldStatus: existing.subscriptionStatus,
+        newStatus: nextStatus,
+        source: "manual_ui",
+      });
+    }
 
     await registerObservedProperties(client, workspaceId, patch.properties);
 

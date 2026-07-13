@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { verifyUnsubscribeToken } from "@mega-crm/delivery-core";
+import { recordSubscriptionStatusChange } from "@mega-crm/contacts-core";
 import { withTenant, withTenantTransaction } from "../../middleware/tenant-context.js";
 
 /**
@@ -188,10 +189,31 @@ export async function registerUnsubscribeRoutes(fastify: FastifyInstance): Promi
       // unknown-contact and forged-token cases (T-04-19-02).
       await withTenant(payload.workspaceId, () =>
         withTenantTransaction(async (client) => {
+          // D-09 (07-01): read the contact's current status BEFORE the
+          // UPDATE so oldStatus is accurate, and skip the history write
+          // entirely if it's already unsubscribed (no-op update, no value
+          // change -- an unknown/nonexistent contactId also resolves to
+          // "no row found", which correctly writes nothing).
+          const { rows } = await client.query<{ subscriptionStatus: string }>(
+            `SELECT subscription_status as "subscriptionStatus" FROM contacts WHERE id = $1`,
+            [payload.contactId]
+          );
+          const existingStatus = rows[0]?.subscriptionStatus ?? null;
+
           await client.query(
             `UPDATE contacts SET subscription_status = 'unsubscribed', updated_at = now() WHERE id = $1`,
             [payload.contactId]
           );
+
+          if (existingStatus !== null && existingStatus !== "unsubscribed") {
+            await recordSubscriptionStatusChange(client, {
+              workspaceId: payload.workspaceId,
+              contactId: payload.contactId,
+              oldStatus: existingStatus,
+              newStatus: "unsubscribed",
+              source: "unsubscribe_route",
+            });
+          }
         })
       );
     }

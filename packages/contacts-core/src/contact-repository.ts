@@ -1,6 +1,7 @@
 import type { PoolClient } from "pg";
 import { logger } from "./logger.js";
 import { registerObservedProperties } from "./property-registry.js";
+import { recordSubscriptionStatusChange } from "./subscription-status-history.js";
 
 export type SubscriptionStatus = "subscribed" | "unsubscribed" | "suppressed";
 
@@ -382,6 +383,18 @@ export async function upsertContactByIdentity(
       nextStatus,
     ]
   );
+
+  // D-09: record the status transition (07-01) -- gated on an actual value
+  // change so a re-upsert of the same status writes zero history rows.
+  if (nextStatus !== existing.subscriptionStatus) {
+    await recordSubscriptionStatusChange(client, {
+      workspaceId,
+      contactId: existing.id,
+      oldStatus: existing.subscriptionStatus,
+      newStatus: nextStatus,
+      source: "csv_or_api_upsert",
+    });
+  }
 
   await registerObservedProperties(client, workspaceId, safeProperties);
 

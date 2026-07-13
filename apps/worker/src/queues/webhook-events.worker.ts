@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Worker, type Job, type ConnectionOptions } from "bullmq";
 import type { PoolClient } from "pg";
 import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
+import { recordSubscriptionStatusChange } from "@mega-crm/contacts-core";
 import {
   normalizeEventType,
   resolveSuppression,
@@ -152,6 +153,15 @@ async function applySuppression(
   contactId: string,
   reason: string
 ): Promise<void> {
+  // D-09 (07-01): capture the prior status BEFORE the UPDATE (RETURNING only
+  // ever exposes the NEW row) so the history write's old->new pair is
+  // accurate, and so a contact already suppressed writes no redundant row.
+  const { rows: priorRows } = await client.query<{ subscriptionStatus: string }>(
+    `SELECT subscription_status as "subscriptionStatus" FROM contacts WHERE id = $1`,
+    [contactId]
+  );
+  const priorStatus = priorRows[0]?.subscriptionStatus ?? null;
+
   const { rows } = await client.query<{ email: string | null }>(
     `UPDATE contacts SET subscription_status = 'suppressed', updated_at = now() WHERE id = $1 RETURNING email`,
     [contactId]
@@ -165,13 +175,41 @@ async function applySuppression(
       [workspaceId, email, reason]
     );
   }
+
+  if (priorStatus !== null && priorStatus !== "suppressed") {
+    await recordSubscriptionStatusChange(client, {
+      workspaceId,
+      contactId,
+      oldStatus: priorStatus,
+      newStatus: "suppressed",
+      source: "webhook_suppression",
+      reason,
+    });
+  }
 }
 
 /** Unsubscribe outcome (D-11/D-13): status change ONLY -- never a `workspace_suppressions` row. */
-async function applyUnsubscribe(client: PoolClient, contactId: string): Promise<void> {
+async function applyUnsubscribe(client: PoolClient, workspaceId: string, contactId: string): Promise<void> {
+  // D-09 (07-01): same capture-before-write pattern as applySuppression.
+  const { rows: priorRows } = await client.query<{ subscriptionStatus: string }>(
+    `SELECT subscription_status as "subscriptionStatus" FROM contacts WHERE id = $1`,
+    [contactId]
+  );
+  const priorStatus = priorRows[0]?.subscriptionStatus ?? null;
+
   await client.query(`UPDATE contacts SET subscription_status = 'unsubscribed', updated_at = now() WHERE id = $1`, [
     contactId,
   ]);
+
+  if (priorStatus !== null && priorStatus !== "unsubscribed") {
+    await recordSubscriptionStatusChange(client, {
+      workspaceId,
+      contactId,
+      oldStatus: priorStatus,
+      newStatus: "unsubscribed",
+      source: "webhook_unsubscribe",
+    });
+  }
 }
 
 interface ResolvedSend {
@@ -210,6 +248,11 @@ async function applyEventSideEffects(
       if (justSet && send.campaignId) {
         await incrementCampaignCounter(client, send.campaignId, "opened_count");
       }
+      // A4/D-11: every genuinely-new open increments the per-send repeat
+      // counter, independent of `justSet` -- justSet only gates the
+      // first-occurrence campaign unique-recipient counter above; the
+      // repeat count must climb on every new open, not just the first.
+      await client.query(`UPDATE sends SET open_count = open_count + 1 WHERE id = $1`, [send.id]);
       break;
     }
     case "click": {
@@ -217,6 +260,8 @@ async function applyEventSideEffects(
       if (justSet && send.campaignId) {
         await incrementCampaignCounter(client, send.campaignId, "clicked_count");
       }
+      // A4/D-11: mirror the open case -- climbs on every new click.
+      await client.query(`UPDATE sends SET click_count = click_count + 1 WHERE id = $1`, [send.id]);
       break;
     }
     case "bounce_hard": {
@@ -267,7 +312,7 @@ async function applyEventSideEffects(
         if (outcome?.status === "suppressed") {
           await applySuppression(client, workspaceId, send.contactId, outcome.reason);
         } else if (outcome?.status === "unsubscribed") {
-          await applyUnsubscribe(client, send.contactId);
+          await applyUnsubscribe(client, workspaceId, send.contactId);
         }
       }
       break;
@@ -286,7 +331,7 @@ async function applyEventSideEffects(
     case "group_unsubscribe": {
       const justSet = await setFactColumnOnce(client, send.id, "unsubscribed_at", event.occurredAt);
       if (justSet) {
-        await applyUnsubscribe(client, send.contactId);
+        await applyUnsubscribe(client, workspaceId, send.contactId);
         if (send.campaignId) await incrementCampaignCounter(client, send.campaignId, "unsubscribed_count");
       }
       break;

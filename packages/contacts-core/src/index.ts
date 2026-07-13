@@ -17,3 +17,8 @@ export {
   type UpsertContactIdentityResult,
 } from "./contact-repository.js";
 export { applyCsvRowMapping, type CsvMappingResult } from "./csv-mapping.js";
+export {
+  recordSubscriptionStatusChange,
+  type RecordSubscriptionStatusChangeParams,
+  type SubscriptionStatusChangeSource,
+} from "./subscription-status-history.js";
