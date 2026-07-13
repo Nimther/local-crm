@@ -63,23 +63,33 @@ export function serializeCanvas(nodes: CanvasNode[], edges: Edge[]): SerializedC
 export type AutosaveState = "idle" | "saving" | "error";
 
 /**
- * Pure derivation of the toolbar's autosave indicator (06-21/WR-05). Kept
- * standalone (no hook state) so the "must not read saved after a failed
- * save" behavior is pinned by a plain unit test with no jsdom/@testing-library
- * install: an in-flight save always wins ("saving"); otherwise a failed save
- * with unsaved changes still pending is "error" (never "idle"/«Сохранено»);
- * anything else — including a stale error with nothing left unsaved — settles
- * to "idle".
+ * Pure derivation of the toolbar's autosave indicator (06-21/WR-05, extended
+ * 06-24 for UAT Test 11). Kept standalone (no hook state) so the "must not
+ * read saved after a failed save" behavior is pinned by a plain unit test
+ * with no jsdom/@testing-library install: a mutation PAUSED by TanStack
+ * Query's offline networkMode ('online' default) never invokes the PATCH
+ * mutationFn and never errors — it just sits at isPending:true indefinitely
+ * — so a paused save must surface the honest not-saved/retrying state rather
+ * than an indefinite «Сохранение…» (checked first, before the isPending
+ * branch below would otherwise claim it as "saving"). TanStack Query resumes
+ * a paused mutation automatically on reconnect, which re-fires the save and
+ * lets this settle back to "idle" without any further user edit. An in-flight
+ * ONLINE save still wins as "saving"; a failed save with unsaved changes
+ * still pending is "error" (never "idle"/«Сохранено»); anything else —
+ * including a stale error with nothing left unsaved — settles to "idle".
  */
 export function deriveAutosaveState({
   isPending,
+  isPaused,
   isError,
   dirty,
 }: {
   isPending: boolean;
+  isPaused: boolean;
   isError: boolean;
   dirty: boolean;
 }): AutosaveState {
+  if (isPending && isPaused) return "error";
   if (isPending) return "saving";
   if (isError && dirty) return "error";
   return "idle";
@@ -167,7 +177,12 @@ export function useAutosaveDraft({
     return () => clearTimeout(id);
   }, [mutation.isError, dirty, debouncedJson]);
 
-  const saveState = deriveAutosaveState({ isPending: mutation.isPending, isError: mutation.isError, dirty });
+  const saveState = deriveAutosaveState({
+    isPending: mutation.isPending,
+    isPaused: mutation.isPaused,
+    isError: mutation.isError,
+    dirty,
+  });
 
   return { saveState, serialized };
 }
