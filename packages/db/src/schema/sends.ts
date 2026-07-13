@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, pgEnum, unique } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, uuid, pgEnum, unique, integer } from "drizzle-orm/pg-core";
 import { organization } from "./auth.js";
 import { campaigns } from "./campaigns.js";
 import { contacts } from "./contacts.js";
@@ -37,6 +37,11 @@ export const sendStatusEnum = pgEnum("send_status", [
  * SQL only -- Drizzle's `unique()` helper cannot express a partial index),
  * scoped to `WHERE kind = 'flow'` so campaign/test rows with a null
  * `flowRunId` never contend with it.
+ *
+ * Phase 7 repeat-engagement counters (07-01, A4/D-11): `openCount`/
+ * `clickCount` climb once per genuinely-new open/click webhook event
+ * (independent of `firstOpenedAt`/`firstClickedAt`'s first-write-only gate)
+ * so the send log and contact timeline can show "xN" repeat opens/clicks.
  */
 export const sends = pgTable(
   "sends",
@@ -66,6 +71,8 @@ export const sends = pgTable(
     dropReason: text("drop_reason"),
     flowRunId: uuid("flow_run_id").references(() => flowRuns.id, { onDelete: "cascade" }),
     nodeId: text("node_id"),
+    openCount: integer("open_count").notNull().default(0),
+    clickCount: integer("click_count").notNull().default(0),
   },
   (t) => [
     unique("sends_workspace_campaign_contact_unique").on(t.workspaceId, t.campaignId, t.contactId),
