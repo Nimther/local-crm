@@ -1,16 +1,20 @@
 ---
-status: diagnosed
+status: testing
 phase: 06-flows-triggered-chains
-source: 06-01-SUMMARY.md, 06-02-SUMMARY.md, 06-03-SUMMARY.md, 06-04-SUMMARY.md, 06-05-SUMMARY.md, 06-06-SUMMARY.md, 06-07-SUMMARY.md, 06-08-SUMMARY.md, 06-09-SUMMARY.md, 06-10-SUMMARY.md, 06-11-SUMMARY.md, 06-12-SUMMARY.md, 06-13-SUMMARY.md, 06-14-SUMMARY.md, 06-15-SUMMARY.md, 06-16-SUMMARY.md, 06-17-SUMMARY.md, 06-18-SUMMARY.md, 06-19-SUMMARY.md, 06-20-SUMMARY.md, 06-21-SUMMARY.md
+source: 06-01-SUMMARY.md, 06-02-SUMMARY.md, 06-03-SUMMARY.md, 06-04-SUMMARY.md, 06-05-SUMMARY.md, 06-06-SUMMARY.md, 06-07-SUMMARY.md, 06-08-SUMMARY.md, 06-09-SUMMARY.md, 06-10-SUMMARY.md, 06-11-SUMMARY.md, 06-12-SUMMARY.md, 06-13-SUMMARY.md, 06-14-SUMMARY.md, 06-15-SUMMARY.md, 06-16-SUMMARY.md, 06-17-SUMMARY.md, 06-18-SUMMARY.md, 06-19-SUMMARY.md, 06-20-SUMMARY.md, 06-21-SUMMARY.md, 06-22-SUMMARY.md, 06-23-SUMMARY.md, 06-24-SUMMARY.md
 started: 2026-07-13T09:04:39.797Z
-updated: 2026-07-13T15:59:09.077Z
+updated: 2026-07-13T17:08:09.000Z
 mode: mvp
 user_story: "As a marketer, I want to visually build, publish, and run automated triggered chains that reuse the proven send pipeline, suppression, and frequency cap, so that the right email reaches the right contact at the right time."
 ---
 
 ## Current Test
 
-[testing complete]
+number: 10
+name: Timezone & Quiet Hours Settings (re-walk after 06-22/06-23)
+expected: |
+  Open /w/{slug}/contacts/import, upload a CSV, reach the column-mapping step. A «Часовой пояс по умолчанию» combobox is visible, searchable, lists real IANA zones (via Intl.supportedValuesOf), can be cleared, and choosing a zone is reflected in the dry-run result (rows without their own timezone get the chosen default).
+awaiting: user response
 
 ## Tests
 
@@ -65,17 +69,17 @@ result: pass
 
 ### 10. Timezone & Quiet Hours Settings
 section: technical
-expected: Workspace send settings expose a default timezone (IANA combobox) + quiet-hours window (start/end/enabled). The contact form and CSV column mapping expose a constrained IANA timezone combobox; an invalid zone is rejected. A flow send inside the quiet window is deferred until the window ends.
-result: issue
-reported: "выпадающий список со списком часовых поясов отсутствует"
-severity: major
+expected: Workspace send settings expose a default timezone (IANA combobox) + quiet-hours window (start/end/enabled). The contact form exposes a constrained IANA timezone combobox; an invalid zone is rejected. The CSV column-mapping step exposes a «Часовой пояс по умолчанию» combobox (constrained IANA, searchable, clearable) whose chosen zone is applied by dry-run/apply to rows without their own timezone. A flow send inside the quiet window is deferred until the window ends.
+result: pending
+retest: round 4 re-walk — fix landed in 06-22 (server default-timezone contract) + 06-23 (combobox rendered in CsvImportWizard mapping step)
+prior_issue: "выпадающий список со списком часовых поясов отсутствует (2026-07-13, severity major)"
 
 ### 11. Autosave Error State & Retry
 section: technical
-expected: With a flow canvas open, simulate a save failure (e.g. stop the API or go offline in devtools) and make an edit. The toolbar shows an honest error/retrying state — NOT «Сохранено». Restore connectivity: the automatic retry re-fires the PATCH and the state returns to «Сохранено».
-result: issue
-reported: "ошибка не показывается. Просто висит статус «Сохранение...»"
-severity: major
+expected: With a flow canvas open, go offline in devtools and make an edit. The toolbar shows «Не сохранено — повтор…» while offline (never a stuck «Сохранение…» or a false «Сохранено»). Restore connectivity: TanStack automatically resumes the paused mutation, the PATCH re-fires, and the toolbar returns to «Сохранено» with no further user edit. Also verify the settled-error case (API stopped, browser online) still shows the honest error state with bounded retry.
+result: pending
+retest: round 4 re-walk — fix landed in 06-24 (deriveAutosaveState models isPaused; offline pause maps to error state, checked before isPending)
+prior_issue: "ошибка не показывается. Просто висит статус «Сохранение...» (2026-07-13, severity major)"
 
 ### 12. Shared Timezone Helper (static check)
 section: technical
@@ -543,8 +547,8 @@ verification: apps/web/src/features/flows/canvas/__tests__/autosaveState.test.ts
 ## Summary
 
 total: 13
-passed: 9
-issues: 2
+passed: 11
+issues: 0
 pending: 2
 skipped: 0
 blocked: 0
@@ -562,7 +566,8 @@ Malformed coverage blocks detected by uat.classify-coverage (entries kept as hum
 ## Gaps
 
 - truth: "The contact form, CSV column mapping, and workspace send settings expose a constrained IANA timezone dropdown (combobox) for selecting a timezone"
-  status: failed
+  status: resolved
+  resolution: "Fix landed 2026-07-13 (round 4): 06-22 added the server-side csv_imports.default_timezone contract (migration 0035, validated fill-only-missing in applyCsvRowMapping, dry-run→apply agreement); 06-23 rendered the TimezoneCombobox («Часовой пояс по умолчанию») in CsvImportWizard's mapping step. Human re-test pending — see Test 10."
   reason: "User reported: выпадающий список со списком часовых поясов отсутствует"
   severity: major
   test: 10
@@ -578,7 +583,8 @@ Malformed coverage blocks detected by uat.classify-coverage (entries kept as hum
   debug_session: ".planning/debug/timezone-combobox-missing.md"
 
 - truth: "On a failed draft autosave the canvas toolbar shows an honest error/retrying state (not a stuck «Сохранение…» and not «Сохранено»), and the automatic retry re-fires the PATCH once connectivity is restored"
-  status: failed
+  status: resolved
+  resolution: "Fix landed 2026-07-13 (round 4): 06-24 threads mutation.isPaused into deriveAutosaveState — isPending && isPaused maps to the error state (checked before plain isPending), so an offline-paused mutation shows «Не сохранено — повтор…»; reconnect auto-resume is TanStack's built-in paused-mutation resume. RED→GREEN test coverage added (6/6). Human re-test pending — see Test 11."
   reason: "User reported: ошибка не показывается. Просто висит статус «Сохранение...»"
   severity: major
   test: 11
