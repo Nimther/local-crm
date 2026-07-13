@@ -24,6 +24,7 @@ export const csvImports = pgTable("csv_imports", {
   status: text("status").notNull().default("uploaded"), // uploaded|validating|ready|applying|done|failed
   duplicatePolicy: text("duplicate_policy").notNull().default("update"), // update|skip (D-15)
   mapping: jsonb("mapping"), // column header -> target field/property key; set once the dry-run runs (D-17)
+  defaultTimezone: text("default_timezone"), // per-import default IANA timezone applied to rows without one; validated app-side, D-08/FLOW-05
   totalRows: integer("total_rows").notNull().default(0),
   processedRows: integer("processed_rows").notNull().default(0),
   summary: jsonb("summary"), // {willCreate,willUpdate,errorCount} after dry-run; {created,updated,skipped,errorCount} after apply (D-18)
