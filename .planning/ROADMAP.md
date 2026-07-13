@@ -422,7 +422,7 @@ _Wave 2 (blocked on 06-22 — needs the defaultTimezone dry-run contract field):
   4. A workspace dashboard shows send / deliver / open trends over a chosen period and contact-base growth.
   5. A user can browse a per-message send log filtered by contact, campaign/flow, status, and period.
 
-**Plans**: 4/7 plans executed
+**Plans**: 5/7 plans executed
 **UI hint**: yes
 
 Plans:
@@ -434,7 +434,7 @@ Plans:
 **Wave 2** *(parallel — blocked on Wave 1)*
 
 - [x] 07-02-PLAN.md — Contact activity timeline: analytics module + UNION-ALL timeline endpoint + unified ContactEventFeed with record-type filter and ×N collapse (ANLT-03)
-- [ ] 07-06-PLAN.md — Workspace daily rollup + incremental aggregation + periodic reconciliation worker + BLOCKING migration (ANLT-04)
+- [x] 07-06-PLAN.md — Workspace daily rollup + incremental aggregation + periodic reconciliation worker + BLOCKING migration (ANLT-04)
 
 **Wave 3** *(parallel — blocked on Wave 2)*
 
@@ -458,4 +458,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 4. Broadcast Campaigns & Send Pipeline | 19/19 | Complete    | 2026-07-06 |
 | 5. Webhook Processing & Delivery Tracking | 13/13 | Complete    | 2026-07-09 |
 | 6. Flows (Triggered Chains) | 24/24 | Complete    | 2026-07-13 |
-| 7. Analytics, Dashboard & Send Log | 4/7 | In Progress|  |
+| 7. Analytics, Dashboard & Send Log | 5/7 | In Progress|  |
