@@ -422,16 +422,28 @@ _Wave 2 (blocked on 06-22 — needs the defaultTimezone dry-run contract field):
   4. A workspace dashboard shows send / deliver / open trends over a chosen period and contact-base growth.
   5. A user can browse a per-message send log filtered by contact, campaign/flow, status, and period.
 
-**Plans**: TBD
+**Plans**: 7 plans
 **UI hint**: yes
 
 Plans:
+**Wave 1** *(parallel)*
 
-- [ ] 07-01: Analytics rollup tables + incremental aggregation (with periodic reconciliation)
-- [ ] 07-02: Campaign metrics + per-flow-step metrics
-- [ ] 07-03: Contact-card activity timeline
-- [ ] 07-04: Workspace summary dashboard
-- [ ] 07-05: Per-message send log with filters
+- [ ] 07-01-PLAN.md — Status-history table (D-09) + sends open/click counters (A4) + BLOCKING migration + write wiring at 4 mutation sites + shared foundation (ANLT-03, ANLT-05)
+- [ ] 07-03-PLAN.md — Campaign metrics: D-01 rates + D-07 excluded-reason row + send-log deep link + list metrics (ANLT-01)
+
+**Wave 2** *(parallel — blocked on Wave 1)*
+
+- [ ] 07-02-PLAN.md — Contact activity timeline: analytics module + UNION-ALL timeline endpoint + unified ContactEventFeed with record-type filter and ×N collapse (ANLT-03)
+- [ ] 07-06-PLAN.md — Workspace daily rollup + incremental aggregation + periodic reconciliation worker + BLOCKING migration (ANLT-04)
+
+**Wave 3** *(parallel — blocked on Wave 2)*
+
+- [ ] 07-04-PLAN.md — Per-flow-step metrics: flow-analytics endpoint (by nodeId across versions) + canvas node badges + «Аналитика» table tab (ANLT-02)
+- [ ] 07-05-PLAN.md — Per-message send log: filtered list + computed-status multi-select + per-message drawer + «Журнал отправок» nav (ANLT-05)
+
+**Wave 4** *(blocked on Wave 3)*
+
+- [ ] 07-07-PLAN.md — Workspace dashboard: rollup-backed trend + growth Recharts charts + KPI cards + mini-lists, replaces WorkspaceHome as index route (ANLT-04)
 
 ## Progress
 
@@ -446,4 +458,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 4. Broadcast Campaigns & Send Pipeline | 19/19 | Complete    | 2026-07-06 |
 | 5. Webhook Processing & Delivery Tracking | 13/13 | Complete    | 2026-07-09 |
 | 6. Flows (Triggered Chains) | 24/24 | Complete    | 2026-07-13 |
-| 7. Analytics, Dashboard & Send Log | 0/5 | Not started | - |
+| 7. Analytics, Dashboard & Send Log | 0/7 | Not started | - |
