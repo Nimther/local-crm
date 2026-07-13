@@ -325,7 +325,7 @@ _Wave 1:_
 
 ### Phase 6: Flows (Triggered Chains)
 
-**Goal**: A marketer can visually build, publish, and run automated triggered chains that send the right email at the right time, reusing the proven send pipeline, suppression, and frequency cap.
+**Goal**: As a marketer, I want to visually build, publish, and run automated triggered chains that reuse the proven send pipeline, suppression, and frequency cap, so that the right email reaches the right contact at the right time.
 **Mode:** mvp
 **Depends on**: Phase 5
 **Requirements**: FLOW-01, FLOW-02, FLOW-03, FLOW-04, FLOW-05, FLOW-06, FLOW-07
@@ -336,7 +336,7 @@ _Wave 1:_
   3. Re-entry control (once ever / once per N days / every time) and quiet hours are honored: no email is sent inside the quiet window, and it is deferred until the window ends.
   4. Editing a live flow happens in a draft that only takes effect on publish; contacts already mid-flight continue on the version they entered, with no duplicate or skipped sends.
 
-**Plans**: 21/21 plans complete
+**Plans**: 24 plans (21 complete + 3 gap-closure pending, from 06-UAT.md 2026-07-13)
 **UI hint**: yes
 
 Plans:
@@ -396,6 +396,17 @@ _Wave 1 (parallel — disjoint files):_
 - [x] 06-19-PLAN.md — Segment re-entry: sweep deletes stale membership-snapshot rows on segment exit so leave->rejoin re-enters subject to canEnterFlow + live-run leave/rejoin regression test (every_time re-enters, once_ever blocked) (FLOW-04)
 - [x] 06-20-PLAN.md — WR-01: deleteSegment SAVEPOINT so the 23503 catch re-check runs on a live transaction (canceled-campaign reference returns 409 not 500) + repository regression test (FLOW-02)
 - [x] 06-21-PLAN.md — WR-05: honest autosave state (pure deriveAutosaveState + 'error' state + auto-retry) so the canvas never shows «Сохранено» after a failed save + pure-function regression test (FLOW-01)
+
+**Gap closure — round 4** *(from 06-UAT.md 2026-07-13 — Test 10 major: timezone combobox missing on CSV mapping surface; Test 11 major: offline-paused autosave stuck at «Сохранение…»)*
+
+_Wave 1 (parallel — disjoint files):_
+
+- [ ] 06-22-PLAN.md — Test 10 server side: csv_imports.default_timezone column + optional defaultTimezone on the dry-run contract + default-aware validated applyCsvRowMapping (dry-run + apply threading) + pure mapper tests (FLOW-05)
+- [ ] 06-24-PLAN.md — Test 11: model mutation.isPaused in deriveAutosaveState so an offline-paused autosave shows the honest not-saved/retrying state (TanStack resumes on reconnect) + paused-input regression tests (FLOW-01)
+
+_Wave 2 (blocked on 06-22 — needs the defaultTimezone dry-run contract field):_
+
+- [ ] 06-23-PLAN.md — Test 10 UI: render the constrained TimezoneCombobox in the CSV column-mapping step as the «default timezone for rows without one» control + thread defaultTimezone into the dry-run request (FLOW-05)
 
 ### Phase 7: Analytics, Dashboard & Send Log
 
