@@ -3,6 +3,7 @@ import { Worker, type Job, type ConnectionOptions } from "bullmq";
 import type { PoolClient } from "pg";
 import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { recordSubscriptionStatusChange } from "@mega-crm/contacts-core";
+import { incrementWorkspaceDailyRollup } from "./analytics-rollup.js";
 import {
   normalizeEventType,
   resolveSuppression,
@@ -240,6 +241,8 @@ async function applyEventSideEffects(
           `UPDATE contacts SET consecutive_soft_bounces = 0, updated_at = now() WHERE id = $1`,
           [send.contactId]
         );
+        // 07-06: same-transaction rollup increment, same idempotency guarantee.
+        await incrementWorkspaceDailyRollup(client, workspaceId, event.occurredAt, "delivered");
       }
       break;
     }
@@ -253,6 +256,9 @@ async function applyEventSideEffects(
       // first-occurrence campaign unique-recipient counter above; the
       // repeat count must climb on every new open, not just the first.
       await client.query(`UPDATE sends SET open_count = open_count + 1 WHERE id = $1`, [send.id]);
+      // 07-06: mirrors sends.open_count -- climbs on every genuinely-new
+      // open, not gated by justSet.
+      await incrementWorkspaceDailyRollup(client, workspaceId, event.occurredAt, "opened");
       break;
     }
     case "click": {
@@ -262,6 +268,8 @@ async function applyEventSideEffects(
       }
       // A4/D-11: mirror the open case -- climbs on every new click.
       await client.query(`UPDATE sends SET click_count = click_count + 1 WHERE id = $1`, [send.id]);
+      // 07-06: mirrors sends.click_count -- climbs on every genuinely-new click.
+      await incrementWorkspaceDailyRollup(client, workspaceId, event.occurredAt, "clicked");
       break;
     }
     case "bounce_hard": {
@@ -272,6 +280,7 @@ async function applyEventSideEffects(
       if (justSet) {
         if (send.campaignId) await incrementCampaignCounter(client, send.campaignId, "bounced_count");
         await applySuppression(client, workspaceId, send.contactId, "hard_bounce");
+        await incrementWorkspaceDailyRollup(client, workspaceId, event.occurredAt, "bounced");
       }
       break;
     }
@@ -293,6 +302,7 @@ async function applyEventSideEffects(
         if (justSet) {
           if (send.campaignId) await incrementCampaignCounter(client, send.campaignId, "bounced_count");
           await applySuppression(client, workspaceId, send.contactId, "soft_bounce_streak");
+          await incrementWorkspaceDailyRollup(client, workspaceId, event.occurredAt, "bounced");
         }
       }
       break;
@@ -307,6 +317,7 @@ async function applyEventSideEffects(
         // ("не доставлено"), independent of the specific reason -- the
         // reason itself stays queryable via sends.drop_reason.
         if (send.campaignId) await incrementCampaignCounter(client, send.campaignId, "bounced_count");
+        await incrementWorkspaceDailyRollup(client, workspaceId, event.occurredAt, "bounced");
 
         const outcome = resolveSuppression("dropped", event.reason);
         if (outcome?.status === "suppressed") {
@@ -324,6 +335,7 @@ async function applyEventSideEffects(
         // non-delivery terminal, grouped into bounced_count like dropped.
         if (send.campaignId) await incrementCampaignCounter(client, send.campaignId, "bounced_count");
         await applySuppression(client, workspaceId, send.contactId, "spam_report");
+        await incrementWorkspaceDailyRollup(client, workspaceId, event.occurredAt, "bounced");
       }
       break;
     }
@@ -333,6 +345,7 @@ async function applyEventSideEffects(
       if (justSet) {
         await applyUnsubscribe(client, workspaceId, send.contactId);
         if (send.campaignId) await incrementCampaignCounter(client, send.campaignId, "unsubscribed_count");
+        await incrementWorkspaceDailyRollup(client, workspaceId, event.occurredAt, "unsubscribed");
       }
       break;
     }
