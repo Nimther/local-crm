@@ -7,6 +7,7 @@ import { createEmailTriggeredWorker } from "./queues/email-triggered.worker.js";
 import { createCampaignKickoffWorker } from "./queues/campaign-kickoff.worker.js";
 import { createCampaignSchedulerWorker } from "./queues/campaign-scheduler.worker.js";
 import { createWebhookEventsWorker } from "./queues/webhook-events.worker.js";
+import { createAnalyticsReconciliationWorker } from "./queues/analytics-reconciliation.worker.js";
 import { createFlowRunAdvanceWorker } from "./queues/flows/flow-run-advance.worker.js";
 import { createFlowReconciliationWorker } from "./queues/flows/flow-reconciliation.worker.js";
 import { createFlowTriggerEvaluatorWorker } from "./queues/flows/flow-trigger-evaluator.worker.js";
@@ -89,6 +90,10 @@ export async function buildWorker(): Promise<WorkerRuntime> {
     // WBHK-01/03: its own dedicated lane (not folded into events-ingest or
     // either send queue), per CLAUDE.md queue-isolation guidance.
     createWebhookEventsWorker(buildRedisConnectionOptions(redisUrl)),
+    // ANLT-04 (07-06): periodic correctness backstop for workspace_daily_rollup
+    // -- overwrites each recent day's row from a fresh scan of `sends`,
+    // self-healing any drift from the webhook worker's incremental increments.
+    createAnalyticsReconciliationWorker(buildRedisConnectionOptions(redisUrl)),
     // FLOW-01/03/06/07 (06-05): the flow execution engine -- the advance
     // worker steps one flow_run one node at a time (send/exit this plan),
     // the reconciliation worker is its durable due-run backstop scan.
@@ -136,7 +141,7 @@ async function main(): Promise<void> {
 
   // eslint-disable-next-line no-console
   console.log(
-    `apps/worker started (${runtime.workers.length} BullMQ worker(s) registered: events:ingest, imports:csv, email-broadcast, email-triggered, campaign-kickoff, campaign-scheduler, webhook-events, flow-run-advance, flow-reconciliation, flow-trigger-evaluator, flow-segment-sweep, flow-enroll-existing)`
+    `apps/worker started (${runtime.workers.length} BullMQ worker(s) registered: events:ingest, imports:csv, email-broadcast, email-triggered, campaign-kickoff, campaign-scheduler, webhook-events, analytics-reconciliation, flow-run-advance, flow-reconciliation, flow-trigger-evaluator, flow-segment-sweep, flow-enroll-existing)`
   );
 }
 
