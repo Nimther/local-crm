@@ -27,6 +27,7 @@ import { registerSendSettingsRoutes } from "./modules/campaigns/send-settings.ro
 import { registerWebhookRoutes } from "./modules/webhooks/webhooks.routes.js";
 import { registerWebhookSettingsRoutes } from "./modules/webhooks/webhook-settings.routes.js";
 import { registerAnalyticsRoutes } from "./modules/analytics/index.js";
+import { registerSendLogRoutes } from "./modules/send-log/send-log.routes.js";
 
 /** Assembles the Fastify app: zod type provider, better-auth handler, workspace/profile/invite/member routes. */
 export async function buildServer() {
@@ -90,6 +91,7 @@ export async function buildServer() {
   await app.register(registerWebhookRoutes);
   await app.register(registerWebhookSettingsRoutes);
   await app.register(registerAnalyticsRoutes);
+  await app.register(registerSendLogRoutes);
 
   return app;
 }

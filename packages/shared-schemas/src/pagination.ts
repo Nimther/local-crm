@@ -13,3 +13,11 @@
  * RLS-scoped query.
  */
 export const EXHAUSTIVE_LOOKUP_PAGE_SIZE = 200;
+
+/**
+ * Page size for the workspace-wide send-log list (07-05, D-13/ANLT-05). The
+ * `sends` ledger is a high-cardinality, time-ordered table (unlike segments/
+ * campaigns above) -- a bounded, offset-paginated page keeps each query
+ * index-backed under RLS rather than an unbounded scan.
+ */
+export const SEND_LOG_PAGE_SIZE = 50;
