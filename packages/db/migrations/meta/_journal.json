@@ -260,6 +260,13 @@
       "when": 1783685963478,
       "tag": "0036_analytics_status_history_counts",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1783685963479,
+      "tag": "0037_workspace_daily_rollup",
+      "breakpoints": true
     }
   ]
 }

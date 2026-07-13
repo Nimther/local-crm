@@ -21,6 +21,7 @@ import * as flowRunsSchema from "./schema/flow-runs.js";
 import * as flowRunStepsSchema from "./schema/flow-run-steps.js";
 import * as flowSegmentMembershipSnapshotSchema from "./schema/flow-segment-membership-snapshot.js";
 import * as subscriptionStatusHistorySchema from "./schema/subscription-status-history.js";
+import * as workspaceDailyRollupSchema from "./schema/workspace-daily-rollup.js";
 
 const schema = {
   ...authSchema,
@@ -44,6 +45,7 @@ const schema = {
   ...flowRunStepsSchema,
   ...flowSegmentMembershipSnapshotSchema,
   ...subscriptionStatusHistorySchema,
+  ...workspaceDailyRollupSchema,
 };
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -82,4 +84,5 @@ export * from "./schema/flow-runs.js";
 export * from "./schema/flow-run-steps.js";
 export * from "./schema/flow-segment-membership-snapshot.js";
 export * from "./schema/subscription-status-history.js";
+export * from "./schema/workspace-daily-rollup.js";
 export { TENANT_GUC_KEY } from "./rls.js";
