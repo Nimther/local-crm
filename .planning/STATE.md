@@ -6,14 +6,14 @@ current_phase: 06
 current_phase_name: flows-triggered-chains
 status: executing
 stopped_at: Completed 06-15-PLAN.md
-last_updated: "2026-07-13T16:32:02.172Z"
+last_updated: "2026-07-13T16:36:51.245Z"
 last_activity: 2026-07-13
 last_activity_desc: Phase 06 execution started
 progress:
   total_phases: 7
   completed_phases: 5
   total_plans: 85
-  completed_plans: 83
+  completed_plans: 84
   percent: 71
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-07-09)
 ## Current Position
 
 Phase: 06 (flows-triggered-chains) — EXECUTING
-Plan: 2 of 24
+Plan: 3 of 24
 Status: Ready to execute
 Last activity: 2026-07-13 — Phase 06 execution started
 
@@ -143,6 +143,7 @@ Progress: [████████████████████] 61/61 p
 | Phase 06 P20 | 12min | 2 tasks | 2 files |
 | Phase 06-flows-triggered-chains P21 | 2min | 2 tasks | 3 files |
 | Phase 06 P22 | 10min | 3 tasks | 9 files |
+| Phase 06 P24 | 5min | 1 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -340,6 +341,7 @@ Recent decisions affecting current work:
 - [Phase ?]: 06-21: dirty computed as lastSavedRef.current !== json; auto-retry is a single bounded 4000ms setTimeout per failure/target, cleared on unmount/dep-change (T-06-21-02 hot-loop prevention)
 - [Phase 06]: 06-22: default is applied+validated inside the shared applyCsvRowMapping (not either caller) so dry-run and apply cannot structurally drift on what a default does
 - [Phase 06]: 06-22: default only fills input.timezone when still undefined after the mapping loop -- a mapped per-row value (valid or invalid) is never overridden by the default
+- [Phase 06]: 06-24: modeled mutation.isPaused in deriveAutosaveState (before isPending check) to close UAT Test 11 offline-paused autosave gap -- TanStack's default networkMode 'online' pauses the mutation (isPending:true, isPaused:true, isError:false) without firing the PATCH; resume-on-reconnect left to TanStack's built-in behavior rather than networkMode 'always'
 
 ### Pending Todos
 
@@ -367,6 +369,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-13T16:31:33.016Z
+Last session: 2026-07-13T16:35:04.248Z
 Stopped at: Completed 06-15-PLAN.md
 Resume file: None
