@@ -19,11 +19,19 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { useDeleteFlow, useFlow, useFlowRuns, usePauseFlow, useResumeFlow } from "@/features/flows/api";
+import {
+  useDeleteFlow,
+  useFlow,
+  useFlowAnalytics,
+  useFlowRuns,
+  usePauseFlow,
+  useResumeFlow,
+} from "@/features/flows/api";
 import { FlowCanvas } from "@/features/flows/canvas/FlowCanvas";
 import { FlowStatusBadge } from "@/features/flows/FlowStatusBadge";
 import { isDeletableFlowStatus } from "@/features/flows/list/FlowsListPage";
 import { listSegments } from "@/features/segments/api";
+import { FlowAnalyticsTable } from "./FlowAnalyticsTable";
 import { FlowLifecycleSettings } from "./FlowLifecycleSettings";
 import { FlowRunsTable } from "./FlowRunsTable";
 import { PublishEnrollDialog } from "./PublishEnrollDialog";
@@ -49,7 +57,7 @@ export function FlowDetailPage() {
   const { slug = "", id = "" } = useParams<{ slug: string; id: string }>();
   const navigate = useNavigate();
 
-  const [activeTab, setActiveTab] = useState<"canvas" | "settings" | "runs">("canvas");
+  const [activeTab, setActiveTab] = useState<"canvas" | "settings" | "runs" | "analytics">("canvas");
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
   const [publishOpen, setPublishOpen] = useState(false);
   const [pauseConfirmOpen, setPauseConfirmOpen] = useState(false);
@@ -70,6 +78,11 @@ export function FlowDetailPage() {
   // FlowRunsTable independently fetches the real paginated list for its tab.
   const runCountsQuery = useFlowRuns(slug, id, { page: 1, pageSize: 1 });
   const counts = runCountsQuery.data?.counts;
+
+  // ANLT-02/D-03: one flow-analytics response drives BOTH the canvas node
+  // badges (below) and FlowAnalyticsTable's own fetch (which independently
+  // re-queries the same key, sharing this cache entry via TanStack Query).
+  const analyticsQuery = useFlowAnalytics(slug, id);
 
   const segmentsQuery = useQuery({
     queryKey: ["workspace", slug, "segments", "all-for-lookup"],
@@ -235,9 +248,10 @@ export function FlowDetailPage() {
           <TabsTrigger value="canvas">Холст</TabsTrigger>
           <TabsTrigger value="settings">Настройки</TabsTrigger>
           <TabsTrigger value="runs">Контакты в цепочке</TabsTrigger>
+          <TabsTrigger value="analytics">Аналитика</TabsTrigger>
         </TabsList>
         <TabsContent value="canvas" className="mt-0 min-h-0 flex-1">
-          <FlowCanvas focusNodeId={focusNodeId} />
+          <FlowCanvas focusNodeId={focusNodeId} metrics={analyticsQuery.data} />
         </TabsContent>
         <TabsContent value="settings" className="min-h-0 flex-1 overflow-y-auto p-6">
           <div className="max-w-2xl space-y-6">
@@ -247,6 +261,9 @@ export function FlowDetailPage() {
         </TabsContent>
         <TabsContent value="runs" className="min-h-0 flex-1 overflow-y-auto p-6">
           <FlowRunsTable slug={slug} flowId={flow.id} canManage={canManage} />
+        </TabsContent>
+        <TabsContent value="analytics" className="min-h-0 flex-1 overflow-y-auto p-6">
+          <FlowAnalyticsTable slug={slug} flowId={flow.id} />
         </TabsContent>
       </Tabs>
 

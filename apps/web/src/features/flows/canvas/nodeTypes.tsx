@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { computeRate } from "@/lib/rates";
 import { cn } from "@/lib/utils";
 
 /** The five canvas node types (FLOW-01, 06-UI-SPEC Canvas & Node Visual Language). */
@@ -41,6 +42,17 @@ export type CanvasNodeConfig = {
   fromEmail?: string;
 };
 
+/**
+ * ANLT-02/D-03: per-node metrics badge data, sourced from the single
+ * GET /flows/:id/analytics response (keyed by nodeId) and threaded in by
+ * FlowCanvas. `sent`/`delivered` are only present for send nodes.
+ */
+export type CanvasNodeMetrics = {
+  contactCount: number;
+  sent?: number;
+  delivered?: number;
+};
+
 export type CanvasNodeData = {
   config: CanvasNodeConfig;
   /**
@@ -49,6 +61,8 @@ export type CanvasNodeData = {
    * Non-null drives the ring-2 ring-destructive state + red dot + tooltip.
    */
   invalidMessage?: string | null;
+  /** ANLT-02/D-03: read-only metric badge overlay data, or null/undefined before analytics loads. */
+  metrics?: CanvasNodeMetrics | null;
 };
 
 export type CanvasNode = Node<CanvasNodeData>;
@@ -103,9 +117,48 @@ export function formatDelaySummary(delay: FlowDelay): string {
 }
 
 /**
+ * ANLT-02/D-03: the read-only metric badge overlay -- «{count} прошли» for
+ * every node type, plus a delivered% sub-badge for send nodes. Absolutely
+ * positioned over the card's top-right corner (existing 4px/xs chip inset
+ * convention, no new hue); `pointer-events-none` on the wrapper keeps the
+ * overlay from intercepting canvas drag/select, with `pointer-events-auto`
+ * re-enabled only on the small pills themselves so the tooltip still opens
+ * on hover.
+ */
+function MetricsBadge({ metrics, nodeType }: { metrics: CanvasNodeMetrics; nodeType: FlowCanvasNodeType }) {
+  const isSend = nodeType === "send";
+  const deliveredRate = isSend ? computeRate(metrics.delivered ?? 0, metrics.sent ?? 0) : null;
+  const deliveredLabel = deliveredRate === null ? "—" : `${deliveredRate}%`;
+  const tooltipText = isSend
+    ? `${metrics.contactCount} прошли · ${deliveredLabel} доставлено`
+    : `${metrics.contactCount} прошли`;
+
+  return (
+    <TooltipProvider delayDuration={150}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div className="pointer-events-none absolute -right-2 -top-2 flex items-center gap-1">
+            <span className="pointer-events-auto rounded-full border border-neutral-200 bg-white px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-neutral-600 shadow-sm">
+              {metrics.contactCount} прошли
+            </span>
+            {isSend ? (
+              <span className="pointer-events-auto rounded-full border border-neutral-200 bg-white px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-green-600 shadow-sm">
+                {deliveredLabel}
+              </span>
+            ) : null}
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top">{tooltipText}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
+/**
  * Shared 240px card shell (06-UI-SPEC Node card anatomy): header icon chip +
  * title + overflow menu, body config summary, selected → ring-primary,
- * invalid-for-publish → ring-destructive + red dot + tooltip.
+ * invalid-for-publish → ring-destructive + red dot + tooltip. `metrics`
+ * (ANLT-02/D-03) renders the read-only badge overlay when present.
  */
 function NodeShell({
   id,
@@ -113,6 +166,7 @@ function NodeShell({
   selected,
   summary,
   invalidMessage,
+  metrics,
   canDuplicate = true,
   children,
 }: {
@@ -121,6 +175,7 @@ function NodeShell({
   selected: boolean | undefined;
   summary: string | null;
   invalidMessage: string | null | undefined;
+  metrics?: CanvasNodeMetrics | null;
   canDuplicate?: boolean;
   children?: React.ReactNode;
 }) {
@@ -131,11 +186,12 @@ function NodeShell({
   return (
     <div
       className={cn(
-        "w-60 rounded-lg border border-neutral-200 bg-white shadow-sm",
+        "relative w-60 rounded-lg border border-neutral-200 bg-white shadow-sm",
         selected && "ring-2 ring-primary",
         invalidMessage && "ring-2 ring-destructive"
       )}
     >
+      {metrics ? <MetricsBadge metrics={metrics} nodeType={type} /> : null}
       <div className="flex items-center gap-2 px-4 pt-3">
         <span className={cn("flex h-6 w-6 shrink-0 items-center justify-center rounded", meta.chipClass)}>
           <Icon className="h-4 w-4" />
@@ -198,7 +254,7 @@ const TriggerNode = memo(function TriggerNode({ id, data, selected }: NodeProps<
         ? `Сегмент: ${config.segmentName ?? "выбран"}`
         : null;
   return (
-    <NodeShell id={id} type="trigger" selected={selected} summary={summary} invalidMessage={data.invalidMessage} canDuplicate={false}>
+    <NodeShell id={id} type="trigger" selected={selected} summary={summary} invalidMessage={data.invalidMessage} metrics={data.metrics} canDuplicate={false}>
       <Handle type="source" position={Position.Bottom} className={handleClass} />
     </NodeShell>
   );
@@ -207,7 +263,7 @@ const TriggerNode = memo(function TriggerNode({ id, data, selected }: NodeProps<
 const DelayNode = memo(function DelayNode({ id, data, selected }: NodeProps<CanvasNode>) {
   const summary = data.config.delay ? formatDelaySummary(data.config.delay) : null;
   return (
-    <NodeShell id={id} type="delay" selected={selected} summary={summary} invalidMessage={data.invalidMessage}>
+    <NodeShell id={id} type="delay" selected={selected} summary={summary} invalidMessage={data.invalidMessage} metrics={data.metrics}>
       <Handle type="target" position={Position.Top} className={handleClass} />
       <Handle type="source" position={Position.Bottom} className={handleClass} />
     </NodeShell>
@@ -218,7 +274,7 @@ const BranchNode = memo(function BranchNode({ id, data, selected }: NodeProps<Ca
   const { config } = data;
   const summary = config.segmentId ? `Сегмент: ${config.segmentName ?? "выбран"}` : null;
   return (
-    <NodeShell id={id} type="branch" selected={selected} summary={summary} invalidMessage={data.invalidMessage}>
+    <NodeShell id={id} type="branch" selected={selected} summary={summary} invalidMessage={data.invalidMessage} metrics={data.metrics}>
       {/* D-13: exactly two labelled outgoing paths, bound to sourceHandle yes/no. */}
       <div className="flex items-center justify-between px-8 pb-2">
         <span className="text-xs font-semibold text-green-600">Да</span>
@@ -235,7 +291,7 @@ const SendNode = memo(function SendNode({ id, data, selected }: NodeProps<Canvas
   const { config } = data;
   const summary = config.templateId ? `Шаблон: ${config.templateName ?? config.templateId}` : null;
   return (
-    <NodeShell id={id} type="send" selected={selected} summary={summary} invalidMessage={data.invalidMessage}>
+    <NodeShell id={id} type="send" selected={selected} summary={summary} invalidMessage={data.invalidMessage} metrics={data.metrics}>
       <Handle type="target" position={Position.Top} className={handleClass} />
       <Handle type="source" position={Position.Bottom} className={handleClass} />
     </NodeShell>
@@ -244,7 +300,7 @@ const SendNode = memo(function SendNode({ id, data, selected }: NodeProps<Canvas
 
 const ExitNode = memo(function ExitNode({ id, data, selected }: NodeProps<CanvasNode>) {
   return (
-    <NodeShell id={id} type="exit" selected={selected} summary="Выход из цепочки" invalidMessage={data.invalidMessage}>
+    <NodeShell id={id} type="exit" selected={selected} summary="Выход из цепочки" invalidMessage={data.invalidMessage} metrics={data.metrics}>
       <Handle type="target" position={Position.Top} className={handleClass} />
     </NodeShell>
   );

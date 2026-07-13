@@ -25,7 +25,7 @@ import type { FlowDefinition } from "@mega-crm/flows-core";
 
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import { useFlow, type FlowResponse } from "../api";
+import { useFlow, type FlowNodeAnalyticsResponse, type FlowResponse } from "../api";
 import { INCOMPLETE_NODE_MESSAGES, NodeConfigPanel, computePublishBlockers } from "./NodeConfigPanel";
 import { NodePalette, PALETTE_DND_MIME } from "./NodePalette";
 import { useAutosaveDraft } from "./useAutosaveDraft";
@@ -35,6 +35,7 @@ import {
   nodeTypes,
   type CanvasNode,
   type CanvasNodeConfig,
+  type CanvasNodeMetrics,
   type FlowCanvasNodeType,
 } from "./nodeTypes";
 
@@ -139,10 +140,12 @@ function FlowCanvasInner({
   slug,
   flow,
   focusNodeId,
+  metrics,
 }: {
   slug: string;
   flow: FlowResponse;
   focusNodeId?: string | null;
+  metrics?: FlowNodeAnalyticsResponse[];
 }) {
   const initial = initialCanvas(flow.definition);
   const [nodes, setNodes, onNodesChange] = useNodesState<CanvasNode>(initial.nodes);
@@ -193,14 +196,28 @@ function FlowCanvasInner({
     return map;
   }, [blockers, serialized, nodes]);
 
-  /** Nodes with the computed invalid ring/tooltip injected (state itself stays clean). */
+  // ANLT-02/D-03: the same GET /flows/:id/analytics response that feeds
+  // FlowAnalyticsTable, keyed by nodeId for O(1) per-node badge lookup.
+  const metricsByNodeId = useMemo(() => {
+    const map = new Map<string, CanvasNodeMetrics>();
+    for (const row of metrics ?? []) {
+      map.set(row.nodeId, { contactCount: row.contactCount, sent: row.sent, delivered: row.delivered });
+    }
+    return map;
+  }, [metrics]);
+
+  /** Nodes with the computed invalid ring/tooltip + metrics badge injected (state itself stays clean). */
   const displayNodes = useMemo(
     () =>
       nodes.map((node) => ({
         ...node,
-        data: { ...node.data, invalidMessage: invalidByNodeId.get(node.id) ?? null },
+        data: {
+          ...node.data,
+          invalidMessage: invalidByNodeId.get(node.id) ?? null,
+          metrics: metricsByNodeId.get(node.id) ?? null,
+        },
       })),
-    [nodes, invalidByNodeId]
+    [nodes, invalidByNodeId, metricsByNodeId]
   );
 
   const uniqueBlockerMessages = useMemo(() => [...new Set(blockers.map((blocker) => blocker.message))], [blockers]);
@@ -358,8 +375,15 @@ function FlowCanvasInner({
  * `focusNodeId` (06-11): when embedded inside FlowDetailPage, the publish
  * dialog's server-returned blocker list can pass a node id here to select +
  * pan/zoom it into view — optional, defaults to no-op for any other caller.
+ *
+ * `metrics` (ANLT-02/D-03): the flow-analytics response, threaded through to
+ * each node's data as a read-only badge overlay — optional, canvas renders
+ * with no badges (undefined metrics) for any caller that doesn't fetch it.
  */
-export function FlowCanvas({ focusNodeId }: { focusNodeId?: string | null } = {}) {
+export function FlowCanvas({
+  focusNodeId,
+  metrics,
+}: { focusNodeId?: string | null; metrics?: FlowNodeAnalyticsResponse[] } = {}) {
   const { slug = "", id = "" } = useParams<{ slug: string; id: string }>();
   const flowQuery = useFlow(slug, id);
 
@@ -385,7 +409,13 @@ export function FlowCanvas({ focusNodeId }: { focusNodeId?: string | null } = {}
   return (
     <div className="flex h-full min-h-0">
       <ReactFlowProvider>
-        <FlowCanvasInner key={flowQuery.data.id} slug={slug} flow={flowQuery.data} focusNodeId={focusNodeId} />
+        <FlowCanvasInner
+          key={flowQuery.data.id}
+          slug={slug}
+          flow={flowQuery.data}
+          focusNodeId={focusNodeId}
+          metrics={metrics}
+        />
       </ReactFlowProvider>
     </div>
   );

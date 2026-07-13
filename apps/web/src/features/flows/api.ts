@@ -81,6 +81,23 @@ export interface FlowRunListResponse {
   counts: FlowRunCounts;
 }
 
+/**
+ * ANLT-02/D-02/D-05: one row per node_id, aggregated across ALL flow
+ * versions (mirrors flow-analytics.repository.ts's FlowNodeAnalyticsRow).
+ * `sent`/`delivered`/`opened`/`clicked`/`bounced` are only present for send
+ * nodes -- every other node type carries just `contactCount`.
+ */
+export interface FlowNodeAnalyticsResponse {
+  nodeId: string;
+  nodeType: string;
+  contactCount: number;
+  sent?: number;
+  delivered?: number;
+  opened?: number;
+  clicked?: number;
+  bounced?: number;
+}
+
 // ---------------------------------------------------------------------------
 // Thin per-endpoint fetch wrappers (campaigns/api.ts convention)
 // ---------------------------------------------------------------------------
@@ -169,6 +186,11 @@ export function ejectFlowRuns(
 /** GET /api/workspaces/:slug/flows/:id/enroll-preview — D-04's "~N contacts" count for a segment-triggered flow. */
 export function getEnrollPreview(slug: string, id: string): Promise<{ count: number }> {
   return apiGet<{ count: number }>(`/api/workspaces/${slug}/flows/${id}/enroll-preview`);
+}
+
+/** GET /api/workspaces/:slug/flows/:id/analytics (ANLT-02, any member) — one response drives both the «Аналитика» table tab and the canvas node badges. */
+export function getFlowAnalytics(slug: string, id: string): Promise<FlowNodeAnalyticsResponse[]> {
+  return apiGet<FlowNodeAnalyticsResponse[]>(`/api/workspaces/${slug}/flows/${id}/analytics`);
 }
 
 // ---------------------------------------------------------------------------
@@ -319,5 +341,14 @@ export function useEnrollPreview(slug: string, id: string, enabled: boolean) {
     queryKey: [...flowKeys.detail(slug, id), "enroll-preview"],
     queryFn: () => getEnrollPreview(slug, id),
     enabled: Boolean(slug && id) && enabled,
+  });
+}
+
+/** ANLT-02: per-node flow analytics, shared by both FlowAnalyticsTable and FlowCanvas's node badges (one response, keyed by nodeId). */
+export function useFlowAnalytics(slug: string, id: string | undefined) {
+  return useQuery({
+    queryKey: [...flowKeys.detail(slug, id ?? ""), "analytics"],
+    queryFn: () => getFlowAnalytics(slug, id as string),
+    enabled: Boolean(slug && id),
   });
 }
