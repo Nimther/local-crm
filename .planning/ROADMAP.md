@@ -336,7 +336,7 @@ _Wave 1:_
   3. Re-entry control (once ever / once per N days / every time) and quiet hours are honored: no email is sent inside the quiet window, and it is deferred until the window ends.
   4. Editing a live flow happens in a draft that only takes effect on publish; contacts already mid-flight continue on the version they entered, with no duplicate or skipped sends.
 
-**Plans**: 24 plans (21 complete + 3 gap-closure pending, from 06-UAT.md 2026-07-13)
+**Plans**: 22/24 plans executed
 **UI hint**: yes
 
 Plans:
@@ -401,7 +401,7 @@ _Wave 1 (parallel — disjoint files):_
 
 _Wave 1 (parallel — disjoint files):_
 
-- [ ] 06-22-PLAN.md — Test 10 server side: csv_imports.default_timezone column + optional defaultTimezone on the dry-run contract + default-aware validated applyCsvRowMapping (dry-run + apply threading) + pure mapper tests (FLOW-05)
+- [x] 06-22-PLAN.md — Test 10 server side: csv_imports.default_timezone column + optional defaultTimezone on the dry-run contract + default-aware validated applyCsvRowMapping (dry-run + apply threading) + pure mapper tests (FLOW-05)
 - [ ] 06-24-PLAN.md — Test 11: model mutation.isPaused in deriveAutosaveState so an offline-paused autosave shows the honest not-saved/retrying state (TanStack resumes on reconnect) + paused-input regression tests (FLOW-01)
 
 _Wave 2 (blocked on 06-22 — needs the defaultTimezone dry-run contract field):_
@@ -445,5 +445,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 3. Segmentation Engine | 8/8 | Complete    | 2026-07-06 |
 | 4. Broadcast Campaigns & Send Pipeline | 19/19 | Complete    | 2026-07-06 |
 | 5. Webhook Processing & Delivery Tracking | 13/13 | Complete    | 2026-07-09 |
-| 6. Flows (Triggered Chains) | 21/21 | Complete    | 2026-07-10 |
+| 6. Flows (Triggered Chains) | 22/24 | In Progress|  |
 | 7. Analytics, Dashboard & Send Log | 0/5 | Not started | - |

@@ -2,19 +2,19 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 7
-current_phase_name: Analytics, Dashboard & Send Log
+current_phase: 06
+current_phase_name: flows-triggered-chains
 status: executing
 stopped_at: Completed 06-15-PLAN.md
-last_updated: "2026-07-10T15:16:47.790Z"
-last_activity: 2026-07-10
-last_activity_desc: Phase 06 complete, transitioned to Phase 7
+last_updated: "2026-07-13T16:32:02.172Z"
+last_activity: 2026-07-13
+last_activity_desc: Phase 06 execution started
 progress:
   total_phases: 7
-  completed_phases: 6
-  total_plans: 82
-  completed_plans: 82
-  percent: 86
+  completed_phases: 5
+  total_plans: 85
+  completed_plans: 83
+  percent: 71
 ---
 
 # Project State
@@ -28,10 +28,10 @@ See: .planning/PROJECT.md (updated 2026-07-09)
 
 ## Current Position
 
-Phase: 7 — Analytics, Dashboard & Send Log
-Plan: Not started
+Phase: 06 (flows-triggered-chains) — EXECUTING
+Plan: 2 of 24
 Status: Ready to execute
-Last activity: 2026-07-10 — Phase 06 complete, transitioned to Phase 7
+Last activity: 2026-07-13 — Phase 06 execution started
 
 Progress: [████████████████████] 61/61 plans (100%)
 
@@ -142,6 +142,7 @@ Progress: [████████████████████] 61/61 p
 | Phase 06 P19 | 8min | 2 tasks | 2 files |
 | Phase 06 P20 | 12min | 2 tasks | 2 files |
 | Phase 06-flows-triggered-chains P21 | 2min | 2 tasks | 3 files |
+| Phase 06 P22 | 10min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -337,6 +338,8 @@ Recent decisions affecting current work:
 - [Phase 06]: 06-19: sweepOneFlow's stale-snapshot DELETE runs before the empty-membership early return (not after) so a fully-emptied segment still clears its stale flow_segment_membership_snapshot rows -- restores every_time/once_per_n_days re-entry for segment-triggered flows while once_ever stays correctly blocked by canEnterFlow
 - [Phase ?]: [Phase 06]: 06-20: deleteSegment wraps its DELETE in SAVEPOINT/ROLLBACK TO SAVEPOINT so the 23503 catch's flow re-check runs on a live transaction, restoring the intended SegmentConflictError (409) for canceled-campaign FK conflicts instead of a raw postgres 25P02 (closes WR-01)
 - [Phase ?]: 06-21: dirty computed as lastSavedRef.current !== json; auto-retry is a single bounded 4000ms setTimeout per failure/target, cleared on unmount/dep-change (T-06-21-02 hot-loop prevention)
+- [Phase 06]: 06-22: default is applied+validated inside the shared applyCsvRowMapping (not either caller) so dry-run and apply cannot structurally drift on what a default does
+- [Phase 06]: 06-22: default only fills input.timezone when still undefined after the mapping loop -- a mapped per-row value (valid or invalid) is never overridden by the default
 
 ### Pending Todos
 
@@ -364,6 +367,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-10T14:49:23.835Z
+Last session: 2026-07-13T16:31:33.016Z
 Stopped at: Completed 06-15-PLAN.md
 Resume file: None
