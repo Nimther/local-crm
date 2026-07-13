@@ -58,6 +58,56 @@ describe("applyCsvRowMapping timezone standard-field validation (06-07)", () => 
 });
 
 /**
+ * 06-22/FLOW-05: `options.defaultTimezone` on applyCsvRowMapping -- the
+ * server-side foundation for the CSV mapping step's "default timezone for
+ * rows without one" control (closes UAT Test 10's gap on the CSV surface,
+ * see .planning/debug/timezone-combobox-missing.md). Validated through the
+ * SAME isValidIanaTimezone check a mapped column value goes through, so an
+ * invalid default is never stored, and a mapped per-row value always wins.
+ */
+describe("applyCsvRowMapping default timezone (06-22/FLOW-05)", () => {
+  const mappingNoTz = { external_id: "externalId" };
+  const mappingWithTz = { external_id: "externalId", tz: "timezone" };
+
+  it("applies the default to a row that maps no timezone column", () => {
+    const result = applyCsvRowMapping({ external_id: "dtz-1" }, mappingNoTz, {
+      defaultTimezone: "Europe/Belgrade",
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.input.timezone).toBe("Europe/Belgrade");
+  });
+
+  it("keeps a row's own valid mapped timezone -- the default is ignored", () => {
+    const result = applyCsvRowMapping({ external_id: "dtz-2", tz: "America/New_York" }, mappingWithTz, {
+      defaultTimezone: "Europe/Belgrade",
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.input.timezone).toBe("America/New_York");
+  });
+
+  it("no default provided + no timezone column leaves input.timezone undefined with no error (backward compatible)", () => {
+    const result = applyCsvRowMapping({ external_id: "dtz-3" }, mappingNoTz);
+    expect(result.error).toBeUndefined();
+    expect(result.input.timezone).toBeUndefined();
+  });
+
+  it("rejects an invalid default with a truthy error", () => {
+    const result = applyCsvRowMapping({ external_id: "dtz-4" }, mappingNoTz, {
+      defaultTimezone: "Mars/Phobos",
+    });
+    expect(result.error).toBeTruthy();
+  });
+
+  it("falls back to the default when the row's timezone cell is empty", () => {
+    const result = applyCsvRowMapping({ external_id: "dtz-5", tz: "" }, mappingWithTz, {
+      defaultTimezone: "Europe/Belgrade",
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.input.timezone).toBe("Europe/Belgrade");
+  });
+});
+
+/**
  * CSV contact import (CONT-02, D-15..D-20): the HTTP-observable half of the
  * pipeline -- upload (streamed staging + header/preview detection), dry-run
  * (D-17: whole-file validation that writes NO contact), the downloadable

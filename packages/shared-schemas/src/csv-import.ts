@@ -31,6 +31,12 @@ export type CsvUploadResponse = z.infer<typeof csvUploadResponseSchema>;
 export const csvDryRunRequestSchema = z.object({
   mapping: csvColumnMappingSchema,
   duplicatePolicy: duplicatePolicySchema.default("update"),
+  // 06-22/FLOW-05: default IANA timezone applied server-side to any row that
+  // doesn't resolve one from a mapped column. FORMAT-ONLY here (matching the
+  // 06-07 timezone/defaultTimezone precedent) -- packages/shared-schemas has
+  // no dependency on @mega-crm/delivery-core, so the real IANA allowlist
+  // check runs server-side in applyCsvRowMapping, not in this zod schema.
+  defaultTimezone: z.string().min(1).nullish(),
 });
 export type CsvDryRunRequest = z.infer<typeof csvDryRunRequestSchema>;
 

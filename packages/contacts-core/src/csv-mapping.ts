@@ -55,10 +55,18 @@ export interface CsvMappingResult {
  * a merge (existing contact fields are preserved when the CSV cell for that
  * row is blank), not a blind overwrite. "tags" is comma-split; any target
  * not in STANDARD_FIELDS lands verbatim in `properties`.
+ *
+ * 06-22/FLOW-05: `options.defaultTimezone`, when given, fills `input.timezone`
+ * for any row that did NOT resolve one from a mapped column (unmapped OR the
+ * cell was empty) -- a mapped per-row value always wins and is never
+ * overridden. The default is validated through the SAME isValidIanaTimezone
+ * check below as a mapped value, so an invalid default is rejected with the
+ * same "Invalid timezone" row error, never stored.
  */
 export function applyCsvRowMapping(
   raw: Record<string, string>,
-  mapping: Record<string, string>
+  mapping: Record<string, string>,
+  options?: { defaultTimezone?: string | null }
 ): CsvMappingResult {
   const input: UpsertContactIdentityInput = { properties: {} };
   const target = input as unknown as Record<string, unknown>;
@@ -83,6 +91,13 @@ export function applyCsvRowMapping(
     } else {
       input.properties![field] = value;
     }
+  }
+
+  // 06-22/FLOW-05: only fills a row that has NO timezone yet (unmapped
+  // column or a blank cell, both leave input.timezone undefined above) --
+  // never masks/overrides a mapped value, valid or invalid.
+  if (input.timezone === undefined && options?.defaultTimezone) {
+    input.timezone = options.defaultTimezone;
   }
 
   if (
