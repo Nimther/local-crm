@@ -126,6 +126,26 @@ describe("webhook-events worker: suppression state machine (SUBS-02, D-10/D-11/D
     );
   }
 
+  interface HistoryRow {
+    oldStatus: string | null;
+    newStatus: string;
+    source: string;
+  }
+
+  /** 07-01 (D-09): asserts the subscription_status_history write from the real webhook-worker call sites. */
+  async function historyRows(workspaceId: string, contactId: string): Promise<HistoryRow[]> {
+    return withTenant(workspaceId, () =>
+      withTenantTransaction(async (client) => {
+        const { rows } = await client.query<HistoryRow>(
+          `SELECT old_status as "oldStatus", new_status as "newStatus", source
+           FROM subscription_status_history WHERE workspace_id = $1 AND contact_id = $2 ORDER BY changed_at ASC`,
+          [workspaceId, contactId]
+        );
+        return rows;
+      })
+    );
+  }
+
   // SendGrid's Event Webhook flattens the mail/send markers directly onto
   // the event object's TOP LEVEL (no nested wrapper) -- this fixture
   // matches the real shape the corrected worker reads.
@@ -163,6 +183,16 @@ describe("webhook-events worker: suppression state machine (SUBS-02, D-10/D-11/D
     expect(rows).toHaveLength(1);
     expect(rows[0].reason).toBe("hard_bounce");
     expect(await sendBounceReason(workspaceId, sendId)).toBe("hard_bounce");
+
+    // 07-01 (D-09): the real applySuppression call site writes exactly one
+    // subscription_status_history row with source='webhook_suppression'.
+    const history = await historyRows(workspaceId, contact.id);
+    expect(history).toHaveLength(1);
+    expect(history[0]).toMatchObject({
+      oldStatus: "subscribed",
+      newStatus: "suppressed",
+      source: "webhook_suppression",
+    });
   });
 
   it("D-11: a spam report suppresses the contact with reason spam_report", async () => {
@@ -191,6 +221,16 @@ describe("webhook-events worker: suppression state machine (SUBS-02, D-10/D-11/D
 
     expect((await contactState(workspaceId, contact.id)).subscriptionStatus).toBe("unsubscribed");
     expect(await suppressionRows(workspaceId, contact.email)).toHaveLength(0);
+
+    // 07-01 (D-09): the real applyUnsubscribe call site writes exactly one
+    // subscription_status_history row with source='webhook_unsubscribe'.
+    const history = await historyRows(workspaceId, contact.id);
+    expect(history).toHaveLength(1);
+    expect(history[0]).toMatchObject({
+      oldStatus: "subscribed",
+      newStatus: "unsubscribed",
+      source: "webhook_unsubscribe",
+    });
   });
 
   it("D-11: group_unsubscribe also flips status to unsubscribed with zero suppression rows", async () => {
