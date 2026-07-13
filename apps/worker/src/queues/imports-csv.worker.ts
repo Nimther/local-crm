@@ -9,6 +9,7 @@ interface CsvImportConfigRow {
   id: string;
   mapping: Record<string, string> | null;
   duplicatePolicy: "update" | "skip";
+  defaultTimezone: string | null;
 }
 
 interface StagedRow {
@@ -47,7 +48,7 @@ export async function processImportsCsvJob(data: ImportsCsvJob): Promise<void> {
   await withTenant(workspaceId, async () => {
     const config = await withTenantTransaction(async (client) => {
       const { rows } = await client.query<CsvImportConfigRow>(
-        `SELECT id, mapping, duplicate_policy as "duplicatePolicy" FROM csv_imports WHERE id = $1 AND workspace_id = $2`,
+        `SELECT id, mapping, duplicate_policy as "duplicatePolicy", default_timezone as "defaultTimezone" FROM csv_imports WHERE id = $1 AND workspace_id = $2`,
         [csvImportId, workspaceId]
       );
       return rows[0];
@@ -88,7 +89,9 @@ export async function processImportsCsvJob(data: ImportsCsvJob): Promise<void> {
             );
             if (lockedRows[0]?.status !== "pending") return;
 
-            const { input, error } = applyCsvRowMapping(row.raw, mapping);
+            const { input, error } = applyCsvRowMapping(row.raw, mapping, {
+              defaultTimezone: config.defaultTimezone,
+            });
             if (error) {
               await client.query(`UPDATE csv_import_rows SET status = 'error', reason = $2 WHERE id = $1`, [
                 row.id,

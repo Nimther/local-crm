@@ -88,7 +88,8 @@ function csvEscape(value: string): string {
 async function computeDryRunSummary(
   csvImportId: string,
   mapping: Record<string, string>,
-  duplicatePolicy: DuplicatePolicy
+  duplicatePolicy: DuplicatePolicy,
+  defaultTimezone: string | null | undefined
 ): Promise<CsvDryRunSummary> {
   let willCreate = 0;
   let willUpdate = 0;
@@ -102,7 +103,7 @@ async function computeDryRunSummary(
 
     for (const row of page) {
       cursor = row.rowNumber;
-      const { input, error } = applyCsvRowMapping(row.raw, mapping);
+      const { input, error } = applyCsvRowMapping(row.raw, mapping, { defaultTimezone });
 
       if (error) {
         errorCount += 1;
@@ -255,12 +256,17 @@ export async function registerCsvImportRoutes(fastify: FastifyInstance): Promise
     const summary = await withTenant(workspace.id, async () => {
       const existing = await getCsvImport(id);
       if (!existing) return null;
-      return computeDryRunSummary(id, parsed.data.mapping, parsed.data.duplicatePolicy);
+      return computeDryRunSummary(id, parsed.data.mapping, parsed.data.duplicatePolicy, parsed.data.defaultTimezone);
     });
     if (!summary) return reply.code(404).send({ error: "Import not found" });
 
     await withTenant(workspace.id, () =>
-      saveDryRunResult(id, { mapping: parsed.data.mapping, duplicatePolicy: parsed.data.duplicatePolicy, summary })
+      saveDryRunResult(id, {
+        mapping: parsed.data.mapping,
+        duplicatePolicy: parsed.data.duplicatePolicy,
+        defaultTimezone: parsed.data.defaultTimezone,
+        summary,
+      })
     );
 
     return reply.send(summary);

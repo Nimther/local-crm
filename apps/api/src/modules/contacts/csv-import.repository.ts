@@ -9,6 +9,7 @@ export interface CsvImportRow {
   status: "uploaded" | "validating" | "ready" | "applying" | "done" | "failed";
   duplicatePolicy: DuplicatePolicy;
   mapping: CsvColumnMapping | null;
+  defaultTimezone: string | null;
   totalRows: number;
   processedRows: number;
   summary: Record<string, number> | null;
@@ -23,6 +24,7 @@ const CSV_IMPORT_COLUMNS = `
   status,
   duplicate_policy as "duplicatePolicy",
   mapping,
+  default_timezone as "defaultTimezone",
   total_rows as "totalRows",
   processed_rows as "processedRows",
   summary,
@@ -154,14 +156,19 @@ export async function setStagedRowClassification(
 
 export async function saveDryRunResult(
   id: string,
-  input: { mapping: CsvColumnMapping; duplicatePolicy: DuplicatePolicy; summary: CsvDryRunSummary }
+  input: {
+    mapping: CsvColumnMapping;
+    duplicatePolicy: DuplicatePolicy;
+    defaultTimezone: string | null | undefined;
+    summary: CsvDryRunSummary;
+  }
 ): Promise<void> {
   return withTenantTransaction(async (client) => {
     const workspaceId = getWorkspaceId();
     await client.query(
-      `UPDATE csv_imports SET mapping = $3, duplicate_policy = $4, summary = $5, status = 'ready', updated_at = now()
+      `UPDATE csv_imports SET mapping = $3, duplicate_policy = $4, default_timezone = $5, summary = $6, status = 'ready', updated_at = now()
        WHERE id = $1 AND workspace_id = $2`,
-      [id, workspaceId, input.mapping, input.duplicatePolicy, input.summary]
+      [id, workspaceId, input.mapping, input.duplicatePolicy, input.defaultTimezone ?? null, input.summary]
     );
   });
 }
