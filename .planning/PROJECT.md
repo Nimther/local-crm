@@ -73,7 +73,7 @@ Multi-tenant SaaS-платформа marketing automation для B2C-компа�
 |----------|-----------|---------|
 | Multi-tenant SaaS с первого дня | Продукт для многих компаний, не внутренний инструмент | ✓ Phase 1: shared schema + tenant_id + RLS работает; изоляция доказана chaos-тестом пула и UAT-тестом изоляции |
 | BYO SendGrid key у тенанта | Проще для MVP: репутация домена, шаблоны и верификация — в аккаунте тенанта | ✓ Phase 1 (connect-половина): live-валидация ключа + KMS envelope encryption подтверждены UAT с реальными ключами |
-| Canvas drag-and-drop редактор цепочек в v1 | Ключевой дифференциатор UX, как Klaviyo/n8n; принято осознанно несмотря на стоимость | — Pending |
+| Canvas drag-and-drop редактор цепочек в v1 | Ключевой дифференциатор UX, как Klaviyo/n8n; принято осознанно несмотря на стоимость | ✓ Phase 6: canvas builder на @xyflow/react (5 типов узлов, autosave с honest error state, publish-валидация графа) прошёл полный UAT 13/13; цепочки переиспользуют общий send pipeline (suppression, frequency cap, per-tenant RPS) |
 | Свободная схема событий (имя + JSON) | Минимум трения при интеграции, модель Klaviyo; типы появляются в UI по мере поступления | ✓ Phase 2: события с произвольным JSON-payload принимаются, отображаются в feed; reserved-key denylist защищает системные свойства |
 | external_id + email, upsert контакта из события | Стабильная идентификация при смене email; событие может создать контакт | ✓ Phase 2: shared upsert (contacts-core) используется API, CSV-воркером и event-воркером; конфликты email → D-04 hard error |
 | Собственный subscription status + фильтрация перед отправкой | Статус виден в платформе и участвует в сегментации; не полагаемся только на SendGrid suppression | ✓ Phase 4+5: pre-send gate перед каждой отправкой (Phase 4); bounce/spam/unsubscribe из webhook автоматически переводят контакт в suppressed/unsubscribed (Phase 5) — цикл замкнут |
@@ -102,4 +102,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-10 after Phase 6 completion (21/21 планов, 3 gap-closure раунда; round 3 закрыл 3 blocking-гэпа — CR-01 cycle detection + step budget, CR-02 atomic enrollExisting=false seed, segment-triggered re-entry — и warnings WR-01/WR-02/WR-05; verification passed 4/4 must-haves, все регрессионные тесты RED→GREEN; code review после round 3: 0 Critical / 6 Warning / 7 Info — не блокируют; SECURITY.md для Phase 6 ещё не создан — secure-phase gate активен; переход к Phase 7)*
+*Last updated: 2026-07-14 after Phase 6 transition (24/24 планов, 4 gap-closure раунда; round 4 закрыл два последних UAT-гэпа — default-timezone combobox в CSV-импорте (06-22/06-23) и offline-paused autosave error state (06-24); UAT complete 13/13 passed, 0 issues; security review: 72 threats, 0 open — 06-SECURITY.md verified; phase 6 отмечена завершённой, переход к Phase 7: Analytics, Dashboard & Send Log)*

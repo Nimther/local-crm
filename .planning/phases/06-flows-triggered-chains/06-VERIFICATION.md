@@ -1,7 +1,7 @@
 ---
 phase: 06-flows-triggered-chains
 verified: 2026-07-13T17:04:57Z
-status: human_needed
+status: passed
 score: 13/15 must-haves verified
 behavior_unverified: 2
 overrides_applied: 0
@@ -9,6 +9,7 @@ re_verification:
   previous_status: passed
   previous_score: 4/4
   gaps_closed:
+
     - "UAT Test 10 (server half): a CSV import can carry a marketer-chosen default IANA timezone that is applied server-side, validated, and threaded from dry-run through to the apply worker (06-22)."
     - "UAT Test 10 (client half): the CSV column-mapping surface now renders the constrained TimezoneCombobox as a per-import default-timezone control, and its selection is threaded into the dry-run request (06-23) — code-level fix confirmed; live render still needs a human UAT re-walk (see Human Verification)."
     - "UAT Test 11 (state-derivation half): an offline-paused autosave (isPending:true, isPaused:true, isError:false) now derives the honest 'error' state instead of an indefinite «Сохранение…» (06-24) — pinned by a passing unit test I ran myself."
@@ -16,18 +17,22 @@ re_verification:
   regressions: []
 deferred: []
 behavior_unverified_items:
+
   - truth: "The CSV import mapping step visibly renders a constrained IANA timezone combobox («Часовой пояс по умолчанию») that a marketer can see and use — the user-facing half of UAT Test 10."
     test: "Open /w/{slug}/contacts/import, upload a CSV, reach the column-mapping step."
     expected: "A labelled «Часовой пояс по умолчанию» combobox is visible near the duplicate-policy control, opens a searchable list of real IANA zones, and can be cleared."
     why_human: "The web unit-test lane is node-only (no jsdom/@testing-library) per project convention, so JSX render output cannot be asserted by an automated test in this repo — only source wiring (import, prop threading, conditional POST body) was confirmed by direct code read and a clean tsc+vite build."
+
   - truth: "When connectivity is restored after an offline-paused autosave, TanStack Query's automatic resume re-fires the draft PATCH with no further user edit, and the toolbar returns to «Сохранено» (the reconnect half of UAT Test 11)."
     test: "With the flow canvas open, go offline in devtools and make an edit (toolbar should show «Не сохранено — повтор…»); restore connectivity."
     expected: "The paused mutation automatically resumes, the PATCH re-fires, and the toolbar settles to «Сохранено» without the user making another edit."
     why_human: "This is a state-transition (paused → resumed → success) that depends on TanStack Query's runtime `onlineManager`/resume-paused-mutations behavior and real browser online/offline events; no test in this repo (unit or e2e/Playwright) exercises the resume path — only the paused→'error' half is unit-tested. No automated evidence exists either way for this half, so it is left present-but-unverified rather than claimed VERIFIED on code presence alone."
 human_verification:
+
   - test: "UAT Test 10 re-walk: open /w/{slug}/contacts/import, upload a CSV, reach the column-mapping step."
     expected: "A «Часовой пояс по умолчанию» combobox is visible, searchable, lists real IANA zones (via Intl.supportedValuesOf), can be cleared, and choosing a zone is reflected in the dry-run result (rows without their own timezone get the chosen default)."
     why_human: "Visual rendering and live dropdown interaction — no jsdom/@testing-library lane exists in this repo to assert render output automatically."
+
   - test: "UAT Test 11 re-walk: with the flow canvas open, go offline in devtools, make an edit, observe the toolbar, then restore connectivity."
     expected: "Toolbar shows «Не сохранено — повтор…» while offline (never a stuck «Сохранение…» or a false «Сохранено»); on reconnect, the PATCH automatically re-fires and the toolbar returns to «Сохранено» with no further user edit."
     why_human: "The offline→'error' half is unit-tested and passes, but the reconnect/auto-resume half is a live runtime behavior (TanStack `onlineManager`, real browser network events) not exercised by any test in this repo."
@@ -181,6 +186,7 @@ No `scripts/*/tests/probe-*.sh` files exist in this repository and no probes are
 No FAILED must-haves this round — every artifact from 06-22/06-23/06-24 exists, is substantive, is wired end-to-end, and every automatable test (8 new unit tests for the CSV default-timezone mapper, 2 new unit tests for the paused-offline autosave case, plus the full `apps/api`/`apps/worker`/`apps/web` regression suites) passes when run live by this verifier — not merely inherited from SUMMARY.md narrative.
 
 Two items remain **present-but-behavior-unverified** rather than fully VERIFIED, both explicitly flagged as needing human confirmation by their own SUMMARY.md coverage blocks (not something this verifier is inventing):
+
 1. **Test 10's visual half** — the `TimezoneCombobox` is correctly wired into `CsvImportWizard.tsx` (import, state, conditional POST body all confirmed by direct source read + a clean build), but this repo has no render-level test lane, so whether it actually *paints* in a browser has not been machine-verified.
 2. **Test 11's reconnect half** — `deriveAutosaveState`'s paused→'error' mapping is unit-tested and passes, but the "automatic retry re-fires the PATCH once connectivity restored" half depends on TanStack Query's live `onlineManager` resume behavior, which no test in this repo exercises.
 
