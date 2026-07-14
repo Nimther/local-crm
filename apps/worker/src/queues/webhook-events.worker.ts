@@ -141,6 +141,32 @@ async function incrementCampaignCounter(client: PoolClient, campaignId: string, 
 }
 
 /**
+ * 07-09 (D-08 OR-combined per-send terminal count): returns `true` iff
+ * exactly one of `bounced_at`/`dropped_at`/`spam_reported_at` is currently
+ * non-null on the send -- i.e. the terminal the caller's `setFactColumnOnce`
+ * just set is this send's ONLY non-delivery terminal so far. Called only
+ * after a successful `justSet` (the column it just set is already committed
+ * in this transaction), so a second terminal on the same send (e.g. a spam
+ * report after an earlier hard bounce) resolves to `false`, matching
+ * `reconcileWorkspaceDay`'s OR-combined filter that counts a send once
+ * regardless of how many of the three terminal columns are set.
+ * `unsubscribed_at` is deliberately NOT part of this set -- it has its own
+ * counter and is unaffected.
+ */
+async function isFirstNonDeliveryTerminal(client: PoolClient, sendId: string): Promise<boolean> {
+  const { rows } = await client.query<{ terminalCount: number }>(
+    `SELECT (
+       (bounced_at IS NOT NULL)::int +
+       (dropped_at IS NOT NULL)::int +
+       (spam_reported_at IS NOT NULL)::int
+     ) as "terminalCount"
+     FROM sends WHERE id = $1`,
+    [sendId]
+  );
+  return rows[0]?.terminalCount === 1;
+}
+
+/**
  * Suppression dual-write (D-13): flips `contacts.subscription_status` to
  * 'suppressed' AND inserts a `workspace_suppressions` row (per-event,
  * per-transaction single-row write -- never bulk), reading the contact's
@@ -282,9 +308,15 @@ async function applyEventSideEffects(
         reason: "hard_bounce",
       });
       if (justSet) {
-        if (send.campaignId) await incrementCampaignCounter(client, send.campaignId, "bounced_count");
+        // 07-09: bounced_count is an OR-combined per-send terminal count
+        // (D-08), matching reconcileWorkspaceDay -- only the FIRST
+        // non-delivery terminal on this send counts. Suppression still
+        // runs unconditionally on every genuinely-new terminal.
+        if (await isFirstNonDeliveryTerminal(client, send.id)) {
+          if (send.campaignId) await incrementCampaignCounter(client, send.campaignId, "bounced_count");
+          await incrementWorkspaceDailyRollup(client, workspaceId, event.occurredAt, "bounced");
+        }
         await applySuppression(client, workspaceId, send.contactId, "hard_bounce");
-        await incrementWorkspaceDailyRollup(client, workspaceId, event.occurredAt, "bounced");
       }
       break;
     }
@@ -304,9 +336,12 @@ async function applyEventSideEffects(
           reason: "soft_bounce_streak",
         });
         if (justSet) {
-          if (send.campaignId) await incrementCampaignCounter(client, send.campaignId, "bounced_count");
+          // 07-09: same first-terminal gating as bounce_hard.
+          if (await isFirstNonDeliveryTerminal(client, send.id)) {
+            if (send.campaignId) await incrementCampaignCounter(client, send.campaignId, "bounced_count");
+            await incrementWorkspaceDailyRollup(client, workspaceId, event.occurredAt, "bounced");
+          }
           await applySuppression(client, workspaceId, send.contactId, "soft_bounce_streak");
-          await incrementWorkspaceDailyRollup(client, workspaceId, event.occurredAt, "bounced");
         }
       }
       break;
@@ -319,9 +354,13 @@ async function applyEventSideEffects(
       if (justSet) {
         // D-08: every address-drop terminal counts into bounced_count
         // ("не доставлено"), independent of the specific reason -- the
-        // reason itself stays queryable via sends.drop_reason.
-        if (send.campaignId) await incrementCampaignCounter(client, send.campaignId, "bounced_count");
-        await incrementWorkspaceDailyRollup(client, workspaceId, event.occurredAt, "bounced");
+        // reason itself stays queryable via sends.drop_reason. 07-09: gated
+        // on isFirstNonDeliveryTerminal, matching reconcileWorkspaceDay's
+        // OR-combined per-send count.
+        if (await isFirstNonDeliveryTerminal(client, send.id)) {
+          if (send.campaignId) await incrementCampaignCounter(client, send.campaignId, "bounced_count");
+          await incrementWorkspaceDailyRollup(client, workspaceId, event.occurredAt, "bounced");
+        }
 
         const outcome = resolveSuppression("dropped", event.reason);
         if (outcome?.status === "suppressed") {
@@ -337,9 +376,13 @@ async function applyEventSideEffects(
       if (justSet) {
         // No dedicated spam counter exists (Task 1 decision) -- spam is a
         // non-delivery terminal, grouped into bounced_count like dropped.
-        if (send.campaignId) await incrementCampaignCounter(client, send.campaignId, "bounced_count");
+        // 07-09: gated on isFirstNonDeliveryTerminal -- suppression still
+        // runs unconditionally on every genuinely-new spam report.
+        if (await isFirstNonDeliveryTerminal(client, send.id)) {
+          if (send.campaignId) await incrementCampaignCounter(client, send.campaignId, "bounced_count");
+          await incrementWorkspaceDailyRollup(client, workspaceId, event.occurredAt, "bounced");
+        }
         await applySuppression(client, workspaceId, send.contactId, "spam_report");
-        await incrementWorkspaceDailyRollup(client, workspaceId, event.occurredAt, "bounced");
       }
       break;
     }
