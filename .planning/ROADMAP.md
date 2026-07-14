@@ -422,7 +422,7 @@ _Wave 2 (blocked on 06-22 — needs the defaultTimezone dry-run contract field):
   4. A workspace dashboard shows send / deliver / open trends over a chosen period and contact-base growth.
   5. A user can browse a per-message send log filtered by contact, campaign/flow, status, and period.
 
-**Plans**: 9 plans (7 complete + 2 gap-closure pending)
+**Plans**: 8/9 plans executed
 **UI hint**: yes
 
 Plans:
@@ -447,7 +447,7 @@ Plans:
 
 **Gap closure** *(parallel — from 07-VERIFICATION.md)*
 
-- [ ] 07-08-PLAN.md — Terminal-campaign SummaryView enrichment: D-01 rates + D-07 «Пропущено» breakdown + send-log link via shared CampaignMetricsSummary (ANLT-01, gap 1)
+- [x] 07-08-PLAN.md — Terminal-campaign SummaryView enrichment: D-01 rates + D-07 «Пропущено» breakdown + send-log link via shared CampaignMetricsSummary (ANLT-01, gap 1)
 - [ ] 07-09-PLAN.md — Workspace rollup dual-writer fix: unique-send opened/clicked gating + bounce+spam single-count + dual-write invariant regression test (ANLT-04, gap 2)
 
 ## Progress
@@ -463,4 +463,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 4. Broadcast Campaigns & Send Pipeline | 19/19 | Complete    | 2026-07-06 |
 | 5. Webhook Processing & Delivery Tracking | 13/13 | Complete    | 2026-07-09 |
 | 6. Flows (Triggered Chains) | 24/24 | Complete    | 2026-07-13 |
-| 7. Analytics, Dashboard & Send Log | 7/7 | Complete   | 2026-07-14 |
+| 7. Analytics, Dashboard & Send Log | 8/9 | In Progress|  |
