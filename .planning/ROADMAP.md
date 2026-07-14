@@ -422,7 +422,7 @@ _Wave 2 (blocked on 06-22 — needs the defaultTimezone dry-run contract field):
   4. A workspace dashboard shows send / deliver / open trends over a chosen period and contact-base growth.
   5. A user can browse a per-message send log filtered by contact, campaign/flow, status, and period.
 
-**Plans**: 9/9 plans complete
+**Plans**: 10 plans (9 complete + 1 gap closure)
 **UI hint**: yes
 
 Plans:
@@ -449,6 +449,7 @@ Plans:
 
 - [x] 07-08-PLAN.md — Terminal-campaign SummaryView enrichment: D-01 rates + D-07 «Пропущено» breakdown + send-log link via shared CampaignMetricsSummary (ANLT-01, gap 1)
 - [x] 07-09-PLAN.md — Workspace rollup dual-writer fix: unique-send opened/clicked gating + bounce+spam single-count + dual-write invariant regression test (ANLT-04, gap 2)
+- [ ] 07-10-PLAN.md — Send-log campaign/flow selector: persistent «Кампания / цепочка» combobox re-applies the campaign filter after reset + pure mutual-exclusion helper (ANLT-05, gap 3 — UAT Test 1)
 
 ## Progress
 
