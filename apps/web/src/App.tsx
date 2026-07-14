@@ -13,7 +13,7 @@ import ResetRequestPage from "@/routes/reset-request";
 import ResetPasswordPage from "@/routes/reset-password";
 import InviteAcceptPage from "@/routes/invite-accept";
 import { AppShell } from "@/features/app-shell/AppShell";
-import { WorkspaceHome } from "@/features/workspace-home/WorkspaceHome";
+import { WorkspaceDashboard } from "@/features/dashboard/WorkspaceDashboard";
 import ProfilePage from "@/features/profile/ProfilePage";
 import TeamPage from "@/features/team/TeamPage";
 import SendGridKeySettings from "@/features/sendgrid-key/SendGridKeySettings";
@@ -77,7 +77,7 @@ export default function App() {
           <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/invite/:invitationId" element={<InviteAcceptPage />} />
           <Route path="/w/:slug" element={<AppShell />}>
-            <Route index element={<WorkspaceHome />} />
+            <Route index element={<WorkspaceDashboard />} />
             <Route path="contacts" element={<ContactsListPage />} />
             <Route path="contacts/imports" element={<CsvImportHistory />} />
             <Route path="contacts/import" element={<CsvImportWizard />} />
