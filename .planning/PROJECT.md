@@ -34,9 +34,9 @@ Multi-tenant SaaS-платформа marketing automation для B2C-компа�
 - [x] Триггерные цепочки: визуальный canvas-редактор с drag-and-drop (узлы, ветвления, соединения) — Validated in Phase 6: canvas builder (@xyflow/react, 5 типов узлов, autosave с honest error state), atomic publish с immutable versioning (draft → live → paused), publish-time валидация графа (включая cycle_detected / no_entry, gap-closure round 3); verification 4/4
 - [x] Правила цепочек: exit conditions, контроль повторного входа (once ever / once per N days / every time), quiet hours, глобальный frequency cap на контакт — Validated in Phase 6: exit conditions + reconciliation, re-entry control (leave→rejoin для segment-triggered восстановлен в round 3), dispatch-time quiet hours с deferral, отправка через общий send pipeline с suppression и frequency cap
 
-### Active
+- [x] Аналитика: метрики по кампаниям и шагам цепочек (sent/delivered/opened/clicked/bounced/unsubscribed), timeline активности в карточке контакта, сводный дашборд воркспейса, по-письмовый лог отправок с фильтрами — Validated in Phase 7: Analytics, Dashboard & Send Log — verification 9/9 (D-01 rates + «Пропущено» breakdown на кампаниях, flow node badges + таблица «Аналитика», unified timeline контакта, rollup-дашборд (Recharts) с трендами и ростом базы, «Журнал отправок» с фильтрами contact/campaign-or-flow/status/period и drawer; 2 gap-closure раунда: campaign-фильтр после сброса (07-10), cmdk identity по id (07-11))
 
-- [ ] Аналитика: метрики по кампаниям и шагам цепочек (sent/delivered/opened/clicked/bounced/unsubscribed), timeline активности в карточке контакта, сводный дашборд воркспейса, по-письмовый лог отправок с фильтрами (счётчики кампаний уже на детальной странице — Phase 5)
+### Active
 - [ ] Webhook hardening (из 05-REVIEW WR-01): при общем BYO SendGrid-ключе на несколько воркспейсов отбрасывать события чужого workspace (сейчас сырые payload'ы соседнего workspace сохраняются в его send_events; атрибуция не страдает — resolution workspace-scoped)
 
 ### Out of Scope
@@ -102,4 +102,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-14 after Phase 6 transition (24/24 планов, 4 gap-closure раунда; round 4 закрыл два последних UAT-гэпа — default-timezone combobox в CSV-импорте (06-22/06-23) и offline-paused autosave error state (06-24); UAT complete 13/13 passed, 0 issues; security review: 72 threats, 0 open — 06-SECURITY.md verified; phase 6 отмечена завершённой, переход к Phase 7: Analytics, Dashboard & Send Log)*
+*Last updated: 2026-07-14 after Phase 7 completion (11/11 планов; verification 9/9 после двух gap-closure раундов — 07-10 campaign/flow-селектор в журнале отправок, 07-11 cmdk selection identity по id (human-verify checkpoint approved); UAT-гэп и debug-сессия resolved; code review: 0 critical / 8 warnings / 11 info (advisory); security review: 0 threats open; последняя фаза roadmap v1.0 — milestone готов к аудиту/закрытию)*
