@@ -422,7 +422,7 @@ _Wave 2 (blocked on 06-22 — needs the defaultTimezone dry-run contract field):
   4. A workspace dashboard shows send / deliver / open trends over a chosen period and contact-base growth.
   5. A user can browse a per-message send log filtered by contact, campaign/flow, status, and period.
 
-**Plans**: 7/7 plans complete
+**Plans**: 9 plans (7 complete + 2 gap-closure pending)
 **UI hint**: yes
 
 Plans:
@@ -444,6 +444,11 @@ Plans:
 **Wave 4** *(blocked on Wave 3)*
 
 - [x] 07-07-PLAN.md — Workspace dashboard: rollup-backed trend + growth Recharts charts + KPI cards + mini-lists, replaces WorkspaceHome as index route (ANLT-04)
+
+**Gap closure** *(parallel — from 07-VERIFICATION.md)*
+
+- [ ] 07-08-PLAN.md — Terminal-campaign SummaryView enrichment: D-01 rates + D-07 «Пропущено» breakdown + send-log link via shared CampaignMetricsSummary (ANLT-01, gap 1)
+- [ ] 07-09-PLAN.md — Workspace rollup dual-writer fix: unique-send opened/clicked gating + bounce+spam single-count + dual-write invariant regression test (ANLT-04, gap 2)
 
 ## Progress
 
