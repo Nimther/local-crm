@@ -45,6 +45,24 @@ export interface SendTargetOption {
 }
 
 /**
+ * 07-11 (gap closure, 07-REVIEW.md WR-02): returns a unique cmdk `CommandItem`
+ * selection identity for a campaign/flow selector item. cmdk (v1.1.1) uses
+ * `CommandItem value` as the item's internal selection/filter/highlight
+ * identity -- but campaign/flow names are NOT unique: the app's own
+ * «Дублировать» action (duplicateCampaign / duplicateFlow) copies the source
+ * name verbatim, so two identically-named items is a routine occurrence.
+ * Keying `value` by name alone collides and cmdk resolves selection to
+ * whichever item matched first, silently substituting the wrong entity.
+ *
+ * Appending the id (name first, space-separated) makes the identity unique
+ * per-id while keeping the name as a searchable prefix, so cmdk's built-in
+ * substring filter still matches on partial name input.
+ */
+export function sendTargetItemValue(name: string, id: string): string {
+  return `${name} ${id}`;
+}
+
+/**
  * Resolves the send-log's active campaign/flow filter to a displayable
  * label. Campaign takes priority over flow when both are set (mirrors
  * SendLogPage's `campaignOrFlowId = campaignId ?? flowId`). If the id isn't

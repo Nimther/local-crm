@@ -9,7 +9,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { cn } from "@/lib/utils";
 import { listCampaigns } from "@/features/campaigns/api";
 import { listFlows } from "@/features/flows/api";
-import { resolveSendTargetLabel, type SendTarget } from "./send-log-filters";
+import { resolveSendTargetLabel, sendTargetItemValue, type SendTarget } from "./send-log-filters";
 
 /**
  * 07-10 (gap closure, UAT Test 1): persistent «Кампания / цепочка» selector
@@ -80,7 +80,7 @@ export function CampaignFlowFilter({
                 {campaigns.map((campaign) => (
                   <CommandItem
                     key={campaign.id}
-                    value={campaign.name}
+                    value={sendTargetItemValue(campaign.name, campaign.id)}
                     onSelect={() => {
                       onSelect({ kind: "campaign", id: campaign.id });
                       setOpen(false);
@@ -97,7 +97,7 @@ export function CampaignFlowFilter({
                 {flows.map((flow) => (
                   <CommandItem
                     key={flow.id}
-                    value={flow.name}
+                    value={sendTargetItemValue(flow.name, flow.id)}
                     onSelect={() => {
                       onSelect({ kind: "flow", id: flow.id });
                       setOpen(false);
