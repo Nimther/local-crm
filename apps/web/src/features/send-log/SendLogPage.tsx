@@ -19,6 +19,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { fetchSendLog, type SendLogItem, type SendLogStatus } from "./api";
+import { CampaignFlowFilter } from "./CampaignFlowFilter";
+import { applySendTargetToParams, type SendTarget } from "./send-log-filters";
 import { SendLogRowDrawer } from "./SendLogRowDrawer";
 
 const RELATIVE_TIME_FORMAT = new Intl.RelativeTimeFormat("ru", { numeric: "auto" });
@@ -106,11 +108,15 @@ const columnHelper = createColumnHelper<SendLogItem>();
 /**
  * D-13/D-15/ANLT-05: the workspace-wide send log. Filters (contact/
  * campaign-or-flow/status multi-select/period) are driven entirely by URL
- * search params -- `contact`/`campaign`/`flow` are set by OTHER pages'
- * deep-links (never edited here, only cleared via their chip's × or the
- * blanket «Сбросить фильтры»), while `status`/`period`/`page` are edited
- * directly on this page. Follows the 02-13 keepPreviousData + results-scoped
- * skeleton + isPlaceholderData dim pattern (ContactsListPage precedent).
+ * search params -- `contact` is set by OTHER pages' deep-links (never edited
+ * here, only cleared via its chip's ×), while `status`/`period`/`page` are
+ * edited directly on this page. `campaign`/`flow` can ALSO be set by other
+ * pages' deep-links, but as of 07-10 are additionally editable in-page via
+ * the persistent «Кампания / цепочка» selector -- so unlike `contact`, the
+ * campaign/flow filter survives «Сбросить фильтры» (it can always be
+ * re-applied from the selector, closing UAT Test 1). Follows the 02-13
+ * keepPreviousData + results-scoped skeleton + isPlaceholderData dim pattern
+ * (ContactsListPage precedent).
  */
 export function SendLogPage() {
   const { slug = "" } = useParams<{ slug: string }>();
@@ -185,6 +191,10 @@ export function SendLogPage() {
     updateParams((next) => {
       next.set("page", String(value));
     });
+  }
+
+  function setSendTarget(target: SendTarget | null) {
+    setSearchParams((prev) => applySendTargetToParams(new URLSearchParams(prev), target));
   }
 
   function resetFilters() {
@@ -278,6 +288,8 @@ export function SendLogPage() {
             </button>
           </Badge>
         )}
+
+        <CampaignFlowFilter slug={slug} campaignId={campaignId} flowId={flowId} onSelect={setSendTarget} />
 
         <Popover open={statusPopoverOpen} onOpenChange={setStatusPopoverOpen}>
           <PopoverTrigger asChild>
