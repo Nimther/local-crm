@@ -6,14 +6,14 @@ current_phase: 07
 current_phase_name: analytics-dashboard-send-log
 status: executing
 stopped_at: Completed 07-01-PLAN.md
-last_updated: "2026-07-14T06:45:43.928Z"
+last_updated: "2026-07-14T12:44:13.266Z"
 last_activity: 2026-07-14
 last_activity_desc: Phase 07 execution started
 progress:
   total_phases: 7
   completed_phases: 7
-  total_plans: 94
-  completed_plans: 94
+  total_plans: 95
+  completed_plans: 95
   percent: 100
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-07-14)
 ## Current Position
 
 Phase: 07 (analytics-dashboard-send-log) — EXECUTING
-Plan: 3 of 9
+Plan: 2 of 10
 Status: Ready to execute
 Last activity: 2026-07-14 — Phase 07 execution started
 
@@ -154,6 +154,7 @@ Progress: [████████████████████] 85/85 p
 | Phase 07 P07 | 282min | 3 tasks | 10 files |
 | Phase 07 P08 | 20min | 3 tasks | 5 files |
 | Phase 07 P09 | 20min | 3 tasks | 4 files |
+| Phase 07 P10 | 8min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -370,6 +371,8 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-07: dashboard empty state derived as kpis.sent===0 && recentCampaigns.length===0 && activeFlows.length===0 -- no dedicated has-ever-sent flag exists on the endpoint
 - [Phase ?]: [Phase 07]: 07-08: bucketExcludedCounts moved verbatim into campaign-metrics.ts; CampaignMetricsSummary shared component closes ANLT-01 terminal-summary verification gap (SummaryView now shows D-01 rates/D-07 breakdown/D-04 send-log link, same as CampaignProgress)
 - [Phase ?]: [Phase 07]: 07-09: adopted unique-send semantic in the incremental webhook path (justSet gate for opened/clicked, isFirstNonDeliveryTerminal for bounced) rather than changing reconciliation -- cheaper option matching CR-01, keeps open rate <=100%
+- [Phase ?]: [Phase 07]: 07-10: applySendTargetToParams always resets page on any target change (campaign/flow/null), matching the page's other filter mutators
+- [Phase ?]: [Phase 07]: 07-10: resolveSendTargetLabel falls back to the raw id as label when a deep-linked id is absent from the workspace list, so a stale filter still renders instead of disappearing
 
 ### Pending Todos
 
@@ -396,6 +399,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-14T06:44:24.509Z
+Last session: 2026-07-14T12:43:24.665Z
 Stopped at: Completed 07-01-PLAN.md
 Resume file: None
