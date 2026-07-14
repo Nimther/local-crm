@@ -1,9 +1,9 @@
 ---
-status: diagnosed
+status: resolved
 phase: 07-analytics-dashboard-send-log
 source: [07-VERIFICATION.md]
 started: 2026-07-14T07:11:30Z
-updated: 2026-07-14T07:45:00Z
+updated: 2026-07-14T14:20:00Z
 ---
 
 ## Current Test
@@ -34,7 +34,8 @@ blocked: 0
 ## Gaps
 
 - truth: "After resetting filters in the send log, the user can re-apply a campaign filter to filter sends by campaign"
-  status: failed
+  status: resolved
+  resolved_by: "07-10 (CampaignFlowFilter combobox in send-log toolbar) + 07-11 (cmdk id-keyed selection identity); re-verified 9/9 in 07-VERIFICATION.md, in-browser checkpoint approved 2026-07-14"
   reason: "User reported: Всё работает, но после сброса фильтров в журнале отправок я не могу снова отфильтровать результаты отправок по кампании — только по событиям"
   severity: major
   test: 1
