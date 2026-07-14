@@ -1,8 +1,8 @@
 ---
 phase: 07-analytics-dashboard-send-log
-reviewed: 2026-07-14T03:30:17Z
+reviewed: 2026-07-14T07:01:48Z
 depth: standard
-files_reviewed: 63
+files_reviewed: 68
 files_reviewed_list:
   - apps/api/src/modules/analytics/__tests__/contact-timeline.test.ts
   - apps/api/src/modules/analytics/__tests__/dashboard.test.ts
@@ -28,9 +28,13 @@ files_reviewed_list:
   - apps/web/src/App.tsx
   - apps/web/src/components/ui/sheet.tsx
   - apps/web/src/features/app-shell/AppShell.tsx
+  - apps/web/src/features/campaigns/CampaignDetailPage.tsx
+  - apps/web/src/features/campaigns/CampaignMetricsSummary.tsx
   - apps/web/src/features/campaigns/CampaignProgress.tsx
   - apps/web/src/features/campaigns/CampaignsListPage.tsx
+  - apps/web/src/features/campaigns/__tests__/campaign-metrics.test.ts
   - apps/web/src/features/campaigns/api.ts
+  - apps/web/src/features/campaigns/campaign-metrics.ts
   - apps/web/src/features/contacts/ContactEventFeed.tsx
   - apps/web/src/features/dashboard/GrowthChart.tsx
   - apps/web/src/features/dashboard/TrendChart.tsx
@@ -48,6 +52,7 @@ files_reviewed_list:
   - apps/web/src/lib/rates.ts
   - apps/worker/src/queues/__tests__/analytics-reconciliation.test.ts
   - apps/worker/src/queues/__tests__/analytics-rollup-idempotency.test.ts
+  - apps/worker/src/queues/__tests__/analytics-rollup-reconciliation-invariant.test.ts
   - apps/worker/src/queues/__tests__/analytics-rollup-tenant-isolation.test.ts
   - apps/worker/src/queues/__tests__/webhook-events-suppression.test.ts
   - apps/worker/src/queues/__tests__/webhook-open-click-counts.test.ts
@@ -67,157 +72,188 @@ files_reviewed_list:
   - packages/db/src/schema/workspace-daily-rollup.ts
   - packages/shared-schemas/src/pagination.ts
 findings:
-  critical: 1
-  warning: 8
-  info: 7
-  total: 16
+  critical: 0
+  warning: 11
+  info: 10
+  total: 21
 status: issues_found
 ---
 
 # Phase 7: Code Review Report
 
-**Reviewed:** 2026-07-14T03:30:17Z
+**Reviewed:** 2026-07-14T07:01:48Z
 **Depth:** standard
-**Files Reviewed:** 63
+**Files Reviewed:** 68
 **Status:** issues_found
 
 ## Summary
 
-Phase 7 adds the analytics surface (contact timeline, flow node analytics, workspace dashboard, workspace send log), the `workspace_daily_rollup` table with a dual write path (incremental webhook increments + periodic reconciliation overwrite), the `subscription_status_history` audit log, and per-send repeat open/click counters.
+Re-review after gap-closure plans 07-08 (campaign summary enrichment) and 07-09 (rollup dual-writer fix). Scope: the Phase 7 analytics stack — subscription-status history, contact timeline, flow-node analytics, workspace dashboard + `workspace_daily_rollup` (incremental webhook writer + reconciliation backstop), the workspace-wide send log, and the campaign metrics summary UI.
 
-Security posture is strong: every new route uses the established `resolveWorkspaceMember` 404 double-gate, all SQL is parameterized (verified by adversarial tests), RLS ENABLE + FORCE + NULLIF-guarded policies ship in the same migration that creates each new table, and the rollup metric column names come from a fixed allow-list, never caller input.
+**Prior CR-01 verification (dual-writer semantics divergence): RESOLVED.** The incremental path in `webhook-events.worker.ts` now gates the `opened`/`clicked` rollup increments on the `setFactColumnOnce` `justSet` result (lines 276–284, 294–298), making them unique-send counts identical to `reconcileWorkspaceDay`'s `first_opened_at`/`first_clicked_at` COUNTs, and gates `bounced` on the new `isFirstNonDeliveryTerminal` OR-combined check (lines 156–167), matching the reconciliation's OR-combined filter. The new `analytics-rollup-reconciliation-invariant.test.ts` proves the same-day invariant against real Postgres (two distinct opens → 1; bounce + spam on one send → 1; byte-identical across a reconcile tick). No oscillation remains for the same-day case.
 
-The most serious defect is a correctness conflict between the rollup's two write paths: the incremental path counts opened/clicked *events* while the reconciliation overwrite counts *unique sends first-opened/clicked that day*. The reconciliation worker runs every 3 minutes and rewrites today/yesterday, so any repeat-open inflation the incremental path produced is clawed back on the next tick — dashboard "Открыто"/clicked numbers visibly oscillate. The two test suites each encode one of the two conflicting semantics and both pass, which is exactly how this slipped through.
+One **residual divergence** from that fix is new finding WR-09: the two writers still disagree when a send accrues two different non-delivery terminals on two *different* UTC days (incremental counts once total; reconciliation counts the send once per day). Bounded, non-oscillating, but the "must never conflict" contract in `workspace-daily-rollup.ts`'s doc-comment is not fully true cross-day.
 
-## Critical Issues
-
-### CR-01: `opened_count`/`clicked_count` semantics conflict between the incremental and reconciliation rollup writers — dashboard metrics oscillate every reconcile tick
-
-**File:** `apps/worker/src/queues/webhook-events.worker.ts:258-272`, `apps/worker/src/queues/analytics-reconciliation.worker.ts:45-54`
-**Issue:** The two write paths for `workspace_daily_rollup` — documented in `packages/db/src/schema/workspace-daily-rollup.ts` as "Maintained two ways that must never conflict" — compute **different metrics** for `opened_count` and `clicked_count`:
-
-- Incremental path (`webhook-events.worker.ts` `open`/`click` cases): increments the rollup on **every genuinely-new open/click event**, explicitly NOT gated by `justSet` ("mirrors sends.open_count -- climbs on every genuinely-new open").
-- Reconciliation path (`reconcileWorkspaceDay`): overwrites with `count(*) FILTER (WHERE first_opened_at::date = day)` — a count of **unique sends first-opened that day**.
-
-Concrete failure: one send opened 5 times today → incremental sets `opened_count = 5`; within 3 minutes the reconciliation worker (RECONCILE_INTERVAL_MS = 180 000, window = today+yesterday) overwrites it to `1`. The dashboard "Открыто" KPI and trend chart values visibly flap between the two numbers, and `openedRate = opened/delivered` can transiently exceed 100% under event-count semantics. Cross-day repeat opens are also permanently lost (an open today of a send first-opened yesterday increments today's count, then reconciliation zeroes it).
-
-A second instance of the same conflict: a send that accumulates BOTH `bounced_at` and `spam_reported_at` (bounce then spam report) is incremented into `bounced_count` **twice** by the incremental path (two separate `justSet` gates at lines 276-284 and 331-339) but counted **once** by the reconciliation's OR-combined filter (lines 49-53) — same oscillation.
-
-The conflict is codified in the tests: `analytics-rollup-idempotency.test.ts:153-170` asserts `opened_count` climbs 1→2 on a repeat open, while `analytics-reconciliation.test.ts:148-177` asserts `opened_count = 1` for a send with `first_opened_at` set. Both pass individually; running reconciliation after the incremental test's scenario would fail it.
-
-**Fix:** Pick one semantic. The cheapest consistent fix is unique-send semantics (matches the reconciliation backstop, the campaign counters, and keeps rates ≤ 100%): gate the rollup increment on `justSet`, exactly like `delivered`:
-
-```typescript
-case "open": {
-  const justSet = await setFactColumnOnce(client, send.id, "first_opened_at", event.occurredAt);
-  if (justSet) {
-    if (send.campaignId) await incrementCampaignCounter(client, send.campaignId, "opened_count");
-    await incrementWorkspaceDailyRollup(client, workspaceId, event.occurredAt, "opened");
-  }
-  // per-send repeat counter still climbs on every new open:
-  await client.query(`UPDATE sends SET open_count = open_count + 1 WHERE id = $1`, [send.id]);
-  break;
-}
-```
-
-(Same for `click`.) For the bounce/spam double-count, gate the second terminal's `bounced` rollup+campaign increment on the send not already having another non-delivery terminal fact, or accept the reconciliation value as authoritative and mirror its OR-grouping. Then fix `analytics-rollup-idempotency.test.ts` to assert `opened_count` stays 1 on a repeat open, and add a test that runs `reconcileWorkspaceDay` after incremental increments and asserts the counts are unchanged (that invariant — the entire point of the dual-write design — is currently untested).
+Eight warnings from the prior review were **not addressed by 07-08/07-09 and remain in the current code** (WR-01…WR-08 below, re-verified line-by-line against the current tree). Two further new warnings were found in this pass (WR-10, WR-11). No security vulnerabilities: all user input reaches SQL via bound parameters or fixed allow-list column maps, every new route enforces workspace membership + RLS with explicit existence-check 404s, and both new tables ship ENABLE + FORCE RLS with the NULLIF-guarded policy from their first migration.
 
 ## Warnings
 
-### WR-01: `timestamptz::date` casts bucket by the Postgres session timezone, not UTC — day attribution diverges from the rest of the pipeline
+### WR-01: `timestamptz::date` casts bucket by the Postgres session timezone, not UTC — day attribution can diverge from the rest of the pipeline
 
-**File:** `apps/worker/src/queues/analytics-reconciliation.worker.ts:45-54`, `apps/api/src/modules/analytics/dashboard.repository.ts:141-151`
-**Issue:** The incremental path buckets days by UTC (`occurredAt.slice(0, 10)` in `analytics-rollup.ts:46`), and `buildDenseDayWindow` computes the dashboard window in UTC. But `reconcileWorkspaceDay`'s filters (`sent_at::date = $2::date`, etc.) and the growth query's `created_at::date` cast a `timestamptz` to `date` using the **session TimeZone GUC** — and `withTenantTransaction` (packages/tenant-context) never sets it, so it inherits the server default. On any Postgres not configured to UTC, the reconciliation overwrite re-buckets events into different days than the incremental path wrote them to (systematic drift near midnight), and growth `newContacts` counts disagree with the JS-computed UTC window. The dashboard repository's own doc comment (lines 90-95) claims this exact pitfall was avoided by binding `$2` — but the `::date` casts on the column side reintroduce it.
-**Fix:** Use an explicit UTC conversion in every cast: `(sent_at AT TIME ZONE 'UTC')::date = $2::date` (and `(created_at AT TIME ZONE 'UTC')::date` in the growth query), or add `SET LOCAL TIME ZONE 'UTC'` alongside the tenant GUC in `withTenantTransaction`.
+**File:** `apps/worker/src/queues/analytics-reconciliation.worker.ts:45-54`, `apps/api/src/modules/analytics/dashboard.repository.ts:141-153`
+**Issue:** Carried over from the prior review; still unresolved (the invariant test even side-steps it explicitly with a noon-UTC fixture, `analytics-rollup-reconciliation-invariant.test.ts:109-113`). The incremental writer buckets by UTC (`occurredAt.slice(0, 10)`), and the dashboard's dense window is computed in UTC, but `reconcileWorkspaceDay`'s `sent_at::date = $2::date` filters and the dashboard growth query's `created_at::date` grouping resolve against the session `TimeZone` GUC, which nothing in `@mega-crm/tenant-context` or `@mega-crm/db` pins. On any deployment where Postgres's default timezone is not UTC, events near midnight are attributed to a different day by reconciliation than by the incremental writer — and because reconciliation *overwrites*, it will systematically erase incremental increments from the UTC day and move them to the local-TZ day, while the dashboard still labels days as UTC. `dashboard.repository.ts`'s own doc-comment (lines 90-95) flags exactly this hazard for `now()`/`current_date` but then uses the equally session-TZ-dependent `::date` cast three lines of SQL later.
+**Fix:** Use an explicit UTC conversion in every day-bucketing expression:
+```sql
+(sent_at AT TIME ZONE 'utc')::date = $2::date
+-- and in the growth query:
+(created_at AT TIME ZONE 'utc')::date
+```
+or add `SET LOCAL TimeZone = 'UTC'` alongside the tenant GUC in `withTenantTransaction`.
 
-### WR-02: Floating promise on repeatable-job registration; tick Queue never closed
+### WR-02: Floating promise on repeatable-job registration; tick Queue never closed on shutdown
 
-**File:** `apps/worker/src/queues/analytics-reconciliation.worker.ts:110-118`
-**Issue:** `void tickQueue.add("reconcile-rollups", {}, { repeat: ... })` discards the promise. If the Redis `add` rejects (transient connection error at boot), the rejection is unobserved — on Node 22 an unhandled rejection terminates the worker process by default; even with a global handler, the repeatable schedule silently never registers and reconciliation never runs (including `sent_count`, whose SOLE writer is this worker). Additionally, the `Queue` instance created here is never closed — `buildWorker().close()` only closes `workers`, so graceful shutdown leaks this connection.
-**Fix:** `tickQueue.add(...).catch((err) => logger.error({ err }, "failed to register reconcile schedule"))` at minimum (ideally retry or crash loudly on purpose), and return/track the Queue so `close()` can call `tickQueue.close()`.
+**File:** `apps/worker/src/queues/analytics-reconciliation.worker.ts:110-118`, `apps/worker/src/server.ts:115-118`
+**Issue:** Carried over; still present. `void tickQueue.add(...)` discards the promise with no `.catch()`. If Redis is briefly unavailable at boot, the rejection becomes an unhandled promise rejection, which crashes the Node 22 process by default — and the failure mode is silent otherwise (no repeatable job registered → reconciliation never runs → `sent_count` stays 0 forever, since the incremental path never writes it). Additionally, the `Queue` instance created inside `createAnalyticsReconciliationWorker` is not reachable from `WorkerRuntime.close()`, which only closes `workers` — its Redis connection leaks on graceful shutdown. (Same pattern exists in `campaign-scheduler.worker.ts`, but that file is out of scope.)
+**Fix:**
+```typescript
+tickQueue
+  .add("reconcile-rollups", {}, { repeat: { every: RECONCILE_INTERVAL_MS }, jobId: "reconcile-rollups" })
+  .catch((err) => console.error("failed to register reconcile-rollups repeatable job", err));
+```
+and either return the queue for `close()` to await `tickQueue.close()`, or close it after registration since the Worker does not need it.
 
 ### WR-03: Send-log OFFSET pagination has no unique tie-breaker — rows can repeat or vanish across pages
 
 **File:** `apps/api/src/modules/send-log/send-log.repository.ts:166-171`
-**Issue:** `ORDER BY COALESCE("sentAt", "queuedAt") DESC` with `LIMIT/OFFSET`. Broadcast dispatch writes many `sends` rows within the same instant (identical `queued_at` from a batch default `now()`), so ordering among ties is unspecified and can differ between the page-1 and page-2 queries — a row can appear on both pages or on neither. At `SEND_LOG_PAGE_SIZE = 50` against a campaign of thousands, this is a routinely visible defect, not a corner case.
-**Fix:** Add a deterministic tie-breaker: `ORDER BY COALESCE("sentAt", "queuedAt") DESC, id DESC`.
+**Issue:** Carried over; still present. `ORDER BY COALESCE("sentAt", "queuedAt") DESC` is not a total order: a campaign fan-out writes many sends with effectively identical timestamps, so Postgres is free to return equal-key rows in different orders across the two paginated queries. A user paging through the send log can see the same row on page 1 and page 2, or miss rows entirely.
+**Fix:** `ORDER BY COALESCE("sentAt", "queuedAt") DESC, id DESC`.
 
 ### WR-04: Reconciliation tick has no per-workspace error isolation — one failing workspace starves all workspaces after it
 
 **File:** `apps/worker/src/queues/analytics-reconciliation.worker.ts:120-129`
-**Issue:** The processor iterates every `organization` row sequentially and `await`s each `reconcileWorkspace` with no try/catch. Any error for one workspace (transient deadlock, RLS/GUC hiccup, bad data) throws out of the processor, fails the whole job, and skips every remaining workspace for that tick. If the failure is persistent (a poison workspace), all workspaces enumerated after it never get reconciled again — and since this worker is the sole writer of `sent_count`, their dashboards permanently show 0 sent.
-**Fix:** Wrap the per-workspace call: `try { await reconcileWorkspace(...) } catch (err) { logger.error({ err, workspaceId: row.id }, "reconcile failed") }` so one tenant's failure cannot affect the others.
+**Issue:** Carried over; still present. The Worker processor iterates every organization row sequentially and awaits `reconcileWorkspace` with no try/catch. A single workspace whose reconcile throws (e.g. a transient connection drop mid-loop) fails the whole job, skipping every workspace ordered after it; because ordering from `SELECT id FROM organization` is stable in practice, the *same* trailing workspaces can be starved on every tick.
+**Fix:** Wrap the per-workspace call:
+```typescript
+for (const row of rows) {
+  try {
+    await reconcileWorkspace(row.id, RECONCILE_WINDOW_DAYS);
+  } catch (err) {
+    console.error(`reconcile failed for workspace ${row.id}`, err);
+  }
+}
+```
 
 ### WR-05: Contact timeline pagination is unreachable — activity silently truncates at 50 rows
 
-**File:** `apps/web/src/features/contacts/ContactEventFeed.tsx:249-254`, `apps/api/src/modules/analytics/timeline.routes.ts:76-79`
-**Issue:** The timeline API supports `?page` (fixed page size 50) but the UI never passes it and renders no "load more"/pagination control — any contact with more than 50 combined events/sends/status-changes/flow-entries silently shows only the newest 50 with no indication more exist. Compounding this, the route returns a bare array with no `total`/`hasMore`, so even a future client cannot know whether another page exists without probing.
-**Fix:** Either add a "Показать ещё" control that increments `page` and appends (and have the API return `{ items, page, pageSize, hasMore }` or fetch pageSize+1), or document/enforce the 50-row cap visibly in the UI.
+**File:** `apps/web/src/features/contacts/ContactEventFeed.tsx:249-254`, `apps/api/src/modules/analytics/timeline.repository.ts:16`
+**Issue:** Carried over; still present. The API supports `page` (validated in `timeline.routes.ts:11`) and the repository pages at 50 rows, but `ContactEventFeed` never sends `page` and renders no load-more/pagination affordance. Any contact with more than 50 timeline rows (trivially reached by opens/clicks/events on an active contact) silently loses all older history in the UI — a marketer has no signal that anything is missing.
+**Fix:** Add a "Показать ещё" button that increments a `page` state and appends `?page=N` (or use `useInfiniteQuery`), or at minimum render a truncation notice when exactly 50 rows return.
 
 ### WR-06: Query errors render as empty states in SendLogPage, SendLogRowDrawer, and ContactEventFeed
 
-**File:** `apps/web/src/features/send-log/SendLogPage.tsx:323-346`, `apps/web/src/features/send-log/SendLogRowDrawer.tsx:115-121`, `apps/web/src/features/contacts/ContactEventFeed.tsx:271-308`
-**Issue:** None of these three components check `isError`. On a 4xx/5xx the queries settle with `data === undefined`, which falls through to `items = []` / `rows = []` and renders the *empty-data* copy («Отправок пока нет», «Событий по этому письму пока нет», «Активности пока нет») — a server failure is indistinguishable from "no data", the exact failure mode `WorkspaceDashboard` and `FlowAnalyticsTable` correctly guard against with dedicated error copy. SendLogPage also forwards unvalidated `?status=` URL values straight to the API (`searchParams.getAll("status") as SendLogStatus[]`, line 125), so any stale/typo'd deep-link status yields a 400 → the misleading «Ничего не найдено» card, with «Сбросить фильтры» being the only escape the user can't know they need.
-**Fix:** Add an `isError` branch with the existing GENERIC_ERROR pattern to all three components; filter `statuses` against the known vocabulary before building `apiParams` (drop unknown values instead of sending them).
+**File:** `apps/web/src/features/send-log/SendLogPage.tsx:196-198,323-345`, `apps/web/src/features/send-log/SendLogRowDrawer.tsx:115-121`, `apps/web/src/features/contacts/ContactEventFeed.tsx:281-308`
+**Issue:** Carried over; still present. None of the three components branch on `isError`. On a failed fetch (network error, 400 from a malformed deep-link filter, expired session): SendLogPage shows «Отправок пока нет» (data `undefined` → `total = 0`, `hasActiveFilters` false with default filters); the drawer shows «Событий по этому письму пока нет»; ContactEventFeed shows «Активности пока нет». All three are false statements about the data. `WorkspaceDashboard.tsx:100-101` and `FlowAnalyticsTable.tsx:126-128` in this same phase get this right, so the pattern already exists in-tree.
+**Fix:** Add an `isError` branch before the empty-state branch in each component, mirroring WorkspaceDashboard's `GENERIC_ERROR` rendering.
 
 ### WR-07: Unsubscribe POST guards `contactId` shape but not `workspaceId` — the same 22P02→500 oracle the guard exists to close
 
-**File:** `apps/api/src/modules/delivery/unsubscribe.routes.ts:177-190`
-**Issue:** The handler applies `isUuid(payload.contactId)` specifically because "a structurally-invalid id reaching a uuid-typed column raises an uncaught 22P02 and produces a distinguishable 500, breaking the byte-identical-response invariant" (its own doc comment). But `payload.workspaceId` gets no such check before `withTenant(payload.workspaceId, ...)`: the value goes into `set_config('app.current_workspace_id', ...)` and the RLS policy's `NULLIF(current_setting(...), '')::uuid` cast throws 22P02 on the first query, producing exactly the distinguishable 500 for a signature-valid token carrying a non-UUID workspaceId (the pre-04-19 test-send tokens signed placeholder literals — the same legacy-token class the contactId guard was added for).
-**Fix:** Extend the existing guard: `if (isValid && isUuid(payload.contactId) && isUuid(payload.workspaceId)) { ... }` — falls through to the identical response block, preserving the invariant.
+**File:** `apps/api/src/modules/delivery/unsubscribe.routes.ts:177-219`
+**Issue:** Carried over; still present. `isUuid(payload.contactId)` exists precisely to keep a structurally invalid id away from a uuid-typed column so the response stays byte-identical (per the CR-01/T-04-19 doc-comment on lines 36-47). But `payload.workspaceId` gets no such check: it flows into `set_config('app.current_workspace_id', ...)` and the RLS policy's `NULLIF(...)::uuid` cast then raises 22P02 inside the transaction → uncaught → 500. A signature-valid token with a non-UUID `workspaceId` (the same legacy-token class the contactId guard defends against) produces a distinguishable 500, breaking the byte-identical-response invariant the handler documents.
+**Fix:** Extend the guard: `if (isValid && isUuid(payload.contactId) && isUuid(payload.workspaceId)) { ... }`.
 
-### WR-08: Webhook batch insert is unbounded — a large batch exceeds Postgres's 65 535 bind-parameter limit and permanently fails the job
+### WR-08: Webhook batch insert is unbounded — a large batch exceeds Postgres's 65,535 bind-parameter limit and permanently fails the job
 
-**File:** `apps/worker/src/queues/webhook-events.worker.ts:411-439`, `packages/shared-schemas/src/queues.ts:228-231`
-**Issue:** `webhookEventsJobSchema` allows `events: z.array(z.unknown())` with no max, and the worker builds ONE multi-row `INSERT` with 9 bound parameters per event. At >7 281 events the statement exceeds the wire-protocol limit of 65 535 parameters and throws — and since the error is deterministic, BullMQ retries exhaust into the failed set and the entire batch of delivery facts is lost. SendGrid retries whole webhook POSTs and can deliver very large bodies during backlog flushes, so this is a reachable production path, not a theoretical one.
-**Fix:** Chunk the insert (e.g. 1 000 rows per statement inside the same transaction), or cap batch size at enqueue time in the webhook route and split oversized posts into multiple jobs.
+**File:** `apps/worker/src/queues/webhook-events.worker.ts:458-485`, `packages/shared-schemas/src/queues.ts:228-231`
+**Issue:** Carried over; still present. `webhookEventsJobSchema` places no bound on `events` (`z.array(z.unknown())`), and the worker builds ONE multi-row INSERT with 9 parameters per row. At 7,282+ events in a single webhook POST the statement exceeds the wire-protocol's 65,535 bind-parameter limit and throws on every retry — the batch fails permanently, and since side effects are same-transaction, all of its delivery facts/counters are lost until reconciliation partially heals (rollups only; `sends` fact columns and campaign counters are never healed). SendGrid batches are usually ~5-1000 events, but the bound is SendGrid's to break, not this code's to assume.
+**Fix:** Chunk the insert (e.g. 1,000 rows per statement) inside the same transaction, accumulating `insertedIds` across chunks; optionally cap `events` in the route before enqueueing.
+
+### WR-09: Residual dual-writer divergence — a send with two non-delivery terminals on two different days is counted twice by reconciliation, once by the incremental path
+
+**File:** `apps/worker/src/queues/analytics-reconciliation.worker.ts:49-53`, `apps/worker/src/queues/webhook-events.worker.ts:156-167`
+**Issue:** New (residual from the 07-09 CR-01 closure). `isFirstNonDeliveryTerminal` counts a send toward `bounced_count` only on its FIRST terminal ever — one increment total, on the first terminal's day. `reconcileWorkspaceDay`'s OR-combined filter counts the send once *per day* on which any of `bounced_at`/`dropped_at`/`spam_reported_at` falls. Same-day multi-terminal is consistent (proven by the invariant test's Scenario B), but cross-day is not: hard bounce on day D, spam report on day D+1 → incremental writes D=1, D+1=0; the next reconcile tick (window covers today+yesterday) overwrites D+1 to 1, so the send contributes 2 to the period total. Non-oscillating (reconciliation wins and stays), but the doc-comment contract "maintained two ways that must never conflict" (`workspace-daily-rollup.ts:11`) and the invariant suite's premise are violated for the cross-day case, and dashboard bounce totals overcount.
+**Fix:** Make reconciliation attribute each send to a single day — its earliest terminal:
+```sql
+count(*) FILTER (WHERE LEAST(bounced_at, dropped_at, spam_reported_at)::date = $2::date
+                 AND COALESCE(bounced_at, dropped_at, spam_reported_at) IS NOT NULL)
+```
+(`LEAST` ignores NULLs only when at least one value is non-null; the COALESCE guard covers the all-null row). Add a cross-day case to `analytics-rollup-reconciliation-invariant.test.ts`.
+
+### WR-10: The platform's own unsubscribe route never records the send-level fact — «Отписки» KPI, campaign «Отписалось», rollup `unsubscribed_count`, and send-log status all miss RFC 8058 one-click unsubscribes
+
+**File:** `apps/api/src/modules/delivery/unsubscribe.routes.ts:190-218`
+**Issue:** New. Every email's `List-Unsubscribe` points at this platform route, and the token's HMAC payload carries the originating `sendId` (per the handler's own T-04-03-01 comment) — yet the POST handler only flips `contacts.subscription_status` and writes a history row. It never sets `sends.unsubscribed_at`, so: (a) the webhook worker's `unsubscribed` rollup increment never fires for this path, (b) `reconcileWorkspaceDay`'s `unsubscribed_at IS NOT NULL` count can't heal it, (c) `campaigns.unsubscribed_count` (the «Отписалось» cell in `CampaignMetricsSummary`) stays 0, and (d) the send log/timeline never associates the unsubscribe with the message that caused it. SendGrid's own `unsubscribe` webhook event only fires for SendGrid subscription-tracking links, not for a custom List-Unsubscribe URL — so for this platform's primary unsubscribe channel, every unsubscribe metric across the Phase 7 dashboard systematically reads 0. The contact timeline shows the status change (via history), which makes the campaign/dashboard zeros look like a bug to the user.
+**Fix:** In the POST handler's tenant transaction, when the token is valid, also run the same first-write-once pattern the webhook worker uses: `UPDATE sends SET unsubscribed_at = now() WHERE id = $sendId AND unsubscribed_at IS NULL RETURNING campaign_id`, and on just-set, increment the campaign counter and `incrementWorkspaceDailyRollup(..., 'unsubscribed')` (extract that helper to a shared package or duplicate the gated upsert). Keep the response byte-identical regardless of outcome.
+
+### WR-11: Non-UUID path params on the new analytics/send-log routes raise Postgres 22P02 → unhandled 500
+
+**File:** `apps/api/src/modules/send-log/send-log.routes.ts:135-146`, `apps/api/src/modules/analytics/timeline.routes.ts:61-73`, `apps/api/src/modules/analytics/flow-analytics.routes.ts:63-71`
+**Issue:** New. Query strings are Zod-validated, but the path params are not: `GET /send-log/not-a-uuid/events` reaches `getSendById`, whose `id = $2` comparison against the uuid-typed column throws `22P02 invalid input syntax for type uuid`. No route or global error handler maps it (grep confirms no `setErrorHandler`/22P02 handling in `apps/api/src`), so a workspace member gets a raw 500 instead of the intended uniform 404 — the same failure-mode class `unsubscribe.routes.ts`'s `isUuid` guard documents and closes on its own route. Same for `:id` on the timeline route (via `getContact`) and the flow-analytics route (via `getFlow`).
+**Fix:** Validate params before querying, e.g. `const params = z.object({ slug: z.string(), sendId: z.string().uuid() }).safeParse(request.params)` → 404 on failure (404, not 400, to preserve the enumeration-safe uniformity).
 
 ## Info
 
 ### IN-01: Unused import in WorkspaceDashboard
 
 **File:** `apps/web/src/features/dashboard/WorkspaceDashboard.tsx:10`
-**Issue:** `computeRate` is imported but never used (all rates arrive precomputed from the API). Will break the build if `noUnusedLocals` is ever enabled.
+**Issue:** Carried over; still present. `computeRate` is imported but never used — all rates arrive pre-computed from the API.
 **Fix:** Remove the import.
 
 ### IN-02: `resolveWorkspaceMember` copy-pasted into four route files
 
-**File:** `apps/api/src/modules/analytics/timeline.routes.ts:21-40`, `dashboard.routes.ts:24-43`, `flow-analytics.routes.ts:15-34`, `apps/api/src/modules/send-log/send-log.routes.ts:42-61`
-**Issue:** Four byte-identical copies of the membership/404 gate (each with a "copied verbatim... not exported there" comment). A future fix to the enumeration-safety behavior must now be applied in ≥6 places (these four plus the contacts/flows originals) or they drift.
-**Fix:** Extract once (e.g. `modules/tenancy/resolve-workspace-member.ts`) and import everywhere.
+**File:** `apps/api/src/modules/analytics/timeline.routes.ts:21-40`, `flow-analytics.routes.ts:15-34`, `dashboard.routes.ts:24-43`, `apps/api/src/modules/send-log/send-log.routes.ts:42-61`
+**Issue:** Carried over. Four byte-identical copies (each self-describing as "copied verbatim"). A future fix to the membership/404 behavior must land in four+ places or silently drift.
+**Fix:** Export it once from a shared module (e.g. `modules/tenancy/resolve-workspace-member.ts`) and import everywhere.
 
 ### IN-03: `relativeTime` + send-status label/class maps duplicated across three components
 
-**File:** `apps/web/src/features/send-log/SendLogPage.tsx:24-62`, `SendLogRowDrawer.tsx:16-29`, `apps/web/src/features/contacts/ContactEventFeed.tsx:12-72`
-**Issue:** `relativeTime` is copied verbatim into three files, and `SEND_STATUS_LABELS`/`SEND_STATUS_CLASSES` into two (already divergent: ContactEventFeed's map has an `unsubscribed` entry, SendLogPage's does not).
-**Fix:** Move `relativeTime` to `@/lib` and the status vocabulary maps to a shared `features/send-log/status.ts`.
+**File:** `apps/web/src/features/send-log/SendLogPage.tsx:24-62`, `SendLogRowDrawer.tsx:16-29`, `apps/web/src/features/contacts/ContactEventFeed.tsx:12-25,48-72`
+**Issue:** Carried over. `relativeTime` is triplicated and `SEND_STATUS_LABELS`/`SEND_STATUS_CLASSES` duplicated (already drifting: ContactEventFeed's copy has an `unsubscribed` key the send-log copy lacks).
+**Fix:** Extract to `@/lib/relative-time.ts` and a shared `send-status` module.
 
 ### IN-04: Dashboard "Отправлено писем" per flow counts excluded/failed send rows
 
-**File:** `apps/api/src/modules/analytics/dashboard.repository.ts:214-224`
-**Issue:** `count(s.id)` over the `sends` join has no status/`sent_at IS NOT NULL` filter, so flow sends with status `excluded`/`failed`/`dispatching` inflate the "emails sent" mini-list metric.
-**Fix:** `count(s.id) FILTER (WHERE s.sent_at IS NOT NULL)`.
+**File:** `apps/api/src/modules/analytics/dashboard.repository.ts:214-225`
+**Issue:** Carried over. `count(s.id)` counts every ledger row, including `status='excluded'`/`'failed'` rows that were never sent. `flow-analytics.repository.ts:70` correctly uses `FILTER (WHERE s.sent_at IS NOT NULL)` for the same concept, so the two surfaces can disagree for the same flow.
+**Fix:** `count(s.id) FILTER (WHERE s.sent_at IS NOT NULL)::text as "emailsSent"`.
 
 ### IN-05: Send-log "no sends yet" empty state is wrong when all sends are older than the default 30-day period
 
-**File:** `apps/web/src/features/send-log/SendLogPage.tsx:127-129,194,327-333`
-**Issue:** `period` is always applied to the query (default 30), but `hasActiveFilters` treats the default period as "no filter". A workspace whose newest send is 40 days old gets `total === 0 && !hasActiveFilters` → «Отправок пока нет. Письма появятся здесь после первой кампании...», which is false and hides the fact that switching to «90 дней» would show data.
-**Fix:** Show the "Ничего не найдено — попробуйте изменить период" card whenever `total === 0` but the (unfiltered, all-time) log is non-empty, or word the empty state to mention the period.
+**File:** `apps/web/src/features/send-log/SendLogPage.tsx:194,327-333`
+**Issue:** Carried over. The period filter always applies (default 30), but `hasActiveFilters` treats the default period as "no filters" — a workspace whose sends are all >30 days old sees «Отправок пока нет. Письма появятся здесь после первой кампании…», which is false.
+**Fix:** Reword the unfiltered empty state to mention the period («Нет отправок за выбранный период») or check an unfiltered total.
 
 ### IN-06: dashboard.test.ts re-implements `computeRate` to compute its own expected values
 
-**File:** `apps/api/src/modules/analytics/__tests__/dashboard.test.ts:177-178,231-234`
-**Issue:** `expect(body.kpis.deliveredRate).toBe(computeRate(13, 15))` where the test defines a local `computeRate` identical to the implementation's — the expectation is tautological with respect to the rounding/null contract (a rounding bug shared by both would pass).
-**Fix:** Assert literal values: `expect(body.kpis.deliveredRate).toBe(87)` / `expect(body.kpis.openedRate).toBe(46)`.
+**File:** `apps/api/src/modules/analytics/__tests__/dashboard.test.ts:231-234`
+**Issue:** Carried over. The test's expected KPI rates come from a local copy of the same formula under test — a shared rounding bug would pass. Lower-value assertions than literal expected values (`expect(body.kpis.deliveredRate).toBe(87)`).
+**Fix:** Assert literal integers for the fixture's known counts.
 
 ### IN-07: Suppression/unsubscribe prior-status read is not row-locked
 
-**File:** `apps/worker/src/queues/webhook-events.worker.ts:160-168,195-201`
-**Issue:** `applySuppression`/`applyUnsubscribe` SELECT the contact's current status without `FOR UPDATE` before the UPDATE. Two concurrent webhook batches (multiple worker processes) touching the same contact can both read `subscribed` and both write a history row with the same `old_status`, producing a duplicate/incoherent transition in `subscription_status_history`. Low likelihood with current single-worker deployment; becomes real under horizontal scaling.
-**Fix:** `SELECT ... FOR UPDATE`, or fold the read into the UPDATE via a CTE (`UPDATE ... FROM (SELECT ... FOR UPDATE)` / `RETURNING` on a conditional `WHERE subscription_status <> 'suppressed'`).
+**File:** `apps/worker/src/queues/webhook-events.worker.ts:186-215,219-240`
+**Issue:** Carried over. `applySuppression`/`applyUnsubscribe` (and the unsubscribe route's equivalent, `unsubscribe.routes.ts:197-216`) SELECT the prior status and then UPDATE without `FOR UPDATE`. Two concurrent transactions touching the same contact can both read the same `oldStatus` and write duplicate/incorrect history rows. Low likelihood at current worker concurrency; the history table is advisory.
+**Fix:** `SELECT ... FOR UPDATE`, or fold the read into the UPDATE via a CTE returning the old value.
+
+### IN-08: `unsubscribes` KPI has no upper day bound — future-dated rollup rows count toward it but not toward the trend KPIs
+
+**File:** `apps/api/src/modules/analytics/dashboard.repository.ts:117,136`, `apps/worker/src/queues/webhook-events.worker.ts:63-70`
+**Issue:** New. `periodUnsubscribes` sums every rollup row with `day >= startDay` (no `day <= today`), while sent/delivered/opened KPIs are summed from the dense window that ends today. `extractEventRow` accepts any timestamp inside the full ECMAScript Date range (± ~275,760 years), so a garbage future timestamp from a webhook payload creates a future-day rollup row that inflates only the unsubscribes KPI. Reconciliation never touches future days (2-day trailing window), so the row persists until that day arrives.
+**Fix:** Add `AND day <= $3::date` (today) to the rollup query, and/or clamp accepted webhook timestamps to a sane window (e.g. now + 24h).
+
+### IN-09: `reconcileWorkspaceDay` inserts an all-zeros row for every workspace/day, even with zero activity
+
+**File:** `apps/worker/src/queues/analytics-reconciliation.worker.ts:39-66`
+**Issue:** New. The aggregate SELECT always returns one row, so every tick upserts 2 rows per workspace (today + yesterday) regardless of activity — a completely idle workspace accrues ~730 zero rows/year. Harmless for correctness (the dashboard zero-fills anyway) but pure table noise.
+**Fix:** Wrap the SELECT and add `WHERE` to skip the insert when all six counts are zero, e.g. `INSERT ... SELECT * FROM (SELECT ...) agg WHERE agg.sent_count + agg.delivered_count + ... > 0` (keep the overwrite path unconditional if a previous non-zero row might need zeroing — in that case, keep as-is and accept the noise; document the choice).
+
+### IN-10: Flow-node analytics: non-deterministic `nodeType` pick and silently dropped send rows
+
+**File:** `apps/api/src/modules/analytics/flow-analytics.repository.ts:51,82-99`
+**Issue:** New. `(array_agg(frs.node_type))[1]` picks an arbitrary element (no ORDER BY inside the aggregate) — deterministic only under the "type is stable across versions" assumption the comment itself hedges on. Separately, the final map iterates `nodeRows` only: a `sends` row whose `node_id` has no `flow_run_steps` row (partial write, historical data) is silently excluded from the response rather than surfaced as a metrics-only row.
+**Fix:** Use `mode() WITHIN GROUP (ORDER BY frs.node_type)` for a deterministic pick; optionally append send-only node ids missing from `nodeRows` with `contactCount: 0`.
 
 ---
 
-_Reviewed: 2026-07-14T03:30:17Z_
+_Reviewed: 2026-07-14T07:01:48Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
