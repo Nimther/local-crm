@@ -8,6 +8,24 @@ Multi-tenant SaaS-платформа marketing automation для B2C-компа�
 
 Маркетолог настраивает триггерную цепочку или кампанию — и письма надёжно и вовремя доходят до нужных контактов, со сквозным отслеживанием статусов (delivered/opened/clicked/bounced) по каждому письму, шагу цепочки и кампании.
 
+## Current State
+
+**Shipped:** v1.0 MVP (2026-07-14) — все 7 фаз roadmap завершены, 49/49 v1-требований выполнены, verified closeout.
+
+Платформа работает end-to-end: регистрация → воркспейс → команда → BYO SendGrid key → контакты (UI/CSV/events API) → сегменты → broadcast-кампании и триггерные цепочки через общий throttled send pipeline → webhook-трекинг доставки с авто-suppression → аналитика (кампании, шаги цепочек, timeline контакта, дашборд, журнал отправок).
+
+- **Кодовая база:** ~57k LOC TypeScript; npm-workspaces монорепо — `apps/api` (Fastify), `apps/web` (React 19/Vite), `apps/worker` (BullMQ), shared-пакеты `db`, `tenant-context`, `contacts-core`, `segments-core`, `delivery-core`, `flows-core`, `kms`, `shared-schemas`
+- **Хранилища:** Postgres (RLS на всех tenant-таблицах, партиционированные `events`/`send_events`) + Redis (BullMQ, per-tenant token bucket)
+- **Известный tech debt (принят при закрытии v1.0):** live-email внешние prerequisites (реальный PLATFORM_SENDGRID_API_KEY + verified sender), непройденные live SendGrid UAT click-through'ы, набор визуальных human-чеков — см. `.planning/milestones/v1.0-MILESTONE-AUDIT.md`
+
+## Next Milestone Goals
+
+Не определены — запустить `/gsd-new-milestone`. Кандидаты, накопленные к закрытию v1.0:
+
+- Webhook hardening (05-REVIEW WR-01): отбрасывать события чужого воркспейса при общем BYO-ключе (единственный оставшийся Active-пункт)
+- Бенчмарк сегментации на 100k–1M контактов (открытый флаг из Phase 3) и load-test triggered-vs-broadcast приоритизации
+- HTTP-уровневый integration-тест с реальным подписанным SendGrid payload (raw-body verification)
+
 ## Business Context
 
 - **Customer**: B2C-компании (e-commerce, подписочные сервисы); пользователи — их маркетологи
@@ -53,10 +71,11 @@ Multi-tenant SaaS-платформа marketing automation для B2C-компа�
 
 ## Context
 
-- Greenfield: пустой репозиторий (`mega-crm`), git инициализирован, кода нет
+- Brownfield после v1.0: ~57k LOC TypeScript, 616 коммитов за 13 дней (2026-07-02 → 2026-07-14); стек Fastify + Drizzle/Postgres(RLS) + BullMQ/Redis + React 19/Vite + @xyflow/react подтверждён в бою
 - Референс продуктовой модели — Klaviyo (flows, сегментация, событийная модель)
-- Целевой масштаб первого года: 100k–1M контактов суммарно по тенантам, сотни тысяч писем в день — сегментация и отправка проектируются под этот объём (батчинг, аккуратные индексы), без преждевременного оверинжиниринга
-- Canvas-редактор цепочек — самый дорогой UI-компонент; экосистема TypeScript/React выбрана в том числе из-за зрелых библиотек графовых редакторов
+- Целевой масштаб первого года: 100k–1M контактов суммарно по тенантам, сотни тысяч писем в день — сегментация и отправка спроектированы под этот объём (партиционирование, батчинг, изоляция очередей), но бенчмарк сегментации на реальном объёме ещё не проводился
+- Canvas-редактор цепочек (@xyflow/react) оказался ожидаемо самым дорогим UI-компонентом — Phase 6 заняла 24 плана из 96; ставка на TypeScript/React-экосистему оправдалась
+- Паттерн исполнения: каждая фаза закрывалась через verifier + UAT + gap-closure раунды (до 5 раундов в Phase 4/5) — итеративное дозакрытие гэпов оказалось нормой, не исключением
 
 ## Constraints
 
@@ -102,4 +121,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-14 after Phase 7 completion (11/11 планов; verification 9/9 после двух gap-closure раундов — 07-10 campaign/flow-селектор в журнале отправок, 07-11 cmdk selection identity по id (human-verify checkpoint approved); UAT-гэп и debug-сессия resolved; code review: 0 critical / 8 warnings / 11 info (advisory); security review: 0 threats open; последняя фаза roadmap v1.0 — milestone готов к аудиту/закрытию)*
+*Last updated: 2026-07-14 after v1.0 milestone (verified closeout: 7/7 фаз, 96 планов, 49/49 требований; архивы в .planning/milestones/)*
