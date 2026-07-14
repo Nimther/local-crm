@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { applySendTargetToParams, resolveSendTargetLabel } from "../send-log-filters";
+import { applySendTargetToParams, resolveSendTargetLabel, sendTargetItemValue } from "../send-log-filters";
 
 /**
  * 07-10 (gap closure, UAT Test 1): pure helpers for the send-log's
@@ -108,5 +108,34 @@ describe("resolveSendTargetLabel", () => {
 
   it("returns null when both campaignId and flowId are undefined", () => {
     expect(resolveSendTargetLabel(undefined, undefined, campaigns, flows)).toBeNull();
+  });
+});
+
+/**
+ * 07-11 (gap closure, 07-REVIEW.md WR-02): regression coverage for cmdk's
+ * CommandItem `value` collision when two campaigns/flows share the same
+ * display name (a routine result of the app's own «Дублировать» action --
+ * duplicateCampaign/duplicateFlow copy the source name verbatim). cmdk uses
+ * `value` as each item's internal selection/filter identity, so a bare-name
+ * value collides and the first match silently wins on selection.
+ */
+describe("sendTargetItemValue", () => {
+  it("produces distinct identities for two entities sharing the same name (WR-02 collision guard)", () => {
+    const first = sendTargetItemValue("Осенний анонс", "C1");
+    const second = sendTargetItemValue("Осенний анонс", "C2");
+
+    expect(first).not.toBe(second);
+  });
+
+  it("keeps the display name as a searchable prefix of the identity", () => {
+    const value = sendTargetItemValue("Осенний анонс", "C1");
+
+    expect(value.startsWith("Осенний анонс")).toBe(true);
+  });
+
+  it("includes the id in the identity for per-id disambiguation", () => {
+    const value = sendTargetItemValue("Осенний анонс", "C2");
+
+    expect(value).toContain("C2");
   });
 });
