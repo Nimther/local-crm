@@ -12,10 +12,12 @@ import { cn } from "@/lib/utils";
 import {
   getCampaign,
   getCampaignAudienceBreakdown,
+  getCampaignProgress,
   type CampaignResponse,
 } from "@/features/campaigns/api";
 import { AudienceBreakdown } from "@/features/campaigns/AudienceBreakdown";
 import CampaignBuilderPage from "@/features/campaigns/CampaignBuilderPage";
+import { CampaignMetricsSummary } from "@/features/campaigns/CampaignMetricsSummary";
 import { CampaignProgress } from "@/features/campaigns/CampaignProgress";
 import { CampaignStatusBadge } from "@/features/campaigns/CampaignStatusBadge";
 import { CancelDialog, LaunchScheduleActions } from "@/features/campaigns/LaunchScheduleDialogs";
@@ -111,9 +113,25 @@ function SendingView({
   );
 }
 
-/** Sent/canceled summary (D-10): sent/failed/excluded counts, red «N ошибок» line when failed>0 — never hide partial failures. */
-function SummaryView({ campaign }: { campaign: CampaignResponse }) {
+/**
+ * Sent/canceled summary (D-10): sent/failed counts, red «N ошибок» line when
+ * failed>0 — never hide partial failures. 07-08: delivery counters, D-01
+ * rate percentages, D-07 excluded breakdown, and the D-04 send-log link are
+ * delegated to the shared `CampaignMetricsSummary` (same component the
+ * sending view renders), fed by a `staleTime: Infinity` progress query —
+ * a terminal campaign's counts do not change, so no polling is needed. While
+ * that query is loading, the `campaign` row's own counters are shown as a
+ * non-blocking fallback.
+ */
+function SummaryView({ slug, campaign }: { slug: string; campaign: CampaignResponse }) {
   const total = campaign.sendableTotal ?? campaign.sentCount;
+
+  const progressQuery = useQuery({
+    queryKey: [...campaignQueryKey(slug, campaign.id), "progress"],
+    queryFn: () => getCampaignProgress(slug, campaign.id),
+    staleTime: Infinity,
+  });
+  const progress = progressQuery.data;
 
   return (
     <Card>
@@ -125,37 +143,23 @@ function SummaryView({ campaign }: { campaign: CampaignResponse }) {
           <p className="text-sm text-muted-foreground">
             {campaign.sentCount} из {total} отправлено
           </p>
-          {campaign.excludedTotal ? (
-            <p className="text-sm text-muted-foreground">{campaign.excludedTotal} исключено</p>
-          ) : null}
           {campaign.failedCount > 0 ? (
             <p className="text-sm font-medium text-destructive">{campaign.failedCount} ошибок</p>
           ) : null}
         </div>
 
-        {/* D-07/D-08/D-09: delivery counters sourced from the campaigns row, kept fresh by the 05-03 webhook worker. */}
-        <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-5">
-          <div>
-            <dt className="text-muted-foreground">Доставлено</dt>
-            <dd className="font-medium">{campaign.deliveredCount}</dd>
-          </div>
-          <div>
-            <dt className="text-muted-foreground">Открытий</dt>
-            <dd className="font-medium">{campaign.openedCount}</dd>
-          </div>
-          <div>
-            <dt className="text-muted-foreground">Кликов</dt>
-            <dd className="font-medium">{campaign.clickedCount}</dd>
-          </div>
-          <div>
-            <dt className="text-muted-foreground">Не доставлено</dt>
-            <dd className="font-medium">{campaign.bouncedCount}</dd>
-          </div>
-          <div>
-            <dt className="text-muted-foreground">Отписалось</dt>
-            <dd className="font-medium">{campaign.unsubscribedCount}</dd>
-          </div>
-        </dl>
+        <CampaignMetricsSummary
+          slug={slug}
+          campaignId={campaign.id}
+          sent={progress?.sentCount ?? campaign.sentCount}
+          delivered={progress?.deliveredCount ?? campaign.deliveredCount}
+          opened={progress?.openedCount ?? campaign.openedCount}
+          clicked={progress?.clickedCount ?? campaign.clickedCount}
+          bounced={progress?.bouncedCount ?? campaign.bouncedCount}
+          unsubscribed={progress?.unsubscribedCount ?? campaign.unsubscribedCount}
+          excludedBreakdown={progress?.excludedBreakdown ?? []}
+          excludedTotal={progress?.excludedTotal ?? campaign.excludedTotal}
+        />
       </CardContent>
     </Card>
   );
@@ -237,7 +241,9 @@ export function CampaignDetailPage() {
       {campaign.status === "sending" ? (
         <SendingView slug={slug} campaign={campaign} onTerminal={refreshCampaign} />
       ) : null}
-      {campaign.status === "sent" || campaign.status === "canceled" ? <SummaryView campaign={campaign} /> : null}
+      {campaign.status === "sent" || campaign.status === "canceled" ? (
+        <SummaryView slug={slug} campaign={campaign} />
+      ) : null}
     </div>
   );
 }
