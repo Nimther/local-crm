@@ -4,17 +4,17 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 07
 current_phase_name: analytics-dashboard-send-log
-status: executing
+status: verifying
 stopped_at: Completed 07-01-PLAN.md
-last_updated: "2026-07-13T22:26:26.393Z"
+last_updated: "2026-07-14T03:18:55.220Z"
 last_activity: 2026-07-13
 last_activity_desc: Phase 07 execution started
 progress:
   total_phases: 7
-  completed_phases: 6
+  completed_phases: 7
   total_plans: 92
-  completed_plans: 91
-  percent: 86
+  completed_plans: 92
+  percent: 100
 ---
 
 # Project State
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-07-14)
 
 Phase: 07 (analytics-dashboard-send-log) — EXECUTING
 Plan: 7 of 7
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-07-13 — Phase 07 execution started
 
 Progress: [████████████████████] 85/85 plans (100%)
@@ -151,6 +151,7 @@ Progress: [████████████████████] 85/85 p
 | Phase 07 P05 | 25min | 2 tasks | 12 files |
 | Phase 07 P06 | 25min | 3 tasks | 11 files |
 | Phase 07 P04 | 25min | 2 tasks | 9 files |
+| Phase 07 P07 | 282min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -363,6 +364,8 @@ Recent decisions affecting current work:
 - [Phase ?]: 07-06: reconciliation opened_count/clicked_count are unique-recipient (first_opened_at/first_clicked_at based) while the incremental path is repeat-event based -- an accepted definitional gap since reconciliation only scans sends, never send_events
 - [Phase 07]: 07-04: getFlowNodeAnalytics runs two separate queries (node-visit COUNT(DISTINCT contact_id) + send-fact COUNT(*) FILTER) joined by nodeId in application code rather than one LEFT JOIN, avoiding fan-out double-counting risk between flow_run_steps and sends
 - [Phase 07]: 07-04: FlowCanvas/FlowDetailPage fetch GET /flows/:id/analytics once via useFlowAnalytics; the canvas badge overlay and FlowAnalyticsTable both resolve to the same TanStack Query cache entry
+- [Phase 07]: 07-07: recharts pinned exact (3.9.2, no caret) matching the @xyflow/react 06-10 precedent for new chart/canvas dependencies
+- [Phase 07]: 07-07: dashboard empty state derived as kpis.sent===0 && recentCampaigns.length===0 && activeFlows.length===0 -- no dedicated has-ever-sent flag exists on the endpoint
 
 ### Pending Todos
 
@@ -389,6 +392,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-13T22:26:09.141Z
+Last session: 2026-07-14T03:16:55.525Z
 Stopped at: Completed 07-01-PLAN.md
 Resume file: None
