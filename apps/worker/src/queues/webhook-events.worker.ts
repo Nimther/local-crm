@@ -248,28 +248,32 @@ async function applyEventSideEffects(
     }
     case "open": {
       const justSet = await setFactColumnOnce(client, send.id, "first_opened_at", event.occurredAt);
-      if (justSet && send.campaignId) {
-        await incrementCampaignCounter(client, send.campaignId, "opened_count");
+      if (justSet) {
+        if (send.campaignId) await incrementCampaignCounter(client, send.campaignId, "opened_count");
+        // 07-09: gated on justSet like the delivered case -- opened_count is
+        // a unique-send count, matching reconcileWorkspaceDay's
+        // first_opened_at-based COUNT and the campaign opened_count above.
+        // Fires regardless of campaignId (flow sends have no campaign but
+        // still count toward the workspace rollup, same as delivered).
+        await incrementWorkspaceDailyRollup(client, workspaceId, event.occurredAt, "opened");
       }
       // A4/D-11: every genuinely-new open increments the per-send repeat
-      // counter, independent of `justSet` -- justSet only gates the
-      // first-occurrence campaign unique-recipient counter above; the
-      // repeat count must climb on every new open, not just the first.
+      // counter, independent of `justSet` -- this is the ONLY remaining
+      // per-event (non-unique-send) counter; it stays outside the justSet
+      // gate on purpose.
       await client.query(`UPDATE sends SET open_count = open_count + 1 WHERE id = $1`, [send.id]);
-      // 07-06: mirrors sends.open_count -- climbs on every genuinely-new
-      // open, not gated by justSet.
-      await incrementWorkspaceDailyRollup(client, workspaceId, event.occurredAt, "opened");
       break;
     }
     case "click": {
       const justSet = await setFactColumnOnce(client, send.id, "first_clicked_at", event.occurredAt);
-      if (justSet && send.campaignId) {
-        await incrementCampaignCounter(client, send.campaignId, "clicked_count");
+      if (justSet) {
+        if (send.campaignId) await incrementCampaignCounter(client, send.campaignId, "clicked_count");
+        // 07-09: mirrors the open case -- unique-send count, gated on justSet.
+        await incrementWorkspaceDailyRollup(client, workspaceId, event.occurredAt, "clicked");
       }
-      // A4/D-11: mirror the open case -- climbs on every new click.
+      // A4/D-11: mirror the open case -- climbs on every new click,
+      // independent of justSet.
       await client.query(`UPDATE sends SET click_count = click_count + 1 WHERE id = $1`, [send.id]);
-      // 07-06: mirrors sends.click_count -- climbs on every genuinely-new click.
-      await incrementWorkspaceDailyRollup(client, workspaceId, event.occurredAt, "clicked");
       break;
     }
     case "bounce_hard": {

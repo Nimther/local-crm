@@ -18,8 +18,10 @@ const METRIC_COLUMN: Record<RollupMetric, string> = {
 /**
  * Same-transaction idempotent increment of `workspace_daily_rollup` (07-06,
  * ANLT-04). Called from inside the webhook worker's existing
- * genuinely-new-event gates (the `justSet` first-write gate for
- * delivered/bounced/unsubscribed, or the per-event open/click increment) --
+ * genuinely-new-event gates -- the `justSet` first-write gate for
+ * delivered/opened/clicked/unsubscribed (07-09: opened/clicked now gated
+ * exactly like delivered, a unique-send count matching
+ * `reconcileWorkspaceDay`), or `isFirstNonDeliveryTerminal` for bounced --
  * never independently gated (Pitfall 1: an increment placed outside the
  * caller's own dedup gate would double-count on webhook replay). Uses the
  * caller's `PoolClient` (same transaction as the `send_events` dedup

@@ -150,7 +150,7 @@ describe("workspace_daily_rollup incremental increment (07-06, ANLT-04)", () => 
     expect((await rollupCounts(workspaceId, DAY))?.deliveredCount).toBe(1);
   });
 
-  it("opened_count climbs on every genuinely-new open event (not just the first) but a replay is a no-op", async () => {
+  it("opened_count is a unique-send count: a first open sets 0->1, a second distinct open leaves it unchanged, and a replay is a no-op", async () => {
     const workspaceId = await freshWorkspaceId("rollup-opened");
     const campaignId = await createFixtureCampaign(workspaceId);
     const contactId = await createFixtureContact(workspaceId);
@@ -160,16 +160,18 @@ describe("workspace_daily_rollup incremental increment (07-06, ANLT-04)", () => 
     await processWebhookEventBatch({ workspaceId, events: firstOpen });
     expect((await rollupCounts(workspaceId, DAY))?.openedCount).toBe(1);
 
+    // A second, distinct open of the same send (justSet false) does NOT
+    // increment the rollup's unique-send count (07-09).
     const secondOpen = [sendgridEvent(workspaceId, campaignId, sendId, { event: "open" })];
     await processWebhookEventBatch({ workspaceId, events: secondOpen });
-    expect((await rollupCounts(workspaceId, DAY))?.openedCount).toBe(2);
+    expect((await rollupCounts(workspaceId, DAY))?.openedCount).toBe(1);
 
     // Replay the exact same batch -- dedup insert returns zero new rows.
     await processWebhookEventBatch({ workspaceId, events: secondOpen });
-    expect((await rollupCounts(workspaceId, DAY))?.openedCount).toBe(2);
+    expect((await rollupCounts(workspaceId, DAY))?.openedCount).toBe(1);
   });
 
-  it("clicked_count climbs on every genuinely-new click event but a replay is a no-op", async () => {
+  it("clicked_count is a unique-send count: a first click sets 0->1, a second distinct click leaves it unchanged, and a replay is a no-op", async () => {
     const workspaceId = await freshWorkspaceId("rollup-clicked");
     const campaignId = await createFixtureCampaign(workspaceId);
     const contactId = await createFixtureContact(workspaceId);
@@ -179,7 +181,11 @@ describe("workspace_daily_rollup incremental increment (07-06, ANLT-04)", () => 
     await processWebhookEventBatch({ workspaceId, events: firstClick });
     expect((await rollupCounts(workspaceId, DAY))?.clickedCount).toBe(1);
 
-    const replay = [...firstClick];
+    const secondClick = [sendgridEvent(workspaceId, campaignId, sendId, { event: "click" })];
+    await processWebhookEventBatch({ workspaceId, events: secondClick });
+    expect((await rollupCounts(workspaceId, DAY))?.clickedCount).toBe(1);
+
+    const replay = [...secondClick];
     await processWebhookEventBatch({ workspaceId, events: replay });
     expect((await rollupCounts(workspaceId, DAY))?.clickedCount).toBe(1);
   });
