@@ -1,5 +1,5 @@
 ---
-status: diagnosed
+status: resolved
 trigger: "UAT Test 10 (phase 06): выпадающий список со списком часовых поясов отсутствует"
 created: 2026-07-13T16:00:00Z
 updated: 2026-07-13T16:15:00Z
@@ -123,3 +123,7 @@ root_cause: "Claim-vs-implementation gap on the CSV column-mapping surface: UAT 
 fix: ""
 verification: ""
 files_changed: []
+
+## Closure Note (milestone v1.0 close)
+
+Resolved at v1.0 milestone close on 2026-07-14: diagnosis was handed to plan-phase --gaps; fix shipped via gap-closure plans (see phase 01/04/05/06 gap plans) or recorded as external-env tech debt in v1.0-MILESTONE-AUDIT.md.

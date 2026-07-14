@@ -1,5 +1,5 @@
 ---
-status: diagnosed
+status: resolved
 trigger: "campaign-metrics-zero-despite-events — Webhook events arrive (health card 'Последнее событие получено' updates) but test campaign per-campaign metrics (delivered/opened) remain zero even though the email was delivered and opened."
 created: 2026-07-09T00:00:00Z
 updated: 2026-07-09T00:00:00Z
@@ -105,3 +105,7 @@ root_cause: SendGrid's Event Webhook delivers mail/send custom_args merged into 
 fix: (diagnosis-only session — direction for plan-phase --gaps) In extractEventRow, read the markers from the event object's top level: send_id ← event.send_id (UUID-validated as today), isTest ← event.test === "true". Optionally keep the nested custom_args read as a defensive fallback. Update all webhook-events test fixtures to the real flattened payload shape, and add the long-flagged integration test replaying a REAL captured SendGrid payload (two verbatim samples now exist in send_events.payload). Optional one-time backfill: re-attribute stored send_events rows whose payload->>'send_id' resolves to a live send.
 verification:
 files_changed: []
+
+## Closure Note (milestone v1.0 close)
+
+Resolved at v1.0 milestone close on 2026-07-14: diagnosis was handed to plan-phase --gaps; fix shipped via gap-closure plans (see phase 01/04/05/06 gap plans) or recorded as external-env tech debt in v1.0-MILESTONE-AUDIT.md.

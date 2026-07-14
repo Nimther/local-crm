@@ -1,5 +1,5 @@
 ---
-status: diagnosed
+status: resolved
 trigger: "enable-delivery-tracking-error: For an already-connected (pre-Phase-5) workspace, attempting to enable delivery tracking from the onboarding checklist ('Включить отслеживание доставки') returns an error. UAT Test 3 of Phase 05 failed."
 created: 2026-07-09T10:00:00Z
 updated: 2026-07-09T10:45:00Z
@@ -114,3 +114,7 @@ root_cause: |
 fix: n/a — diagnose-only session (goal: find_root_cause_only)
 verification: n/a
 files_changed: []
+
+## Closure Note (milestone v1.0 close)
+
+Resolved at v1.0 milestone close on 2026-07-14: diagnosis was handed to plan-phase --gaps; fix shipped via gap-closure plans (see phase 01/04/05/06 gap plans) or recorded as external-env tech debt in v1.0-MILESTONE-AUDIT.md.

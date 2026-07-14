@@ -1,5 +1,5 @@
 ---
-status: diagnosed
+status: resolved
 trigger: "Editing a segment referenced by a scheduled campaign does not show the D-03 warning before saving (UAT Test 12)"
 created: 2026-07-07T00:00:00Z
 updated: 2026-07-07T00:45:00Z
@@ -115,3 +115,7 @@ root_cause: "NOT a recurrence of the 04-15 pageSize bug — that fix is verified
 fix: "(not applied — find_root_cause_only) Direction: move/duplicate the D-03 check to save time — in handleSave, before mutate(), refetch the referencing-campaigns lookup (await queryClient.fetchQuery or referencingCampaignsQuery.refetch()) and if a scheduled campaign references the segment, require an explicit confirm (dialog or inline warning + second click). Additionally: surface referencingCampaignsQuery.isError as a muted note instead of silently rendering nothing, and add a component test with a mocked scheduled campaign asserting the banner + save-time warning render. Optional hardening: per-mount fresh key or refetchOnMount:'always' for the warning query."
 verification: "(n/a — diagnosis only) Discriminator for the fixer: open /w/localrent/segments/2c15ff95-74b9-4140-b044-1a6e28538800 in a FRESH tab today (campaign 'Datetime picker' is still scheduled until 2026-07-08) — the amber banner should render, proving the mount-time path works and isolating the gap to the stale-mount/save-time lifecycle; if it does NOT render even on fresh mount, capture the network response of GET /api/workspaces/localrent/campaigns?page=1&pageSize=200 in devtools (all server-side layers are verified, so any residual failure must be visible there)."
 files_changed: []
+
+## Closure Note (milestone v1.0 close)
+
+Resolved at v1.0 milestone close on 2026-07-14: diagnosis was handed to plan-phase --gaps; fix shipped via gap-closure plans (see phase 01/04/05/06 gap plans) or recorded as external-env tech debt in v1.0-MILESTONE-AUDIT.md.

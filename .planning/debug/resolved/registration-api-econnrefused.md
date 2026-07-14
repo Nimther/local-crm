@@ -1,5 +1,5 @@
 ---
-status: diagnosed
+status: resolved
 trigger: "Submitting the registration form fails with a generic error toast; the vite dev-server proxy reports ECONNREFUSED for /api/auth/sign-up/email — the API server is unreachable from the web dev proxy during UAT of Phase 01."
 created: 2026-07-03T00:00:00Z
 updated: 2026-07-03T00:20:00Z
@@ -96,3 +96,7 @@ latent_secondary_issue: |
   "KMS_LOCAL_KEK must be set when KMS_PROVIDER=local" once boot is fixed.
   Likewise, PLATFORM_SENDGRID_API_KEY must be a real platform key (not a
   stub) for UAT Tests 4, 5, and 7 (real email delivery).
+
+## Closure Note (milestone v1.0 close)
+
+Resolved at v1.0 milestone close on 2026-07-14: diagnosis was handed to plan-phase --gaps; fix shipped via gap-closure plans (see phase 01/04/05/06 gap plans) or recorded as external-env tech debt in v1.0-MILESTONE-AUDIT.md.

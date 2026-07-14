@@ -1,5 +1,5 @@
 ---
-status: diagnosed
+status: resolved
 trigger: "Connecting a live tenant SendGrid API key does NOT create the workspace-scoped Event Webhook in the tenant's SendGrid account. UAT Test 1 of Phase 05 failed."
 created: 2026-07-09T00:00:00Z
 updated: 2026-07-09T12:00:00Z
@@ -146,3 +146,7 @@ root_cause: |
 fix: ""
 verification: ""
 files_changed: []
+
+## Closure Note (milestone v1.0 close)
+
+Resolved at v1.0 milestone close on 2026-07-14: diagnosis was handed to plan-phase --gaps; fix shipped via gap-closure plans (see phase 01/04/05/06 gap plans) or recorded as external-env tech debt in v1.0-MILESTONE-AUDIT.md.

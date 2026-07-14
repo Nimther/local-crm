@@ -1,5 +1,5 @@
 ---
-status: diagnosed
+status: resolved
 trigger: "UAT Test 11 (phase 06): autosave error state never shows — toolbar stuck at «Сохранение…» when save fails"
 created: 2026-07-13T20:45:00.000Z
 updated: 2026-07-13T20:55:00.000Z
@@ -96,3 +96,7 @@ verification: ""
 files_changed: []
 
 suggested_fix_direction: "Feed mutation.isPaused into the autosave state derivation and map paused+dirty to the honest error/retrying (or an explicit offline) state — e.g. deriveAutosaveState({isPending, isPaused, isError, dirty}) with `if (isPending && isPaused) return 'error'` before the isPending check. Alternative: set networkMode 'always' on useUpdateFlowDraft so the fetch actually fires, fails, and settles to isError, letting the existing 4s bounded retry own reconnection (note: TanStack already auto-resumes paused mutations on reconnect, so with the isPaused approach the auto-retry half likely works as-is). Extend autosaveState.test.ts with the paused input shape."
+
+## Closure Note (milestone v1.0 close)
+
+Resolved at v1.0 milestone close on 2026-07-14: diagnosis was handed to plan-phase --gaps; fix shipped via gap-closure plans (see phase 01/04/05/06 gap plans) or recorded as external-env tech debt in v1.0-MILESTONE-AUDIT.md.

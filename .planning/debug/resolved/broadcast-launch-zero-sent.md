@@ -1,5 +1,5 @@
 ---
-status: diagnosed
+status: resolved
 trigger: "Launching a broadcast campaign transitions it to «Отправляется» but hangs at «0 отправленных» and no recipient ever receives an email. BLOCKER (UAT test 5). Test-send (test 4) also never arrives — same pipeline."
 created: 2026-07-07T00:00:00Z
 updated: 2026-07-07T00:40:00Z
@@ -122,3 +122,7 @@ root_cause: |
 fix: ""
 verification: ""
 files_changed: []
+
+## Closure Note (milestone v1.0 close)
+
+Resolved at v1.0 milestone close on 2026-07-14: diagnosis was handed to plan-phase --gaps; fix shipped via gap-closure plans (see phase 01/04/05/06 gap plans) or recorded as external-env tech debt in v1.0-MILESTONE-AUDIT.md.

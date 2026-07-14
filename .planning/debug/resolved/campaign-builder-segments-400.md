@@ -1,5 +1,5 @@
 ---
-status: diagnosed
+status: resolved
 trigger: "UAT Test 3 (Phase 04): Не могу выбрать сегмент аудитории — сегменты не отображаются. В консоли ошибка http://localhost:5173/api/workspaces/localrent/segments?page=1&pageSize=200 400 (Bad Request)"
 created: 2026-07-06T18:00:00Z
 updated: 2026-07-06T18:20:00Z
@@ -75,3 +75,7 @@ root_cause: "Client/server contract mismatch on the pageSize bound. Phase 4 UI c
 fix: "(not applied — find_root_cause_only)"
 verification: "(n/a)"
 files_changed: []
+
+## Closure Note (milestone v1.0 close)
+
+Resolved at v1.0 milestone close on 2026-07-14: diagnosis was handed to plan-phase --gaps; fix shipped via gap-closure plans (see phase 01/04/05/06 gap plans) or recorded as external-env tech debt in v1.0-MILESTONE-AUDIT.md.

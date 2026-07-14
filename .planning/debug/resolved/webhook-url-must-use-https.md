@@ -1,5 +1,5 @@
 ---
-status: diagnosed
+status: resolved
 trigger: "UAT round 4 (Phase 05) tests 1-2: webhook provisioning fails — SendGrid 400 'webhook url must use https'; webhook silently absent from SendGrid dashboard with no UI warning"
 created: 2026-07-09T14:30:00Z
 updated: 2026-07-09T14:50:00Z
@@ -131,3 +131,7 @@ root_cause: |
 fix: "N/A — diagnose-only session (goal: find_root_cause_only); fix owned by plan-phase --gaps"
 verification: "N/A — no fix applied in this session"
 files_changed: []
+
+## Closure Note (milestone v1.0 close)
+
+Resolved at v1.0 milestone close on 2026-07-14: diagnosis was handed to plan-phase --gaps; fix shipped via gap-closure plans (see phase 01/04/05/06 gap plans) or recorded as external-env tech debt in v1.0-MILESTONE-AUDIT.md.
