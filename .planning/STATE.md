@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-07-14)
 Phase: Milestone v1.0 complete
 Plan: —
 Status: Awaiting next milestone
-Last activity: 2026-07-14 — Milestone v1.0 completed and archived
+Last activity: 2026-07-22 — Completed quick task 260722-q4t: Создать README.md в корне репозитория
 
 ## Performance Metrics
 
@@ -177,6 +177,12 @@ Research flags to carry into planning:
 - Phase 5 → hardening follow-up (05-REVIEW WR-01, now in PROJECT.md Active): worker ignores flattened workspace_id — with one BYO SendGrid key backing multiple workspaces, sibling workspaces' raw event payloads are persisted into each other's send_events (attribution unaffected; data-isolation concern).
 - Operational prerequisite (any fresh environment): PLATFORM_SENDGRID_API_KEY / PLATFORM_MAIL_FROM in .env must be a real SendGrid key + verified sender before verification/reset/invite emails work — placeholders cause a 500 on resend (hit and resolved during Phase 1 UAT; all 01-03/01-04/01-05/01-07 deferred manual checks now passed in phase UAT 2026-07-04).
 - Operational prerequisite (any fresh environment): REDIS_URL=redis://localhost:6379 required in .env before npm run dev boots api+worker (working in local runtime — Phase 2 CSV/event UAT passed; confirm .env.example documents it, since executor tools are hard-denied on .env* paths).
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260722-q4t | Создать README.md в корне репозитория | 2026-07-22 | 939b816 | [260722-q4t-readme-md](./quick/260722-q4t-readme-md/) |
 
 ## Deferred Items
 
