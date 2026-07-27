@@ -18,13 +18,27 @@ Multi-tenant SaaS-платформа marketing automation для B2C-компа�
 - **Хранилища:** Postgres (RLS на всех tenant-таблицах, партиционированные `events`/`send_events`) + Redis (BullMQ, per-tenant token bucket)
 - **Известный tech debt (принят при закрытии v1.0):** live-email внешние prerequisites (реальный PLATFORM_SENDGRID_API_KEY + verified sender), непройденные live SendGrid UAT click-through'ы, набор визуальных human-чеков — см. `.planning/milestones/v1.0-MILESTONE-AUDIT.md`
 
-## Next Milestone Goals
+## Current Milestone: v1.1 Production Hardening
 
-Не определены — запустить `/gsd-new-milestone`. Кандидаты, накопленные к закрытию v1.0:
+**Goal:** Довести Mega CRM от функционально готового MVP до системы, которую можно эксплуатировать в production: корректность отправок на границах сбоев, доказанная изоляция тенантов, честные compliance и analytics, ограниченные и отказоустойчивые фоновые процессы, автоматизированный жизненный цикл БД и полный эксплуатационный контур.
 
-- Webhook hardening (05-REVIEW WR-01): отбрасывать события чужого воркспейса при общем BYO-ключе (единственный оставшийся Active-пункт)
-- Бенчмарк сегментации на 100k–1M контактов (открытый флаг из Phase 3) и load-test triggered-vs-broadcast приоритизации
-- HTTP-уровневый integration-тест с реальным подписанным SendGrid payload (raw-body verification)
+**Источник требований:** `.planning/AUDIT-2026-07-27-production-readiness.md` — внешний аудит v1.0 (27.07.2026). Все findings в scope: High + Medium-High + Medium.
+
+**Target features:**
+
+1. **Quality gates** — CI, lint/coverage, изолированный Playwright E2E (не может использовать dev-БД), migration tests, failure-injection harness, repository hygiene (`.env`/`dump.rdb` из корня), правило обновления `SPECIFICATION.md`/`ARCHITECTURE.md`/`CONVENTIONS.md` (последние два создаются в этом milestone)
+2. **Delivery correctness** — tenant-local throttling вместо глобального `worker.rateLimit`, timeout+`AbortController` на SendGrid, формальная delivery state machine с `unknown`/`reconciling`, зафиксированная at-most-once/effectively-once модель, correlation ID, crash-тесты на трёх границах
+3. **Security & tenant isolation** — admin-scan RLS через отдельную DB role, унификация RLS-политик, trust boundary Better Auth, API key scopes, webhook replay protection, invite privacy, распределённый rate limit, secrets/redaction, единый `resolveWorkspaceMember`, одинаковое anti-enumeration поведение, отрицательные cross-tenant тесты (API + фоновые jobs), WR-01
+4. **Compliance & analytics** — атомарное unsubscribe-событие с propagation в send analytics, единая UTC-семантика дневных метрик, consent history через обезличивание с сохранением evidence, ограничение provider `occurred_at` + server receive time, metrics reconciliation
+5. **Worker reliability** — bounded segment sweep (keyset pagination + checkpoint), короткие транзакции, graceful shutdown с закрытием всех Queue handles, единые worker error listeners, retention failed jobs, общая queue factory (Redis options + `defaultJobOptions` + TTL), валидация `DEFAULT_TENANT_RPS` нагрузкой, dead-letter
+6. **Database lifecycle** — автопартиции на 2–3 месяца вперёд с мониторингом, перенос данных из DEFAULT, migration pipeline с gate/rollback/roll-forward, backup/PITR + restore drill, retention, недостающие constraints, TLS и pooling
+7. **Observability, deployment & performance** — Dockerfiles + деплой на self-hosted VPS с документированным rollback, `/healthz`+`/readyz`, Sentry, hosted logs с redaction, correlation (`request_id`/`tenant_id`/`job_id`/`send_id` + trace), alerts (queue depth, oldest job age, webhook lag, send failures), Bull Board, runbooks, frontend route-level code splitting и обработка error/empty/pagination/stale-analytics состояний
+
+**Definition of Done (глобальный):** каждое замечание аудита должно быть исправлено, опровергнуто проверкой либо оформлено как явно принятое решение с владельцем и сроком. Незакрытых Critical/High в delivery, tenant isolation и compliance быть не должно.
+
+**Жёсткий дедлайн:** партиции `events`/`send_events` заведены только по август 2026 — автопартиции (область 6) должны закрыться **до 1 сентября 2026**, иначе данные пойдут в DEFAULT partitions.
+
+**Открытое решение внутри milestone:** trust boundary Better Auth (аудит 4.3) — отдельная DB role с минимальными привилегиями против RLS на `organization`/`session`/`account`. Требует архитектурной проработки на discuss-phase.
 
 ## Business Context
 
@@ -55,7 +69,16 @@ Multi-tenant SaaS-платформа marketing automation для B2C-компа�
 - [x] Аналитика: метрики по кампаниям и шагам цепочек (sent/delivered/opened/clicked/bounced/unsubscribed), timeline активности в карточке контакта, сводный дашборд воркспейса, по-письмовый лог отправок с фильтрами — Validated in Phase 7: Analytics, Dashboard & Send Log — verification 9/9 (D-01 rates + «Пропущено» breakdown на кампаниях, flow node badges + таблица «Аналитика», unified timeline контакта, rollup-дашборд (Recharts) с трендами и ростом базы, «Журнал отправок» с фильтрами contact/campaign-or-flow/status/period и drawer; 2 gap-closure раунда: campaign-фильтр после сброса (07-10), cmdk identity по id (07-11))
 
 ### Active
-- [ ] Webhook hardening (из 05-REVIEW WR-01): при общем BYO SendGrid-ключе на несколько воркспейсов отбрасывать события чужого workspace (сейчас сырые payload'ы соседнего workspace сохраняются в его send_events; атрибуция не страдает — resolution workspace-scoped)
+
+Scope milestone v1.1 Production Hardening. Детализация с REQ-ID — в `.planning/REQUIREMENTS.md`, первоисточник — `.planning/AUDIT-2026-07-27-production-readiness.md`.
+
+- [ ] Quality gates: CI, lint/coverage, изолированный E2E, migration tests, failure-injection harness, repository hygiene, зафиксированные `ARCHITECTURE.md`/`CONVENTIONS.md` с правилом обновления
+- [ ] Delivery correctness: ни одно письмо не теряется, не дублируется и не классифицируется ложно при сбоях SendGrid, таймаутах и падении процесса
+- [ ] Tenant isolation: один тенант не может затормозить отправку остальных; межтенантный доступ невозможен и доказан отрицательными тестами (включая WR-01 — отбрасывание событий чужого workspace при общем BYO-ключе)
+- [ ] Compliance & analytics: отписка атомарно доходит до подписки, consent history и метрик; дневные метрики согласованы по единой UTC-семантике; удаление контакта обезличивает данные с сохранением compliance evidence
+- [ ] Worker reliability: фоновые процессы ограничены по объёму, переживают рестарт и наблюдаемы (bounded sweep, graceful shutdown, retention, dead-letter)
+- [ ] Database lifecycle: партиции, миграции, бэкапы и retention автоматизированы; restore drill отработан
+- [ ] Observability, deployment & performance: сервис деплоится в Docker на VPS, сообщает о готовности, ошибки и метрики видны, алерты настроены, есть runbook'и; frontend bundle разделён по маршрутам
 
 ### Out of Scope
 
@@ -102,6 +125,11 @@ Multi-tenant SaaS-платформа marketing automation для B2C-компа�
 | Очередь + RPS-троттлинг в MVP | Rate limits SendGrid; broadcast не должен блокировать триггерные письма | ✓ Phase 4: две BullMQ-очереди (email:triggered / email:broadcast) с отдельными воркерами, per-tenant token bucket через rate-limiter-flexible, идемпотентный dispatch без дублей на ретраях |
 | TypeScript full-stack | Один язык, экосистема canvas-библиотек (React Flow и т.п.) | ✓ Phase 1: Fastify + Drizzle + React/Vite стек собран и прошёл полный UAT |
 | Команда + базовые роли (Owner/Admin/Member) в v1 | SaaS для команд маркетинга; права на запуск кампаний и смену SendGrid-ключа | ✓ Phase 1: инвайты, серверная ролевая матрица и role-gated UI подтверждены UAT |
+| v1.1: production hardening отдельным milestone, без переписывания | Аудит 27.07.2026 оценил готовность к production 6/10 при качестве реализации 7,5/10; риски на границах сбоев, а не в CRUD-коде | — Pending (milestone v1.1) |
+| v1.1: деплой — Docker на self-hosted VPS | Полный контроль над окружением, приемлемая ops-нагрузка для текущего размера команды | — Pending (milestone v1.1) |
+| v1.1: observability — SaaS (Sentry + hosted logs/metrics) | Быстрый запуск без содержания собственного стека мониторинга; провайдер логов уточняется на ресёрче | — Pending (milestone v1.1) |
+| v1.1: удаление контакта обезличивает данные, compliance evidence сохраняется | Баланс между правом на забвение (GDPR erasure) и доказуемостью законности отправки/suppression в споре | — Pending (milestone v1.1) |
+| v1.1: live SendGrid UAT — обязательный шаг фаз, не отложенный tech debt | Аудит назвал его выпускным барьером; аккаунт и verified sender доступны, блокера больше нет | — Pending (milestone v1.1) |
 
 ## Evolution
 
@@ -121,4 +149,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-14 after v1.0 milestone (verified closeout: 7/7 фаз, 96 планов, 49/49 требований; архивы в .planning/milestones/)*
+*Last updated: 2026-07-27 after starting milestone v1.1 Production Hardening (scope из внешнего аудита `.planning/AUDIT-2026-07-27-production-readiness.md`)*

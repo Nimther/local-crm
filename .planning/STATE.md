@@ -1,20 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: MVP
-status: Awaiting next milestone
-stopped_at: "Completed quick task 260727-sfk: SPECIFICATION.md as-built audit + CLAUDE.md spec rule"
-last_updated: "2026-07-27T15:45:11.686Z"
-last_activity: 2026-07-22
-last_activity_desc: "Completed quick task 260722-q4t: Создать README.md в корне репозитория"
-current_phase: 0
-current_phase_name: analytics-dashboard-send-log
+milestone: v1.1
+milestone_name: Production Hardening
+status: planning
+last_updated: "2026-07-27T16:08:25.058Z"
+last_activity: 2026-07-27
 progress:
-  total_phases: 7
-  completed_phases: 7
-  total_plans: 96
-  completed_plans: 96
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -28,10 +24,10 @@ See: .planning/PROJECT.md (updated 2026-07-14)
 
 ## Current Position
 
-Phase: Milestone v1.0 complete
+Phase: Not started (defining requirements)
 Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-07-27 — Completed quick task 260727-sfk: Проверить актуальность SPECIFICATION.md как as-built описания проекта, перенести правило из CLAUDE-md-spec-rule.snippet.md в CLAUDE.md после GSD-managed блоков и удалить временный snippet только после успешной проверки
+Status: Defining requirements
+Last activity: 2026-07-27 — Milestone v1.1 started
 
 ## Performance Metrics
 
