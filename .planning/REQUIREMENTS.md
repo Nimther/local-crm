@@ -168,17 +168,130 @@
 
 ## Traceability
 
-Заполняется при создании roadmap.
+Заполнено при создании roadmap v1.1 (2026-07-27). Каждое требование закреплено ровно за одной фазой.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| *(pending roadmap)* | | |
+| QG-01 | Phase 8 | Pending |
+| QG-02 | Phase 8 | Pending |
+| QG-03 | Phase 8 | Pending |
+| QG-04 | Phase 8 | Pending |
+| QG-05 | Phase 8 | Pending |
+| QG-06 | Phase 8 | Pending |
+| QG-07 | Phase 8 | Pending |
+| QG-08 | Phase 8 | Pending |
+| QG-09 | Phase 8 | Pending |
+| QG-10 | Phase 8 | Pending |
+| DLV-01 | Phase 11 | Pending |
+| DLV-02 | Phase 11 | Pending |
+| DLV-03 | Phase 11 | Pending |
+| DLV-04 | Phase 11 | Pending |
+| DLV-05 | Phase 11 | Pending |
+| DLV-06 | Phase 11 | Pending |
+| DLV-07 | Phase 11 | Pending |
+| DLV-08 | Phase 11 | Pending |
+| DLV-09 | Phase 11 | Pending |
+| SEC-01 | Phase 10 | Pending |
+| SEC-02 | Phase 10 | Pending |
+| SEC-03 | Phase 10 | Pending |
+| SEC-04 | Phase 10 | Pending |
+| SEC-05 | Phase 10 | Pending |
+| SEC-06 | Phase 10 | Pending |
+| SEC-07 | Phase 10 | Pending |
+| SEC-08 | Phase 10 | Pending |
+| SEC-09 | Phase 10 | Pending |
+| SEC-10 | Phase 10 | Pending |
+| SEC-11 | Phase 10 | Pending |
+| SEC-12 | Phase 10 | Pending |
+| SEC-13 | Phase 10 | Pending |
+| SEC-14 | Phase 10 | Pending |
+| SEC-15 | Phase 10 | Pending |
+| SEC-16 | Phase 10 | Pending |
+| CMP-01 | Phase 13 | Pending |
+| CMP-02 | Phase 13 | Pending |
+| CMP-03 | Phase 13 | Pending |
+| CMP-04 | Phase 13 | Pending |
+| CMP-05 | Phase 13 | Pending |
+| CMP-06 | Phase 13 | Pending |
+| CMP-07 | Phase 13 | Pending |
+| CMP-08 | Phase 13 | Pending |
+| CMP-09 | Phase 13 | Pending |
+| WRK-01 | Phase 12 | Pending |
+| WRK-02 | Phase 12 | Pending |
+| WRK-03 | Phase 12 | Pending |
+| WRK-04 | Phase 12 | Pending |
+| WRK-05 | Phase 12 | Pending |
+| WRK-06 | Phase 12 | Pending |
+| WRK-07 | Phase 12 | Pending |
+| WRK-08 | Phase 12 | Pending |
+| WRK-09 | Phase 12 | Pending |
+| WRK-10 | Phase 12 | Pending |
+| WRK-11 | Phase 12 | Pending |
+| WRK-12 | Phase 8 | Pending |
+| WRK-13 | Phase 12 | Pending |
+| DB-01 | Phase 9 | Pending |
+| DB-02 | Phase 9 | Pending |
+| DB-03 | Phase 9 | Pending |
+| DB-04 | Phase 9 | Pending |
+| DB-05 | Phase 14 | Pending |
+| DB-06 | Phase 14 | Pending |
+| DB-07 | Phase 14 | Pending |
+| DB-08 | Phase 8 | Pending |
+| DB-09 | Phase 14 | Pending |
+| DB-10 | Phase 14 | Pending |
+| DB-11 | Phase 14 | Pending |
+| DB-12 | Phase 14 | Pending |
+| DB-13 | Phase 14 | Pending |
+| DB-14 | Phase 14 | Pending |
+| OPS-01 | Phase 14 | Pending |
+| OPS-02 | Phase 14 | Pending |
+| OPS-03 | Phase 14 | Pending |
+| OPS-04 | Phase 14 | Pending |
+| OPS-05 | Phase 14 | Pending |
+| OPS-06 | Phase 15 | Pending |
+| OPS-07 | Phase 15 | Pending |
+| OPS-08 | Phase 15 | Pending |
+| OPS-09 | Phase 15 | Pending |
+| OPS-10 | Phase 15 | Pending |
+| OPS-11 | Phase 15 | Pending |
+| OPS-12 | Phase 15 | Pending |
+| OPS-13 | Phase 15 | Pending |
+| OPS-14 | Phase 15 | Pending |
+| OPS-15 | Phase 15 | Pending |
+| OPS-16 | Phase 15 | Pending |
+| OPS-17 | Phase 15 | Pending |
+| OPS-18 | Phase 15 | Pending |
+| OPS-19 | Phase 15 | Pending |
+| UAT-01 | Phase 16 | Pending |
+| UAT-02 | Phase 16 | Pending |
+| UAT-03 | Phase 16 | Pending |
+| UAT-04 | Phase 16 | Pending |
+| UAT-05 | Phase 16 | Pending |
+
+### Phase Summary
+
+| Phase | Requirements | Count |
+|-------|--------------|-------|
+| Phase 8 — Quality Gates & Failure-Injection Foundation | QG-01, QG-02, QG-03, QG-04, QG-05, QG-06, QG-07, QG-08, QG-09, QG-10, WRK-12, DB-08 | 12 |
+| Phase 9 — Partition Automation & Boundary Safety | DB-01, DB-02, DB-03, DB-04 | 4 |
+| Phase 10 — Tenant Isolation & Trust Boundaries | SEC-01, SEC-02, SEC-03, SEC-04, SEC-05, SEC-06, SEC-07, SEC-08, SEC-09, SEC-10, SEC-11, SEC-12, SEC-13, SEC-14, SEC-15, SEC-16 | 16 |
+| Phase 11 — Delivery Correctness | DLV-01, DLV-02, DLV-03, DLV-04, DLV-05, DLV-06, DLV-07, DLV-08, DLV-09 | 9 |
+| Phase 12 — Worker Reliability & Tenant Fairness | WRK-01, WRK-02, WRK-03, WRK-04, WRK-05, WRK-06, WRK-07, WRK-08, WRK-09, WRK-10, WRK-11, WRK-13 | 12 |
+| Phase 13 — Compliance & Analytics Integrity | CMP-01, CMP-02, CMP-03, CMP-04, CMP-05, CMP-06, CMP-07, CMP-08, CMP-09 | 9 |
+| Phase 14 — Deployment & Database Durability | DB-05, DB-06, DB-07, DB-09, DB-10, DB-11, DB-12, DB-13, DB-14, OPS-01, OPS-02, OPS-03, OPS-04, OPS-05 | 14 |
+| Phase 15 — Observability, Alerting & Frontend Resilience | OPS-06, OPS-07, OPS-08, OPS-09, OPS-10, OPS-11, OPS-12, OPS-13, OPS-14, OPS-15, OPS-16, OPS-17, OPS-18, OPS-19 | 14 |
+| Phase 16 — Live SendGrid Verification | UAT-01, UAT-02, UAT-03, UAT-04, UAT-05 | 5 |
 
 **Coverage:**
 - v1.1 requirements: 95 total
-- Mapped to phases: 0
-- Unmapped: 95 ⚠️
+- Mapped to phases: 95 ✓
+- Unmapped: 0 ✓
+- Duplicated across phases: 0 ✓
+
+**Deadline-gated:** DB-01, DB-02 (Phase 9) — must complete before **2026-09-01**.
+
+**Open decisions inside scope:** SEC-05 (Better Auth trust boundary, Phase 10), WRK-02 (per-tenant concurrency-cap mechanism, Phase 12) — см. `.planning/ROADMAP.md` § Open Decisions.
 
 ---
 *Requirements defined: 2026-07-27*
-*Last updated: 2026-07-27 after milestone v1.1 scoping*
+*Last updated: 2026-07-27 after roadmap creation (Phases 8-16, 95/95 requirements mapped)*
