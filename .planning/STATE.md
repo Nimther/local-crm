@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-07-14)
 Phase: Milestone v1.0 complete
 Plan: —
 Status: Awaiting next milestone
-Last activity: 2026-07-22 — Completed quick task 260722-q4t: Создать README.md в корне репозитория
+Last activity: 2026-07-27 — Completed quick task 260727-sfk: Проверить актуальность SPECIFICATION.md как as-built описания проекта, перенести правило из CLAUDE-md-spec-rule.snippet.md в CLAUDE.md после GSD-managed блоков и удалить временный snippet только после успешной проверки
 
 ## Performance Metrics
 
@@ -180,10 +180,10 @@ Research flags to carry into planning:
 
 ### Quick Tasks Completed
 
-| # | Description | Date | Commit | Directory |
-|---|-------------|------|--------|-----------|
-| 260722-q4t | Создать README.md в корне репозитория | 2026-07-22 | 939b816 | [260722-q4t-readme-md](./quick/260722-q4t-readme-md/) |
-| 260727-sfk | Audit SPECIFICATION.md as-built + relocate CLAUDE.md maintenance rule | 2026-07-27 | b63ca82 | [260727-sfk-specification-md-as-built-claude-md-spec](./quick/260727-sfk-specification-md-as-built-claude-md-spec/) |
+| # | Description | Date | Commit | Status | Directory |
+|---|-------------|------|--------|--------|-----------|
+| 260722-q4t | Создать README.md в корне репозитория | 2026-07-22 | 939b816 | | [260722-q4t-readme-md](./quick/260722-q4t-readme-md/) |
+| 260727-sfk | Audit SPECIFICATION.md as-built + relocate CLAUDE.md maintenance rule | 2026-07-27 | b63ca82 | Verified | [260727-sfk-specification-md-as-built-claude-md-spec](./quick/260727-sfk-specification-md-as-built-claude-md-spec/) |
 
 ## Deferred Items
 
