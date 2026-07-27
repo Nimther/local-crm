@@ -2,19 +2,19 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: MVP
-current_phase: 0
 status: Awaiting next milestone
-stopped_at: v1.0 milestone archived
-last_updated: "2026-07-14T18:10:59.324Z"
-last_activity: 2026-07-14
-last_activity_desc: Milestone v1.0 completed and archived
+stopped_at: "Completed quick task 260727-sfk: SPECIFICATION.md as-built audit + CLAUDE.md spec rule"
+last_updated: "2026-07-27T15:45:11.686Z"
+last_activity: 2026-07-22
+last_activity_desc: "Completed quick task 260722-q4t: Создать README.md в корне репозитория"
+current_phase: 0
+current_phase_name: analytics-dashboard-send-log
 progress:
   total_phases: 7
   completed_phases: 7
   total_plans: 96
   completed_plans: 96
   percent: 100
-current_phase_name: analytics-dashboard-send-log
 ---
 
 # Project State
@@ -183,6 +183,7 @@ Research flags to carry into planning:
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 260722-q4t | Создать README.md в корне репозитория | 2026-07-22 | 939b816 | [260722-q4t-readme-md](./quick/260722-q4t-readme-md/) |
+| 260727-sfk | Audit SPECIFICATION.md as-built + relocate CLAUDE.md maintenance rule | 2026-07-27 | b63ca82 | [260727-sfk-specification-md-as-built-claude-md-spec](./quick/260727-sfk-specification-md-as-built-claude-md-spec/) |
 
 ## Deferred Items
 
@@ -194,8 +195,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-14T15:52:20.777Z
-Stopped at: Completed 07-01-PLAN.md
+Last session: 2026-07-27T15:44:59.456Z
+Stopped at: Completed quick task 260727-sfk: SPECIFICATION.md as-built audit + CLAUDE.md spec rule
 Resume file: None
 
 ## Operator Next Steps
