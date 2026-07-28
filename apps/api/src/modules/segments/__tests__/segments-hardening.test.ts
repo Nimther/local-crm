@@ -57,7 +57,7 @@ describe("segments hardening (03-06 gap closure)", () => {
       payload: { name },
     });
     expect(res.statusCode, `create workspace failed: ${res.body}`).toBe(200);
-    return res.json() as { id: string; slug: string; name: string };
+    return res.json<{ id: string; slug: string; name: string }>();
   }
 
   async function owner(nameSeed: string) {
@@ -75,7 +75,7 @@ describe("segments hardening (03-06 gap closure)", () => {
       payload,
     });
     expect(res.statusCode, `create contact failed: ${res.body}`).toBe(201);
-    return res.json() as { id: string };
+    return res.json<{ id: string }>();
   }
 
   it("CR-01: POST /segments with an unknown standard field returns 400, not 500", async () => {

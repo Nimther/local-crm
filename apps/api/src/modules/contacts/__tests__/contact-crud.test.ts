@@ -45,7 +45,7 @@ describe("Contact CRUD (CONT-01, CONT-05)", () => {
       payload: { name },
     });
     expect(res.statusCode, `create workspace failed: ${res.body}`).toBe(200);
-    return res.json() as { id: string; slug: string; name: string };
+    return res.json<{ id: string; slug: string; name: string }>();
   }
 
   async function owner(nameSeed: string) {

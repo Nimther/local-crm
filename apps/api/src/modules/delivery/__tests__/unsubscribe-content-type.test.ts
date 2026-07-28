@@ -52,7 +52,7 @@ describe("Public unsubscribe content-type parsing (SUBS-04, CR-01)", () => {
       payload: { name },
     });
     expect(res.statusCode, `create workspace failed: ${res.body}`).toBe(200);
-    return res.json() as { id: string; slug: string; name: string };
+    return res.json<{ id: string; slug: string; name: string }>();
   }
 
   async function owner(nameSeed: string) {
@@ -70,7 +70,7 @@ describe("Public unsubscribe content-type parsing (SUBS-04, CR-01)", () => {
       payload: { email },
     });
     expect(res.statusCode, `create contact failed: ${res.body}`).toBe(201);
-    return res.json() as { id: string; subscriptionStatus: string; email: string };
+    return res.json<{ id: string; subscriptionStatus: string; email: string }>();
   }
 
   async function getContact(cookie: string, slug: string, id: string) {
@@ -80,7 +80,7 @@ describe("Public unsubscribe content-type parsing (SUBS-04, CR-01)", () => {
       headers: { cookie },
     });
     expect(res.statusCode, `get contact failed: ${res.body}`).toBe(200);
-    return res.json() as { id: string; subscriptionStatus: string };
+    return res.json<{ id: string; subscriptionStatus: string }>();
   }
 
   function futureExp(): number {

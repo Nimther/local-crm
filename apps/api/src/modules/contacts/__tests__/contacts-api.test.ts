@@ -46,7 +46,7 @@ describe("Contacts integration API (CONT-03, D-02)", () => {
       payload: { name },
     });
     expect(res.statusCode, `create workspace failed: ${res.body}`).toBe(200);
-    return res.json() as { id: string; slug: string; name: string };
+    return res.json<{ id: string; slug: string; name: string }>();
   }
 
   async function mintApiKey(cookie: string, slug: string, name: string): Promise<string> {
@@ -57,7 +57,7 @@ describe("Contacts integration API (CONT-03, D-02)", () => {
       payload: { name },
     });
     expect(res.statusCode, `create api key failed: ${res.body}`).toBe(200);
-    return (res.json() as { fullKey: string }).fullKey;
+    return (res.json<{ fullKey: string }>()).fullKey;
   }
 
   async function ownerWithKey(nameSeed: string) {
@@ -101,7 +101,7 @@ describe("Contacts integration API (CONT-03, D-02)", () => {
     });
 
     expect(res.statusCode, `create via v1 failed: ${res.body}`).toBe(200);
-    const body = res.json() as { id: string };
+    const body = res.json<{ id: string }>();
     expect(body.id).toBeTruthy();
   });
 
@@ -116,7 +116,7 @@ describe("Contacts integration API (CONT-03, D-02)", () => {
       payload: { email, externalId: "v1-update-ext" },
     });
     expect(createRes.statusCode, `create via v1 failed: ${createRes.body}`).toBe(200);
-    const created = createRes.json() as { id: string };
+    const created = createRes.json<{ id: string }>();
 
     const updateRes = await app.inject({
       method: "POST",
@@ -125,7 +125,7 @@ describe("Contacts integration API (CONT-03, D-02)", () => {
       payload: { externalId: "v1-update-ext", firstName: "Updated Via API" },
     });
     expect(updateRes.statusCode, `update via v1 failed: ${updateRes.body}`).toBe(200);
-    const updated = updateRes.json() as { id: string };
+    const updated = updateRes.json<{ id: string }>();
     expect(updated.id).toBe(created.id);
 
     const getRes = await app.inject({
@@ -134,7 +134,7 @@ describe("Contacts integration API (CONT-03, D-02)", () => {
       headers: { cookie },
     });
     expect(getRes.statusCode, `session get failed: ${getRes.body}`).toBe(200);
-    expect((getRes.json() as { firstName: string }).firstName).toBe("Updated Via API");
+    expect((getRes.json<{ firstName: string }>()).firstName).toBe("Updated Via API");
   });
 
   it("D-02: rejects a payload with neither email nor externalId", async () => {

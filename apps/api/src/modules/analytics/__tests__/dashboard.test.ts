@@ -47,7 +47,7 @@ describe("Workspace dashboard (07-07, ANLT-04)", () => {
       payload: { name },
     });
     expect(res.statusCode, `create workspace failed: ${res.body}`).toBe(200);
-    return res.json() as { id: string; slug: string; name: string };
+    return res.json<{ id: string; slug: string; name: string }>();
   }
 
   async function owner(nameSeed: string) {
@@ -129,13 +129,13 @@ describe("Workspace dashboard (07-07, ANLT-04)", () => {
       headers: { cookie },
     });
     expect(res.statusCode, `dashboard failed: ${res.body}`).toBe(200);
-    const body = res.json() as {
+    const body = res.json<{
       trend: Array<{ day: string; sent: number; delivered: number; opened: number }>;
       growth: Array<{ day: string; newContacts: number; cumulativeContacts: number }>;
       kpis: { sent: number; deliveredRate: number | null; openedRate: number | null; newContacts: number; unsubscribes: number };
       recentCampaigns: unknown[];
       activeFlows: unknown[];
-    };
+    }>();
 
     // Dense series: 7 days, no gaps.
     expect(body.trend).toHaveLength(7);
@@ -192,7 +192,7 @@ describe("Workspace dashboard (07-07, ANLT-04)", () => {
       headers: { cookie },
     });
     expect(defaultRes.statusCode, `default period failed: ${defaultRes.body}`).toBe(200);
-    const defaultBody = defaultRes.json() as { trend: unknown[]; growth: unknown[] };
+    const defaultBody = defaultRes.json<{ trend: unknown[]; growth: unknown[] }>();
     expect(defaultBody.trend).toHaveLength(30);
     expect(defaultBody.growth).toHaveLength(30);
 
@@ -213,12 +213,12 @@ describe("Workspace dashboard (07-07, ANLT-04)", () => {
       headers: { cookie },
     });
     expect(res.statusCode, `dashboard failed: ${res.body}`).toBe(200);
-    const body = res.json() as {
+    const body = res.json<{
       trend: Array<{ sent: number; delivered: number; opened: number }>;
       kpis: { sent: number; unsubscribes: number };
       recentCampaigns: unknown[];
       activeFlows: unknown[];
-    };
+    }>();
 
     expect(body.trend.every((t) => t.sent === 0 && t.delivered === 0 && t.opened === 0)).toBe(true);
     expect(body.kpis.sent).toBe(0);

@@ -47,7 +47,7 @@ describe("API-keys management (D-21/D-22/D-23)", () => {
       payload: { name },
     });
     expect(res.statusCode, `create workspace failed: ${res.body}`).toBe(200);
-    return res.json() as { id: string; slug: string; name: string };
+    return res.json<{ id: string; slug: string; name: string }>();
   }
 
   /** Adds a member with an explicit role directly, mirroring role-guard.test.ts's isolation approach. */
@@ -80,7 +80,7 @@ describe("API-keys management (D-21/D-22/D-23)", () => {
       headers: { cookie: owner.cookie },
     });
     expect(listRes.statusCode, `list keys failed: ${listRes.body}`).toBe(200);
-    const list = listRes.json() as Array<Record<string, unknown>>;
+    const list = listRes.json<Array<Record<string, unknown>>>();
     expect(list).toHaveLength(1);
     expect(list[0]).not.toHaveProperty("fullKey");
     expect(list[0].keyMask).toBe(created.keyMask);
@@ -111,7 +111,7 @@ describe("API-keys management (D-21/D-22/D-23)", () => {
       url: `/api/workspaces/${workspace.slug}/api-keys`,
       headers: { cookie: owner.cookie },
     });
-    const list = listRes.json() as Array<{ revokedAt: string | null }>;
+    const list = listRes.json<Array<{ revokedAt: string | null }>>();
     expect(list[0].revokedAt).not.toBeNull();
   });
 

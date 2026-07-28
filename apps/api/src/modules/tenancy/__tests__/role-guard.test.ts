@@ -57,7 +57,7 @@ describe("role-based access control (TENANT-03, D-17/D-18)", () => {
       payload: { name },
     });
     expect(res.statusCode, `create workspace failed: ${res.body}`).toBe(200);
-    return res.json() as { id: string; slug: string; name: string };
+    return res.json<{ id: string; slug: string; name: string }>();
   }
 
   /** Adds a member with an explicit role directly (bypassing the invite flow, which is covered by invite-flow.test.ts) so each role-guard scenario is isolated. */
@@ -75,7 +75,7 @@ describe("role-based access control (TENANT-03, D-17/D-18)", () => {
       headers: { cookie: ownerCookie },
     });
     expect(res.statusCode, `list members failed: ${res.body}`).toBe(200);
-    const row = (res.json() as Array<{ id: string; userId: string }>).find((m) => m.userId === userId);
+    const row = (res.json<Array<{ id: string; userId: string }>>()).find((m) => m.userId === userId);
     if (!row) throw new Error(`member row not found for userId ${userId}`);
     return row.id;
   }

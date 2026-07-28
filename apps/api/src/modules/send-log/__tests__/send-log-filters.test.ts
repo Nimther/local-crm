@@ -46,7 +46,7 @@ describe("Send log filters (07-05, ANLT-05)", () => {
       payload: { name },
     });
     expect(res.statusCode, `create workspace failed: ${res.body}`).toBe(200);
-    return res.json() as { id: string; slug: string; name: string };
+    return res.json<{ id: string; slug: string; name: string }>();
   }
 
   async function owner(nameSeed: string) {
@@ -64,7 +64,7 @@ describe("Send log filters (07-05, ANLT-05)", () => {
       payload,
     });
     expect(res.statusCode, `create contact failed: ${res.body}`).toBe(201);
-    return res.json() as { id: string };
+    return res.json<{ id: string }>();
   }
 
   async function createFixtureCampaign(workspaceId: string, name: string): Promise<string> {
@@ -181,7 +181,7 @@ describe("Send log filters (07-05, ANLT-05)", () => {
       headers: { cookie },
     });
     expect(res.statusCode, `send-log failed: ${res.body}`).toBe(200);
-    const body = res.json() as { items: Array<{ contactId: string }>; total: number };
+    const body = res.json<{ items: Array<{ contactId: string }>; total: number }>();
     expect(body.total).toBe(1);
     expect(body.items[0].contactId).toBe(contactA.id);
   });
@@ -204,7 +204,7 @@ describe("Send log filters (07-05, ANLT-05)", () => {
       headers: { cookie },
     });
     expect(byCampaign.statusCode, `send-log failed: ${byCampaign.body}`).toBe(200);
-    expect((byCampaign.json() as { total: number }).total).toBe(1);
+    expect((byCampaign.json<{ total: number }>()).total).toBe(1);
 
     const byFlow = await app.inject({
       method: "GET",
@@ -212,7 +212,7 @@ describe("Send log filters (07-05, ANLT-05)", () => {
       headers: { cookie },
     });
     expect(byFlow.statusCode, `send-log failed: ${byFlow.body}`).toBe(200);
-    const flowBody = byFlow.json() as { total: number; items: Array<{ flowRunId: string | null }> };
+    const flowBody = byFlow.json<{ total: number; items: Array<{ flowRunId: string | null }> }>();
     expect(flowBody.total).toBe(1);
     expect(flowBody.items[0].flowRunId).toBe(flowRunId);
   });
@@ -236,7 +236,7 @@ describe("Send log filters (07-05, ANLT-05)", () => {
 
     const all = await app.inject({ method: "GET", url: sendLogUrl(workspace.slug), headers: { cookie } });
     expect(all.statusCode, `send-log failed: ${all.body}`).toBe(200);
-    const allBody = all.json() as { items: Array<{ id: string; status: string }> };
+    const allBody = all.json<{ items: Array<{ id: string; status: string }> }>();
     const byId = new Map(allBody.items.map((i) => [i.id, i.status]));
     expect(byId.get(deliveredId)).toBe("delivered");
     expect(byId.get(bouncedId)).toBe("bounced");
@@ -250,7 +250,7 @@ describe("Send log filters (07-05, ANLT-05)", () => {
       headers: { cookie },
     });
     expect(filtered.statusCode, `send-log failed: ${filtered.body}`).toBe(200);
-    const filteredBody = filtered.json() as { items: Array<{ id: string }>; total: number };
+    const filteredBody = filtered.json<{ items: Array<{ id: string }>; total: number }>();
     expect(filteredBody.total).toBe(2);
     expect(new Set(filteredBody.items.map((i) => i.id))).toEqual(new Set([failedId, excludedId]));
   });
@@ -270,7 +270,7 @@ describe("Send log filters (07-05, ANLT-05)", () => {
       headers: { cookie },
     });
     expect(res.statusCode, `send-log failed: ${res.body}`).toBe(200);
-    const body = res.json() as { items: Array<{ id: string }>; total: number };
+    const body = res.json<{ items: Array<{ id: string }>; total: number }>();
     expect(body.total).toBe(1);
     expect(body.items[0].id).toBe(recentId);
     expect(body.items.some((i) => i.id === oldId)).toBe(false);

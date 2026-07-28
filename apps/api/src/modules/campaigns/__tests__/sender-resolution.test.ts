@@ -91,7 +91,7 @@ describe("Campaign sender resolution (CR-02, CAMP-01/02/04)", () => {
       payload: { name },
     });
     expect(res.statusCode, `create workspace failed: ${res.body}`).toBe(200);
-    return res.json() as { id: string; slug: string; name: string };
+    return res.json<{ id: string; slug: string; name: string }>();
   }
 
   async function owner(nameSeed: string) {
@@ -121,7 +121,7 @@ describe("Campaign sender resolution (CR-02, CAMP-01/02/04)", () => {
       },
     });
     expect(res.statusCode, `create segment failed: ${res.body}`).toBe(201);
-    return res.json() as { id: string };
+    return res.json<{ id: string }>();
   }
 
   // workspace_sendgrid_keys carries ENABLE + FORCE ROW LEVEL SECURITY --
@@ -152,7 +152,7 @@ describe("Campaign sender resolution (CR-02, CAMP-01/02/04)", () => {
       payload: body,
     });
     expect(res.statusCode, `create campaign failed: ${res.body}`).toBe(201);
-    return res.json() as { id: string; fromEmail: string | null; fromSenderId: string | null };
+    return res.json<{ id: string; fromEmail: string | null; fromSenderId: string | null }>();
   }
 
   async function getCampaign(cookie: string, slug: string, id: string) {
@@ -162,7 +162,7 @@ describe("Campaign sender resolution (CR-02, CAMP-01/02/04)", () => {
       headers: { cookie },
     });
     expect(res.statusCode, `get campaign failed: ${res.body}`).toBe(200);
-    return res.json() as { id: string; fromEmail: string | null; fromSenderId: string | null };
+    return res.json<{ id: string; fromEmail: string | null; fromSenderId: string | null }>();
   }
 
   it("launch resolves a fromSenderId-only campaign to its verified sender email and persists it", async () => {
@@ -235,7 +235,7 @@ describe("Campaign sender resolution (CR-02, CAMP-01/02/04)", () => {
       headers: { cookie },
     });
     expect(launchRes.statusCode, `expected 422, got ${launchRes.statusCode}: ${launchRes.body}`).toBe(422);
-    const body = launchRes.json() as { error?: string; fields?: Record<string, string> };
+    const body = launchRes.json<{ error?: string; fields?: Record<string, string> }>();
     expect(body.fields?.sender ?? body.error).toBeTruthy();
   });
 
@@ -262,7 +262,7 @@ describe("Campaign sender resolution (CR-02, CAMP-01/02/04)", () => {
       testSendRes.statusCode,
       `expected 422, got ${testSendRes.statusCode}: ${testSendRes.body}`
     ).toBe(422);
-    const body = testSendRes.json() as { error?: string; fields?: Record<string, string> };
+    const body = testSendRes.json<{ error?: string; fields?: Record<string, string> }>();
     expect(body.fields?.sender ?? body.error).toBeTruthy();
   });
 });

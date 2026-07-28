@@ -49,7 +49,7 @@ describe("Flow lifecycle (FLOW-01/06/07, D-17/D-20/D-23/D-24)", () => {
       payload: { name },
     });
     expect(res.statusCode, `create workspace failed: ${res.body}`).toBe(200);
-    return res.json() as { id: string; slug: string; name: string };
+    return res.json<{ id: string; slug: string; name: string }>();
   }
 
   async function owner(nameSeed: string) {
@@ -87,7 +87,7 @@ describe("Flow lifecycle (FLOW-01/06/07, D-17/D-20/D-23/D-24)", () => {
       },
     });
     expect(res.statusCode, `create segment failed: ${res.body}`).toBe(201);
-    return res.json() as { id: string };
+    return res.json<{ id: string }>();
   }
 
   async function createFlow(cookie: string, slug: string, name: string) {
@@ -98,12 +98,12 @@ describe("Flow lifecycle (FLOW-01/06/07, D-17/D-20/D-23/D-24)", () => {
       payload: { name },
     });
     expect(res.statusCode, `create flow failed: ${res.body}`).toBe(201);
-    return res.json() as {
+    return res.json<{
       id: string;
       status: string;
       draftVersionId: string | null;
       liveVersionId: string | null;
-    };
+    }>();
   }
 
   const validDefinition = {
@@ -143,7 +143,7 @@ describe("Flow lifecycle (FLOW-01/06/07, D-17/D-20/D-23/D-24)", () => {
       headers: { cookie },
     });
     expect(publishRejected.statusCode).toBe(422);
-    const rejectedBody = publishRejected.json() as { fields: Record<string, string> };
+    const rejectedBody = publishRejected.json<{ fields: Record<string, string> }>();
     expect(rejectedBody.fields.trigger).toBeTruthy();
 
     const patchValid = await app.inject({
@@ -161,7 +161,7 @@ describe("Flow lifecycle (FLOW-01/06/07, D-17/D-20/D-23/D-24)", () => {
       },
     });
     expect(patchValid.statusCode, `patch failed: ${patchValid.body}`).toBe(200);
-    const patched = patchValid.json() as { triggerEventName: string; reentryWindowDays: number };
+    const patched = patchValid.json<{ triggerEventName: string; reentryWindowDays: number }>();
     expect(patched.triggerEventName).toBe("purchase");
     expect(patched.reentryWindowDays).toBe(7);
 
@@ -171,7 +171,7 @@ describe("Flow lifecycle (FLOW-01/06/07, D-17/D-20/D-23/D-24)", () => {
       headers: { cookie },
     });
     expect(published.statusCode, `publish failed: ${published.body}`).toBe(200);
-    const publishedBody = published.json() as { status: string; liveVersionId: string | null; draftVersionId: string | null };
+    const publishedBody = published.json<{ status: string; liveVersionId: string | null; draftVersionId: string | null }>();
     expect(publishedBody.status).toBe("live");
     expect(publishedBody.liveVersionId).not.toBeNull();
     // D-20: draft_version_id is cleared on publish -- the next edit lazily
@@ -200,7 +200,7 @@ describe("Flow lifecycle (FLOW-01/06/07, D-17/D-20/D-23/D-24)", () => {
       headers: { cookie },
     });
     expect(pauseAgainOnDraft.statusCode).toBe(200);
-    expect((pauseAgainOnDraft.json() as { status: string }).status).toBe("paused");
+    expect((pauseAgainOnDraft.json<{ status: string }>()).status).toBe("paused");
 
     const pauseWhilePaused = await app.inject({
       method: "POST",
@@ -215,7 +215,7 @@ describe("Flow lifecycle (FLOW-01/06/07, D-17/D-20/D-23/D-24)", () => {
       headers: { cookie },
     });
     expect(resumed.statusCode).toBe(200);
-    expect((resumed.json() as { status: string }).status).toBe("live");
+    expect((resumed.json<{ status: string }>()).status).toBe("live");
 
     // D-20: after publish, draft_version_id is null -- the first edit since
     // publish must lazily create a fresh working draft from the live
@@ -225,7 +225,7 @@ describe("Flow lifecycle (FLOW-01/06/07, D-17/D-20/D-23/D-24)", () => {
       url: `/api/workspaces/${workspace.slug}/flows/${flow.id}`,
       headers: { cookie },
     });
-    expect((getBeforeEdit.json() as { draftVersionId: string | null }).draftVersionId).toBeNull();
+    expect((getBeforeEdit.json<{ draftVersionId: string | null }>()).draftVersionId).toBeNull();
 
     const renamed = await app.inject({
       method: "PATCH",
@@ -234,7 +234,7 @@ describe("Flow lifecycle (FLOW-01/06/07, D-17/D-20/D-23/D-24)", () => {
       payload: { name: "Onboarding v2" },
     });
     expect(renamed.statusCode, `rename failed: ${renamed.body}`).toBe(200);
-    const renamedBody = renamed.json() as { draftVersionId: string | null; definition: unknown };
+    const renamedBody = renamed.json<{ draftVersionId: string | null; definition: unknown }>();
     expect(renamedBody.draftVersionId).not.toBeNull();
     // The lazily-created draft copies the live definition forward.
     expect((renamedBody.definition as { nodes: unknown[] }).nodes.length).toBe(3);
@@ -258,7 +258,7 @@ describe("Flow lifecycle (FLOW-01/06/07, D-17/D-20/D-23/D-24)", () => {
       headers: { cookie },
     });
     expect(firstPublish.statusCode, `publish failed: ${firstPublish.body}`).toBe(200);
-    expect((firstPublish.json() as { status: string }).status).toBe("live");
+    expect((firstPublish.json<{ status: string }>()).status).toBe("live");
 
     const paused = await app.inject({
       method: "POST",
@@ -266,7 +266,7 @@ describe("Flow lifecycle (FLOW-01/06/07, D-17/D-20/D-23/D-24)", () => {
       headers: { cookie },
     });
     expect(paused.statusCode, `pause failed: ${paused.body}`).toBe(200);
-    expect((paused.json() as { status: string }).status).toBe("paused");
+    expect((paused.json<{ status: string }>()).status).toBe("paused");
 
     // Editing the draft again while paused (D-20 lazily recreates a working
     // draft on the paused flow).
@@ -277,7 +277,7 @@ describe("Flow lifecycle (FLOW-01/06/07, D-17/D-20/D-23/D-24)", () => {
       payload: { definition: validDefinition },
     });
     expect(secondPatch.statusCode, `patch failed: ${secondPatch.body}`).toBe(200);
-    expect((secondPatch.json() as { draftVersionId: string | null }).draftVersionId).not.toBeNull();
+    expect((secondPatch.json<{ draftVersionId: string | null }>()).draftVersionId).not.toBeNull();
 
     // WR-04: publishing the accumulated draft changes on a PAUSED flow must
     // NOT silently resume enrollment/sends -- the flow stays paused (D-18/D-19).
@@ -287,11 +287,11 @@ describe("Flow lifecycle (FLOW-01/06/07, D-17/D-20/D-23/D-24)", () => {
       headers: { cookie },
     });
     expect(secondPublish.statusCode, `publish failed: ${secondPublish.body}`).toBe(200);
-    const secondPublishBody = secondPublish.json() as {
+    const secondPublishBody = secondPublish.json<{
       status: string;
       draftVersionId: string | null;
       liveVersionId: string | null;
-    };
+    }>();
     expect(secondPublishBody.status).toBe("paused");
     expect(secondPublishBody.draftVersionId).toBeNull();
     expect(secondPublishBody.liveVersionId).not.toBeNull();
@@ -318,13 +318,13 @@ describe("Flow lifecycle (FLOW-01/06/07, D-17/D-20/D-23/D-24)", () => {
       headers: { cookie },
     });
     expect(duplicated.statusCode, `duplicate failed: ${duplicated.body}`).toBe(201);
-    const body = duplicated.json() as {
+    const body = duplicated.json<{
       id: string;
       status: string;
       reentryMode: string;
       draftVersionId: string | null;
       definition: { nodes: unknown[] };
-    };
+    }>();
     expect(body.id).not.toBe(flow.id);
     expect(body.status).toBe("draft");
     expect(body.reentryMode).toBe("once_ever");
@@ -343,7 +343,7 @@ describe("Flow lifecycle (FLOW-01/06/07, D-17/D-20/D-23/D-24)", () => {
       payload: { name: "Member-created flow" },
     });
     expect(created.statusCode, `member create failed: ${created.body}`).toBe(201);
-    const flow = created.json() as { id: string };
+    const flow = created.json<{ id: string }>();
 
     const patched = await app.inject({
       method: "PATCH",
@@ -396,7 +396,7 @@ describe("Flow lifecycle (FLOW-01/06/07, D-17/D-20/D-23/D-24)", () => {
     expect(firstPatch.statusCode, `patch failed: ${firstPatch.body}`).toBe(200);
     // Contrast case: a still-draft flow's PATCH reflects the new trigger
     // immediately (the draft IS the flow's trigger pre-publish).
-    expect((firstPatch.json() as { triggerEventName: string | null }).triggerEventName).toBe("purchase");
+    expect((firstPatch.json<{ triggerEventName: string | null }>()).triggerEventName).toBe("purchase");
 
     const firstPublish = await app.inject({
       method: "POST",
@@ -404,8 +404,8 @@ describe("Flow lifecycle (FLOW-01/06/07, D-17/D-20/D-23/D-24)", () => {
       headers: { cookie },
     });
     expect(firstPublish.statusCode, `publish failed: ${firstPublish.body}`).toBe(200);
-    expect((firstPublish.json() as { status: string; triggerEventName: string | null }).status).toBe("live");
-    expect((firstPublish.json() as { triggerEventName: string | null }).triggerEventName).toBe("purchase");
+    expect((firstPublish.json<{ status: string; triggerEventName: string | null }>()).status).toBe("live");
+    expect((firstPublish.json<{ triggerEventName: string | null }>()).triggerEventName).toBe("purchase");
 
     // Autosave a draft edit on the now-live flow that changes the trigger
     // event to "signup" -- this must NOT re-target live enrollment.
@@ -429,7 +429,7 @@ describe("Flow lifecycle (FLOW-01/06/07, D-17/D-20/D-23/D-24)", () => {
       headers: { cookie },
     });
     expect(getAfterDraftEdit.statusCode).toBe(200);
-    const afterDraftEditBody = getAfterDraftEdit.json() as { triggerEventName: string | null; status: string };
+    const afterDraftEditBody = getAfterDraftEdit.json<{ triggerEventName: string | null; status: string }>();
     // CR-03 regression: the columns flow-trigger-evaluator/flow-segment-sweep
     // read stay pinned to "purchase" -- the unpublished draft edit did not
     // leak into live enrollment.
@@ -449,7 +449,7 @@ describe("Flow lifecycle (FLOW-01/06/07, D-17/D-20/D-23/D-24)", () => {
       url: `/api/workspaces/${workspace.slug}/flows/${flow.id}`,
       headers: { cookie },
     });
-    expect((getAfterRepublish.json() as { triggerEventName: string | null }).triggerEventName).toBe("signup");
+    expect((getAfterRepublish.json<{ triggerEventName: string | null }>()).triggerEventName).toBe("signup");
   });
 
   it("D-24: a segment referenced by a flow trigger cannot be deleted", async () => {
@@ -472,7 +472,7 @@ describe("Flow lifecycle (FLOW-01/06/07, D-17/D-20/D-23/D-24)", () => {
       },
     });
     expect(patched.statusCode, `patch failed: ${patched.body}`).toBe(200);
-    expect((patched.json() as { triggerSegmentId: string | null }).triggerSegmentId).toBe(segment.id);
+    expect((patched.json<{ triggerSegmentId: string | null }>()).triggerSegmentId).toBe(segment.id);
 
     const deleteRes = await app.inject({
       method: "DELETE",
@@ -480,6 +480,6 @@ describe("Flow lifecycle (FLOW-01/06/07, D-17/D-20/D-23/D-24)", () => {
       headers: { cookie },
     });
     expect(deleteRes.statusCode).toBe(409);
-    expect((deleteRes.json() as { code: string }).code).toBe("referenced_by_flow");
+    expect((deleteRes.json<{ code: string }>()).code).toBe("referenced_by_flow");
   });
 });

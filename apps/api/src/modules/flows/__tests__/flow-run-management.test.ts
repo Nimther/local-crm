@@ -46,7 +46,7 @@ describe("Flow run management (D-21/D-22/D-23)", () => {
       payload: { name },
     });
     expect(res.statusCode, `create workspace failed: ${res.body}`).toBe(200);
-    return res.json() as { id: string; slug: string; name: string };
+    return res.json<{ id: string; slug: string; name: string }>();
   }
 
   async function owner(nameSeed: string) {
@@ -83,7 +83,7 @@ describe("Flow run management (D-21/D-22/D-23)", () => {
       payload: { name },
     });
     expect(res.statusCode, `create flow failed: ${res.body}`).toBe(201);
-    return res.json() as { id: string; status: string; draftVersionId: string | null; liveVersionId: string | null };
+    return res.json<{ id: string; status: string; draftVersionId: string | null; liveVersionId: string | null }>();
   }
 
   async function publishFlow(cookie: string, slug: string, flowId: string) {
@@ -99,7 +99,7 @@ describe("Flow run management (D-21/D-22/D-23)", () => {
       headers: { cookie },
     });
     expect(res.statusCode, `publish failed: ${res.body}`).toBe(200);
-    return res.json() as { id: string; status: string; liveVersionId: string };
+    return res.json<{ id: string; status: string; liveVersionId: string }>();
   }
 
   async function createContact(cookie: string, slug: string, email: string) {
@@ -110,7 +110,7 @@ describe("Flow run management (D-21/D-22/D-23)", () => {
       payload: { email },
     });
     expect(res.statusCode, `create contact failed: ${res.body}`).toBe(201);
-    return res.json() as { id: string };
+    return res.json<{ id: string }>();
   }
 
   /**
@@ -165,11 +165,11 @@ describe("Flow run management (D-21/D-22/D-23)", () => {
       headers: { cookie },
     });
     expect(runsRes.statusCode, `runs list failed: ${runsRes.body}`).toBe(200);
-    const body = runsRes.json() as {
+    const body = runsRes.json<{
       total: number;
       counts: { active: number; onOldVersions: number };
       items: Array<{ contactId: string; onOldVersion: boolean; status: string }>;
-    };
+    }>();
     expect(body.total).toBe(3);
     expect(body.counts.active).toBe(2);
     expect(body.counts.onOldVersions).toBe(2);
@@ -179,7 +179,7 @@ describe("Flow run management (D-21/D-22/D-23)", () => {
       url: `/api/workspaces/${workspace.slug}/flows/${flow.id}/runs?status=completed`,
       headers: { cookie },
     });
-    const filteredBody = filtered.json() as { total: number; items: unknown[] };
+    const filteredBody = filtered.json<{ total: number; items: unknown[] }>();
     expect(filteredBody.total).toBe(1);
   });
 
@@ -209,7 +209,7 @@ describe("Flow run management (D-21/D-22/D-23)", () => {
       payload: { runIds: [runA.id] },
     });
     expect(singleEject.statusCode, `eject failed: ${singleEject.body}`).toBe(200);
-    expect((singleEject.json() as { ejected: number }).ejected).toBe(1);
+    expect((singleEject.json<{ ejected: number }>()).ejected).toBe(1);
 
     const bulkEject = await app.inject({
       method: "POST",
@@ -218,14 +218,14 @@ describe("Flow run management (D-21/D-22/D-23)", () => {
       payload: { contactIds: [contactB.id] },
     });
     expect(bulkEject.statusCode, `bulk eject failed: ${bulkEject.body}`).toBe(200);
-    expect((bulkEject.json() as { ejected: number }).ejected).toBe(1);
+    expect((bulkEject.json<{ ejected: number }>()).ejected).toBe(1);
 
     const runsRes = await app.inject({
       method: "GET",
       url: `/api/workspaces/${workspace.slug}/flows/${flow.id}/runs`,
       headers: { cookie: ownerCookie },
     });
-    const body = runsRes.json() as { counts: { active: number }; items: Array<{ status: string; flowVersionId: string }> };
+    const body = runsRes.json<{ counts: { active: number }; items: Array<{ status: string; flowVersionId: string }> }>();
     expect(body.counts.active).toBe(0);
     // FLOW-07: eject never re-points flow_version_id.
     for (const run of body.items) {
@@ -284,7 +284,7 @@ describe("Flow run management (D-21/D-22/D-23)", () => {
       headers: { cookie: ownerCookie },
     });
     expect(deletePausedZeroActive.statusCode, `delete failed: ${deletePausedZeroActive.body}`).toBe(200);
-    expect((deletePausedZeroActive.json() as { deleted: boolean }).deleted).toBe(true);
+    expect((deletePausedZeroActive.json<{ deleted: boolean }>()).deleted).toBe(true);
   });
 
   it("D-22: a never-published draft flow is always deletable", async () => {
@@ -299,6 +299,6 @@ describe("Flow run management (D-21/D-22/D-23)", () => {
       headers: { cookie },
     });
     expect(deleteRes.statusCode, `delete failed: ${deleteRes.body}`).toBe(200);
-    expect((deleteRes.json() as { deleted: boolean }).deleted).toBe(true);
+    expect((deleteRes.json<{ deleted: boolean }>()).deleted).toBe(true);
   });
 });

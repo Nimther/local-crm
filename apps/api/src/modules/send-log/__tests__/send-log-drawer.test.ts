@@ -44,7 +44,7 @@ describe("Send log drawer (07-05, D-14)", () => {
       payload: { name },
     });
     expect(res.statusCode, `create workspace failed: ${res.body}`).toBe(200);
-    return res.json() as { id: string; slug: string; name: string };
+    return res.json<{ id: string; slug: string; name: string }>();
   }
 
   async function owner(nameSeed: string) {
@@ -62,7 +62,7 @@ describe("Send log drawer (07-05, D-14)", () => {
       payload,
     });
     expect(res.statusCode, `create contact failed: ${res.body}`).toBe(201);
-    return res.json() as { id: string };
+    return res.json<{ id: string }>();
   }
 
   async function insertSend(workspaceId: string, contactId: string): Promise<string> {
@@ -124,7 +124,7 @@ describe("Send log drawer (07-05, D-14)", () => {
       headers: { cookie },
     });
     expect(res.statusCode, `drawer failed: ${res.body}`).toBe(200);
-    const rows = res.json() as Array<{ eventType: string; occurredAt: string; clickUrl: string | null }>;
+    const rows = res.json<Array<{ eventType: string; occurredAt: string; clickUrl: string | null }>>();
 
     expect(rows).toHaveLength(3);
     expect(rows.map((r) => r.eventType)).toEqual(["processed", "delivered", "click"]);

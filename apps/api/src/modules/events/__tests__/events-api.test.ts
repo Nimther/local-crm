@@ -54,7 +54,7 @@ describe("Event ingestion API (EVNT-01/EVNT-03, D-24)", () => {
       payload: { name },
     });
     expect(res.statusCode, `create workspace failed: ${res.body}`).toBe(200);
-    return res.json() as { id: string; slug: string; name: string };
+    return res.json<{ id: string; slug: string; name: string }>();
   }
 
   async function mintApiKey(cookie: string, slug: string, name: string): Promise<string> {
@@ -65,7 +65,7 @@ describe("Event ingestion API (EVNT-01/EVNT-03, D-24)", () => {
       payload: { name },
     });
     expect(res.statusCode, `create api key failed: ${res.body}`).toBe(200);
-    return (res.json() as { fullKey: string }).fullKey;
+    return (res.json<{ fullKey: string }>()).fullKey;
   }
 
   async function ownerWithKey(nameSeed: string) {
@@ -109,7 +109,7 @@ describe("Event ingestion API (EVNT-01/EVNT-03, D-24)", () => {
     });
 
     expect(res.statusCode, `POST /v1/events failed: ${res.body}`).toBe(202);
-    const body = res.json() as { results: Array<{ eventId: string; status: string }> };
+    const body = res.json<{ results: Array<{ eventId: string; status: string }> }>();
     expect(body.results).toHaveLength(1);
     expect(body.results[0].status).toBe("accepted");
     expect(body.results[0].eventId).toBeTruthy();
@@ -139,7 +139,7 @@ describe("Event ingestion API (EVNT-01/EVNT-03, D-24)", () => {
     });
 
     expect(res.statusCode, `batch POST /v1/events failed: ${res.body}`).toBe(202);
-    const body = res.json() as { results: Array<{ eventId: string; status: string }> };
+    const body = res.json<{ results: Array<{ eventId: string; status: string }> }>();
     expect(body.results).toHaveLength(3);
     for (const item of body.results) {
       expect(item.status).toBe("accepted");
@@ -178,7 +178,7 @@ describe("Event ingestion API (EVNT-01/EVNT-03, D-24)", () => {
     });
 
     expect(res.statusCode, `POST /v1/events failed: ${res.body}`).toBe(202);
-    const body = res.json() as { results: Array<{ status: string }> };
+    const body = res.json<{ results: Array<{ status: string }> }>();
     expect(body.results).toHaveLength(2);
     expect(body.results[0].status).toBe("accepted");
     expect(body.results[1].status).toBe("rejected");
@@ -196,7 +196,7 @@ describe("Event ingestion API (EVNT-01/EVNT-03, D-24)", () => {
     });
 
     expect(res.statusCode, `POST /v1/events failed: ${res.body}`).toBe(202);
-    const body = res.json() as { results: Array<{ status: string }> };
+    const body = res.json<{ results: Array<{ status: string }> }>();
     expect(body.results[0].status).toBe("rejected");
   });
 
@@ -258,7 +258,7 @@ describe("Event ingestion API (EVNT-01/EVNT-03, D-24)", () => {
     });
 
     expect(res.statusCode, `POST /v1/events failed: ${res.body}`).toBe(202);
-    const body = res.json() as { results: Array<{ status: string }> };
+    const body = res.json<{ results: Array<{ status: string }> }>();
     expect(body.results[0].status).toBe("accepted");
   });
 });
