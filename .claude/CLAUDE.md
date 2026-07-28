@@ -153,14 +153,14 @@ Multi-tenant SaaS-платформа marketing automation для B2C-компа�
 
 ## Conventions
 
-Conventions not yet established. Will populate as patterns emerge during development.
+Соглашения зафиксированы в [`CONVENTIONS.md`](../CONVENTIONS.md) в корне репозитория: именование и структура workspace'ов, размещение тестов и конвенция тестовой БД, политика escape-hatch, правила миграций и expand/contract. Каждое правило там подкреплено ссылкой на реальный файл репозитория.
 <!-- GSD:conventions-end -->
 
 <!-- GSD:architecture-start source:ARCHITECTURE.md -->
 
 ## Architecture
 
-Architecture not yet mapped. Follow existing patterns found in the codebase.
+Архитектура описана в [`ARCHITECTURE.md`](../ARCHITECTURE.md) в корне репозитория: граница `apps/*` ↔ `packages/*`, путь от события до отправленного письма (с диаграммой), две очереди отправки и их изоляция, модель multi-tenancy и RLS, envelope-шифрование ключей тенантов. Документ отвечает на вопрос **почему** система устроена так; фактическое устройство — в `SPECIFICATION.md`.
 <!-- GSD:architecture-end -->
 
 <!-- GSD:skills-start source:skills/ -->
@@ -193,9 +193,17 @@ Do not make direct repo edits outside a GSD workflow unless the user explicitly 
 > This section is managed by `generate-claude-profile` -- do not edit manually.
 <!-- GSD:profile-end -->
 
-## Project Specification (SPECIFICATION.md)
+## Project Documentation (SPECIFICATION.md / ARCHITECTURE.md / CONVENTIONS.md)
 
-`SPECIFICATION.md` в корне репозитория — as-built описание системы для security review: фактические зависимости и версии, схема данных и RLS, хранение и чтение секретов, планировщик отправки, публичные точки входа, расхождения с разделом Technology Stack выше.
+Три корневых документа с непересекающимися ролями:
+
+| Документ | Отвечает на | Содержит |
+|---|---|---|
+| [`SPECIFICATION.md`](../SPECIFICATION.md) | **что есть** | as-built: зависимости и версии, схема данных и RLS, секреты, пайплайн отправки, публичные точки входа |
+| [`ARCHITECTURE.md`](../ARCHITECTURE.md) | **почему так** | пять несущих решений и их цена; фактов не дублирует, ссылается на `SPECIFICATION.md` |
+| [`CONVENTIONS.md`](../CONVENTIONS.md) | **как писать дальше** | именование, структура модулей, паттерны тестов, escape-hatch, правила миграций |
+
+`SPECIFICATION.md` — as-built описание системы для security review: фактические зависимости и версии, схема данных и RLS, хранение и чтение секретов, планировщик отправки, публичные точки входа, расхождения с разделом Technology Stack выше.
 
 **Правило: при добавлении любой новой библиотеки или технологии — дописать её в `SPECIFICATION.md` в соответствующий раздел в том же изменении.**
 
@@ -214,5 +222,26 @@ Do not make direct repo edits outside a GSD workflow unless the user explicitly 
 - версия — ровно та, что в `package.json` (не диапазон из ресёрча)
 - если пакет объявлен, но ещё не используется в коде — пометить это явно
 - чего нет в коде — писать **«не определено»**, не додумывать
+
+**Правило: при изменении границ модулей, потока данных, топологии очередей, модели multi-tenancy/RLS или способа защиты секретов тенанта — дописать это в `ARCHITECTURE.md` в том же изменении.**
+
+Что именно является триггером для `ARCHITECTURE.md`:
+
+- изменилась граница между `apps/*` и `packages/*` — что-то доменное переехало в приложение или наоборот; появилась зависимость `packages/*` → `apps/*`
+- изменился путь от события до отправленного письма: новый этап, снятый этап, другой порядок — диаграмма в документе перестала быть верной
+- изменилась топология очередей: добавилась очередь, слились две существующие, изменился принцип изоляции broadcast и triggered
+- изменилась модель multi-tenancy или RLS: другой способ выставления сессионной переменной, отказ от FORCE, переход на schema-per-tenant
+- изменился способ защиты ключей тенантов: другой провайдер KMS, отказ от envelope-схемы, изменение того, что именно связывается в AAD
+
+**Правило: при изменении правил именования, структуры модулей, размещения тестов, конвенции тестовой БД, политики escape-hatch или правил миграций — дописать это в `CONVENTIONS.md` в том же изменении.**
+
+Что именно является триггером для `CONVENTIONS.md`:
+
+- изменились правила именования или форма workspace'а (`main`/`types`, `include` в tsconfig, направление зависимостей)
+- изменилось соглашение о размещении тестов или конвенция тестовой БД (`TEST_DATABASE_URL`, провижининг через `globalSetup`, запрет fallback'а на dev-БД)
+- изменилась политика escape-hatch хотя бы в одном из трёх мест — line-scoped подавление линта, маркер разрушительного DDL, исключение из coverage
+- изменились правила миграций: формат имени файла, правило expand/contract, синтаксис маркера, который принимает `scripts/lint-migrations.mjs`
+
+Формулировка обязывающая для всех трёх документов одинаково: **дописать в том же изменении**, а не «по возможности». Документ, обновляемый по возможности, к следующей фазе описывает систему, которой уже нет.
 
 Раздел Technology Stack в этом файле генерируется из `research/STACK.md` и описывает *рекомендованный* стек — он не является описанием системы и не заменяет `SPECIFICATION.md`.
