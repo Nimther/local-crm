@@ -221,13 +221,29 @@ async function awaitReady(proc: RunningProcess, port: number, binary: string): P
   }
 }
 
-/** SIGTERM, then SIGKILL if it will not go. */
+/**
+ * SIGTERM, then SIGKILL if it will not go.
+ *
+ * 08-REVIEW WR-02: a child that is still alive after the SIGKILL wait (e.g.
+ * wedged in an uninterruptible D-state, or an "exit" event delayed under
+ * extreme host load) must be a loud, named failure here — `restart()` would
+ * otherwise immediately rebind the same port a still-live process holds, and
+ * `stop()` would `rm` a data directory a still-writing process still owns,
+ * both of which surface later as an unrelated-looking bind error or
+ * "exited before becoming ready" rather than naming the real cause.
+ */
 async function terminate(child: ChildProcess): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) return;
   child.kill("SIGTERM");
   if (!(await waitForExit(child, STOP_TIMEOUT_MS))) {
     child.kill("SIGKILL");
-    await waitForExit(child, STOP_TIMEOUT_MS);
+    if (!(await waitForExit(child, STOP_TIMEOUT_MS))) {
+      throw new Error(
+        `redis-server (pid ${String(child.pid)}) did not exit within ${String(STOP_TIMEOUT_MS)}ms ` +
+          "after SIGKILL. Refusing to proceed as if it had -- a surviving process would keep " +
+          "holding the port and writing to the data directory the caller is about to reuse or remove.",
+      );
+    }
   }
 }
 
