@@ -2,7 +2,7 @@
 phase: 08-quality-gates-failure-injection-foundation
 reviewed: 2026-07-28T00:00:00Z
 depth: standard
-files_reviewed: 67
+files_reviewed: 68
 files_reviewed_list:
   - .github/workflows/ci.yml
   - apps/api/src/load-env.ts
@@ -43,6 +43,7 @@ files_reviewed_list:
   - packages/tenant-context/vitest.config.ts
   - packages/test-support/src/__tests__/coverage-gate.test.ts
   - packages/test-support/src/__tests__/coverage-ratchet.test.ts
+  - packages/test-support/src/__tests__/db-fixture-advisory-unlock.test.ts
   - packages/test-support/src/__tests__/db-fixture-isolation.test.ts
   - packages/test-support/src/__tests__/guard.test.ts
   - packages/test-support/src/__tests__/lint-gate.test.ts
@@ -71,231 +72,211 @@ files_reviewed_list:
   - scripts/migrate-dev.mjs
   - scripts/verify-redis-config.mjs
 findings:
-  critical: 0
-  warning: 6
-  info: 2
-  total: 8
+  critical: 1
+  warning: 2
+  info: 1
+  total: 4
 status: issues_found
 ---
 
-# Phase 08: Code Review Report
+# Phase 08: Code Review Report (re-review)
 
 **Reviewed:** 2026-07-28T00:00:00Z
 **Depth:** standard
-**Files Reviewed:** 67
+**Files Reviewed:** 68
 **Status:** issues_found
 
 ## Summary
 
-This phase builds the CI/quality-gate infrastructure itself (test-database
-provisioning + guard, migration runner, coverage gate/ratchet, lint floor,
-Redis-config verifier, migration linter, root-hygiene check, and the five
-failure-injection scenarios) plus the process/child-process harnesses that
-back them. The security-critical paths — `provision-db.ts`'s DROP DATABASE
-name guard, `guard.ts`'s dev-database comparison, and the envelope-encryption
-and tenant-isolation tests — hold up under adversarial reading: the ordering
-invariants the code comments claim (validate-before-connect, guard-before-publish,
-compare-against-the-true-dev-DSN-before-overwrite) are actually implemented in
-that order, and the accompanying unit tests exercise the documented edge cases
-(loopback aliases, absent ports, quote-injection payloads, byte-identical DSNs).
+This is a re-review of the current tree, including the five fixes made in
+response to the previous 08-REVIEW.md pass (WR-01 through WR-06 minus WR-03,
+which was a documented-scope decision) and the one new file added since,
+`db-fixture-advisory-unlock.test.ts`. None of that fix code had been seen by a
+reviewer before this pass.
 
-No Critical findings. The Warnings below are all instances of the specific
-failure mode this review was asked to weight toward: a gate whose coverage is
-narrower than its own stated purpose, or whose "empty/degenerate input" branch
-was not fully hardened against a vacuous pass. None of them are exploitable by
-an external actor — they are latent correctness gaps in the gates' own logic,
-most requiring an unusual or long-tail input to trigger.
+Four of the five code fixes were traced end-to-end and are correct; their
+prior findings do not re-apply and are not carried forward:
+
+- **`packages/test-support/src/db-fixture.ts`** (prior WR-01) — the nested
+  `try { unlock } finally { client.release() }` genuinely closes the leak: a
+  rejected `pg_advisory_unlock` still releases the client, confirmed against
+  `db-fixture-advisory-unlock.test.ts`'s mocked-`pg` reproduction.
+- **`scripts/coverage-ratchet.mjs`** (prior WR-04) — the null-base branch now
+  correctly fails on a non-finite `currentLines` instead of passing vacuously;
+  confirmed against the two new cases in `coverage-ratchet.test.ts`.
+- **`packages/test-support/src/migration-runner.ts`** (prior WR-05) — sorting
+  on the parsed numeric prefix with a filename tie-break produces a total,
+  deterministic order and correctly resolves a 5-digit prefix sorting after a
+  4-digit one; the `PADDED_PREFIX` capturing group is used correctly.
+- **`packages/test-support/src/provision-db.ts`** (prior WR-06) —
+  `buildEphemeralDatabaseName`'s hash-truncation path was hand-traced: the
+  kept prefix (54 bytes) always exceeds `mega_crm_test_`'s length (14 bytes),
+  so a truncated name always still starts with the required prefix and always
+  stays within `[a-z0-9_]`, satisfying both the SAFE_IDENTIFIER allow-list and
+  the destructive-drop guard's namespace check. No defect found here.
+  (Prior IN-01, the `OWNER mega_crm_app` literal, was not touched by this
+  round of fixes and is not re-asserted; it was Info-level and out of this
+  review's re-scope.)
+
+The fifth fix — `scripts/lint-migrations.mjs`'s move from per-line to
+per-statement matching in `checkDestructiveDdl` (prior WR-02) — does fix the
+multi-line evasion it was written for (confirmed against
+`bad-destructive-multiline.sql`), but the statement splitter it introduces
+walks *raw* lines for the semicolon boundary with no awareness of comments or
+string literals. That produces two new, empirically-reproduced defects in the
+exact rule whose entire job is to catch dangerous DDL before it reaches
+production: a false negative that lets genuinely unsafe multi-line DDL through
+silently (Critical — this is the "gate that cannot fail for the reason it
+exists" failure mode this phase is otherwise careful to close everywhere
+else), and a false positive that can block a merge over someone's unrelated
+code comment (Warning). Both are demonstrated below by running the actual
+exported function, not hypothesized.
+
+## Structural Findings (fallow)
+
+None supplied for this review.
+
+## Narrative Findings (AI reviewer)
+
+## Critical Issues
+
+### CR-01: `checkDestructiveDdl`'s statement splitter can be evaded by a semicolon inside an inline comment, letting genuinely unsafe DDL pass QG-05 silently
+
+**File:** `scripts/lint-migrations.mjs:98-150` (root cause at line 104: `if (!lines[i].includes(";")) continue;`)
+
+**Issue:** The fix for the prior WR-02 finding changed statement-boundary
+detection from "does this physical line contain the keyword" to "walk lines
+until one contains a `;`, then test the joined text" — but the boundary scan
+runs over the **raw** lines, with no comment- or string-literal-awareness. A
+`;` inside an inline `--` comment (or inside a string literal) is treated
+identically to a real SQL statement terminator, which **prematurely closes the
+statement** before its second identifying keyword (`NOT NULL`, or the far half
+of a wrapped `DROP … COLUMN`) is ever read into the same joined chunk. Neither
+resulting fragment then contains both keywords together, so
+`isUnsafeNotNull`/`isDropColumn` never fire, and the migration is reported
+clean.
+
+Empirically reproduced against the actual exported function:
+
+```
+ALTER TABLE campaigns
+  ADD COLUMN legacy_flag boolean -- temporary; will backfill via migration N+1
+  NOT NULL;
+```
+
+`checkDestructiveDdl("evasion.sql", <above>)` returns `[]` — zero violations —
+for a column addition that is `NOT NULL` with no `DEFAULT`, unmarked, of
+exactly the shape `packages/db/src/__tests__/migrate-incremental.test.ts` in
+this same phase proves fails against a populated table at deploy time. CI goes
+green having verified nothing about this statement — the precise "gate that
+can pass while having verified nothing" / "gate that cannot fail for the
+reason it exists" failure class this phase is otherwise careful to close
+everywhere (lint file-count floor, coverage empty-denominator, redis-config
+policy-only check) — present here, newly, in the fix to the migration linter
+itself.
+
+**Fix:** Determine statement boundaries and do keyword matching against
+comment-stripped text (reuse `stripSqlComments`, or an equivalent that blanks
+`--`/`/* */` content in place rather than removing lines, so line numbers stay
+aligned), while continuing to use the **original** raw lines for the
+marker-adjacency walk only (the marker is itself a comment and must stay
+visible to that half of the logic, which is already correctly designed this
+way). Concretely: build a parallel array of comment-stripped lines once per
+file; use it to (a) find the true `;` boundaries and (b) build `statementText`
+for the `isDropColumn`/`isUnsafeNotNull` tests; keep using the raw `lines`
+array only for `isCommentOnlyLine`/`DESTRUCTIVE_MARKER` matching. Add a
+regression fixture alongside `bad-destructive-multiline.sql` with a
+semicolon-bearing comment between the two keywords, and assert it is still
+flagged.
 
 ## Warnings
 
-### WR-01: A failed advisory-unlock in the migration fixture leaks the pg client and can hang `pool.end()` forever
+### WR-01: The same statement splitter produces a false positive: an unrelated preceding comment can get a fully safe, nullable column addition flagged as unmarked destructive DDL
 
-**File:** `packages/test-support/src/db-fixture.ts:85-116`
-**Issue:** `applyPendingMigrations` acquires a session-level advisory lock, then in a single `finally` block runs the unlock query followed unconditionally by `client.release()`:
+**File:** `scripts/lint-migrations.mjs:98-150`
 
-```ts
-} finally {
-  await client.query("SELECT pg_advisory_unlock($1)", [MIGRATION_ADVISORY_LOCK_KEY]);
-  client.release();
-}
+**Issue:** The inverse of CR-01, same root cause. A comment-only line that
+does *not* contain a `;` is folded into the *same* joined `statementText` as
+the next real statement (there was no earlier terminator to close a separate
+chunk), so any word or phrase inside that comment participates in the
+`isUnsafeNotNull` keyword test. A comment that happens to contain the words
+"not null" — plausible prose in a migration file discussing a schema
+convention — causes a completely unconstrained `ADD COLUMN` (no `NOT NULL` on
+it at all) to be reported as unmarked destructive DDL.
+
+Empirically reproduced:
+
+```
+-- note: legacy columns are NOT NULL by convention
+ALTER TABLE foo ADD COLUMN bar text;
 ```
 
-If the unlock query itself throws (e.g. the connection was already dropped by
-the server — a live possibility under CI, where `docker compose` Postgres can
-hiccup, or under the `redis-restart`/`sigkill` failure-injection scenarios that
-run in the same CI job), the throw propagates out of the `finally` block
-*before* `client.release()` executes. The `pg.Pool` client is then never
-returned to the pool. `ensureTestDbMigrated()` chains
-`applyPendingMigrations(pool).finally(() => pool.end())`, and node-postgres's
-`Pool.end()` waits for every checked-out client to be released before it
-resolves — so the leaked client causes `pool.end()` (and therefore the whole
-`beforeAll` awaiting `ensureTestDbMigrated()`) to hang until the surrounding
-`hookTimeout` kills the run, rather than failing fast with the real error.
-**Fix:** Release unconditionally regardless of whether the unlock query
-succeeded:
-```ts
-} finally {
-  try {
-    await client.query("SELECT pg_advisory_unlock($1)", [MIGRATION_ADVISORY_LOCK_KEY]);
-  } finally {
-    client.release();
-  }
-}
-```
+`checkDestructiveDdl("fp.sql", <above>)` returns one
+`destructive-ddl-unmarked` violation at line 2, for a statement that adds a
+nullable column with **no constraint whatsoever**.
 
-### WR-02: The destructive-DDL lint rule only matches statements written on a single line
+Unlike CR-01 this fails loud (blocks the merge rather than hiding a risk), so
+it is a correctness/maintainability defect rather than a safety one — but a
+migration linter that can reject legitimate, safe migrations for reasons that
+have nothing to do with their SQL erodes trust in the gate and invites the
+"just reword the comment to make CI happy" workaround that makes a linter
+meaningless over time.
 
-**File:** `scripts/lint-migrations.mjs:83-114`
-**Issue:** `checkDestructiveDdl` tests `DROP\s+COLUMN` and the unsafe
-`ADD COLUMN ... NOT NULL` shape against `lines[i]` individually — one line at
-a time. A migration that wraps the statement across lines, e.g.:
-```sql
-ALTER TABLE "campaigns"
-  ADD COLUMN "mandatory_note" text
-  NOT NULL;
-```
-never has both `ADD COLUMN` and `NOT NULL` present on the *same* line, so
-`isUnsafeNotNull` is false for every line and the statement is silently
-accepted without requiring a `-- destructive:` marker — even though it is
-exactly the shape the rule exists to catch. Contrast with
-`checkEnumAddValueSameFile`'s regex, which correctly uses `\s+` (matching
-newlines) and therefore *does* tolerate multi-line statements. Nothing in
-`lintMigrationDirectory`'s current 38-file corpus happens to use this
-formatting, which is why `lintMigrationDirectory(MIGRATIONS)` in
-`migration-lint.test.ts` reports zero violations — the gate has not actually
-been proven against a multi-line destructive statement.
-**Fix:** Join each statement (naive approach: collapse runs of whitespace
-including newlines before matching, similar to how `checkEnumAddValueSameFile`
-already tolerates newlines) before applying the `DROP COLUMN` /
-`ADD COLUMN ... NOT NULL` tests, or explicitly scan statement-by-statement
-(split on `;`) rather than line-by-line.
+**Fix:** Same fix as CR-01 — build the keyword-matching text from
+comment-stripped lines, not raw ones. Once that is done, this false positive
+and CR-01's false negative are both closed by the same change.
 
-### WR-03: The destructive-DDL rule's coverage is narrower than its own stated purpose
+### WR-02: `TempRedis.restart()`/`terminate()` does not surface a stuck child process; it silently proceeds to rebind the same port
 
-**File:** `scripts/lint-migrations.mjs:1-16, 83-114`
-**Issue:** The file's header comment frames rule 2 generally — "Destructive DDL
-with no visible, reason-bearing marker" — but the implementation only
-recognizes two shapes: `DROP COLUMN` and `ADD COLUMN ... NOT NULL` with no
-`DEFAULT`. `DROP TABLE`, `TRUNCATE`, and `ALTER TABLE ... ALTER COLUMN TYPE`
-(a type change can silently truncate or reject existing data) are at least as
-destructive and pass through completely unmarked and unflagged. A migration
-that drops an entire table requires no `-- destructive:` comment at all under
-this linter.
-**Fix:** Either narrow the header comment to name exactly the two covered
-shapes (so the gate's advertised scope matches its actual scope), or extend
-`checkDestructiveDdl` to also match `DROP\s+TABLE`, `TRUNCATE`, and
-`ALTER\s+COLUMN\s+\S+\s+TYPE`.
+**File:** `packages/test-support/src/harness/temp-redis.ts:225-232`
 
-### WR-04: `checkRatchet` can report a pass without validating the current value it is supposed to be ratcheting
-
-**File:** `scripts/coverage-ratchet.mjs:34-44`
 **Issue:**
-```js
-export function checkRatchet(current, base) {
-  const currentLines = Number(current?.lines);
-  if (base === null || base === undefined) {
-    return { pass: true, current: currentLines, base: null, delta: null };
+
+```ts
+async function terminate(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  child.kill("SIGTERM");
+  if (!(await waitForExit(child, STOP_TIMEOUT_MS))) {
+    child.kill("SIGKILL");
+    await waitForExit(child, STOP_TIMEOUT_MS);
   }
-  ...
 }
 ```
-When `base` is `null` (the documented "introducing commit" case — the base
-branch has no `coverage-baseline.json` yet), the function returns `pass: true`
-unconditionally, without checking whether `currentLines` is even a valid
-number. If `coverage-baseline.json` on the current commit is malformed (e.g.
-the `lines` key was renamed or omitted by a typo in the very commit that
-introduces the file), `currentLines` is `NaN`, and the ratchet still reports
-`pass: true` — a vacuous pass on the one commit where there is nothing yet to
-compare against, exactly the class of gap this review was asked to weight
-toward. `checkCoverageGate` (the sibling script) explicitly guards its
-equivalent empty-denominator case; `checkRatchet`'s null-base branch does not
-have an equivalent guard for an invalid `current`.
-**Fix:** Validate `Number.isFinite(currentLines)` before returning `pass: true`
-in the null-base branch, and fail with a clear "coverage-baseline.json is
-malformed" message otherwise.
 
-### WR-05: The zero-padded-migration-filename check enforces a minimum width, not a uniform one, so its own stated guarantee does not fully hold
+The second `waitForExit`'s boolean return value is discarded. If a child does
+not report exit within `STOP_TIMEOUT_MS` even after `SIGKILL` (e.g. it is
+wedged in an uninterruptible D-state, or the "exit" event is delayed under
+extreme host load), `terminate()` returns normally as though termination
+succeeded. `restart()` then immediately calls `spawnServer(binary, args)` with
+the **same port** the possibly-still-live process holds, and `stop()`
+proceeds to `rm(dir, ...)` the data directory a possibly-still-writing process
+still owns. The resulting failure (`awaitReady` reporting "redis-server exited
+before becoming ready" or a bind error) would read as flaky infrastructure
+rather than naming the real cause: a process that never actually died. This is
+exactly the "unhandled exit path" this review was asked to weight toward for
+this file, even though in ordinary operation `SIGKILL` is effectively always
+fatal and this is a long-tail case.
 
-**File:** `packages/test-support/src/migration-runner.ts:24-54`
-**Issue:** The doc comment states the invariant plainly: *"lexicographic
-sorting only agrees with numeric order while every name is padded"* — but
-`PADDED_PREFIX = /^\d{4,}_/` only requires **at least** 4 digits, not exactly
-4 (or any single fixed width). Lexicographic ordering across differing digit
-widths is not numerically monotonic in general: e.g. `"0009_x.sql"` sorts
-*after* `"00010_y.sql"` (comparing character-by-character, `'9' > '1'` at
-position 4), even though 9 < 10 numerically. Once the migration count crosses
-9999 and a 5-digit-prefixed file is added alongside existing 4-digit files
-whose leading digit is `>= 1` (which is every file from `0001_` onward), the
-new file can sort *before* files it should logically follow, and
-`listMigrationFiles`'s regex accepts this without complaint — the exact
-silent-misordering failure mode the function's own comment says it exists to
-prevent. `migration-runner.test.ts`'s "accepts more than four digits" case
-only exercises the coincidentally-safe pairing (`"0000_a.sql"` vs
-`"10000_z.sql"`, where the leading `'0'` vs `'1'` happens to sort correctly)
-and does not cover the unsafe pairing.
-**Fix:** Either enforce a single fixed width (e.g. exactly 4 digits, with an
-explicit migration plan for when the count would exceed it), or sort
-numerically on the parsed prefix instead of relying on `Array.prototype.sort`'s
-lexicographic string order.
-
-### WR-06: `buildEphemeralDatabaseName`'s 63-byte truncation can violate its own documented no-collision guarantee
-
-**File:** `packages/test-support/src/provision-db.ts:49-56`
-**Issue:** The function's doc comment states the deliverable directly:
-*"unique per workspace and per run (D-10), so two concurrent CI runs can never
-collide on one physical database."* But the implementation is a plain
-`.slice(0, MAX_IDENTIFIER_LENGTH)` with no collision-avoidance step (e.g. a
-hash suffix). `TEST_DATABASE_PREFIX + "_"` already consumes 14 of the 63
-available bytes, leaving 49 for `<workspace>_<runId>` combined. Two different
-`runId`s for a sufficiently long `workspace` string are silently truncated to
-an identical database name, and `dropEphemeralDatabase` combined with
-`createEphemeralDatabase` calling it first means the second run's
-`createEphemeralDatabase` would drop the first run's still-in-use database out
-from under it before recreating it — the opposite of the isolation this
-function exists to provide. Current call sites all use short, static workspace
-strings (`"api"`, `"worker"`, `"e2e"`, `"delivery-core"`, …), so this is not
-observed today, but the function is exported as a general-purpose API
-(`packages/test-support/src/index.ts`) with no length guard or warning at the
-call boundary.
-**Fix:** Either document the effective workspace-name length budget as part of
-the function's contract and assert it (throw if the sanitized workspace name
-alone would leave too little room for the runId to remain distinguishable), or
-truncate by hashing the full un-truncated name into the tail instead of a
-blind prefix slice.
+**Fix:** Check the second `waitForExit`'s return value and throw a clear error
+(naming the PID) when a child survives `SIGKILL` for the full timeout, rather
+than letting `restart()`/`stop()` proceed as if it had exited.
 
 ## Info
 
-### IN-01: `OWNER mega_crm_app` in the CREATE DATABASE statement is a re-typed literal, not derived from `DEFAULT_APP_ROLE`
+### IN-01: The destructive-DDL rule does not cover `DROP TABLE`, `TRUNCATE`, or column type changes
 
-**File:** `packages/test-support/src/provision-db.ts:30, 136-138`
-**Issue:** `DEFAULT_APP_ROLE = "mega_crm_app"` is defined as a named constant
-specifically so the role name has one source of truth, but the `CREATE
-DATABASE` statement re-types the literal string instead of interpolating the
-constant: `` `CREATE DATABASE ${quoteIdentifier(databaseName)} OWNER
-mega_crm_app` ``. If `DEFAULT_APP_ROLE` is ever changed, this line will not
-follow it, and newly-created ephemeral databases would silently get the wrong
-owner (and, per the adjacent `buildAppDsn` comment, RLS assertions relying on
-running as the app role would become vacuous).
-**Fix:** `` `CREATE DATABASE ${quoteIdentifier(databaseName)} OWNER
-${quoteIdentifier(DEFAULT_APP_ROLE)}` `` (safe here since `DEFAULT_APP_ROLE`
-is a module constant, not caller input, matching the code's own reasoning for
-why the current literal is "safe").
+**File:** `scripts/lint-migrations.mjs:98-150`
 
-### IN-02: A failed `restart()` in the temp-Redis harness leaves the new process and its temp directory uncleaned
+**Issue:** `checkDestructiveDdl` only recognizes `DROP COLUMN` and unsafe
+`ADD COLUMN … NOT NULL` without a `DEFAULT`. A `DROP TABLE`, `TRUNCATE`, or an
+in-place column type change in a migration file passes this linter with zero
+violations regardless of whether it carries a marker.
 
-**File:** `packages/test-support/src/harness/temp-redis.ts:268-275`
-**Issue:** `TempRedis.restart()` terminates the old process and calls
-`spawnServer` again, then `awaitReady`. If `awaitReady` throws (e.g. the
-restarted server fails to come up), nothing in `restart()`'s own code path
-calls `stop()` — the new child process is only guaranteed to be killed by the
-process-`exit` hook (`live` set), and the new `dir` (a `mkdtemp` temp
-directory) is never removed at all, since removal only happens inside
-`stop()`. Compare with `startTempRedis`, whose top-level `try { await
-awaitReady(...) } catch { await instance.stop(); throw err; }` explicitly
-handles this same failure shape.
-**Fix:** Wrap the `awaitReady(proc, port, binary)` call inside `restart()`
-with the same catch-and-`stop()`-then-rethrow pattern `startTempRedis` already
-uses.
+This is a **documented scope boundary**, not a defect: CONVENTIONS.md bounds
+the rule to exactly these two patterns (this was raised and closed as
+out-of-scope in the prior review round, WR-03, rather than fixed). Recording
+it here only so this re-review is explicit about having considered it and
+found the boundary unchanged — no action implied.
 
 ---
 
