@@ -104,6 +104,36 @@ export default tseslint.config(
     },
   },
 
+  // Block 4b — the `no-unsafe-*` family, off for test files ONLY (08-07, D-06).
+  //
+  // Measured at the 08-07 baseline: 243 violations of these five rules, of which
+  // 238 are in test files and 5 in source. The 238 have a single root cause that
+  // is not a defect in our code — Fastify's `app.inject()` returns a
+  // light-my-request Response whose body reader is typed `json: <T = any>() => T`,
+  // so every expression derived from a response body is `any` by construction.
+  // The rule is reporting the type of a third-party test helper, not a place
+  // where this codebase loses type safety in shipped code.
+  //
+  // Scoped to tests deliberately: in source these rules stay fully on, which is
+  // where an `any` crossing a boundary actually matters. The 5 source violations
+  // were fixed individually rather than absorbed by this block.
+  //
+  // NOT disabled here, in tests or anywhere: no-floating-promises,
+  // no-misused-promises, await-thenable, require-await. That rule class is the
+  // entire reason D-05 chose the type-aware tier, and an un-awaited promise in a
+  // test is a test that can pass before its assertions run.
+  // See docs/lint-rule-exceptions.md.
+  {
+    files: ["**/*.test.ts", "**/*.test.tsx", "**/__tests__/**/*.{ts,tsx}"],
+    rules: {
+      "@typescript-eslint/no-unsafe-member-access": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/no-unsafe-argument": "off",
+      "@typescript-eslint/no-unsafe-return": "off",
+      "@typescript-eslint/no-unsafe-call": "off",
+    },
+  },
+
   // Block 5 — Playwright specs. @vitest/eslint-plugin's rule is vitest-specific
   // and does not see these files, but a .only here is the same silent-green risk.
   {
