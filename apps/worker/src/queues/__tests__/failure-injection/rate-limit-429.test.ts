@@ -68,7 +68,7 @@ describe("failure injection: SendGrid 429 rate limit (QG-06)", () => {
       { sendMail: fakeSendMail(429, { "retry-after": "3" }), redisClient },
     );
 
-    expect(result).toEqual({ outcome: "THROWAWAY_BREAK", rateLimitMs: 3000 });
+    expect(result).toEqual({ outcome: "rate_limited", rateLimitMs: 3000 });
 
     // The assertion that matters. A claim left at `dispatching` would send the
     // retry into the interrupted branch and resolve this contact to `failed`.
