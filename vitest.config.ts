@@ -43,6 +43,8 @@ export default defineConfig({
       "packages/delivery-core/vitest.config.ts",
       "packages/flows-core/vitest.config.ts",
       "packages/test-support/vitest.config.ts",
+      "packages/kms/vitest.config.ts",
+      "packages/tenant-context/vitest.config.ts",
       "packages/segments-core/vitest.config.ts",
       "packages/shared-schemas/vitest.config.ts",
     ],

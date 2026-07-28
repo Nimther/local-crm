@@ -6,13 +6,16 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run"
   },
   "dependencies": {
     "pg": "8.22.0"
   },
   "devDependencies": {
+    "@mega-crm/test-support": "0.1.0",
     "@types/pg": "^8.15.6",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "4.1.9"
   }
 }
