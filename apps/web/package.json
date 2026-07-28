@@ -8,7 +8,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "dev:e2e": "vite"
   },
   "dependencies": {
     "@hookform/resolvers": "5.4.0",
@@ -49,6 +50,7 @@
     "zustand": "5.0.14"
   },
   "devDependencies": {
+    "@mega-crm/test-support": "0.1.0",
     "@playwright/test": "1.61.1",
     "@types/node": "^22.10.5",
     "@types/react": "19.2.17",

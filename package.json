@@ -23,7 +23,8 @@
     "failure:429": "vitest run --root apps/worker src/queues/__tests__/failure-injection/rate-limit-429.test.ts",
     "failure:timeout": "vitest run --root apps/worker src/queues/__tests__/failure-injection/timeout.test.ts",
     "failure:reset": "vitest run --root apps/worker src/queues/__tests__/failure-injection/connection-reset.test.ts",
-    "test:migrations": "vitest run --root packages/db"
+    "test:migrations": "vitest run --root packages/db",
+    "test:e2e": "npm run test:e2e -w apps/web"
   },
   "devDependencies": {
     "@vitest/eslint-plugin": "^1.6.24",
