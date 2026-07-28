@@ -50,4 +50,22 @@ describe("checkRatchet", () => {
     const result = checkRatchet({ lines: current }, { lines: base });
     expect(result.pass, "a tolerance band is a smaller version of the same loophole").toBe(false);
   });
+
+  // 08-REVIEW WR-04: the null-base branch used to return `pass: true`
+  // unconditionally, without checking whether `currentLines` was even a
+  // valid number. That is a vacuous pass on the one commit where there is
+  // nothing yet to compare against -- exactly the introducing-commit case
+  // this branch exists to handle.
+  it("fails when the base has no baseline yet AND the current baseline is malformed", () => {
+    const result = checkRatchet({ lines: "not-a-number" }, null);
+    expect(result.pass, "a malformed current baseline must not pass vacuously").toBe(false);
+    expect(result.base).toBeNull();
+    expect(result.reason).toMatch(/malformed/i);
+  });
+
+  it("fails when the base has no baseline yet AND `lines` is missing entirely", () => {
+    const result = checkRatchet({}, null);
+    expect(result.pass).toBe(false);
+    expect(result.reason).toMatch(/malformed/i);
+  });
 });

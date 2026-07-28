@@ -29,12 +29,28 @@ const BASELINE_FILE = "coverage-baseline.json";
 /**
  * @param current parsed working-tree coverage-baseline.json
  * @param base    parsed base-branch copy, or null when the base has no such file
- * @returns {{ pass: boolean, current: number, base: number|null, delta: number|null }}
+ * @returns {{ pass: boolean, current: number, base: number|null, delta: number|null, reason?: string }}
  */
 export function checkRatchet(current, base) {
   const currentLines = Number(current?.lines);
 
   if (base === null || base === undefined) {
+    // 08-REVIEW WR-04: the null-base branch is the "introducing commit" case
+    // — there is nothing yet to ratchet against — but that must not become a
+    // vacuous pass for a malformed `current`. Without this guard, a typo'd or
+    // missing `lines` key in the very commit that introduces
+    // coverage-baseline.json makes `currentLines` NaN and still reports
+    // `pass: true`, mirroring the empty-denominator guard `checkCoverageGate`
+    // already has for its own sibling case.
+    if (!Number.isFinite(currentLines)) {
+      return {
+        pass: false,
+        current: currentLines,
+        base: null,
+        delta: null,
+        reason: `${BASELINE_FILE} is malformed — "lines" must be a finite number, got ${JSON.stringify(current?.lines)}`,
+      };
+    }
     return { pass: true, current: currentLines, base: null, delta: null };
   }
 
@@ -104,15 +120,17 @@ if (isDirectInvocation()) {
 
   if (!result.pass) {
     console.error(
-      [
-        "",
-        "coverage:ratchet FAILED: the recorded coverage threshold was LOWERED.",
-        "",
-        "Raising coverage is the way to make a red gate green. Lowering the",
-        "threshold makes the gate agree with the regression instead. If the",
-        "number genuinely needs re-measuring, say so in the commit and update",
-        "measuredLines/measuredAt alongside it so the change is auditable.",
-      ].join("\n"),
+      result.reason
+        ? ["", `coverage:ratchet FAILED: ${result.reason}.`].join("\n")
+        : [
+            "",
+            "coverage:ratchet FAILED: the recorded coverage threshold was LOWERED.",
+            "",
+            "Raising coverage is the way to make a red gate green. Lowering the",
+            "threshold makes the gate agree with the regression instead. If the",
+            "number genuinely needs re-measuring, say so in the commit and update",
+            "measuredLines/measuredAt alongside it so the change is auditable.",
+          ].join("\n"),
     );
     process.exit(1);
   }
