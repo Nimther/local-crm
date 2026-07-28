@@ -99,6 +99,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # The aggregate includes apps/worker's redis-restart scenario, which
+      # starts its own throwaway server from docker/redis.conf. Same ordering
+      # constraint as the failure-injection job: install while 6379 is free,
+      # take the system service down, then let compose bind the port.
+      - name: Install redis-server and free port 6379
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y redis-server
+          sudo systemctl disable --now redis-server
+
       # `--wait` blocks on the healthcheck blocks already defined for `db` and
       # `redis` in docker-compose.yml. Never add a `sleep` here — if the runner
       # genuinely needs longer, raise `--wait-timeout` explicitly instead.

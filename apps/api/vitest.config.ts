@@ -66,6 +66,21 @@ export default defineConfig({
       // pattern above -- only an explicit TEST_PUBLIC_APP_URL can override
       // the deterministic https default.
       PUBLIC_APP_URL: process.env.TEST_PUBLIC_APP_URL ?? "https://api.test.local",
+      // 08-18: these three are boot-required by env.ts and were the ONLY
+      // required variables this block never supplied — the developer's own
+      // configuration file happened to carry them, so the suite passed
+      // locally and had simply never run anywhere else. The tracer CI job ran
+      // `-w apps/worker` only; the aggregate that includes apps/api first ran
+      // in CI in this plan, and failed immediately on all three.
+      //
+      // The `??` form is deliberate and matches every other entry here: a
+      // developer with these set keeps their values, and the defaults exist
+      // so the suite does not depend on a file outside the repository.
+      // Values mirror apps/web/playwright.config.ts's webServer block so the
+      // two test lanes cannot drift. Neither is a real credential.
+      BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET ?? "test-only-better-auth-secret-value",
+      BETTER_AUTH_URL: process.env.BETTER_AUTH_URL ?? "http://localhost:4000",
+      WEB_URL: process.env.WEB_URL ?? "http://localhost:5173",
     },
   },
 });
