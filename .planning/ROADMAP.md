@@ -55,7 +55,7 @@ Full phase details: [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md)
   4. Redis refuses new writes with an error instead of silently evicting when it hits its memory ceiling, and queued jobs survive a Redis container restart.
   5. A migration is automatically verified both from an empty database and on top of the current schema, and expand/contract sequencing is a written, enforced rule; `.env`/`dump.rdb` are out of the repo working root, and `ARCHITECTURE.md`/`CONVENTIONS.md` exist with a binding update rule in `CLAUDE.md`.
 
-**Plans**: 3/18 plans executed
+**Plans**: 4/18 plans executed
 
 Plans:
 **Wave 1**
@@ -69,7 +69,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 08-03-PLAN.md — ESLint flat config, fail-first fixtures, version-controlled lint file-count floor
+- [x] 08-03-PLAN.md — ESLint flat config, fail-first fixtures, version-controlled lint file-count floor
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
@@ -407,7 +407,7 @@ Phase 9 has no dependents and may be scheduled in parallel at any point after Ph
 | 5. Webhook Processing & Delivery Tracking | v1.0 | 13/13 | Complete | 2026-07-09 |
 | 6. Flows (Triggered Chains) | v1.0 | 24/24 | Complete | 2026-07-13 |
 | 7. Analytics, Dashboard & Send Log | v1.0 | 11/11 | Complete | 2026-07-14 |
-| 8. Quality Gates & Failure-Injection Foundation | v1.1 | 3/18 | In Progress|  |
+| 8. Quality Gates & Failure-Injection Foundation | v1.1 | 4/18 | In Progress|  |
 | 9. Partition Automation & Boundary Safety | v1.1 | 0/TBD | Not started | - |
 | 10. Tenant Isolation & Trust Boundaries | v1.1 | 0/TBD | Not started | - |
 | 11. Delivery Correctness | v1.1 | 0/TBD | Not started | - |
