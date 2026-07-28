@@ -7,7 +7,7 @@ import { apiDelete, apiGet, apiPost } from "@/lib/api";
 import { useSession } from "@/lib/authClient";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { InviteModal } from "@/features/team/InviteModal";
 import { MemberRow, type MemberRowData } from "@/features/team/MemberRow";
 import { DeleteWorkspaceDialog } from "@/features/team/DeleteWorkspaceDialog";

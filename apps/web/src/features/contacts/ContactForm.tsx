@@ -281,14 +281,14 @@ export function ContactForm({ slug, contact, showProperties = true, onSuccess }:
       subscriptionStatus: contact?.subscriptionStatus === "suppressed" ? undefined : subscriptionStatus,
       ...(showProperties ? { properties } : {}),
     };
-    await mutation.mutateAsync(payload as CreateContactInput | UpdateContactInput);
+    await mutation.mutateAsync(payload);
   }
 
   const externalIdLocked = Boolean(contact?.externalId);
 
   return (
     <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+      <form onSubmit={(e) => void form.handleSubmit(onSubmit)(e)} className="space-y-4">
         <div className="grid grid-cols-2 gap-4">
           <FormField
             control={form.control}
@@ -446,7 +446,7 @@ export function CreateContactDialog({ slug }: { slug: string }) {
           slug={slug}
           onSuccess={(created) => {
             setOpen(false);
-            navigate(`/w/${slug}/contacts/${created.id}`);
+            void navigate(`/w/${slug}/contacts/${created.id}`);
           }}
         />
       </DialogContent>

@@ -333,7 +333,7 @@ export function SegmentDetailPage() {
           </p>
         ) : null}
 
-        <Button onClick={handleSave} disabled={saveMutation.isPending}>
+        <Button onClick={() => void handleSave()} disabled={saveMutation.isPending}>
           {saveMutation.isPending
             ? "Сохраняем…"
             : pendingConfirmCampaign

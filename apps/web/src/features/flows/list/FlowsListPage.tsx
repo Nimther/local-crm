@@ -102,7 +102,7 @@ function CreateFlowDialog({
         onSuccess: (created) => {
           toast.success("Цепочка создана");
           handleOpenChange(false);
-          navigate(`/w/${slug}/flows/${created.id}`);
+          void navigate(`/w/${slug}/flows/${created.id}`);
         },
         onError: () => setServerError(GENERIC_ERROR),
       }
@@ -178,7 +178,7 @@ export function FlowsListPage() {
     duplicateMutation.mutate(flow.id, {
       onSuccess: (duplicated) => {
         toast.success("Цепочка продублирована");
-        navigate(`/w/${slug}/flows/${duplicated.id}`);
+        void navigate(`/w/${slug}/flows/${duplicated.id}`);
       },
       onError: () => toast.error(GENERIC_ERROR),
     });
@@ -250,7 +250,7 @@ export function FlowsListPage() {
                   <TableRow
                     key={flow.id}
                     className="h-12 cursor-pointer"
-                    onClick={() => navigate(`/w/${slug}/flows/${flow.id}`)}
+                    onClick={() => void navigate(`/w/${slug}/flows/${flow.id}`)}
                   >
                     <TableCell>{flow.name}</TableCell>
                     <TableCell>
@@ -266,7 +266,7 @@ export function FlowsListPage() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onSelect={() => navigate(`/w/${slug}/flows/${flow.id}`)}>
+                          <DropdownMenuItem onSelect={() => void navigate(`/w/${slug}/flows/${flow.id}`)}>
                             Открыть
                           </DropdownMenuItem>
                           <DropdownMenuItem

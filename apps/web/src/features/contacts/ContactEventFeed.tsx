@@ -153,7 +153,9 @@ function EventRow({ row }: { row: TimelineRow }) {
 
 /** kind='send' row -- current status badge (D-06 priority chain, computed server-side), «×N» repeat opens/clicks (D-11), and the bounce/drop/exclusion reason when present. */
 function SendRow({ row }: { row: TimelineRow }) {
-  const status = String(row.detail.status ?? "sent");
+  // detail is a freeform JSONB bag, so `status` is unknown — String() on an
+  // object here would render "[object Object]" into the badge.
+  const status = typeof row.detail.status === "string" ? row.detail.status : "sent";
   const openCount = Number(row.detail.openCount ?? 0);
   const clickCount = Number(row.detail.clickCount ?? 0);
   const reason = row.detail.reason as string | null | undefined;

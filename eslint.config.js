@@ -55,6 +55,24 @@ export default tseslint.config(
         tsconfigRootDir: import.meta.dirname,
       },
     },
+    rules: {
+      // 08-07: recognize the leading-underscore convention this codebase
+      // already writes, e.g. `const { dayOfWeek: _omitted, ...rest } = delay`
+      // — a binding that exists precisely so a key can be dropped from the
+      // rest object. The name IS the signal that it is unused on purpose;
+      // without this option the only alternatives are a suppression comment
+      // per site or deleting a deliberately-named binding.
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        {
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+          caughtErrorsIgnorePattern: "^_",
+          destructuredArrayIgnorePattern: "^_",
+          ignoreRestSiblings: true,
+        },
+      ],
+    },
   },
 
   // Block 3 — everything outside src/: config files and plain Node scripts.

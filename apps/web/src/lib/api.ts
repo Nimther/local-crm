@@ -17,7 +17,9 @@ export class ApiError extends Error {
 
 function extractErrorMessage(body: unknown, fallback: string): string {
   if (body && typeof body === "object" && "error" in body) {
-    const err = (body as { error: unknown }).error;
+    // The guard above already narrows `body`; the assertion it used to carry
+    // restated a type TypeScript had, and hid that `.error` is unknown.
+    const err: unknown = body.error;
     if (typeof err === "string") return err;
     if (err && typeof err === "object") return JSON.stringify(err);
   }
@@ -35,7 +37,11 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   });
 
   const contentType = res.headers.get("content-type") ?? "";
-  const body = contentType.includes("application/json") ? await res.json() : undefined;
+  // res.json() is typed `Promise<any>`; landing it in `unknown` keeps that
+  // `any` from spreading into every caller through the return below.
+  const body: unknown = contentType.includes("application/json")
+    ? await res.json()
+    : undefined;
 
   if (!res.ok) {
     throw new ApiError(res.status, extractErrorMessage(body, `Request failed: ${res.status}`), body);

@@ -127,7 +127,7 @@ export function FlowDetailPage() {
     deleteMutation.mutate(flow.id, {
       onSuccess: () => {
         toast.success("Цепочка удалена");
-        navigate(`/w/${slug}/flows`);
+        void navigate(`/w/${slug}/flows`);
       },
       onError: (error: unknown) => {
         setDeleteConfirmOpen(false);

@@ -39,7 +39,7 @@ function DeleteContactDialog({ slug, contact }: { slug: string; contact: Contact
     onSuccess: async () => {
       toast.success("Контакт удалён");
       await queryClient.invalidateQueries({ queryKey: ["workspace", slug, "contacts"] });
-      navigate(`/w/${slug}/contacts`, { replace: true });
+      void navigate(`/w/${slug}/contacts`, { replace: true });
     },
     onError: () => {
       setServerError(GENERIC_ERROR);

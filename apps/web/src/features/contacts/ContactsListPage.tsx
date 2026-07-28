@@ -99,7 +99,9 @@ export function ContactsListPage() {
     placeholderData: keepPreviousData,
   });
 
-  const items = contactsQuery.data?.items ?? [];
+  // `?? []` built a fresh array every render, so the availableTags useMemo
+  // below re-ran on every render and memoized nothing.
+  const items = useMemo(() => contactsQuery.data?.items ?? [], [contactsQuery.data?.items]);
   const total = contactsQuery.data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
@@ -321,7 +323,7 @@ export function ContactsListPage() {
                         <TableRow
                           key={row.id}
                           className="h-12 cursor-pointer"
-                          onClick={() => navigate(`/w/${slug}/contacts/${row.original.id}`)}
+                          onClick={() => void navigate(`/w/${slug}/contacts/${row.original.id}`)}
                         >
                           {row.getVisibleCells().map((cell) => (
                             <TableCell key={cell.id}>

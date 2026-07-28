@@ -35,7 +35,7 @@ export default function CreateWorkspacePage() {
     try {
       const workspace = await apiPost<WorkspaceResponse>("/api/workspaces", values);
       await queryClient.invalidateQueries({ queryKey: ["workspaces"] });
-      navigate(`/w/${workspace.slug}`);
+      void navigate(`/w/${workspace.slug}`);
     } catch {
       setServerError("Что-то пошло не так. Попробуйте ещё раз — если ошибка повторится, обновите страницу.");
     }
@@ -50,7 +50,7 @@ export default function CreateWorkspacePage() {
         </CardHeader>
         <CardContent>
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+            <form onSubmit={(e) => void form.handleSubmit(onSubmit)(e)} className="space-y-4">
               <FormField
                 control={form.control}
                 name="name"

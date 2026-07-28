@@ -102,7 +102,7 @@ const edgeTypes: EdgeTypes = { flow: LabelledFlowEdge };
 export function definitionToCanvas(definition: FlowDefinition): { nodes: CanvasNode[]; edges: Edge[] } {
   const nodes = definition.nodes.map((node): CanvasNode => {
     const { id, type, position, ...config } = node;
-    return { id, type, position, data: { config: config as CanvasNodeConfig } };
+    return { id, type, position, data: { config } };
   });
   const edges = definition.edges.map(
     (edge): Edge => ({
@@ -163,7 +163,7 @@ function FlowCanvasInner({
       return nds.map((node) => ({ ...node, selected: node.id === focusNodeId }));
     });
     if (nodes.some((node) => node.id === focusNodeId)) {
-      fitView({ nodes: [{ id: focusNodeId }], duration: 300, maxZoom: 1 });
+      void fitView({ nodes: [{ id: focusNodeId }], duration: 300, maxZoom: 1 });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusNodeId]);

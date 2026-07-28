@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
 
 import { apiDelete } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -30,7 +29,7 @@ export function DeleteWorkspaceDialog({ slug, workspaceName }: { slug: string; w
     mutationFn: () => apiDelete(`/api/workspaces/${slug}`, { confirmName }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["workspaces"] });
-      navigate("/", { replace: true });
+      void navigate("/", { replace: true });
     },
     onError: () => {
       setServerError("Что-то пошло не так. Попробуйте ещё раз — если ошибка повторится, обновите страницу.");

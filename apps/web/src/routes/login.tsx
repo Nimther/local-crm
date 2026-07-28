@@ -41,7 +41,7 @@ export default function LoginPage() {
 
     // Root route (Task 3 / App.tsx) resolves whether the user has a
     // workspace and routes to /w/:slug or /create-workspace accordingly.
-    navigate("/");
+    void navigate("/");
   }
 
   return (
@@ -53,7 +53,7 @@ export default function LoginPage() {
         </CardHeader>
         <CardContent>
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+            <form onSubmit={(e) => void form.handleSubmit(onSubmit)(e)} className="space-y-4">
               <FormField
                 control={form.control}
                 name="email"

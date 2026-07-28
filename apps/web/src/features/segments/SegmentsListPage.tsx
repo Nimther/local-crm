@@ -75,7 +75,7 @@ export function SegmentsListPage() {
             Динамические аудитории по свойствам профиля и поведению.
           </p>
         </div>
-        <Button onClick={() => navigate(`/w/${slug}/segments/new`)}>Создать сегмент</Button>
+        <Button onClick={() => void navigate(`/w/${slug}/segments/new`)}>Создать сегмент</Button>
       </div>
 
       {isInitialLoad ? (
@@ -90,7 +90,7 @@ export function SegmentsListPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Button onClick={() => navigate(`/w/${slug}/segments/new`)}>Создать сегмент</Button>
+            <Button onClick={() => void navigate(`/w/${slug}/segments/new`)}>Создать сегмент</Button>
           </CardContent>
         </Card>
       ) : (
@@ -111,7 +111,7 @@ export function SegmentsListPage() {
                   <TableRow
                     key={segment.id}
                     className="h-12 cursor-pointer"
-                    onClick={() => navigate(`/w/${slug}/segments/${segment.id}`)}
+                    onClick={() => void navigate(`/w/${slug}/segments/${segment.id}`)}
                   >
                     <TableCell>{segment.name}</TableCell>
                     <TableCell>
@@ -140,7 +140,7 @@ export function SegmentsListPage() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onSelect={() => navigate(`/w/${slug}/segments/${segment.id}`)}>
+                          <DropdownMenuItem onSelect={() => void navigate(`/w/${slug}/segments/${segment.id}`)}>
                             Изменить
                           </DropdownMenuItem>
                           <DropdownMenuItem

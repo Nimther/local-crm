@@ -91,7 +91,7 @@ export function CampaignsListPage() {
       setServerError(null);
       await queryClient.invalidateQueries({ queryKey: ["workspace", slug, "campaigns"] });
       toast.success("Кампания продублирована");
-      navigate(`/w/${slug}/campaigns/${duplicated.id}`);
+      void navigate(`/w/${slug}/campaigns/${duplicated.id}`);
     },
     onError: () => {
       setServerError(GENERIC_ERROR);
@@ -125,7 +125,7 @@ export function CampaignsListPage() {
           <h1 className="text-display font-semibold">Кампании</h1>
           <p className="text-sm text-muted-foreground">Разовые email-рассылки по сегментам через SendGrid.</p>
         </div>
-        <Button onClick={() => navigate(`/w/${slug}/campaigns/new`)}>Создать кампанию</Button>
+        <Button onClick={() => void navigate(`/w/${slug}/campaigns/new`)}>Создать кампанию</Button>
       </div>
 
       {isInitialLoad ? (
@@ -139,7 +139,7 @@ export function CampaignsListPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Button onClick={() => navigate(`/w/${slug}/campaigns/new`)}>Создать кампанию</Button>
+            <Button onClick={() => void navigate(`/w/${slug}/campaigns/new`)}>Создать кампанию</Button>
           </CardContent>
         </Card>
       ) : (
@@ -171,7 +171,7 @@ export function CampaignsListPage() {
                   <TableRow
                     key={campaign.id}
                     className="h-12 cursor-pointer"
-                    onClick={() => navigate(`/w/${slug}/campaigns/${campaign.id}`)}
+                    onClick={() => void navigate(`/w/${slug}/campaigns/${campaign.id}`)}
                   >
                     <TableCell>{campaign.name}</TableCell>
                     <TableCell>
@@ -191,7 +191,7 @@ export function CampaignsListPage() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onSelect={() => navigate(`/w/${slug}/campaigns/${campaign.id}`)}>
+                          <DropdownMenuItem onSelect={() => void navigate(`/w/${slug}/campaigns/${campaign.id}`)}>
                             Открыть
                           </DropdownMenuItem>
                           <DropdownMenuItem

@@ -133,7 +133,7 @@ export function CampaignBuilderPage() {
       await queryClient.invalidateQueries({ queryKey: ["workspace", slug, "campaigns"] });
       toast.success(isEdit ? "Черновик сохранён" : "Кампания создана");
       if (!isEdit) {
-        navigate(`/w/${slug}/campaigns/${saved.id}`);
+        void navigate(`/w/${slug}/campaigns/${saved.id}`);
       }
     },
     onError: () => {
