@@ -49,6 +49,17 @@ jobs:
           docker compose exec -T db
           psql -U postgres -c "CREATE DATABASE mega_crm_test_worker OWNER mega_crm_app"
 
+      # 08-04 (WRK-12): the SAME script the local suite runs against a throwaway
+      # redis-server, here pointed at the container. This is the only place the
+      # `command:` override and the read-only docker/redis.conf mount are
+      # actually exercised — a machine without Docker cannot prove that path.
+      # REDIS_URL is supplied from outside precisely so the script needs no
+      # environment branch of its own.
+      - name: Verify Redis configuration
+        env:
+          REDIS_URL: redis://localhost:6379
+        run: npm run verify:redis-config
+
       # D-04: this step IS the typecheck. Every workspace's `build` script is
       # `tsc -p tsconfig.json` with noEmit, so a type error anywhere in the
       # monorepo fails the job. There is deliberately no separate tsc pass.

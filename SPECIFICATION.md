@@ -38,17 +38,36 @@
 `docker-compose.yml`: только два сервиса.
 
 - `db`: `postgres:17`, порт `5432:5432`, `POSTGRES_USER=postgres`, `POSTGRES_PASSWORD=postgres` (dev-креды в открытом виде), volume `mega_crm_db_data`, init-скрипт `docker/init-app-role.sql`.
-- `redis`: `redis:7`, порт `6379:6379`, volume `mega_crm_redis_data`. **Без `requirepass`** — Redis в dev-compose без аутентификации.
+- `redis`: `redis:7`, порт `6379:6379`, volume `mega_crm_redis_data`. С 08-04 сервис запускается **явным `command: ["redis-server", "/usr/local/etc/redis/redis.conf"]`** и монтирует `./docker/redis.conf` в `/usr/local/etc/redis/redis.conf` в режиме `:ro` — без `command:` образ стартовал бы на дефолтах и смонтированный файл не имел бы эффекта. **Без `requirepass`** — Redis в dev-compose без аутентификации.
 
 `docker/init-app-role.sql` создаёт роль `mega_crm_app` `NOSUPERUSER NOCREATEDB NOCREATEROLE **NOBYPASSRLS**` с паролем `mega_crm_dev_pw` и передаёт ей владение БД. Это единственное место, где кодифицировано требование «app-роль не должна иметь BYPASSRLS».
 
-`.github/workflows/ci.yml` (добавлен в 08-01): workflow `CI`, триггеры `push` (без фильтра веток) и `pull_request` (`branches: [master]`) — оба обязательны, иначе required status check не появляется на PR. `concurrency` по `${{ github.workflow }}-${{ github.ref }}` с `cancel-in-progress: true`. Один job с id и name `test` на `ubuntu-latest`. Шаги: `actions/checkout` и `actions/setup-node` (оба закреплены на полный 40-символьный commit SHA, тег — только в комментарии) → `npm ci` → `docker compose up -d --wait` (поднимает `db` и `redis` по их существующим healthcheck'ам, без `sleep`) → создание эфемерной БД `mega_crm_test_worker` через `docker compose exec -T db psql -U postgres` → `npm run build --workspaces --if-present` (**это и есть тайпчек**, отдельного `tsc --noEmit` нет) → `npm run test -w apps/worker`. Job-level `env`: `DATABASE_URL`, `TEST_DATABASE_URL`, `TEST_REDIS_URL` (dev-креды, те же что в compose).
+`docker/redis.conf` (добавлен в 08-04) содержит ровно четыре директивы:
+
+| Директива | Значение |
+|-----------|----------|
+| `maxmemory` | `512mb` |
+| `maxmemory-policy` | `noeviction` |
+| `appendonly` | `yes` |
+| `appendfsync` | `everysec` |
+
+`maxmemory` и `maxmemory-policy` обязательны вместе: `noeviction` — дефолт Redis, и при `maxmemory 0` (без лимита) он не может сработать вовсе, поэтому проверка одной только политики проходит против полностью ненастроенного сервера. `512mb` — dev-значение, а не измеренное; сайзинг под прод отнесён к фазе 15. Значения не параметризуются через переменные окружения: у `redis.conf` нет подстановки переменных, а entrypoint-обёртка вернула бы ровно то расхождение local/CI, ради устранения которого файл и заведён.
+
+Этот же файл — источник конфигурации для локальной проверки: `packages/test-support/src/harness/temp-redis.ts` поднимает из него **отдельный временный `redis-server`** на свободном порту с временным каталогом данных и гарантированно останавливает его и удаляет каталог. Системный Redis на `6379` при этом не читается, не перенастраивается и не перезапускается.
+
+`scripts/verify-redis-config.mjs` (добавлен в 08-04) читает `CONFIG GET` живого сервера и утверждает все четыре значения. Скрипт получает `REDIS_URL` **извне** и не имеет ни дефолтного адреса, ни ветки «локально/CI» — это один и тот же код в обоих окружениях, различается только передаваемый URL. Реализован на встроенных модулях Node (минимальный RESP-клиент на `node:net`), без зависимостей, как и остальные скрипты-гейты. Недоступный Redis и отсутствующий бинарь `redis-server` дают ненулевой код возврата, а не `skipped`: пропуск завершился бы кодом 0, который CI прочитал бы как успех.
+
+`.github/workflows/ci.yml` (добавлен в 08-01): workflow `CI`, триггеры `push` (без фильтра веток) и `pull_request` (`branches: [master]`) — оба обязательны, иначе required status check не появляется на PR. `concurrency` по `${{ github.workflow }}-${{ github.ref }}` с `cancel-in-progress: true`. Один job с id и name `test` на `ubuntu-latest`. Шаги: `actions/checkout` и `actions/setup-node` (оба закреплены на полный 40-символьный commit SHA, тег — только в комментарии) → `npm ci` → `docker compose up -d --wait` (поднимает `db` и `redis` по их существующим healthcheck'ам, без `sleep`) → создание эфемерной БД `mega_crm_test_worker` через `docker compose exec -T db psql -U postgres` → **`npm run verify:redis-config` с `REDIS_URL: redis://localhost:6379` (шаг добавлен в 08-04)** → `npm run build --workspaces --if-present` (**это и есть тайпчек**, отдельного `tsc --noEmit` нет) → `npm run test -w apps/worker`. Job-level `env`: `DATABASE_URL`, `TEST_DATABASE_URL`, `TEST_REDIS_URL` (dev-креды, те же что в compose).
+
+CI — **единственное** место, где проверяется контейнерный путь применения `docker/redis.conf` (`command:` + `:ro`-mount): на машине без Docker его воспроизвести нечем. Локальный прогон проверяет тот же файл, но применённый к временному `redis-server`.
 
 `.nvmrc` (добавлен в 08-01): `26` — мажорная версия Node, на которую `actions/setup-node` настраивается через `node-version-file`.
 
 `eslint.config.js` (добавлен в 08-03): flat-config ESLint 10 из семи блоков. Type-aware ярус (`recommendedTypeChecked` + `projectService`) намеренно ограничен глобами `apps/*/src/**` и `packages/*/src/**` — каждый `tsconfig.json` в репозитории объявляет `include: ["src"]`, поэтому `projectService` падает с ошибкой парсинга на любом файле вне `src/`. Конфиг-файлы, `scripts/**/*.mjs` и Playwright-спеки покрыты отдельным не-type-aware ярусом. На момент добавления: **396 файлов проверяется, 536 нарушений** (522 error / 14 warning) — приведение к нулю выполняется в 08-07, а не здесь.
 
 **Расхождение окружения (08-01):** локальная машина разработчика запускает Postgres 17.10 и Redis 8.8.0 нативно через Homebrew, а не через `docker compose` — Docker на ней не установлен. На `ubuntu-latest` `docker compose` доступен, поэтому CI работает как описано; локально эквивалентом `docker compose exec -T db psql -U postgres` служит `psql -U <локальный суперюзер>` (роли `postgres` в Homebrew-инстансе нет). Локальный Redis — версии 8, а не `redis:7` из compose.
+
+**Разрешение для Redis-конфигурации (08-04):** смонтированный в контейнер файл не может повлиять на Homebrew-Redis, поэтому локальный путь не мутирует системный сервер, а поднимает из `docker/redis.conf` отдельный временный `redis-server` (свободный порт, временный каталог данных, гарантированный teardown). Системный Redis на `6379` остаётся нетронутым — его `maxmemory` по-прежнему `0`, `appendonly` `no`. Расхождение, которое остаётся непроверяемым локально: сам механизм применения (`command:` + `:ro`-mount) и версия сервера (локально 8.8.0, в CI `redis:7`); обе директивные семантики в этих версиях совпадают. То же ограничение относится к 08-13, который перезапускает Redis-**контейнер**.
 
 **Dockerfile, деплой-манифестов, healthcheck-эндпоинта в репозитории нет.** Как api/worker собираются и запускаются в staging/prod — **не определено**.
 
@@ -138,7 +157,7 @@
 | `packages/flows-core` | `zod` `4.4.3` |
 | `packages/shared-schemas` | `@mega-crm/flows-core`, `zod` |
 | `packages/tenant-context` | `pg` `8.22.0` |
-| `packages/test-support` | `pg` `8.22.0`, `ioredis` `5.11.0`; dev: `@types/node` `^22.10.5`, `@types/pg` `^8.15.6`, `typescript` `^5.9.3`, `vitest` `4.1.9`, `execa` `10.0.0`. **`pg`, `ioredis` и `execa` на данный момент объявлены, но кодом ещё не используются** — они заявлены заранее под провижининг эфемерной БД, проверку конфигурации Redis и SIGKILL-harness последующих планов фазы 8 |
+| `packages/test-support` | `pg` `8.22.0`, `ioredis` `5.11.0`; dev: `@types/node` `^22.10.5`, `@types/pg` `^8.15.6`, `typescript` `^5.9.3`, `vitest` `4.1.9`, `execa` `10.0.0`. `pg` используется с 08-02/08-06 (`provision-db.ts`, `db-fixture.ts`). **`ioredis` и `execa` объявлены, но кодом ещё не используются**: проверка конфигурации Redis (08-04) реализована на встроенных модулях Node, а не на `ioredis`; `execa` заявлен заранее под SIGKILL-harness (08-12) |
 
 ---
 
@@ -439,6 +458,10 @@ workspace_id = NULLIF(current_setting('app.current_workspace_id', true), '')::uu
 - `email-triggered`: `concurrency: 20` (always-on)
 
 `defaultJobOptions` — `attempts: 5`, `backoff: { type: "exponential", delay: 2000 }`, `removeOnComplete: { age: 86400 }`, **`removeOnFail: false`** (проваленные джобы хранятся в Redis бессрочно) — этот блок **продублирован в 8 местах**: `apps/api/src/modules/campaigns/campaign-queues.ts:35`, `apps/api/src/modules/events/events-queue.ts:45`, `apps/api/src/modules/contacts/imports-csv-queue.ts:41-46`, `apps/api/src/modules/webhooks/enqueue.ts:43-48`, `apps/api/src/modules/flows/flow-queues.ts:30`, `apps/worker/src/queues/campaign-broadcast-producer.ts:11`, `apps/worker/src/queues/campaign-scheduler.worker.ts:9-14`, `apps/worker/src/queues/flows/flow-queues.ts:13`. Исключение — `FLOW_RUN_ADVANCE_JOB_OPTIONS` (`apps/worker/src/queues/flows/flow-queues.ts:29-34`): `removeOnComplete: true`, `removeOnFail: { age: 86400 }`.
+
+**Durability-постура Redis под очередями (08-04).** Redis, на котором держится BullMQ, сконфигурирован через `docker/redis.conf` (см. §1.3) так, чтобы при достижении потолка памяти **отказывать в записи, а не вытеснять**: `maxmemory 512mb` + `maxmemory-policy noeviction`. Это прямо взаимодействует с `removeOnFail: false` выше — проваленные джобы копятся в Redis бессрочно, и при вытесняющей политике состояние джобов исчезало бы молча, без ошибки где-либо; под `noeviction` то же переполнение даёт явную ошибку записи. Обратная сторона: под потолком BullMQ может получить `OOM command not allowed` не только на `queue.add`, но и на внутренних Lua-скриптах смены статуса. Обработка этого состояния — **не** задача фазы 8, она отнесена к фазе 12; здесь зафиксирована только сама конфигурация.
+
+`appendonly yes` + `appendfsync everysec` — то, что позволяет поставленным в очередь джобам пережить рестарт: `docker restart` шлёт SIGTERM, и Redis при штатном завершении делает финальный fsync. `everysec` вместо `always` — сознательный компромисс по пропускной способности с границей потери в одну секунду записей. Само выживание очереди через рестарт утверждается отдельно в 08-13.
 
 ### 5.4 Планировщик кампаний (`campaign-scheduler.worker.ts`)
 
