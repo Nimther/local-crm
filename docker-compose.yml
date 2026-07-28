@@ -22,10 +22,14 @@ services:
   redis:
     image: redis:7
     restart: unless-stopped
+    # 08-04 (WRK-12): without this override the image starts on defaults —
+    # maxmemory 0 and no AOF — so the mounted file below would be inert.
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
     ports:
       - "6379:6379"
     volumes:
       - mega_crm_redis_data:/data
+      - ./docker/redis.conf:/usr/local/etc/redis/redis.conf:ro
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
