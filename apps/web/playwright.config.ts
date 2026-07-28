@@ -2,33 +2,45 @@
 import { defineConfig } from "@playwright/test";
 import { resolveEnvPath } from "../../scripts/env-path.mjs";
 
+import { provisionE2eDatabase } from "./e2e/provision-database.js";
+
 // Load this machine's configuration into the PLAYWRIGHT process (not into the servers it
 // starts), mirroring every vitest.config.ts in the repo. Two things need it:
 // TEST_ADMIN_DATABASE_URL, without which provisioning cannot create a database;
-// and DATABASE_URL, which is what globalSetup's guard compares the freshly
+// and DATABASE_URL, which is what the provisioning guard compares the freshly
 // provisioned DSN AGAINST — with nothing to compare to, that half of the check
-// would pass vacuously. globalSetup overwrites DATABASE_URL with the ephemeral
-// DSN before any server starts, so nothing downstream sees the dev value.
+// would pass vacuously.
 try {
   process.loadEnvFile(resolveEnvPath());
 } catch {
   // No configuration file — rely on already-exported environment variables
 }
 
+// 08-18: awaited HERE, at module scope, and not in a globalSetup hook. Every
+// Playwright startup task — including the one that starts the webServers —
+// runs after this module has been evaluated, which is the only point in the
+// lifecycle early enough to decide what database the API server boots against.
+// See e2e/provision-database.ts for the ordering this replaced and the
+// evidence that it was wrong.
+const e2eDatabaseUrl = await provisionE2eDatabase();
+
 /**
  * 08-10 (QG-04): the E2E lane runs against an ephemeral database of its own.
  *
- * `./e2e/global-setup.ts` provisions one through @mega-crm/test-support — the
- * same functions the vitest suites use — applies the schema, guards the
- * resolved DSN, assigns it to process.env.DATABASE_URL and prints it behind the
- * `[e2e:database]` marker. `./e2e/global-teardown.ts` drops it.
+ * `./e2e/provision-database.ts` provisions one through @mega-crm/test-support —
+ * the same functions the vitest suites use — applies the schema, guards the
+ * resolved DSN and prints it behind the `[e2e:database]` marker.
+ * `./e2e/global-teardown.ts` drops it.
  *
- * The two webServer entries run `dev:e2e`, NOT `dev`. The difference is the
- * `--env-file=../../.env` flag that `dev` carries: it loads the developer's own
- * configuration, which points at the dev database by definition. `dev:e2e`
- * carries no such flag, so the API's whole environment comes from the block
- * below plus the DSN globalSetup assigned — and an unprovisioned run fails to
- * boot rather than quietly reaching dev.
+ * It is awaited above rather than registered as `globalSetup`, and that is the
+ * whole correctness argument: 08-10 used the hook, and the hook runs AFTER the
+ * webServer plugin, so the server it was meant to redirect had already read
+ * DATABASE_URL. 08-18 moved it and passes the DSN to the server by name.
+ *
+ * The two webServer entries run `dev:e2e`, which is where the API's whole
+ * environment comes from — the block below plus the DSN named in it. The
+ * server has no other source for a connection string, so an unprovisioned run
+ * fails to boot rather than quietly reaching dev.
  *
  * `reuseExistingServer` is false on both, deliberately. With it true, a
  * developer who happens to have a dev stack listening on 4000/5173 gets those
@@ -43,7 +55,6 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   timeout: 30_000,
-  globalSetup: "./e2e/global-setup.ts",
   globalTeardown: "./e2e/global-teardown.ts",
   use: {
     baseURL: "http://localhost:5173",
@@ -57,10 +68,14 @@ export default defineConfig({
       reuseExistingServer: false,
       timeout: 60_000,
       env: {
-        // DATABASE_URL is deliberately absent: it is inherited from this
-        // process's environment, where globalSetup put the ephemeral DSN.
-        // Naming it here would freeze whatever was set at config-load time,
-        // which is before globalSetup has run.
+        // 08-18: named EXPLICITLY, reversing 08-10's decision to let it be
+        // inherited. Inheritance was the defect: the server starts before
+        // globalSetup, so it inherited the value that was in the environment
+        // at that moment — the developer's dev DSN — and 08-10's ephemeral
+        // assignment arrived too late to matter. Freezing the config-load
+        // value is now correct precisely because provisioning happens at
+        // config load.
+        DATABASE_URL: e2eDatabaseUrl,
         //
         // Everything else is enumerated from apps/api/src/env.ts's boot schema
         // and mirrors apps/api/vitest.config.ts's values so the two test lanes
