@@ -151,7 +151,7 @@ CI — **единственное** место, где проверяется к
 
 | Пакет | Зависимости |
 |---|---|
-| `packages/db` | `drizzle-orm` `0.45.2`, `pg` `8.22.0`; dev: `drizzle-kit` `0.31.10` |
+| `packages/db` | `drizzle-orm` `0.45.2`, `pg` `8.22.0`; dev: `drizzle-kit` `0.31.10`, `vitest` `4.1.9`, `@mega-crm/test-support` `0.1.0` (обе добавлены в 08-09 — у пакета появилась тестовая дорожка с `vitest.config.ts` и `globalSetup`, под два прогона цепочки миграций) |
 | `packages/kms` | `@aws-sdk/client-kms` `3.1079.0` |
 | `packages/delivery-core` | `@mega-crm/tenant-context`, `pg` |
 | `packages/contacts-core` | `@mega-crm/delivery-core`, `pg`, `pino` `10.3.1` |
@@ -370,6 +370,8 @@ workspace_id = NULLIF(current_setting('app.current_workspace_id', true), '')::uu
 На: `workspace_api_keys` (`0006`), `campaigns` (`ALTER POLICY` в `0019`), `workspace_webhook_endpoints` (`0021`), `flows`, `flow_versions`, `flow_runs`, `flow_run_steps`, `flow_segment_membership_snapshot` (`0026`), `subscription_status_history` (`0036`), `workspace_daily_rollup` (`0037`) — **10 таблиц**.
 
 Причина (в комментариях `0006` и `0019`): после того как кастомный GUC был хоть раз затронут в сессии, `current_setting(name, true)` возвращает `''`, а не NULL, до конца сессии; каст `''::uuid` бросает `invalid input syntax for type uuid` вместо «не совпало». `0019` — это фикс именно этого на `campaigns`. Postgres объединяет все permissive-политики команды через OR, поэтому ошибка в одной политике роняет весь запрос. Заявленное обоснование того, что вариант A оставлен: эти таблицы читаются только внутри `withTenantTransaction`, где значение всегда непустое. **Это инвариант приложения, БД его не проверяет.** В варианте A находятся в том числе `events` и `send_events` — обе пишутся воркером.
+
+**Эмпирическое подтверждение (08-09):** `packages/db/src/__tests__/migrate-incremental.test.ts` наткнулся на это на практике. Соединение, которое один раз выполнило tenant-скоупленную транзакцию и вернулось в пул, при следующем не-скоупленном запросе к таблице варианта A падает с `invalid input syntax for type uuid: ""` — вместо того чтобы вернуть ноль строк. Поэтому тест держит **два пула**: один для DDL (никогда не скоупится), второй для скоупленных вставок и подсчётов. Инвариант «читаем только внутри `withTenantTransaction`» относится к прикладному коду; любой смешанный сценарий на одном пуле его нарушает.
 
 **Дополнительные GUC и bypass-политики (все `FOR SELECT`):**
 

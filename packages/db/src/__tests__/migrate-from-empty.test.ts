@@ -50,7 +50,7 @@ describe("migration chain: empty database (QG-05 run A)", () => {
   let pool: Pool;
   let databaseName: string;
   let adminDsn: string;
-  let applied: string[] = [];
+  const applied: string[] = [];
   let listed: string[] = [];
 
   beforeAll(async () => {
