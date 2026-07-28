@@ -18,15 +18,21 @@ export default defineConfig({
     environment: "node",
     testTimeout: 20_000,
     hookTimeout: 20_000,
+    // 08-06 (QG-04): the same setup hook apps/worker got in 08-01 — provisions a
+    // per-workspace ephemeral database, runs the fail-closed guard, and drops
+    // it on teardown even when the suite fails.
+    globalSetup: ["../../packages/test-support/src/global-setup.ts"],
     // `npm run build`'s tsc output (dist/**) mirrors src/**/*.test.ts as
     // compiled .test.js — without this exclude, vitest's default glob picks
     // up BOTH the source and the compiled copy and silently runs every test
     // twice per `vitest run` (with no path filter).
     exclude: [...configDefaults.exclude, "dist/**"],
     env: {
-      // Route every test run at the isolated test database, never the dev
-      // DATABASE_URL, so tests can never touch real dev data.
-      DATABASE_URL: process.env.TEST_DATABASE_URL ?? "",
+      // 08-06: deliberately NOT set here. This config module evaluates BEFORE
+      // the setup hook runs, so an eager read would freeze an empty string and the
+      // per-run ephemeral DSN would never reach the test workers. The forked
+      // processes inherit the value that hook writes into process.env — the
+      // same mechanism 08-02 established for apps/worker.
       // 02-05: REDIS_URL is boot-required by env.ts; tests never open a real
       // Redis connection (no test in apps/api exercises BullMQ/ioredis
       // directly), so a placeholder value just satisfies the Zod schema.

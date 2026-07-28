@@ -31,7 +31,7 @@
 | `packages/contacts-core` | Репозиторий контактов, CSV-маппинг, property registry |
 | `packages/segments-core` | Компиляция определения сегмента в SQL |
 | `packages/flows-core` | Схема и валидация определения flow |
-| `packages/test-support` | Fail-closed guard тестовой БД (`assertTestDatabaseUrl`) + vitest `globalSetup`. Далее по фазе 8 сюда переезжают провижининг эфемерной БД, консолидированный migration-фикстур и helper'ы harness'а failure-injection |
+| `packages/test-support` | Fail-closed guard тестовой БД (`assertTestDatabaseUrl`), провижининг эфемерных БД (`createEphemeralDatabase`/`dropEphemeralDatabase`), vitest `globalSetup` и **единственный** migration-фикстур (`ensureTestDbMigrated`/`createTestPool`/`getTestDatabaseUrl`). С 08-06 три прежние копии `db-fixture.ts` (`apps/api/src/test`, `apps/worker/src/test`, `packages/delivery-core/src/test`) — тонкие ре-экспорты отсюда, хранящие только свои workspace-специфичные хелперы (`resetTestData`, `createFixtureFlowRun`). Fallback `TEST_DATABASE_URL ?? DATABASE_URL` удалён: отсутствие тестового DSN — жёсткая ошибка |
 
 ### 1.3 Инфраструктура в репозитории
 
@@ -171,6 +171,7 @@
 | `TEST_ADMIN_DATABASE_URL` | `packages/test-support/src/provision-db.ts` (`resolveAdminDsn`) | Admin/superuser DSN — используется **только** для `CREATE DATABASE` / `DROP DATABASE`. Дефолт `postgres://postgres:postgres@localhost:5432/postgres` (креды docker-compose). Локально, где сервисы подняты нативно через Homebrew и роли `postgres` нет, задаётся явно |
 | `GSD_TEST_RUN_ID` | `packages/test-support/src/provision-db.ts` | Опциональный дискриминатор прогона в имени эфемерной БД. При отсутствии — `randomUUID().slice(0, 8)`. Задаётся в CI, чтобы имя БД было привязано к конкретному прогону |
 | `TEST_APP_DB_PASSWORD` | `packages/test-support/src/provision-db.ts` (`buildAppDsn`) | Пароль роли `mega_crm_app` в DSN, который получают тесты. Дефолт `mega_crm_dev_pw` (из `docker/init-app-role.sql`) |
+| `GSD_DEV_DATABASE_URL` | выставляется `packages/test-support/src/global-setup.ts`, читается `packages/test-support/src/db-fixture.ts` | Сохранённый **исходный** dev-DSN. `globalSetup` перезаписывает `DATABASE_URL` эфемерным DSN (иначе `packages/tenant-context`, читающий `DATABASE_URL` напрямую, ушёл бы в dev-БД), поэтому второй слой guard'а внутри тестового процесса (D-14 layer b) сравнивает именно с этим значением — сравнение с перезаписанным `DATABASE_URL` сравнивало бы DSN сам с собой |
 
 **Важно:** `packages/tenant-context` (`src/index.ts:15`) и `packages/kms` (`src/env.ts:17-22`) читают `process.env` **напрямую**, минуя zod-схему `apps/api/src/env.ts`. Схема — не единственная точка входа конфигурации; она гарантирует только то, что **api-процесс** не стартует при плохом конфиге. Воркер собственной полной схемы не имеет — только три ручные проверки в `apps/worker/src/server.ts`: `REDIS_URL` (`:49-52`), `UNSUBSCRIBE_TOKEN_SECRET >= 32` (`:61-66`), `PUBLIC_APP_URL` (`:67-72`).
 

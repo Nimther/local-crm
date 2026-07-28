@@ -33,10 +33,22 @@ export default async function setup(project?: { name?: string }): Promise<() => 
   // dev DSN.
   assertTestDatabaseUrl(dsn, process.env.DATABASE_URL);
 
+  // Preserve the TRUE dev DSN before it is overwritten below.
+  //
+  // 08-06: db-fixture.ts runs the guard again inside the test process (D-14
+  // layer b, so an entrypoint that bypassed this hook still cannot reach dev).
+  // That second check needs something real to compare against — and by then
+  // DATABASE_URL has been replaced by the ephemeral DSN, so comparing against
+  // it would compare the DSN to itself and throw on every run.
+  if (process.env.DATABASE_URL) {
+    process.env.GSD_DEV_DATABASE_URL = process.env.DATABASE_URL;
+  }
+
   // Publish to BOTH names. vitest forks its test workers after globalSetup
   // returns and hands them the parent's process.env, so mutations here reach
-  // the test processes. DATABASE_URL is set as well because the worker's
-  // vitest config no longer freezes it at config-load time.
+  // the test processes. DATABASE_URL must also be set because
+  // packages/tenant-context reads it directly (SPECIFICATION.md §3.2) — leaving
+  // it pointed at dev would send tenant-scoped pools to the dev database.
   process.env.TEST_DATABASE_URL = dsn;
   process.env.DATABASE_URL = dsn;
 

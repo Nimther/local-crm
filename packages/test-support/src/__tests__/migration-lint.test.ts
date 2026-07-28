@@ -92,7 +92,7 @@ describe("checkDestructiveDdl", () => {
       fixture("bad-destructive-unmarked.sql"),
     );
     expect(violations).toHaveLength(2);
-    expect(violations.every((v) => v.rule === "destructive-ddl-unmarked")).toBe(true);
+    expect(violations.every((v: { rule: string }) => v.rule === "destructive-ddl-unmarked")).toBe(true);
     expect(violations[0].line).not.toBe(violations[1].line);
   });
 

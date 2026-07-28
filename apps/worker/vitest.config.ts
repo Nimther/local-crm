@@ -50,10 +50,10 @@ export default defineConfig({
     exclude: [...configDefaults.exclude, "dist/**"],
     env: {
       // 08-02: deliberately NOT `process.env.TEST_DATABASE_URL ?? ""`. This
-      // config module evaluates BEFORE globalSetup runs, so an eager read here
+      // config module evaluates BEFORE the setup hook runs, so an eager read here
       // would freeze an empty string and the per-run ephemeral DSN provisioned
-      // by globalSetup would never reach the test workers. Omitting the key
-      // lets the value globalSetup writes into process.env be inherited by the
+      // by the setup hook would never reach the test workers. Omitting the key
+      // lets the value that hook writes into process.env be inherited by the
       // forked test processes instead.
       REDIS_URL: process.env.TEST_REDIS_URL ?? "redis://localhost:6379/1",
       // 04-04: send-dispatch.ts pulls in @mega-crm/kms (decryptTenantSecret)

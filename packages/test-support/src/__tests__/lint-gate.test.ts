@@ -80,8 +80,13 @@ describe("no blanket file-level eslint-disable", () => {
       .filter((f) => /\.(ts|tsx|mjs|js)$/.test(f))
       .filter((f) => !f.startsWith("tools/lint-fixtures/"));
 
-    // A bare `/* eslint-disable */` with no rule list. A directive naming rules
-    // is allowed (D-06); one naming nothing is the blanket suppression forbidden.
+    // Matches a block-comment disable directive carrying no rule list. A
+    // directive that names rules is allowed (D-06); one that names nothing is
+    // the blanket suppression this asserts against.
+    //
+    // Deliberately no literal example in this comment: an example would be
+    // matched by the very scan below, and this file is itself tracked. That is
+    // not hypothetical — it failed exactly that way once.
     const blanket = /\/\*\s*eslint-disable\s*\*\//;
 
     const offenders = tracked.filter((f) => {
