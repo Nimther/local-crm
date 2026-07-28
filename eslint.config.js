@@ -75,6 +75,23 @@ export default tseslint.config(
     extends: [tseslint.configs.recommended],
   },
 
+  // Block 2b — the lint fixtures, checked by the SAME type-aware tier as real
+  // source. Without this the fixtures sit outside every `*/src/**` glob and
+  // `eslint --no-ignore tools/lint-fixtures/floating-promise.ts` exits 0,
+  // proving nothing. `tools/` is outside every tsconfig's `include: ["src"]`,
+  // so allowDefaultProject is typescript-eslint's documented escape hatch for
+  // exactly this "a few stray files" case (RESEARCH Pitfall 2).
+  {
+    files: ["tools/lint-fixtures/**/*.ts"],
+    extends: [tseslint.configs.recommendedTypeChecked],
+    languageOptions: {
+      parserOptions: {
+        projectService: { allowDefaultProject: ["tools/lint-fixtures/*.ts"] },
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+  },
+
   // Block 4 — vitest.
   {
     files: ["**/*.test.ts", "**/*.test.tsx"],
