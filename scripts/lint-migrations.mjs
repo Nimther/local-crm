@@ -74,41 +74,77 @@ export function checkEnumAddValueSameFile(file, rawSql) {
   return violations;
 }
 
+/** A line that is entirely a `--` comment (ignoring leading whitespace). */
+function isCommentOnlyLine(line) {
+  return /^\s*--/.test(line);
+}
+
 /**
  * Rule 2 — destructive DDL without a marker on the immediately preceding line.
  *
  * Walks the ORIGINAL lines rather than the comment-stripped text, because the
  * marker itself is a comment and must stay visible.
+ *
+ * 08-REVIEW WR-02: the DROP COLUMN / ADD COLUMN ... NOT NULL patterns are
+ * matched against the whole STATEMENT (every line from the previous `;` up to
+ * and including the next `;`, whitespace-collapsed) rather than one physical
+ * line at a time. A statement wrapped across lines — e.g. `ADD COLUMN` on one
+ * line and `NOT NULL` on the next — never had both keywords on the same
+ * physical line, so the old per-line test silently accepted it. The marker
+ * placement check still walks physical lines: it looks at the line
+ * immediately preceding the statement's first non-blank, non-comment line,
+ * same as before.
  */
 export function checkDestructiveDdl(file, rawSql) {
   const violations = [];
   const lines = rawSql.split("\n");
 
+  let statementStart = 0;
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+    if (!lines[i].includes(";")) continue;
 
-    const isDropColumn = /DROP\s+COLUMN/i.test(line);
+    const statementLines = lines.slice(statementStart, i + 1);
+    const statementText = statementLines.join(" ").replace(/\s+/g, " ");
+
+    const isDropColumn = /DROP\s+COLUMN/i.test(statementText);
     // Unsafe only when the same statement declares NOT NULL and supplies no
     // DEFAULT. `ADD COLUMN x integer DEFAULT 0 NOT NULL` is safe — which is the
     // shape every existing migration in this repo uses.
-    const isUnsafeNotNull = /ADD\s+COLUMN/i.test(line) && /NOT\s+NULL/i.test(line) && !/DEFAULT/i.test(line);
+    const isUnsafeNotNull =
+      /ADD\s+COLUMN/i.test(statementText) &&
+      /NOT\s+NULL/i.test(statementText) &&
+      !/DEFAULT/i.test(statementText);
 
-    if (!isDropColumn && !isUnsafeNotNull) continue;
+    if (isDropColumn || isUnsafeNotNull) {
+      // Find the statement's first real content line -- skip leading blank
+      // lines and comment-only lines within this range, since those are
+      // candidates for the marker itself, not part of the statement.
+      let contentIndex = statementStart;
+      while (
+        contentIndex <= i &&
+        (lines[contentIndex].trim() === "" || isCommentOnlyLine(lines[contentIndex]))
+      ) {
+        contentIndex++;
+      }
+      const reportIndex = contentIndex <= i ? contentIndex : statementStart;
 
-    // The immediately preceding NON-BLANK line — blank lines between the marker
-    // and its statement are tolerated, arbitrary distance is not.
-    let priorIndex = i - 1;
-    while (priorIndex >= 0 && lines[priorIndex].trim() === "") priorIndex--;
-    const priorLine = (lines[priorIndex] ?? "").trim();
+      // The immediately preceding NON-BLANK line — blank lines between the
+      // marker and its statement are tolerated, arbitrary distance is not.
+      let priorIndex = reportIndex - 1;
+      while (priorIndex >= 0 && lines[priorIndex].trim() === "") priorIndex--;
+      const priorLine = (lines[priorIndex] ?? "").trim();
 
-    if (!DESTRUCTIVE_MARKER.test(priorLine)) {
-      violations.push({
-        file,
-        rule: "destructive-ddl-unmarked",
-        line: i + 1,
-        detail: `line ${i + 1} is destructive DDL with no "-- destructive: <reason>" marker on the preceding line`,
-      });
+      if (!DESTRUCTIVE_MARKER.test(priorLine)) {
+        violations.push({
+          file,
+          rule: "destructive-ddl-unmarked",
+          line: reportIndex + 1,
+          detail: `line ${reportIndex + 1} is destructive DDL with no "-- destructive: <reason>" marker on the preceding line`,
+        });
+      }
     }
+
+    statementStart = i + 1;
   }
   return violations;
 }

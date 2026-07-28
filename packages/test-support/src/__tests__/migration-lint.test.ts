@@ -127,6 +127,29 @@ describe("checkDestructiveDdl", () => {
     const sql = 'ALTER TABLE "campaigns" ADD COLUMN "opened_count" integer DEFAULT 0 NOT NULL;';
     expect(checkDestructiveDdl("safe.sql", sql)).toHaveLength(0);
   });
+
+  // 08-REVIEW WR-02: ADD COLUMN and NOT NULL wrapped across separate physical
+  // lines used to evade the rule entirely, since the old check tested both
+  // keywords against a single line at a time.
+  it("flags an unsafe ADD COLUMN ... NOT NULL statement wrapped across lines", () => {
+    const violations = checkDestructiveDdl(
+      "bad-destructive-multiline.sql",
+      fixture("bad-destructive-multiline.sql"),
+    );
+    expect(violations).toHaveLength(1);
+    expect(violations[0].rule).toBe("destructive-ddl-unmarked");
+    expect(violations[0].line).toBe(6);
+  });
+
+  it("does not flag a marked statement wrapped across lines", () => {
+    const sql = [
+      "-- destructive: multi-line statement, marker still applies",
+      'ALTER TABLE "campaigns"',
+      '  DROP',
+      '  COLUMN "legacy_note";',
+    ].join("\n");
+    expect(checkDestructiveDdl("good-multiline.sql", sql)).toHaveLength(0);
+  });
 });
 
 describe("lintMigrationFile", () => {
