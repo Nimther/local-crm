@@ -57,7 +57,32 @@
 
 `scripts/verify-redis-config.mjs` (добавлен в 08-04) читает `CONFIG GET` живого сервера и утверждает все четыре значения. Скрипт получает `REDIS_URL` **извне** и не имеет ни дефолтного адреса, ни ветки «локально/CI» — это один и тот же код в обоих окружениях, различается только передаваемый URL. Реализован на встроенных модулях Node (минимальный RESP-клиент на `node:net`), без зависимостей, как и остальные скрипты-гейты. Недоступный Redis и отсутствующий бинарь `redis-server` дают ненулевой код возврата, а не `skipped`: пропуск завершился бы кодом 0, который CI прочитал бы как успех.
 
-`.github/workflows/ci.yml` (добавлен в 08-01): workflow `CI`, триггеры `push` (без фильтра веток) и `pull_request` (`branches: [master]`) — оба обязательны, иначе required status check не появляется на PR. `concurrency` по `${{ github.workflow }}-${{ github.ref }}` с `cancel-in-progress: true`. Один job с id и name `test` на `ubuntu-latest`. Шаги: `actions/checkout` и `actions/setup-node` (оба закреплены на полный 40-символьный commit SHA, тег — только в комментарии) → `npm ci` → `docker compose up -d --wait` (поднимает `db` и `redis` по их существующим healthcheck'ам, без `sleep`) → создание эфемерной БД `mega_crm_test_worker` через `docker compose exec -T db psql -U postgres` → **`npm run verify:redis-config` с `REDIS_URL: redis://localhost:6379` (шаг добавлен в 08-04)** → `npm run build --workspaces --if-present` (**это и есть тайпчек**, отдельного `tsc --noEmit` нет) → `npm run test -w apps/worker`. Job-level `env`: `DATABASE_URL`, `TEST_DATABASE_URL`, `TEST_REDIS_URL` (dev-креды, те же что в compose).
+`.github/workflows/ci.yml` (добавлен в 08-01, переписан в 08-18): workflow `CI`, триггеры `push` (без фильтра веток) и `pull_request` (`branches: [master]`) — оба обязательны, иначе required status check не появляется на PR. `concurrency` по `${{ github.workflow }}-${{ github.ref }}` с `cancel-in-progress: true`. Все `uses:` закреплены на полный 40-символьный commit SHA, тег — только в комментарии. `sleep` в workflow отсутствует: ожидание сервисов делает `docker compose up -d --wait` по healthcheck'ам из `docker-compose.yml`.
+
+**Четыре job'а на `ubuntu-latest`:**
+
+| Job | Сервисы | Шаги |
+|-----|---------|------|
+| `static` | нет | `npm ci` → `npm run build --workspaces --if-present` (**это и есть тайпчек**, отдельного `tsc --noEmit` нет) → `npm run lint` → `npm run lint:floor` → `npm run lint:migrations` → `npm run check:root-hygiene` |
+| `test` | `db`, `redis` | checkout с `fetch-depth: 0` → `npm ci` → `docker compose up -d --wait` → `npm run verify:redis-config` (`REDIS_URL: redis://localhost:6379`) → `npm run coverage` → `npm run coverage:gate` → `npm run coverage:ratchet` |
+| `failure-injection` | `db`, `redis` | `npm ci` → установка пакета `redis-server` и `systemctl disable --now redis-server` → `docker compose up -d --wait` → **пять отдельных шагов**: `failure:429`, `failure:timeout`, `failure:reset`, `failure:sigkill`, `failure:redis-restart` |
+| `e2e` | `db`, `redis` | `npm ci` → `docker compose up -d --wait` → `npx playwright install --with-deps chromium` → `npm run test:e2e` → проверка маркера `[e2e:database]` в выводе |
+
+Job-level `env` у трёх job'ов с сервисами: `DATABASE_URL` (dev-DSN — то, **с чем** сравнивает гард эфемерной БД; без него половина проверки прошла бы вхолостую) и `TEST_REDIS_URL`. `TEST_DATABASE_URL` намеренно **не** задаётся: каждый workspace создаёт свою эфемерную БД в `globalSetup` и публикует DSN сам.
+
+Значимые детали, каждая — исправление реального дефекта:
+
+- **`fetch-depth: 0` у `test`.** `coverage:ratchet` резолвит `git show origin/master:coverage-baseline.json`; в shallow-клоне по умолчанию `origin/master` не существует, а нечитаемый ref рэтчет трактует как ошибку, а не как проход.
+- **`redis-server` ставится ДО `docker compose up`.** Установка пакета поднимает системный сервис на `6379` — том же порту, что публикует compose-сервис `redis`. При обратном порядке job падает на конфликте портов. Бинарь нужен сценарию `failure:redis-restart`, который поднимает собственный временный сервер из `docker/redis.conf`.
+- **Пять отдельных шагов, а не агрегирующая команда.** Один общий шаг скрыл бы сценарий, который проходит только потому, что перед ним отработал соседний, и не назвал бы упавший сценарий в сводке job'а.
+- **`shell: bash` на шаге захвата вывода E2E.** Шелл раннера по умолчанию — `bash -e` **без** `pipefail`, поэтому упавший Playwright, пропущенный через `tee`, вернул бы код `tee` (`0`) и шаг прошёл бы зелёным при полностью красном прогоне.
+- **`e2e` — единственный job с `continue-on-error: true`.** Он сообщает, но не блокирует.
+
+**Required status checks на `master`: `static`, `test`, `failure-injection`.** `e2e` в обязательный набор **не входит** — флапающий браузерный прогон блокировал бы каждый мёрдж ложно. Машинно-проверяемая часть его ценности при этом сохранена: job грепает обратно маркер `[e2e:database]` и падает, если прогон не сообщил БД из эфемерного пространства имён `mega_crm_test_e2e_*`. Сама branch protection — настройка репозитория GitHub, она живёт вне дерева и ни одной внутрирепозиторной проверкой не утверждается.
+
+`npm run lint:floor` = `eslint . --format json | node scripts/check-lint-file-floor.mjs`. До 08-18 скрипт был голым `node scripts/…` и всегда получал путь к отчёту из verify-блока плана — как самостоятельная команда он читал пустой stdin и падал на `JSON.parse`. Пайп внутри npm-скрипта делает команду одинаковой локально и в CI, без CI-only обвязки; код возврата берётся от гейта, а не от ESLint, потому что за нарушения отвечает отдельный `npm run lint`. Непарсящийся отчёт (ESLint не стартовал вовсе) даёт внятную ошибку и exit 1, а не stack trace: это ровно тот вакуумный успех, ради которого гейт и заведён.
+
+**Модель ветвления (08-18):** `.planning/config.json` → `git.branching_strategy` = `phase` (было `none`). Работа над фазой идёт в отдельной ветке, точка слияния — pull request, где и срабатывают три обязательные проверки. Шаблон ветки — `gsd/phase-{phase}-{slug}`.
 
 CI — **единственное** место, где проверяется контейнерный путь применения `docker/redis.conf` (`command:` + `:ro`-mount): на машине без Docker его воспроизвести нечем. Локальный прогон проверяет тот же файл, но применённый к временному `redis-server`.
 
@@ -661,6 +686,9 @@ Restart-safe: следующий тик просто пересканирует;
 - Worker: **структурированного логирования нет** — только `console.log`/`console.error` в `server.ts` и `pool.on("error")` в `tenant-context`.
 - **Bull Board / UI очередей отсутствует** (не объявлен ни в одном package.json). В комментарии `apps/worker/src/server.ts:20` он упомянут как «future wiring».
 - Метрик и трейсинга нет. HTTP-healthcheck'а у приложения нет (см. 6.1). Контейнерные healthcheck'и в `docker-compose.yml` есть, но это проверки самой инфраструктуры, а не приложения: `pg_isready -U postgres` для `db` и `redis-cli ping` для `redis`.
+- **Единственный регулярный сигнал о состоянии кода — CI** (`.github/workflows/ci.yml`, см. 1.3): четыре job'а — `static`, `test`, `failure-injection`, `e2e` — на каждый push и на каждый PR в `master`. Обязательных из них три: `static`, `test`, `failure-injection`; `e2e` сообщает, но не блокирует. Никакого мониторинга работающей системы это не заменяет: за пределами CI не наблюдается ничего.
+- Отчёт покрытия (`json-summary`) пишется в `./coverage` и потребляется `coverage:gate` и `coverage:ratchet` внутри job'а `test`. Наружу — в дашборд, бэйдж или внешний сервис — он **не** публикуется, история значений нигде не хранится: единственная зафиксированная точка отсчёта — `coverage-baseline.json` в репозитории.
+- Артефакты Playwright (`trace: retain-on-failure`) создаются в job'е `e2e`, но `actions/upload-artifact` не подключён — при падении трейс остаётся на раннере и пропадает вместе с ним.
 
 ---
 
