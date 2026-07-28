@@ -28,7 +28,9 @@
     "coverage": "vitest run --coverage --testTimeout=60000",
     "failure:sigkill": "vitest run --root apps/worker src/queues/__tests__/failure-injection/sigkill.test.ts",
     "failure:redis-restart": "vitest run --root apps/worker src/queues/__tests__/failure-injection/redis-restart.test.ts",
-    "failure:all": "npm run failure:429 && npm run failure:timeout && npm run failure:reset && npm run failure:sigkill && npm run failure:redis-restart"
+    "failure:all": "npm run failure:429 && npm run failure:timeout && npm run failure:reset && npm run failure:sigkill && npm run failure:redis-restart",
+    "coverage:gate": "node scripts/coverage-gate.mjs",
+    "coverage:ratchet": "node scripts/coverage-ratchet.mjs"
   },
   "devDependencies": {
     "@vitest/eslint-plugin": "^1.6.24",
