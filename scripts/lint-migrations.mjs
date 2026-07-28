@@ -80,30 +80,97 @@ function isCommentOnlyLine(line) {
 }
 
 /**
+ * Comment-mask a SQL string, character for character: `--` line comments and
+ * `/* *\/` block comments are replaced with spaces (newlines are preserved
+ * as-is), everything else is left untouched. Output has the exact same
+ * length and line count as the input, so a masked line's index always maps
+ * back to the same physical line in the original file.
+ *
+ * 08-REVIEW CR-01/WR-01: statement-boundary detection (";") and the
+ * destructive-pattern keyword tests must not see inside comments — a `;`
+ * inside a `--` comment must not close a statement early (CR-01), and prose
+ * inside a comment must not participate in the `NOT NULL` keyword match
+ * (WR-01). The marker itself (`-- destructive: <reason>`) IS a comment, so
+ * the marker-adjacency check below deliberately keeps using the RAW `lines`
+ * array, never this masked one.
+ *
+ * Scope: does not mask single-quoted string literals or dollar-quoted
+ * (`$$ ... $$`) bodies. A `;` or the words "not null" inside a string
+ * literal can still perturb boundary detection or the keyword test — no
+ * migration in this repo does that today, and handling it is left as a
+ * follow-up rather than folded into this fix silently (08-REVIEW-FIX.md).
+ */
+export function maskSqlComments(rawSql) {
+  let result = "";
+  let state = "normal"; // "normal" | "line" | "block"
+  for (let i = 0; i < rawSql.length; i++) {
+    const ch = rawSql[i];
+    const next = rawSql[i + 1];
+    if (state === "normal") {
+      if (ch === "-" && next === "-") {
+        state = "line";
+        result += "  ";
+        i++;
+        continue;
+      }
+      if (ch === "/" && next === "*") {
+        state = "block";
+        result += "  ";
+        i++;
+        continue;
+      }
+      result += ch;
+      continue;
+    }
+    if (state === "line") {
+      if (ch === "\n") {
+        state = "normal";
+        result += "\n";
+        continue;
+      }
+      result += " ";
+      continue;
+    }
+    // state === "block"
+    if (ch === "*" && next === "/") {
+      state = "normal";
+      result += "  ";
+      i++;
+      continue;
+    }
+    result += ch === "\n" ? "\n" : " ";
+  }
+  return result;
+}
+
+/**
  * Rule 2 — destructive DDL without a marker on the immediately preceding line.
  *
- * Walks the ORIGINAL lines rather than the comment-stripped text, because the
- * marker itself is a comment and must stay visible.
+ * Boundary detection (";") and the DROP COLUMN / ADD COLUMN ... NOT NULL
+ * keyword tests run against `maskedLines` (comments blanked, see
+ * `maskSqlComments`), so a `;` or keyword-like prose inside a comment can
+ * neither hide a real statement (CR-01) nor fabricate a fake one (WR-01).
+ * The marker placement check still walks the RAW `lines` array: it looks at
+ * the line immediately preceding the statement's first non-blank,
+ * non-comment line, same as before — the marker is itself a comment and
+ * must stay visible to that half of the logic.
  *
- * 08-REVIEW WR-02: the DROP COLUMN / ADD COLUMN ... NOT NULL patterns are
- * matched against the whole STATEMENT (every line from the previous `;` up to
- * and including the next `;`, whitespace-collapsed) rather than one physical
- * line at a time. A statement wrapped across lines — e.g. `ADD COLUMN` on one
- * line and `NOT NULL` on the next — never had both keywords on the same
- * physical line, so the old per-line test silently accepted it. The marker
- * placement check still walks physical lines: it looks at the line
- * immediately preceding the statement's first non-blank, non-comment line,
- * same as before.
+ * 08-REVIEW WR-02 (prior round): the DROP COLUMN / ADD COLUMN ... NOT NULL
+ * patterns are matched against the whole STATEMENT (every line from the
+ * previous `;` up to and including the next `;`, whitespace-collapsed)
+ * rather than one physical line at a time, so a statement wrapped across
+ * lines is no longer silently accepted by the old per-line test.
  */
 export function checkDestructiveDdl(file, rawSql) {
   const violations = [];
   const lines = rawSql.split("\n");
+  const maskedLines = maskSqlComments(rawSql).split("\n");
 
   let statementStart = 0;
   for (let i = 0; i < lines.length; i++) {
-    if (!lines[i].includes(";")) continue;
+    if (!maskedLines[i].includes(";")) continue;
 
-    const statementLines = lines.slice(statementStart, i + 1);
+    const statementLines = maskedLines.slice(statementStart, i + 1);
     const statementText = statementLines.join(" ").replace(/\s+/g, " ");
 
     const isDropColumn = /DROP\s+COLUMN/i.test(statementText);

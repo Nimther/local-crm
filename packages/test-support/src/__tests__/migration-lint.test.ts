@@ -150,6 +150,59 @@ describe("checkDestructiveDdl", () => {
     ].join("\n");
     expect(checkDestructiveDdl("good-multiline.sql", sql)).toHaveLength(0);
   });
+
+  // 08-REVIEW CR-01: a `;` inside an inline `--` comment used to be treated
+  // as the statement terminator, prematurely closing the statement before
+  // its second keyword was read — so this genuinely unsafe, unmarked
+  // ADD COLUMN ... NOT NULL evaded the rule silently. Fixture form.
+  it("flags an unsafe ADD COLUMN ... NOT NULL when a semicolon inside an inline comment precedes NOT NULL", () => {
+    const violations = checkDestructiveDdl(
+      "bad-destructive-comment-semicolon.sql",
+      fixture("bad-destructive-comment-semicolon.sql"),
+    );
+    expect(violations).toHaveLength(1);
+    expect(violations[0].rule).toBe("destructive-ddl-unmarked");
+  });
+
+  // 08-REVIEW CR-01: same defect, inline form — the semicolon sits between
+  // the word "note" and "here" inside the comment, not at the true
+  // statement end.
+  it("flags an unsafe ADD COLUMN ... NOT NULL when the comment's semicolon is mid-comment", () => {
+    const sql = [
+      'ALTER TABLE "c"',
+      '  ADD COLUMN "x" text -- note; here',
+      '    NOT NULL;',
+    ].join("\n");
+    const violations = checkDestructiveDdl("cr01-inline.sql", sql);
+    expect(violations).toHaveLength(1);
+    expect(violations[0].rule).toBe("destructive-ddl-unmarked");
+  });
+
+  // 08-REVIEW WR-01: the inverse defect — an unrelated preceding comment
+  // that happens to contain "not null" used to get folded into the next
+  // statement's keyword test, flagging a fully safe, nullable ADD COLUMN
+  // with no constraint at all.
+  it("does not flag a safe nullable ADD COLUMN because an unrelated comment contains the words 'not null'", () => {
+    const sql = [
+      "-- this column is explicitly not null-constrained on purpose",
+      'ALTER TABLE "contacts" ADD COLUMN "note" text;',
+    ].join("\n");
+    expect(checkDestructiveDdl("wr01.sql", sql)).toHaveLength(0);
+  });
+
+  // 08-REVIEW CR-01/WR-01: block comments (`/* ... */`) must be masked the
+  // same way as `--` comments, including when they span multiple lines.
+  it("does not let a semicolon inside a multi-line block comment split a statement early", () => {
+    const sql = [
+      'ALTER TABLE "c"',
+      '  ADD COLUMN "x" text /* backfill later;',
+      '  see ticket 42 */',
+      '  NOT NULL;',
+    ].join("\n");
+    const violations = checkDestructiveDdl("block-comment.sql", sql);
+    expect(violations).toHaveLength(1);
+    expect(violations[0].rule).toBe("destructive-ddl-unmarked");
+  });
 });
 
 describe("lintMigrationFile", () => {
