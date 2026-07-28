@@ -159,7 +159,10 @@
 | `KMS_LOCAL_KEK` | читается в `packages/kms/src/env.ts:20`, потребляется в `local-provider.ts` | optional в схеме; провайдер требует base64 → **ровно 32 байта** |
 | `KMS_KEK_ID` | читается в `packages/kms/src/env.ts:21`, потребляется в `aws-provider.ts` | optional в схеме; обязателен при `KMS_PROVIDER=aws` (superRefine) |
 | `UNSUBSCRIBE_TOKEN_SECRET` | `apps/api/src/env.ts`; `apps/worker/src/server.ts` (ручная проверка `>= 32`); лениво в `packages/delivery-core/src/unsubscribe-token.ts` | **`z.string().min(32)`** |
-| `TEST_DATABASE_URL`, `TEST_REDIS_URL`, `TEST_PUBLIC_APP_URL` | только `vitest.config.ts` | — |
+| `TEST_DATABASE_URL`, `TEST_REDIS_URL`, `TEST_PUBLIC_APP_URL` | `vitest.config.ts`; `TEST_DATABASE_URL` с 08-02 **выставляется самим** `packages/test-support/src/global-setup.ts` (DSN эфемерной БД), а не задаётся вызывающим | — |
+| `TEST_ADMIN_DATABASE_URL` | `packages/test-support/src/provision-db.ts` (`resolveAdminDsn`) | Admin/superuser DSN — используется **только** для `CREATE DATABASE` / `DROP DATABASE`. Дефолт `postgres://postgres:postgres@localhost:5432/postgres` (креды docker-compose). Локально, где сервисы подняты нативно через Homebrew и роли `postgres` нет, задаётся явно |
+| `GSD_TEST_RUN_ID` | `packages/test-support/src/provision-db.ts` | Опциональный дискриминатор прогона в имени эфемерной БД. При отсутствии — `randomUUID().slice(0, 8)`. Задаётся в CI, чтобы имя БД было привязано к конкретному прогону |
+| `TEST_APP_DB_PASSWORD` | `packages/test-support/src/provision-db.ts` (`buildAppDsn`) | Пароль роли `mega_crm_app` в DSN, который получают тесты. Дефолт `mega_crm_dev_pw` (из `docker/init-app-role.sql`) |
 
 **Важно:** `packages/tenant-context` (`src/index.ts:15`) и `packages/kms` (`src/env.ts:17-22`) читают `process.env` **напрямую**, минуя zod-схему `apps/api/src/env.ts`. Схема — не единственная точка входа конфигурации; она гарантирует только то, что **api-процесс** не стартует при плохом конфиге. Воркер собственной полной схемы не имеет — только три ручные проверки в `apps/worker/src/server.ts`: `REDIS_URL` (`:49-52`), `UNSUBSCRIBE_TOKEN_SECRET >= 32` (`:61-66`), `PUBLIC_APP_URL` (`:67-72`).
 
