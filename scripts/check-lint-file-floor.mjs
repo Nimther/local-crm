@@ -45,11 +45,32 @@ if (isDirectInvocation()) {
   const { minFiles } = JSON.parse(readFileSync(floorPath, "utf8"));
 
   const reportPath = process.argv[2];
+  const source = reportPath ? `report file ${reportPath}` : "stdin";
   const raw = reportPath
     ? readFileSync(path.resolve(process.cwd(), reportPath), "utf8")
     : await readStdin();
 
-  const result = checkLintFileFloor(JSON.parse(raw), minFiles);
+  // An empty or unparseable report is not a crash to shrug at — it IS the
+  // vacuous-success case this gate exists to catch, and it must be reported as
+  // such rather than as a JSON stack trace. It happens when ESLint failed to
+  // start at all (a config error), which leaves stdout empty.
+  let report;
+  try {
+    report = JSON.parse(raw);
+  } catch {
+    console.error(
+      [
+        `Lint file-count floor FAILED: no parseable ESLint report on ${source}.`,
+        "",
+        "ESLint produced no JSON, which usually means it did not run at all —",
+        "a syntax or resolution error in eslint.config.js. Run `npm run lint`",
+        "on its own to see the real error.",
+      ].join("\n"),
+    );
+    process.exit(1);
+  }
+
+  const result = checkLintFileFloor(report, minFiles);
 
   if (!result.pass) {
     console.error(

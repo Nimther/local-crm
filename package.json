@@ -15,7 +15,7 @@
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "lint": "eslint . --max-warnings=0",
-    "lint:floor": "node scripts/check-lint-file-floor.mjs",
+    "lint:floor": "eslint . --format json | node scripts/check-lint-file-floor.mjs",
     "lint:migrations": "node scripts/lint-migrations.mjs",
     "verify:redis-config": "node scripts/verify-redis-config.mjs",
     "db:generate": "npm run db:generate -w packages/db",
