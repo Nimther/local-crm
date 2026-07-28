@@ -39,22 +39,22 @@ describe("applyPendingMigrations releases the client when the advisory unlock re
 
   it("still releases the client back to the pool", async () => {
     const releaseMock = vi.fn();
-    const queryMock = vi.fn(async (sql: unknown) => {
+    const queryMock = vi.fn((sql: unknown) => {
       const text = String(sql);
       if (text.includes("pg_advisory_unlock")) {
-        throw new Error("connection terminated unexpectedly");
+        return Promise.reject(new Error("connection terminated unexpectedly"));
       }
       if (text.includes("SELECT true as exists")) {
         // Pretend every migration is already recorded so the fixture never
         // needs to actually execute migration SQL against the fake client.
-        return { rows: [{ exists: true }] };
+        return Promise.resolve({ rows: [{ exists: true }] });
       }
-      return { rows: [] };
+      return Promise.resolve({ rows: [] });
     });
 
     const fakeClient = { query: queryMock, release: releaseMock };
-    const connectMock = vi.fn(async () => fakeClient);
-    const endMock = vi.fn(async () => {});
+    const connectMock = vi.fn(() => Promise.resolve(fakeClient));
+    const endMock = vi.fn(() => Promise.resolve());
 
     vi.doMock("pg", () => ({
       Pool: vi.fn(function FakePool() {
