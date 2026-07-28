@@ -1,10 +1,11 @@
-import { readFileSync, readdirSync, mkdirSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { Pool } from "pg";
 
 import { assertTestDatabaseUrl } from "./guard.js";
+import { applyMigrationFile, listMigrationFiles } from "./migration-runner.js";
 
 /**
  * 08-06 (QG-04, D-13) — the ONE migration-applying test fixture.
@@ -93,11 +94,11 @@ async function applyPendingMigrations(pool: Pool): Promise<void> {
     `);
 
     mkdirSync(MIGRATIONS_DIR, { recursive: true });
-    // Filename order is correct ONLY because every migration is zero-padded
-    // (0001_, 0002_, ...). A non-padded name would sort into the wrong slot.
-    const files = readdirSync(MIGRATIONS_DIR)
-      .filter((f) => f.endsWith(".sql"))
-      .sort();
+    // 08-09: listing and per-file application now come from migration-runner.ts,
+    // so the fixture and the two migration tests share one mechanism. The
+    // zero-padded-filename check that used to be a comment here is enforced
+    // inside listMigrationFiles.
+    const files = listMigrationFiles(MIGRATIONS_DIR);
 
     for (const file of files) {
       const { rows } = await client.query<{ exists: boolean }>(
@@ -106,8 +107,7 @@ async function applyPendingMigrations(pool: Pool): Promise<void> {
       );
       if (rows.length > 0) continue;
 
-      const sql = readFileSync(path.join(MIGRATIONS_DIR, file), "utf8");
-      await client.query(sql);
+      await applyMigrationFile(client, MIGRATIONS_DIR, file);
       await client.query("INSERT INTO _test_migrations_applied (filename) VALUES ($1)", [file]);
     }
   } finally {

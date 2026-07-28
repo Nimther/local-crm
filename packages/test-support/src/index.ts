@@ -12,5 +12,12 @@ export {
   getMigrationsDir,
   getTestDatabaseUrl,
 } from "./db-fixture.js";
+export {
+  applyMigrationFile,
+  applyMigrationsUpTo,
+  applyRemainingMigrations,
+  listMigrationFiles,
+} from "./migration-runner.js";
+export type { MigrationClient } from "./migration-runner.js";
 export { startTempRedis } from "./harness/temp-redis.js";
 export type { StartTempRedisOptions, TempRedis } from "./harness/temp-redis.js";
