@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { URL } from "node:url";
 
 import { Pool } from "pg";
@@ -46,13 +46,31 @@ function sanitizeSegment(segment: string): string {
   return segment.toLowerCase().replace(/[^a-z0-9_]/g, "_");
 }
 
+/** Hex characters of content hash appended when the name must be truncated. */
+const TRUNCATION_HASH_LENGTH = 8;
+
 /**
  * `mega_crm_test_<workspace>_<runId>` — unique per workspace and per run (D-10),
  * so two concurrent CI runs can never collide on one physical database.
+ *
+ * 08-REVIEW WR-06: a plain `.slice(0, 63)` has no collision-avoidance step.
+ * `TEST_DATABASE_PREFIX + "_"` already consumes 14 of the 63 available bytes,
+ * leaving 49 for `<workspace>_<runId>` combined -- two different `runId`s for
+ * a sufficiently long `workspace` string can truncate to an IDENTICAL 63-byte
+ * name, and `createEphemeralDatabase`'s `dropEphemeralDatabase`-then-create
+ * sequence would drop the first run's still-in-use database out from under it.
+ * When truncation is needed, the tail is instead a short content hash of the
+ * FULL un-truncated name, so any two distinct (workspace, runId) pairs stay
+ * distinguishable even after the cut -- rather than merely detecting the
+ * collision, this avoids it by construction.
  */
 export function buildEphemeralDatabaseName(workspace: string, runId: string): string {
   const name = `${TEST_DATABASE_PREFIX}_${sanitizeSegment(workspace)}_${sanitizeSegment(runId)}`;
-  return name.slice(0, MAX_IDENTIFIER_LENGTH);
+  if (name.length <= MAX_IDENTIFIER_LENGTH) return name;
+
+  const hash = createHash("sha256").update(name).digest("hex").slice(0, TRUNCATION_HASH_LENGTH);
+  const keepLength = MAX_IDENTIFIER_LENGTH - TRUNCATION_HASH_LENGTH - 1; // -1 for the "_" separator
+  return `${name.slice(0, keepLength)}_${hash}`;
 }
 
 function resolveAdminDsn(explicit?: string): string {

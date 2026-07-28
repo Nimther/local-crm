@@ -54,6 +54,25 @@ describe("buildEphemeralDatabaseName", () => {
       buildEphemeralDatabaseName("worker", "def456"),
     );
   });
+
+  // 08-REVIEW WR-06: a plain 63-byte slice has no collision-avoidance step.
+  // With a long enough workspace name, the runId-carrying suffix falls
+  // entirely past the 63-byte cutoff, so two DIFFERENT runIds truncate to the
+  // SAME name -- the opposite of the "unique per run" guarantee this function
+  // documents. `dropEphemeralDatabase` combined with `createEphemeralDatabase`
+  // calling it first means the second run would drop the first run's
+  // still-in-use database out from under it.
+  it("stays distinct after truncation even when the divergent runId falls past the 63-byte cutoff", () => {
+    const workspace = "a".repeat(60);
+    const nameA = buildEphemeralDatabaseName(workspace, "run-one");
+    const nameB = buildEphemeralDatabaseName(workspace, "run-two");
+
+    expect(nameA.length).toBeLessThanOrEqual(63);
+    expect(nameB.length).toBeLessThanOrEqual(63);
+    expect(nameA).not.toBe(nameB);
+    expect(nameA.startsWith("mega_crm_test_")).toBe(true);
+    expect(nameB.startsWith("mega_crm_test_")).toBe(true);
+  });
 });
 
 describe("dropEphemeralDatabase — refuses non-test databases before connecting", () => {
