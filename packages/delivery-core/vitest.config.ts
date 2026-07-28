@@ -1,14 +1,14 @@
-import path from "node:path";
 import { configDefaults, defineConfig } from "vitest/config";
+import { resolveEnvPath } from "../../scripts/env-path.mjs";
 
 // Load the repo-root .env for local dev/test runs (Node >=20.6 native loader),
 // mirroring apps/worker/vitest.config.ts's convention. Optional -- delivery-core's
 // own unit tests never open a real DB/Redis connection (pre-send-gate/send-ledger
 // tests stub the PoolClient directly), so this is only here for parity/future use.
 try {
-  process.loadEnvFile(path.resolve(import.meta.dirname, "../../.env"));
+  process.loadEnvFile(resolveEnvPath());
 } catch {
-  // .env not present -- rely on already-exported environment variables
+  // No configuration file -- rely on already-exported environment variables
 }
 
 export default defineConfig({

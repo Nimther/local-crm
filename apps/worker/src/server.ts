@@ -1,3 +1,4 @@
+import "./load-env.js";
 import type { Worker } from "bullmq";
 import { buildRedisConnectionOptions, createRedisConnection } from "./queues/connection.js";
 import { createEventsIngestWorker } from "./queues/events-ingest.worker.js";

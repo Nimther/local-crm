@@ -1,8 +1,8 @@
-import path from "node:path";
 
 import { defineConfig } from "@playwright/test";
+import { resolveEnvPath } from "../../scripts/env-path.mjs";
 
-// Load the repo-root .env into the PLAYWRIGHT process (not into the servers it
+// Load this machine's configuration into the PLAYWRIGHT process (not into the servers it
 // starts), mirroring every vitest.config.ts in the repo. Two things need it:
 // TEST_ADMIN_DATABASE_URL, without which provisioning cannot create a database;
 // and DATABASE_URL, which is what globalSetup's guard compares the freshly
@@ -10,9 +10,9 @@ import { defineConfig } from "@playwright/test";
 // would pass vacuously. globalSetup overwrites DATABASE_URL with the ephemeral
 // DSN before any server starts, so nothing downstream sees the dev value.
 try {
-  process.loadEnvFile(path.resolve(import.meta.dirname, "../../.env"));
+  process.loadEnvFile(resolveEnvPath());
 } catch {
-  // .env not present — rely on already-exported environment variables
+  // No configuration file — rely on already-exported environment variables
 }
 
 /**

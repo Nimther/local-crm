@@ -1,5 +1,5 @@
-import path from "node:path";
 import { configDefaults, defineConfig } from "vitest/config";
+import { resolveEnvPath } from "../../scripts/env-path.mjs";
 
 // 08-01 set no `globalSetup` and no `env.DATABASE_URL` block here (unlike
 // apps/worker and packages/delivery-core) on the grounds that this workspace's
@@ -15,13 +15,13 @@ import { configDefaults, defineConfig } from "vitest/config";
 // in the docker-compose `db` service but not in a Homebrew install, so both
 // files failed locally with `role "postgres" does not exist` while passing in
 // CI. provision-db.ts already reads TEST_ADMIN_DATABASE_URL as an override;
-// it simply had nowhere to be set. Loading the repo-root .env here gives it
+// it simply had nowhere to be set. Loading this machine's configuration here gives it
 // one, and is the same optional/try-catch shape apps/worker uses — shell and
 // CI environment variables still take precedence.
 try {
-  process.loadEnvFile(path.resolve(import.meta.dirname, "../../.env"));
+  process.loadEnvFile(resolveEnvPath());
 } catch {
-  // .env not present — rely on already-exported environment variables
+  // No configuration file — rely on already-exported environment variables
 }
 
 export default defineConfig({
