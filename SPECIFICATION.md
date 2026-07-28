@@ -46,6 +46,8 @@
 
 `.nvmrc` (добавлен в 08-01): `26` — мажорная версия Node, на которую `actions/setup-node` настраивается через `node-version-file`.
 
+`eslint.config.js` (добавлен в 08-03): flat-config ESLint 10 из семи блоков. Type-aware ярус (`recommendedTypeChecked` + `projectService`) намеренно ограничен глобами `apps/*/src/**` и `packages/*/src/**` — каждый `tsconfig.json` в репозитории объявляет `include: ["src"]`, поэтому `projectService` падает с ошибкой парсинга на любом файле вне `src/`. Конфиг-файлы, `scripts/**/*.mjs` и Playwright-спеки покрыты отдельным не-type-aware ярусом. На момент добавления: **396 файлов проверяется, 536 нарушений** (522 error / 14 warning) — приведение к нулю выполняется в 08-07, а не здесь.
+
 **Расхождение окружения (08-01):** локальная машина разработчика запускает Postgres 17.10 и Redis 8.8.0 нативно через Homebrew, а не через `docker compose` — Docker на ней не установлен. На `ubuntu-latest` `docker compose` доступен, поэтому CI работает как описано; локально эквивалентом `docker compose exec -T db psql -U postgres` служит `psql -U <локальный суперюзер>` (роли `postgres` в Homebrew-инстансе нет). Локальный Redis — версии 8, а не `redis:7` из compose.
 
 **Dockerfile, деплой-манифестов, healthcheck-эндпоинта в репозитории нет.** Как api/worker собираются и запускаются в staging/prod — **не определено**.
@@ -60,6 +62,12 @@
 |---|---|---|
 | `concurrently` | `10.0.3` | dev |
 | `typescript` | `^5.9.3` (установлено 5.9.3) | dev |
+| `eslint` | `^10.8.0` | dev — добавлен в 08-03 |
+| `typescript-eslint` | `^8.65.0` | dev — мета-пакет (`tseslint.config`, `recommendedTypeChecked`) |
+| `@vitest/eslint-plugin` | `^1.6.24` | dev — правило `vitest/no-focused-tests` |
+| `eslint-plugin-react-hooks` | `^7.1.1` | dev — `rules-of-hooks` / `exhaustive-deps` для `apps/web` |
+| `eslint-plugin-no-only-tests` | `^3.4.0` | dev — `.only` в Playwright-спеках (плагин vitest их не видит) |
+| `eslint-plugin-import-x` | `^4.17.1` | dev — **форк** `eslint-plugin-import`; используется ровно одно правило `import-x/no-extraneous-dependencies` |
 
 ### 2.2 `apps/api`
 
@@ -648,6 +656,8 @@ CLAUDE.md описывает **рекомендованный** стек по и
 | `tsx` | `^4.19.2` | Рантайм dev + загрузчик `.env` (`--env-file`) |
 | **GitHub Actions CI** (`.github/workflows/ci.yml`) | — | Гейт качества: тайпчек + тесты на каждый `push` и `pull_request` в `master`, живые Postgres/Redis через `docker compose up -d --wait`. **CLAUDE.md не упоминает CI вообще** — ни GitHub Actions, ни какую-либо другую систему; раздел Technology Stack описывает только рантайм-стек |
 | `execa` | `10.0.0` | Объявлен в `packages/test-support` под spawn/kill дочерних процессов для SIGKILL-сценария; **кодом ещё не используется** |
+| **ESLint + typescript-eslint** (`eslint.config.js`) | `10.8.0` / `8.65.0` | Линт-гейт с type-aware ярусом. **CLAUDE.md не упоминает линтер вообще** — раздел Technology Stack называет Vitest и Playwright, но ни ESLint, ни какой-либо другой линтер |
+| `eslint-plugin-import-x` | `^4.17.1` | **Расхождение с планом 08-03:** план называл `eslint-plugin-import`, но его последняя версия `2.32.0` объявляет peer `eslint: ^2 … ^9` и не поддерживает ESLint 10. Установлен поддерживаемый форк, дающий то же правило `no-extraneous-dependencies` |
 
 ### 8.3 Совпадает с CLAUDE.md (для полноты)
 

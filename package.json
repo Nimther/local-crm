@@ -14,12 +14,20 @@
     "dev": "concurrently -n api,web,worker -c blue,green,yellow \"npm run dev -w apps/api\" \"npm run dev -w apps/web\" \"npm run dev -w apps/worker\"",
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
+    "lint": "eslint . --max-warnings=0",
+    "lint:floor": "node scripts/check-lint-file-floor.mjs",
     "lint:migrations": "node scripts/lint-migrations.mjs",
     "db:generate": "npm run db:generate -w packages/db",
     "db:migrate": "npm run db:migrate -w packages/db"
   },
   "devDependencies": {
+    "@vitest/eslint-plugin": "^1.6.24",
     "concurrently": "10.0.3",
-    "typescript": "^5.9.3"
+    "eslint": "^10.8.0",
+    "eslint-plugin-import-x": "^4.17.1",
+    "eslint-plugin-no-only-tests": "^3.4.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.65.0"
   }
 }
