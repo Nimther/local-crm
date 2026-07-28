@@ -1,0 +1,59 @@
+name: CI
+
+# 08-01 (QG-01, D-01): BOTH triggers are required. `push` alone means the check
+# never appears on a pull request, so branch protection has nothing to require
+# and silently allows the merge; `pull_request` alone means a direct push to a
+# phase branch is never checked. See 08-RESEARCH.md § Common Pitfalls → Pitfall 1.
+on:
+  push:
+  pull_request:
+    branches: [master]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    env:
+      # The guard compares the test DSN against a REAL dev DSN — without
+      # DATABASE_URL exported here it would have nothing to compare against and
+      # the equality half of the check would be vacuous.
+      DATABASE_URL: postgres://mega_crm_app:mega_crm_dev_pw@localhost:5432/mega_crm
+      TEST_DATABASE_URL: postgres://mega_crm_app:mega_crm_dev_pw@localhost:5432/mega_crm_test_worker
+      TEST_REDIS_URL: redis://localhost:6379/1
+    steps:
+      # Third-party action code runs with access to this job's token and the
+      # checked-out tree, so every action is pinned to a full commit SHA — a
+      # floating tag can be re-pointed at attacker-controlled code (T-08-01-01).
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # `--wait` blocks on the healthcheck blocks already defined for `db` and
+      # `redis` in docker-compose.yml. Never add a `sleep` here — if the runner
+      # genuinely needs longer, raise `--wait-timeout` explicitly instead.
+      - name: Start Postgres and Redis
+        run: docker compose up -d --wait
+
+      - name: Create ephemeral test database
+        run: >
+          docker compose exec -T db
+          psql -U postgres -c "CREATE DATABASE mega_crm_test_worker OWNER mega_crm_app"
+
+      # D-04: this step IS the typecheck. Every workspace's `build` script is
+      # `tsc -p tsconfig.json` with noEmit, so a type error anywhere in the
+      # monorepo fails the job. There is deliberately no separate tsc pass.
+      - name: Typecheck
+        run: npm run build --workspaces --if-present
+
+      - name: Test (apps/worker)
+        run: npm run test -w apps/worker

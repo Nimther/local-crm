@@ -29,6 +29,11 @@ export default defineConfig({
     environment: "node",
     testTimeout: 20_000,
     hookTimeout: 20_000,
+    // 08-01 (QG-04): the fail-closed test-database guard. Runs before vitest
+    // collects any test file, so a TEST_DATABASE_URL that is unset, or that
+    // resolves to the same physical database as DATABASE_URL, aborts the run
+    // before a single test opens a connection. There is no opt-out.
+    globalSetup: ["../../packages/test-support/src/global-setup.ts"],
     // 06-12: flow-run-advance-integration.test.ts registers a REAL BullMQ
     // Worker against the SAME shared FLOW_RUN_ADVANCE_QUEUE every other
     // flow-engine test file enqueues onto (real Redis, no per-file
