@@ -111,8 +111,17 @@ async function applyPendingMigrations(pool: Pool): Promise<void> {
       await client.query("INSERT INTO _test_migrations_applied (filename) VALUES ($1)", [file]);
     }
   } finally {
-    await client.query("SELECT pg_advisory_unlock($1)", [MIGRATION_ADVISORY_LOCK_KEY]);
-    client.release();
+    // 08-REVIEW WR-01: release unconditionally. If the unlock query itself
+    // throws (e.g. the connection was already dropped by the server), the
+    // outer finally must still release the client back to the pool -- a
+    // leaked checked-out client makes `pool.end()` (and therefore the
+    // `beforeAll` awaiting `ensureTestDbMigrated()`) hang until hookTimeout,
+    // rather than failing fast with the real error.
+    try {
+      await client.query("SELECT pg_advisory_unlock($1)", [MIGRATION_ADVISORY_LOCK_KEY]);
+    } finally {
+      client.release();
+    }
   }
 }
 
