@@ -59,7 +59,11 @@ describe("tenant context (RLS session variable)", () => {
   it("refuses to run at all with no tenant in scope", async () => {
     // Both entry points fail closed rather than defaulting to some workspace.
     expect(() => getWorkspaceId()).toThrow(/No tenant context/);
-    await expect(withTenantTransaction(async () => undefined)).rejects.toThrow(/No tenant context/);
+    // The callback is never reached — withTenantTransaction throws before it
+    // acquires a client — so it deliberately has nothing to await.
+    await expect(withTenantTransaction(() => Promise.resolve(undefined))).rejects.toThrow(
+      /No tenant context/,
+    );
   });
 
   it("does not leak one scope's workspace id into the next", async () => {
