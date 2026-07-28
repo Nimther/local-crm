@@ -43,38 +43,86 @@ Full phase details: [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md)
 ## Phase Details
 
 ### Phase 8: Quality Gates & Failure-Injection Foundation
+
 **Goal**: Any change to the send pipeline can be proven safe before it ships — CI blocks broken code, tests cannot touch the dev database, and every failure mode the audit names can be reproduced on demand.
 **Depends on**: Phase 7 (v1.0 shipped)
 **Requirements**: QG-01, QG-02, QG-03, QG-04, QG-05, QG-06, QG-07, QG-08, QG-09, QG-10, WRK-12, DB-08
 **Success Criteria** (what must be TRUE):
+
   1. A pull request carrying a failing test, a type error, a lint violation, or a coverage drop below the recorded baseline cannot be merged.
   2. An E2E run started without a provisioned ephemeral database aborts with a hard error instead of silently falling back to the dev database, and CI asserts which connection string the run actually used.
   3. Each failure mode named by the audit — SendGrid timeout, SendGrid 429, connection reset, process SIGKILL mid-dispatch, Redis restart mid-queue — is reproducible by a single command and produces an asserted outcome, not just a log line.
   4. Redis refuses new writes with an error instead of silently evicting when it hits its memory ceiling, and queued jobs survive a Redis container restart.
   5. A migration is automatically verified both from an empty database and on top of the current schema, and expand/contract sequencing is a written, enforced rule; `.env`/`dump.rdb` are out of the repo working root, and `ARCHITECTURE.md`/`CONVENTIONS.md` exist with a binding update rule in `CLAUDE.md`.
+
 **Plans**: 18 plans (15 waves, tracer-first). Waves are largely sequential by necessity: root `package.json`, `SPECIFICATION.md` and `package-lock.json` are hub files touched by most plans, and two concurrent `npm install` runs in one workspace tree corrupt each other — so no two plans in a wave share a file. Parallel pairs: W2 (08-02+08-05), W6 (08-04+08-08), W14 (08-16+08-17).
 
 Plans:
+**Wave 1**
+
 - [ ] 08-01-PLAN.md — Tracer: end-to-end CI gate (one job, minimal fail-closed guard, worker suite, branch protection)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 08-02-PLAN.md — Fail-closed DSN guard + ephemeral database provisioning with an internally-guarded drop
-- [ ] 08-03-PLAN.md — ESLint flat config, fail-first fixtures, version-controlled lint file-count floor
-- [ ] 08-04-PLAN.md — Redis durability config (`docker/redis.conf`) with a fail-first `CONFIG GET` assertion
 - [ ] 08-05-PLAN.md — Migration linter: expand/contract + unmarked destructive DDL
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 08-03-PLAN.md — ESLint flat config, fail-first fixtures, version-controlled lint file-count floor
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 08-06-PLAN.md — Consolidate `db-fixture`, remove the dev-DB fallback, wire every vitest globalSetup
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
 - [ ] 08-07-PLAN.md — Zero lint debt across all workspaces
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 08-04-PLAN.md — Redis durability config (`docker/redis.conf`) with a fail-first `CONFIG GET` assertion
 - [ ] 08-08-PLAN.md — Failure scenarios: SendGrid 429, timeout, connection reset
-- [ ] 08-09-PLAN.md — Migration tests: from empty + incremental over seeded data
-- [ ] 08-10-PLAN.md — Playwright fail-closed E2E lane (no dev-stack reuse, no dev config)
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
 - [ ] 08-11-PLAN.md — Root vitest aggregator, coverage provider, measured baseline
-- [ ] 08-12-PLAN.md — SIGKILL scenario: real process killed inside the claim window
-- [ ] 08-13-PLAN.md — Redis-restart scenario + the five-scenario checklist
+
+**Wave 8** *(blocked on Wave 7 completion)*
+
 - [ ] 08-14-PLAN.md — Coverage gate (unrounded, equality passes) + threshold ratchet
+
+**Wave 9** *(blocked on Wave 8 completion)*
+
+- [ ] 08-09-PLAN.md — Migration tests: from empty + incremental over seeded data
+
+**Wave 10** *(blocked on Wave 9 completion)*
+
+- [ ] 08-10-PLAN.md — Playwright fail-closed E2E lane (no dev-stack reuse, no dev config)
+
+**Wave 11** *(blocked on Wave 10 completion)*
+
 - [ ] 08-15-PLAN.md — Root hygiene: `MEGA_CRM_ENV_FILE` resolver + blacklist check
+
+**Wave 12** *(blocked on Wave 11 completion)*
+
+- [ ] 08-12-PLAN.md — SIGKILL scenario: real process killed inside the claim window
+
+**Wave 13** *(blocked on Wave 12 completion)*
+
+- [ ] 08-13-PLAN.md — Redis-restart scenario + the five-scenario checklist
+
+**Wave 14** *(blocked on Wave 13 completion)*
+
 - [ ] 08-16-PLAN.md — Close the coverage increment: `packages/kms` and `packages/tenant-context` tests
 - [ ] 08-17-PLAN.md — `ARCHITECTURE.md`, `CONVENTIONS.md`, binding update rule in `CLAUDE.md`
+
+**Wave 15** *(blocked on Wave 14 completion)*
+
 - [ ] 08-18-PLAN.md — CI assembly: static/test/failure-injection/e2e + required checks on `master`
 
 **Sequencing and pitfall notes:**
+
 - **QG-06 is a hard blocker for Phase 11.** The delivery state machine cannot be safely changed without a harness that can prove the new `interrupted → reconciling` transition under simulated crash timing. Build the harness on the existing `ProcessSendJobDeps.sendMail` dependency-injection seam (`apps/worker/src/queues/send-dispatch.ts`) — that seam already exists and is already used by `send-dispatch-idempotency.test.ts` / `send-dispatch-durability.test.ts`; this phase adds scenarios, not a new seam.
 - **QG-04 (Pitfall 21):** the guard must be a hard failure, not a graceful default. Assert the resolved test connection string is *not equal* to `DATABASE_URL` before any test runs, and provision the ephemeral database with the same script locally and in CI (no CI-only path).
 - **QG-03 (Pitfall 22):** set the coverage threshold from the measured current baseline plus a deliberate increase, not a round number. Track the named crash/race scenarios as a separate checklist mapped to specific test names — the coverage percentage must never stand in as evidence that they exist.
@@ -84,17 +132,21 @@ Plans:
 ---
 
 ### Phase 9: Partition Automation & Boundary Safety
+
 **Goal**: `events` and `send_events` always have partitions ahead of incoming data, and a missing partition is loud rather than silent.
 **Depends on**: Phase 8 (migration tests + CI gate)
 **Requirements**: DB-01, DB-02, DB-03, DB-04
 **Success Criteria** (what must be TRUE):
+
   1. Partitions for `events` and `send_events` exist at least two months ahead of the current date at all times, created without manual intervention.
   2. If the maintenance job stops running or the next partition is missing, an alert fires while there is still buffer — before any row can land in DEFAULT.
   3. Crossing a month boundary is exercised by an automated test, including the case where the automation ran late and DEFAULT already holds rows.
   4. Rows already sitting in a DEFAULT partition can be relocated into their correct partition by a documented procedure that does not hold a long exclusive lock on the live table.
+
 **Plans**: TBD
 
 **Sequencing and pitfall notes:**
+
 - ⚠️ **HARD EXTERNAL DEADLINE: 2026-09-01.** Partitions exist only through August 2026. From 1 September new rows land in DEFAULT, after which every subsequent `ATTACH PARTITION` requires a full DEFAULT scan under `ACCESS EXCLUSIVE` lock — an ingestion outage on the live events table.
 - **This phase is deliberately small and depends only on Phase 8** so it can be scheduled independently of Phases 10-16 and so "Phase 9 complete" literally means "deadline met". Do not fold other database work into it.
 - **Pitfall 13:** shipping the automation and *avoiding the DEFAULT-scan cost forever* are two different bars. Before any attach, query whether `events_default`/`send_events_default` already holds rows; if so, apply the CHECK-constraint-first technique (a CHECK on DEFAULT proving it cannot contain rows in the new range lets Postgres skip the scan) before attaching.
@@ -105,21 +157,26 @@ Plans:
 ---
 
 ### Phase 10: Tenant Isolation & Trust Boundaries
+
 **Goal**: Cross-tenant access is prevented by database identity and policy — not by a session flag and not by remembering to write a `WHERE` clause — and the prevention is proven by tests that actively try to break it.
 **Depends on**: Phase 8
 **Requirements**: SEC-01, SEC-02, SEC-03, SEC-04, SEC-05, SEC-06, SEC-07, SEC-08, SEC-09, SEC-10, SEC-11, SEC-12, SEC-13, SEC-14, SEC-15, SEC-16
 **Success Criteria** (what must be TRUE):
+
   1. A query against a tenant table with no tenant context raises an error rather than returning zero rows, and a test asserts that specific Postgres error class.
   2. Cross-tenant background scans run only under a dedicated least-privilege database role whose credentials the API process does not hold; no code path reachable from the public API can grant itself cross-tenant read access; and the Better Auth tables sit behind a decided, implemented trust boundary that login, signup and invite-accept still pass through end to end.
   3. Negative cross-tenant tests cover both API routes and background jobs, and a webhook event carrying a sibling workspace's data under a shared BYO SendGrid key is discarded rather than persisted.
   4. The webhook endpoint rejects a stale-timestamp or replayed delivery and is rate-limited independently of the rest of the API; an API key lacking the required scope is refused on every route, or scopes are removed outright as a guarantee the system does not actually make.
   5. Every route resolves workspace membership through one implementation and answers identically for a missing and a forbidden resource; API rate limiting stays correct with more than one API replica; secrets and PII are redacted through one shared rule set used by both API and worker; and a short `BETTER_AUTH_SECRET` is refused in production.
+
 **Plans**: TBD
 
 **Open decision — carry into `/gsd-discuss-phase`:**
+
 - **SEC-05 — Better Auth trust boundary.** Dedicated least-privilege DB role (`mega_crm_auth` owning only the 7 auth tables, `mega_crm_app` revoked entirely — the audit's own stated preference and research's lean) **vs.** adding RLS to `organization`/`session`/`account`. This is an architectural decision, not an implementation task. Research (ARCHITECTURE §3) also proposes moving the 7 tables into a dedicated `auth.*` schema so the boundary is one `REVOKE ALL ON SCHEMA` instead of seven table-level revokes.
 
 **Sequencing and pitfall notes:**
+
 - **This phase must precede Phase 11's reconciler (DLV-03) and Phase 12's bounded sweep (WRK-05).** Both are cross-tenant background scans; sequencing the role first means each rewrites its admin-scan usage *once*, against the final role, rather than against the GUC pattern and then again later.
 - ⚠️ **SEC-03 must unify RLS policies in the fail-CLOSED direction (Pitfall 11).** The two variants today are bare-cast (`current_setting(...)::uuid` — throws when the GUC is unset) and NULLIF-guarded (returns zero rows). Unify toward **bare-cast**. Standardizing on NULLIF "because it looks more defensive" silently converts 12 currently-fail-closed tables — including `contacts`, `sends`, `events`, `send_events` — into fail-open-to-empty-result tables, which application code routinely misreads as "this record does not exist". SEC-04's test must assert the **thrown error**; a test asserting `rows.length === 0` passes under either variant and catches nothing. Run this unification as its own reviewed, isolated change — it touches 22 security-critical policies at once.
 - ⚠️ **SEC-12 (Pitfall 12):** do not add RLS to Better Auth tables as a mechanical checklist item. Better Auth issues its own SQL through a non-tenant pool that never sets the workspace GUC, and `organization` has no `workspace_id` column to key on — a copy-pasted policy breaks login, signup and session validation platform-wide, silently (a zero-row policy produces no SQL error). Gate any change here on the SEC-05 decision above and re-test the full login/signup/invite-accept flow before it ships.
@@ -132,18 +189,22 @@ Plans:
 ---
 
 ### Phase 11: Delivery Correctness
+
 **Goal**: No email is lost, duplicated, or wrongly classified when SendGrid is slow, when SendGrid returns an ambiguous result, or when the process dies mid-send.
 **Depends on**: Phase 8 (failure-injection harness), Phase 10 (least-privilege role for the reconciler's cross-tenant discovery scan)
 **Requirements**: DLV-01, DLV-02, DLV-03, DLV-04, DLV-05, DLV-06, DLV-07, DLV-08, DLV-09
 **Success Criteria** (what must be TRUE):
+
   1. A process killed after SendGrid accepted a message leaves that send in `reconciling`, not `failed`, and no retry path re-sends it.
   2. A reconciler resolves every `reconciling` send to a true terminal state, and a retry worker acting on the same row concurrently cannot produce a second terminal write or a second SendGrid call.
   3. A SendGrid request that hangs is aborted by an explicit timeout strictly shorter than the queue's lock duration, and the timeout is classified as an ambiguous outcome rather than a failure.
   4. Re-running the same send intent produces the same idempotency key, so a retry cannot create a second message.
   5. The documented delivery model (at-most-once / effectively-once) matches observed behavior under the crash tests at all three boundaries — before the send, after SendGrid accepted, before the result was written — and send duration is available as a metric.
+
 **Plans**: TBD
 
 **Sequencing and pitfall notes:**
+
 - ⚠️ **The reconciler must claim rows exclusively, or this phase recreates the duplicate-send bug one layer up (Pitfall 1).** Resolution must take `SELECT ... FOR UPDATE SKIP LOCKED` inside `withTenantTransaction` (matching the existing `claimCampaignSend` pattern) before reading provider state and writing a terminal status — never a blind `UPDATE sends SET status=... WHERE status='reconciling'`. The retry path must be forbidden from calling SendGrid for any row in `reconciling`: only the reconciler resolves that state, and the job processor treats it as "not my job", not "try again". DLV-08's crash tests must include the three-way race (reconciler *and* retry worker both touching one row), not just the three named crash points.
 - **Design the state machine as an explicit reviewed artifact before touching `send-dispatch.ts`** — states, valid transitions, and *who is allowed to write each transition*. DLV-01 is a design deliverable, not documentation written after the code.
 - **Correlation is by `send_id` only.** `custom_args.send_id` already exists on every SendGrid request and is already read back by `webhook-events.worker.ts` — the reconciler must match provider events to `sends` rows through it and never re-derive by (contact, timestamp, template) heuristics.
@@ -156,21 +217,26 @@ Plans:
 ---
 
 ### Phase 12: Worker Reliability & Tenant Fairness
+
 **Goal**: One tenant's limits, one oversized segment, or a restart cannot degrade the rest of the platform; background work is bounded, resumable and observable.
 **Depends on**: Phase 11 (same files, same `SendJobResult` shape), Phase 10 (role for the sweep's cross-tenant discovery scan), Phase 8 (Redis `noeviction`)
 **Requirements**: WRK-01, WRK-02, WRK-03, WRK-04, WRK-05, WRK-06, WRK-07, WRK-08, WRK-09, WRK-10, WRK-11, WRK-13
 **Success Criteria** (what must be TRUE):
+
   1. Under load with tenant A over its rate limit, tenant B's send throughput is measurably unaffected — proven by a two-tenant load test, not by code review — and the configured per-tenant RPS is backed by that test or by SendGrid's documented limit rather than a guess.
   2. A single tenant cannot occupy more than its configured share of worker slots while other tenants have queued work.
   3. A segment sweep across the platform's target contact volume completes in bounded pages with short transactions, and resumes from its checkpoint after being killed mid-sweep without reprocessing everything already done.
   4. SIGTERM drains in-flight jobs and closes every Queue handle without losing the job in progress; every worker — including the repeatable ticks — reports errors through one shared listener, and the multi-instance-safety assumptions are written down.
   5. Failed jobs age out under a per-queue retention policy instead of accumulating forever, terminal failures land in an observable dead-letter path, and Redis connection options, `defaultJobOptions` and TTL values have exactly one definition.
+
 **Plans**: TBD
 
 **Open decision — carry into `/gsd-discuss-phase`:**
+
 - **WRK-02 — per-tenant concurrency-cap mechanism.** BullMQ configuration **vs.** a Redis counter **vs.** bounded per-tier worker pools. This is a distinct problem from RPS throttling: a correct token bucket still lets one tenant's large backlog occupy worker slots ahead of another tenant's small batch. Research explicitly leaves the mechanism open.
 
 **Sequencing and pitfall notes:**
+
 - ⚠️ **WRK-01 (Pitfall 4):** `worker.rateLimit()` is worker-scoped, not tenant-scoped — that is the bug. Replace it with `job.moveToDelayed(timestamp, job.token)` + `Worker.DelayedError()` **only for the tenant-bucket cause**; keep the existing `worker.rateLimit()` behavior for genuine SendGrid 429/5xx backpressure, which really is a worker-wide signal. This requires splitting `SendJobResult` with `cause: "tenant_bucket" | "provider_backoff"` (introduced in Phase 11 — this is why the two phases are adjacent and touch the same files). The two-queue split (`email-broadcast`/`email-triggered`) solves *lane* fairness, not *tenant* fairness within a lane.
 - **WRK-05/WRK-06:** copy the pattern this codebase already proved in `recipient-snapshot.ts` / `campaign-kickoff.worker.ts` — keyset pagination on `contacts.id`, per-page `statement_timeout`, persisted resume cursor. It cannot be copied verbatim: campaign snapshotting is a one-shot freeze, while the segment sweep is perpetual, so a permanent cursor would silently skip contacts inserted before the cursor position between ticks. Reset the cursor on successful full completion of each walk. Split discovery-and-enqueue from the per-flow bounded walk (mirroring `campaign-scheduler` → `campaign-kickoff`), with a deterministic `jobId` per flow so a still-running sweep is not double-enqueued. The stale-snapshot anti-join `DELETE` needs the same `LIMIT`-bounded loop treatment.
 - ⚠️ **WRK-09/WRK-11 (Pitfall 6):** do not collapse retention into one shared constant. The shared queue factory must take retention **as a per-queue parameter**. `flow-run-advance`'s existing differentiated policy is a deliberate precedent to preserve, not an inconsistency to erase. Retention for anything feeding the `reconciling`/dead-letter path must outlive the reconciliation window with margin — hours/days, not minutes.
@@ -181,18 +247,22 @@ Plans:
 ---
 
 ### Phase 13: Compliance & Analytics Integrity
+
 **Goal**: What the platform claims about consent and delivery matches what actually happened — an unsubscribe is honored everywhere at once, and a daily number means exactly one thing.
 **Depends on**: Phase 10 (webhook ingress validation this phase extends), Phase 11 (settled send-status semantics)
 **Requirements**: CMP-01, CMP-02, CMP-03, CMP-04, CMP-05, CMP-06, CMP-07, CMP-08, CMP-09
 **Success Criteria** (what must be TRUE):
+
   1. An unsubscribe updates subscription status, consent history and the originating send as one atomic event — a crash partway through leaves no partial state anywhere.
   2. Daily metrics are computed from one documented UTC field, and a provider event that arrives late is counted on the day it occurred rather than the day it arrived.
   3. Deleting a contact removes personal data while leaving the minimum evidence needed to later prove a send or a suppression was lawful.
   4. A provider event carrying an out-of-range or manipulated timestamp cannot bypass deduplication or land outside its partition, and a redelivered event is counted once even when `sg_event_id` is not stable across retries.
   5. Metric drift is corrected by a scheduled reconciliation job rather than a one-off fix, events missed while the webhook endpoint was unreachable are recovered by backfill, and a tenant approaching the spam-complaint threshold raises an alert.
+
 **Plans**: TBD
 
 **Sequencing and pitfall notes:**
+
 - ⚠️ **CMP-05/CMP-07 (Pitfall 14):** `send_events.occurred_at` is provider-supplied and today does double duty — it routes the partition **and** forms part of the dedup key `(workspace_id, sg_event_id, occurred_at)`. Varying only the timestamp on a resent `sg_event_id` bypasses dedup entirely and double-counts delivered/opened/clicked. Bound `occurred_at` to a sane window *before* it is used for either purpose, keep server-side `received_at` as the separate authority, and re-base dedup on server-controlled fields. Route rejected events to an explicit quarantine path — a single malformed event must not fail the whole webhook batch, which is enqueued as one job.
 - **CMP-07 rests on a verified fact, not an assumption:** `sg_event_id` is *not* reliably stable across SendGrid webhook retries (confirmed in a first-party SendGrid issue, despite SendGrid's docs implying otherwise). A compound-key fallback is required.
 - **CMP-04:** the erasure/evidence tension resolves via anonymisation-with-retained-evidence (ICO guidance on erasure vs. suppression), matching the decision already recorded in PROJECT.md.
@@ -202,18 +272,22 @@ Plans:
 ---
 
 ### Phase 14: Deployment & Database Durability
+
 **Goal**: The platform can be deployed, rolled back and restored — and the database survives migrations, disasters and the passage of time.
 **Depends on**: Phase 8 (migration tests), Phase 9 (the partition job must be deployable), Phases 11-12 (send-pipeline semantics settled before deployment automation is adopted)
 **Requirements**: OPS-01, OPS-02, OPS-03, OPS-04, OPS-05, DB-05, DB-06, DB-07, DB-09, DB-10, DB-11, DB-12, DB-13, DB-14
 **Success Criteria** (what must be TRUE):
+
   1. `api`, `web` and `worker` deploy to the VPS with one reproducible command, and a documented rollback returns the previous version without manual surgery.
   2. `/healthz` answers about process liveness and `/readyz` refuses readiness until Postgres and Redis are reachable and migrations have completed — and the deploy waits on `/readyz` rather than on a timer.
   3. Migrations run exactly once per deploy even when two processes start simultaneously, a migration process killed mid-run does not block the next deploy attempt, and a rollback / roll-forward has been rehearsed against the real migration history.
   4. A point-in-time restore from backup has actually been performed and written up, not merely configured.
   5. Postgres connections use TLS, every pool has an error handler, the missing constraints exist and are verifiably enforced, and retention deletes aged data on a defined schedule.
+
 **Plans**: TBD
 
 **Sequencing and pitfall notes:**
+
 - **OPS-04/OPS-05 must land before OPS-02.** The recommended rolling-restart pattern is health-check-gated; deployment automation built before the health endpoints exist will gate on a timer instead, which is the failure mode it is supposed to prevent.
 - ⚠️ **DB-05 (Pitfall 16):** use `pg_try_advisory_lock` in a bounded retry loop with an explicit loud failure path — never a blocking `pg_advisory_lock` that turns a stuck migration into a silently hanging deploy. Take the lock on a **dedicated short-lived connection** that is closed when the migration step ends, never on a connection returned to a shared pool. Prefer one explicit one-shot `migrate` service that runs to completion before `api`/`worker` start; the advisory lock is the safety net for concurrent deploys, not the primary mechanism. Test the unclean-death case: kill the migration mid-run and confirm the next deploy proceeds.
 - ⚠️ **DB-12 (Pitfall 17):** run a pre-migration duplicate-check query for every new constraint **first**, as its own reviewed step — `member (organizationId, userId)` in particular could plausibly have duplicates from an invite-accept race. Use `CREATE UNIQUE INDEX CONCURRENTLY` + `ALTER TABLE ... ADD CONSTRAINT ... UNIQUE USING INDEX`, and assert `pg_index.indisvalid` afterwards: a `CONCURRENTLY` build over existing duplicates leaves an `INVALID`, non-enforcing index with **no migration-time error at all**.
@@ -227,19 +301,23 @@ Plans:
 ---
 
 ### Phase 15: Observability, Alerting & Frontend Resilience
+
 **Goal**: The system reports its true state — to an operator through structured logs, correlated traces and alerts, and to a user through honest error, empty and stale states.
 **Depends on**: Phase 10 (shared redaction rule set, single membership resolver as the tagging point), Phase 14 (deployed environment to observe)
 **Requirements**: OPS-06, OPS-07, OPS-08, OPS-09, OPS-10, OPS-11, OPS-12, OPS-13, OPS-14, OPS-15, OPS-16, OPS-17, OPS-18, OPS-19
 **Success Criteria** (what must be TRUE):
+
   1. A single send can be followed from HTTP request through queue job to Postgres query using one correlation identifier, in structured API and worker logs that reach the hosted log provider.
   2. An exception from frontend, API or worker reaches Sentry tagged with tenant and request, and a test proves no SendGrid key, contact email or freeform JSONB payload reaches it.
   3. Alerts fire on queue depth, oldest job age, webhook lag and share of failed sends; Bull Board is reachable only behind administrative access; a runbook exists for each alert describing recovery.
   4. The app loads with route-level code splitting — canvas and heavy dashboard chunks arrive only when those routes are opened.
   5. A failed API call, an empty list, a paginated list, stale analytics and unsaved canvas changes each show the user what is actually true rather than a blank or silently-wrong screen.
+
 **Plans**: TBD
 **UI hint**: yes
 
 **Sequencing and pitfall notes:**
+
 - **OPS-06 must land before OPS-08/OPS-10/OPS-12.** The worker currently logs only through `console.log`/`console.error` with no structured fields and no redaction — hosted logs, Sentry and trace correlation are all meaningless until it has a real Pino logger. Small but load-bearing.
 - ⚠️ **OPS-09 (Pitfall 18):** Sentry has **no retroactive redaction** — the only remedy for a leak is deleting the project's data. Sentry's default scrubbing does *not* cover email addresses or this system's secret shapes. Configure `beforeSend`/`beforeSendTransaction` on both API and worker SDKs, reusing Phase 10's shared redaction rules plus explicit scrubbing of `email`, `phone` and the freeform `properties`/`payload` JSONB blobs, and **test it against representative payloads before Sentry receives live traffic** — a thrown error from inside `sendTenantMailV3` with the decrypted key in scope, and a contact-upsert error with a `Contact` in context. Deepen pino's redaction beyond two levels using wildcard paths; JSONB nesting depth is not schema-bounded.
 - **OPS-11/OPS-12:** extend the existing `packages/tenant-context` AsyncLocalStorage context from `{workspaceId}` to also carry `requestId`/`jobId` rather than threading parameters. Job payload schemas gain an optional `requestId` so HTTP-originated jobs carry their origin across the queue boundary; repeatable ticks and webhook-driven jobs fall back to `job.id`. `send_id` already exists end to end — it needs to be *logged*, not created. A `SET LOCAL application_name` or SQL comment makes the correlation visible in `pg_stat_activity` with no schema change.
@@ -250,17 +328,21 @@ Plans:
 ---
 
 ### Phase 16: Live SendGrid Verification
+
 **Goal**: Every delivery guarantee this milestone claims is confirmed against the real SendGrid account and a real inbox — not against a mock.
 **Depends on**: Phases 10, 11, 12, 13, 14, 15
 **Requirements**: UAT-01, UAT-02, UAT-03, UAT-04, UAT-05
 **Success Criteria** (what must be TRUE):
+
   1. A live send using a tenant's own BYO key through a SendGrid Dynamic Template arrives in a real inbox.
   2. Real delivered, opened, clicked and bounced events from SendGrid land on the correct send, flow step and campaign.
   3. A genuinely signed SendGrid webhook payload passes signature verification through the full HTTP stack, and a redelivery of that same payload is counted exactly once.
   4. A real SendGrid 429 or transient error defers only the affected tenant's sends and resolves without duplicate or lost mail.
+
 **Plans**: TBD
 
 **Why UAT is its own final phase (deliberate decision):**
+
 - It is named a **release barrier** for the milestone, not per-phase acceptance. Its scope is end-to-end confirmation across the whole pipeline, which no single earlier phase owns.
 - Live verification needs a deployed environment with a real verified sender — that exists only after Phase 14. Attaching UAT-01/02 to Phase 11 would block the milestone's highest-priority correctness work on external environment readiness.
 - UAT-05 spans Phase 11 (ambiguous outcomes) *and* Phase 12 (tenant fairness); UAT-03/04 span Phase 10 (signature/replay) *and* Phase 13 (dedup). Assigning them to any one phase would misrepresent what they verify.

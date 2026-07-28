@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Production Hardening
 current_phase: 8
-status: roadmap_ready
-stopped_at: Phase 8 context gathered
-last_updated: "2026-07-28T04:04:45.871Z"
-last_activity: 2026-07-27
-last_activity_desc: ROADMAP.md created for v1.1 (9 phases, 95/95 requirements mapped)
+status: planned
+stopped_at: Phase 8 planned (18 plans, 15 waves)
+last_updated: "2026-07-28T09:30:00.000Z"
+last_activity: 2026-07-28
+last_activity_desc: Phase 8 planned — 18 plans across 15 waves, tracer-first, TDD mode
 progress:
   total_phases: 9
   completed_phases: 0
-  total_plans: 0
+  total_plans: 18
   completed_plans: 0
   percent: 0
 ---
@@ -23,15 +23,15 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-14)
 
 **Core value:** Маркетолог настраивает триггерную цепочку или кампанию — и письма надёжно и вовремя доходят до нужных контактов, со сквозным отслеживанием статусов (delivered/opened/clicked/bounced).
-**Current focus:** v1.1 Production Hardening — Phases 8-16 roadmapped, ready to plan Phase 8
+**Current focus:** v1.1 Production Hardening — Phases 8-16 roadmapped, Phase 8 planned and ready to execute
 
 ## Current Position
 
 Milestone: v1.1 Production Hardening (Phases 8-16, 95 requirements)
-Phase: 8 — Quality Gates & Failure-Injection Foundation (not started)
-Plan: —
-Status: Roadmap complete, awaiting `/gsd-discuss-phase 8` → `/gsd-plan-phase 8`
-Last activity: 2026-07-27 — ROADMAP.md created for v1.1 (9 phases, 95/95 requirements mapped)
+Phase: 8 — Quality Gates & Failure-Injection Foundation (planned)
+Plan: 0/18 complete (15 waves, tracer-first)
+Status: Ready to execute
+Last activity: 2026-07-28 — Phase 8 planned (18 plans, 15 waves; 12/12 requirements and 33/33 decisions covered)
 Progress: [░░░░░░░░░░░░░░░░░░░░] 0% (0/9 v1.1 phases)
 
 ⚠️ **Deadline:** Phase 9 (DB-01/DB-02 partition automation) must complete before **2026-09-01** — ~5 weeks. It depends only on Phase 8 and has no dependents, so it can be scheduled in parallel with Phases 10-16.
