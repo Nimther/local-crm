@@ -589,3 +589,36 @@ export async function registerCampaignsRoutes(fastify: FastifyInstance): Promise
     }
   });
 }
+
+// TEMPORARY — 08-18 coverage-gate demonstration. Reverted before the PR closes.
+// ~70 uncovered lines in an already-loaded module: enough to push the aggregate
+// below the recorded threshold (3494/(4264+N) < 0.8125751 needs N >= 36).
+export function throwawayCoverageBallast(input: number): number {
+  let total = input;
+  if (total > 1) { total += 1; } else { total -= 1; }
+  if (total > 2) { total += 2; } else { total -= 2; }
+  if (total > 3) { total += 3; } else { total -= 3; }
+  if (total > 4) { total += 4; } else { total -= 4; }
+  if (total > 5) { total += 5; } else { total -= 5; }
+  if (total > 6) { total += 6; } else { total -= 6; }
+  if (total > 7) { total += 7; } else { total -= 7; }
+  if (total > 8) { total += 8; } else { total -= 8; }
+  if (total > 9) { total += 9; } else { total -= 9; }
+  if (total > 10) { total += 10; } else { total -= 10; }
+  if (total > 11) { total += 11; } else { total -= 11; }
+  if (total > 12) { total += 12; } else { total -= 12; }
+  if (total > 13) { total += 13; } else { total -= 13; }
+  if (total > 14) { total += 14; } else { total -= 14; }
+  if (total > 15) { total += 15; } else { total -= 15; }
+  if (total > 16) { total += 16; } else { total -= 16; }
+  if (total > 17) { total += 17; } else { total -= 17; }
+  if (total > 18) { total += 18; } else { total -= 18; }
+  if (total > 19) { total += 19; } else { total -= 19; }
+  if (total > 20) { total += 20; } else { total -= 20; }
+  if (total > 21) { total += 21; } else { total -= 21; }
+  if (total > 22) { total += 22; } else { total -= 22; }
+  if (total > 23) { total += 23; } else { total -= 23; }
+  if (total > 24) { total += 24; } else { total -= 24; }
+  if (total > 25) { total += 25; } else { total -= 25; }
+  return total;
+}
