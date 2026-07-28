@@ -200,9 +200,3 @@ describe("send-dispatch.ts 429/5xx backoff (SEND-07)", () => {
     expect(rowCount, "exactly one sends row across the rate-limited attempt + successful retry").toBe(1);
   });
 });
-
-// TEMPORARY — 08-01 Task 3 branch-protection exercise. Deliberately failing
-// assertion, reverted in the next commit on this throwaway branch.
-it("DELIBERATE FAILURE proving branch protection blocks a red PR", () => {
-  expect(1).toBe(2);
-});
