@@ -52,7 +52,27 @@ Full phase details: [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md)
   3. Each failure mode named by the audit — SendGrid timeout, SendGrid 429, connection reset, process SIGKILL mid-dispatch, Redis restart mid-queue — is reproducible by a single command and produces an asserted outcome, not just a log line.
   4. Redis refuses new writes with an error instead of silently evicting when it hits its memory ceiling, and queued jobs survive a Redis container restart.
   5. A migration is automatically verified both from an empty database and on top of the current schema, and expand/contract sequencing is a written, enforced rule; `.env`/`dump.rdb` are out of the repo working root, and `ARCHITECTURE.md`/`CONVENTIONS.md` exist with a binding update rule in `CLAUDE.md`.
-**Plans**: TBD
+**Plans**: 18 plans (7 waves, tracer-first)
+
+Plans:
+- [ ] 08-01-PLAN.md — Tracer: end-to-end CI gate (one job, minimal fail-closed guard, worker suite, branch protection)
+- [ ] 08-02-PLAN.md — Fail-closed DSN guard + ephemeral database provisioning with an internally-guarded drop
+- [ ] 08-03-PLAN.md — ESLint flat config, fail-first fixtures, version-controlled lint file-count floor
+- [ ] 08-04-PLAN.md — Redis durability config (`docker/redis.conf`) with a fail-first `CONFIG GET` assertion
+- [ ] 08-05-PLAN.md — Migration linter: expand/contract + unmarked destructive DDL
+- [ ] 08-06-PLAN.md — Consolidate `db-fixture`, remove the dev-DB fallback, wire every vitest globalSetup
+- [ ] 08-07-PLAN.md — Zero lint debt across all workspaces
+- [ ] 08-08-PLAN.md — Failure scenarios: SendGrid 429, timeout, connection reset
+- [ ] 08-09-PLAN.md — Migration tests: from empty + incremental over seeded data
+- [ ] 08-10-PLAN.md — Playwright fail-closed E2E lane (no dev-stack reuse, no dev config)
+- [ ] 08-11-PLAN.md — Root vitest aggregator, coverage provider, measured baseline
+- [ ] 08-12-PLAN.md — SIGKILL scenario: real process killed inside the claim window
+- [ ] 08-13-PLAN.md — Redis-restart scenario + the five-scenario checklist
+- [ ] 08-14-PLAN.md — Coverage gate (unrounded, equality passes) + threshold ratchet
+- [ ] 08-15-PLAN.md — Root hygiene: `MEGA_CRM_ENV_FILE` resolver + blacklist check
+- [ ] 08-16-PLAN.md — Close the coverage increment: `packages/kms` and `packages/tenant-context` tests
+- [ ] 08-17-PLAN.md — `ARCHITECTURE.md`, `CONVENTIONS.md`, binding update rule in `CLAUDE.md`
+- [ ] 08-18-PLAN.md — CI assembly: static/test/failure-injection/e2e + required checks on `master`
 
 **Sequencing and pitfall notes:**
 - **QG-06 is a hard blocker for Phase 11.** The delivery state machine cannot be safely changed without a harness that can prove the new `interrupted → reconciling` transition under simulated crash timing. Build the harness on the existing `ProcessSendJobDeps.sendMail` dependency-injection seam (`apps/worker/src/queues/send-dispatch.ts`) — that seam already exists and is already used by `send-dispatch-idempotency.test.ts` / `send-dispatch-durability.test.ts`; this phase adds scenarios, not a new seam.
