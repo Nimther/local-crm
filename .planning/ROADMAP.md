@@ -52,7 +52,7 @@ Full phase details: [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md)
   3. Each failure mode named by the audit — SendGrid timeout, SendGrid 429, connection reset, process SIGKILL mid-dispatch, Redis restart mid-queue — is reproducible by a single command and produces an asserted outcome, not just a log line.
   4. Redis refuses new writes with an error instead of silently evicting when it hits its memory ceiling, and queued jobs survive a Redis container restart.
   5. A migration is automatically verified both from an empty database and on top of the current schema, and expand/contract sequencing is a written, enforced rule; `.env`/`dump.rdb` are out of the repo working root, and `ARCHITECTURE.md`/`CONVENTIONS.md` exist with a binding update rule in `CLAUDE.md`.
-**Plans**: 18 plans (7 waves, tracer-first)
+**Plans**: 18 plans (15 waves, tracer-first). Waves are largely sequential by necessity: root `package.json`, `SPECIFICATION.md` and `package-lock.json` are hub files touched by most plans, and two concurrent `npm install` runs in one workspace tree corrupt each other — so no two plans in a wave share a file. Parallel pairs: W2 (08-02+08-05), W6 (08-04+08-08), W14 (08-16+08-17).
 
 Plans:
 - [ ] 08-01-PLAN.md — Tracer: end-to-end CI gate (one job, minimal fail-closed guard, worker suite, branch protection)
