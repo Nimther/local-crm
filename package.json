@@ -26,7 +26,9 @@
     "test:migrations": "vitest run --root packages/db",
     "test:e2e": "npm run test:e2e -w apps/web",
     "coverage": "vitest run --coverage --testTimeout=60000",
-    "failure:sigkill": "vitest run --root apps/worker src/queues/__tests__/failure-injection/sigkill.test.ts"
+    "failure:sigkill": "vitest run --root apps/worker src/queues/__tests__/failure-injection/sigkill.test.ts",
+    "failure:redis-restart": "vitest run --root apps/worker src/queues/__tests__/failure-injection/redis-restart.test.ts",
+    "failure:all": "npm run failure:429 && npm run failure:timeout && npm run failure:reset && npm run failure:sigkill && npm run failure:redis-restart"
   },
   "devDependencies": {
     "@vitest/eslint-plugin": "^1.6.24",

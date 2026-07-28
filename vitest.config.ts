@@ -21,11 +21,14 @@ import { defineConfig } from "vitest/config";
  * that steals sibling files' jobs mid-assertion, and the failures look like
  * flakiness rather than a config regression.
  *
- * `packages/segments-core` and `packages/shared-schemas` are bare directory
- * entries: they ship no vitest.config.ts, and Vitest 4.1.9 accepts a directory
- * for a config-less package (verified empirically in 08-11 Task 1 — 5 files /
- * 52 tests collected across the three pure packages). Adding config files
- * purely to satisfy the aggregator would have been ceremony.
+ * 08-11 originally listed `packages/segments-core` and
+ * `packages/shared-schemas` as bare directory entries, having verified that
+ * Vitest 4.1.9 accepts a directory for a config-less package. That was true of
+ * the AGGREGATE and missed the converse: with no local config, `vitest run`
+ * inside those packages walks up, finds THIS file, and resolves the paths below
+ * relative to itself — producing `packages/segments-core/apps/api/...` and a
+ * startup error. 08-13 gave both packages a minimal config, and they are
+ * referenced here like every other project.
  *
  * A project whose tests fail, or fail to run, fails the whole aggregated run.
  * That is what stops a workspace from silently dropping out of the denominator
@@ -40,8 +43,8 @@ export default defineConfig({
       "packages/delivery-core/vitest.config.ts",
       "packages/flows-core/vitest.config.ts",
       "packages/test-support/vitest.config.ts",
-      "packages/segments-core",
-      "packages/shared-schemas",
+      "packages/segments-core/vitest.config.ts",
+      "packages/shared-schemas/vitest.config.ts",
     ],
     coverage: {
       provider: "v8",

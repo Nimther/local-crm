@@ -37,6 +37,16 @@ export interface TempRedis {
   readonly dir: string;
   /** Whatever the server wrote to stdout/stderr, for diagnostics. */
   output(): string;
+  /**
+   * Stop the server with SIGTERM and start it again on the SAME port from the
+   * SAME data directory, resolving once it answers PING.
+   *
+   * SIGTERM, not SIGKILL, on purpose: Redis performs a final fsync on a clean
+   * shutdown, which is exactly what `docker restart` does to a container. That
+   * makes this a faithful model of the restart 08-13 asserts survival across —
+   * and it is only survivable at all because the mounted config enables AOF.
+   */
+  restart(): Promise<void>;
   /** Terminate the process and remove the data directory. Safe to call twice. */
   stop(): Promise<void>;
 }
@@ -150,6 +160,77 @@ export interface StartTempRedisOptions {
   configFile?: string;
 }
 
+interface RunningProcess {
+  child: ChildProcess;
+  output: () => string;
+  spawnError: () => Error | undefined;
+}
+
+/** Start the process, wire up output capture, and register it for cleanup. */
+function spawnServer(binary: string, args: string[]): RunningProcess {
+  const child = spawn(binary, args, { stdio: ["ignore", "pipe", "pipe"] });
+  const handle = { child };
+  live.add(handle);
+  installExitHook();
+
+  let captured = "";
+  const capture = (chunk: Buffer): void => {
+    if (captured.length < MAX_CAPTURED_OUTPUT) captured += chunk.toString("utf8");
+  };
+  child.stdout?.on("data", capture);
+  child.stderr?.on("data", capture);
+
+  let spawnError: Error | undefined;
+  child.on("error", (err: Error) => {
+    spawnError = err;
+  });
+
+  child.once("exit", () => {
+    live.delete(handle);
+  });
+
+  return { child, output: () => captured, spawnError: () => spawnError };
+}
+
+/** Poll PING until the server answers, or fail with whatever it printed. */
+async function awaitReady(proc: RunningProcess, port: number, binary: string): Promise<void> {
+  const deadline = Date.now() + READY_TIMEOUT_MS;
+  for (;;) {
+    const err = proc.spawnError();
+    if (err) throw new Error(`could not start redis-server (${binary}): ${err.message}`);
+
+    if (proc.child.exitCode !== null || proc.child.signalCode !== null) {
+      throw new Error(
+        `redis-server exited before becoming ready (code ${String(proc.child.exitCode)}). ` +
+          `A malformed directive causes an immediate exit rather than a fallback to defaults.\n${
+            proc.output().trim() || "(no output)"
+          }`,
+      );
+    }
+
+    if (await ping(port, 1_000)) return;
+
+    if (Date.now() > deadline) {
+      throw new Error(
+        `redis-server did not become ready on port ${String(port)} within ${String(READY_TIMEOUT_MS)}ms.\n${
+          proc.output().trim() || "(no output)"
+        }`,
+      );
+    }
+    await sleep(READY_POLL_INTERVAL_MS);
+  }
+}
+
+/** SIGTERM, then SIGKILL if it will not go. */
+async function terminate(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  child.kill("SIGTERM");
+  if (!(await waitForExit(child, STOP_TIMEOUT_MS))) {
+    child.kill("SIGKILL");
+    await waitForExit(child, STOP_TIMEOUT_MS);
+  }
+}
+
 /**
  * Start a redis-server on a free port with a temporary data directory.
  * The caller MUST call `stop()`, normally from a `finally` or `afterAll`.
@@ -177,63 +258,33 @@ export async function startTempRedis(options: StartTempRedisOptions = {}): Promi
     "--daemonize", "no",
   );
 
-  const child = spawn(binary, args, { stdio: ["ignore", "pipe", "pipe"] });
-  const handle = { child };
-  live.add(handle);
-  installExitHook();
-
-  let captured = "";
-  const capture = (chunk: Buffer): void => {
-    if (captured.length < MAX_CAPTURED_OUTPUT) captured += chunk.toString("utf8");
-  };
-  child.stdout?.on("data", capture);
-  child.stderr?.on("data", capture);
-
-  let spawnError: Error | undefined;
-  child.on("error", (err: Error) => {
-    spawnError = err;
-  });
+  let proc = spawnServer(binary, args);
 
   const instance: TempRedis = {
     url: `redis://127.0.0.1:${String(port)}`,
     port,
     dir,
-    output: () => captured,
+    output: () => proc.output(),
+    restart: async () => {
+      await terminate(proc.child);
+      // Same binary, same args — therefore the same port, the same data
+      // directory and the same config file. Anything the server persisted
+      // before the stop is what it reads back now.
+      proc = spawnServer(binary, args);
+      await awaitReady(proc, port, binary);
+    },
     stop: async () => {
-      live.delete(handle);
-      if (child.exitCode === null && child.signalCode === null) {
-        child.kill("SIGTERM");
-        if (!(await waitForExit(child, STOP_TIMEOUT_MS))) {
-          child.kill("SIGKILL");
-          await waitForExit(child, STOP_TIMEOUT_MS);
-        }
-      }
+      await terminate(proc.child);
       await rm(dir, { recursive: true, force: true });
     },
   };
 
-  const deadline = Date.now() + READY_TIMEOUT_MS;
-  for (;;) {
-    if (spawnError) {
-      await instance.stop();
-      throw new Error(`could not start redis-server (${binary}): ${spawnError.message}`);
-    }
-    if (child.exitCode !== null || child.signalCode !== null) {
-      const detail = captured.trim() || "(no output)";
-      await instance.stop();
-      throw new Error(
-        `redis-server exited before becoming ready (code ${String(child.exitCode)}). ` +
-          `A malformed directive causes an immediate exit rather than a fallback to defaults.\n${detail}`,
-      );
-    }
-    if (await ping(port, 1_000)) return instance;
-    if (Date.now() > deadline) {
-      const detail = captured.trim() || "(no output)";
-      await instance.stop();
-      throw new Error(
-        `redis-server did not become ready on port ${String(port)} within ${String(READY_TIMEOUT_MS)}ms.\n${detail}`,
-      );
-    }
-    await sleep(READY_POLL_INTERVAL_MS);
+  try {
+    await awaitReady(proc, port, binary);
+  } catch (err) {
+    await instance.stop();
+    throw err;
   }
+
+  return instance;
 }
