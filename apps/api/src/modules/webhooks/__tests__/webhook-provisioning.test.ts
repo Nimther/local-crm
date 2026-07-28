@@ -31,6 +31,7 @@ describe("provisionEventWebhook (D-01/D-02/D-05)", () => {
   });
 
   function route(handler: (method: string, url: string, body: unknown) => Response | undefined) {
+    // eslint-disable-next-line @typescript-eslint/require-await -- test double: the signature must match the async function it replaces at the DI seam; a stub having nothing to await is the point
     fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
       const method = init?.method ?? "GET";
       const body = init?.body ? JSON.parse(init.body as string) : undefined;
@@ -186,6 +187,7 @@ describe("provisionEventWebhook (D-01/D-02/D-05)", () => {
   });
 
   it("an unexpected fetch exception is caught and returns { error: 'failed' } (never throws)", async () => {
+    // eslint-disable-next-line @typescript-eslint/require-await -- test double: the signature must match the async function it replaces at the DI seam; a stub having nothing to await is the point
     fetchMock.mockImplementation(async () => {
       throw new Error(`network unreachable, key=${API_KEY}`);
     });

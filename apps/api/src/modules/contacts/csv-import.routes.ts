@@ -96,7 +96,6 @@ async function computeDryRunSummary(
   let errorCount = 0;
   let cursor = 0;
 
-  // eslint-disable-next-line no-constant-condition
   while (true) {
     const page = await getStagedRowsPage(csvImportId, cursor, DRY_RUN_PAGE_SIZE);
     if (page.length === 0) break;

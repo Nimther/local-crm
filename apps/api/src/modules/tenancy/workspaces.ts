@@ -66,6 +66,7 @@ function toWorkspaceResponse(
  *
  * GET /api/workspaces/:slug: member-only read, 403/404 for non-members.
  */
+// eslint-disable-next-line @typescript-eslint/require-await -- Fastify plugin contract: app.register() resolves the returned promise, and the declared Promise<void> is part of that signature -- dropping async would change it, not simplify it
 export async function registerWorkspaceRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post("/api/workspaces", async (request, reply) => {
     const parsed = createWorkspaceSchema.safeParse(request.body);

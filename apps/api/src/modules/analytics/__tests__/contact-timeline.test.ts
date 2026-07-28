@@ -135,7 +135,7 @@ describe("Contact timeline (07-02, ANLT-03)", () => {
     );
   }
 
-  async function timelineUrl(slug: string, contactId: string, query?: string) {
+  function timelineUrl(slug: string, contactId: string, query?: string) {
     return `/api/workspaces/${slug}/contacts/${contactId}/timeline${query ? `?${query}` : ""}`;
   }
 
@@ -161,7 +161,7 @@ describe("Contact timeline (07-02, ANLT-03)", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: await timelineUrl(workspace.slug, contact.id),
+      url: timelineUrl(workspace.slug, contact.id),
       headers: { cookie },
     });
     expect(res.statusCode, `timeline failed: ${res.body}`).toBe(200);
@@ -193,7 +193,7 @@ describe("Contact timeline (07-02, ANLT-03)", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: await timelineUrl(workspace.slug, contact.id),
+      url: timelineUrl(workspace.slug, contact.id),
       headers: { cookie },
     });
     expect(res.statusCode, `timeline failed: ${res.body}`).toBe(200);
@@ -211,7 +211,7 @@ describe("Contact timeline (07-02, ANLT-03)", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: await timelineUrl(a.workspace.slug, contactInB.id),
+      url: timelineUrl(a.workspace.slug, contactInB.id),
       headers: { cookie: a.cookie },
     });
     expect(res.statusCode).toBe(404);
@@ -228,7 +228,7 @@ describe("Contact timeline (07-02, ANLT-03)", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: await timelineUrl(workspace.slug, contact.id, "type=emails"),
+      url: timelineUrl(workspace.slug, contact.id, "type=emails"),
       headers: { cookie },
     });
     expect(res.statusCode, `timeline failed: ${res.body}`).toBe(200);

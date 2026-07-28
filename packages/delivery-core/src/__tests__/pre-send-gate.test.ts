@@ -7,6 +7,7 @@ import { getWorkspaceSendSettings } from "../send-settings.js";
 /** Stubs a PoolClient whose `query()` returns each of `responses` in order (one per call). */
 function stubClient(responses: Array<Record<string, unknown>[]>): PoolClient {
   let call = 0;
+  // eslint-disable-next-line @typescript-eslint/require-await -- test double: the signature must match the async function it replaces at the DI seam; a stub having nothing to await is the point
   const query = vi.fn(async () => {
     const rows = responses[call] ?? [];
     call += 1;

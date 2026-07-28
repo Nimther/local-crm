@@ -51,6 +51,7 @@ async function resolveWorkspaceMember(
  * scope every read (rollup + contacts + campaigns/flows mini-lists) to the
  * caller's own workspace under RLS.
  */
+// eslint-disable-next-line @typescript-eslint/require-await -- Fastify plugin contract: app.register() resolves the returned promise, and the declared Promise<void> is part of that signature -- dropping async would change it, not simplify it
 export async function registerDashboardRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get("/api/workspaces/:slug/dashboard", async (request, reply) => {
     const { slug } = request.params as { slug: string };

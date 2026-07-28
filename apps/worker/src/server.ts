@@ -45,6 +45,7 @@ export interface WorkerRuntime {
  * No HTTP listener; this is a long-running background process, not a
  * server.
  */
+// eslint-disable-next-line @typescript-eslint/require-await -- composition root: the declared Promise<WorkerRuntime> is the contract server.ts awaits, and boot ordering is not something to reshape for a lint rule
 export async function buildWorker(): Promise<WorkerRuntime> {
   const redisUrl = process.env.REDIS_URL;
   if (!redisUrl) {
@@ -124,13 +125,11 @@ async function main(): Promise<void> {
   const runtime = await buildWorker();
 
   const shutdown = (signal: NodeJS.Signals) => {
-    // eslint-disable-next-line no-console
     console.log(`apps/worker received ${signal}, shutting down gracefully`);
     runtime
       .close()
       .then(() => process.exit(0))
       .catch((err) => {
-        // eslint-disable-next-line no-console
         console.error("apps/worker shutdown error", err);
         process.exit(1);
       });
@@ -139,7 +138,6 @@ async function main(): Promise<void> {
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
 
-  // eslint-disable-next-line no-console
   console.log(
     `apps/worker started (${runtime.workers.length} BullMQ worker(s) registered: events:ingest, imports:csv, email-broadcast, email-triggered, campaign-kickoff, campaign-scheduler, webhook-events, analytics-reconciliation, flow-run-advance, flow-reconciliation, flow-trigger-evaluator, flow-segment-sweep, flow-enroll-existing)`
   );
@@ -148,7 +146,6 @@ async function main(): Promise<void> {
 const isDirectRun = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
 if (isDirectRun) {
   main().catch((err) => {
-    // eslint-disable-next-line no-console
     console.error(err);
     process.exitCode = 1;
   });

@@ -43,6 +43,7 @@ function toInviteResponse(inv: {
  * preview/accept/register routes (`/api/invites/:invitationId*`) are NOT
  * slug-scoped: the invitee doesn't know or belong to the workspace yet.
  */
+// eslint-disable-next-line @typescript-eslint/require-await -- Fastify plugin contract: app.register() resolves the returned promise, and the declared Promise<void> is part of that signature -- dropping async would change it, not simplify it
 export async function registerInviteRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post(
     "/api/workspaces/:slug/invites",

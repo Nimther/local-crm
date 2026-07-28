@@ -13,6 +13,7 @@ import { getCallerRoles } from "../tenancy/member-roles.js";
  * (`requirePermission("campaign", "launch")`, same gate as launch/schedule
  * per UI-SPEC) since it governs every future send's throttle/cap/timing.
  */
+// eslint-disable-next-line @typescript-eslint/require-await -- Fastify plugin contract: app.register() resolves the returned promise, and the declared Promise<void> is part of that signature -- dropping async would change it, not simplify it
 export async function registerSendSettingsRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get("/api/workspaces/:slug/send-settings", async (request, reply) => {
     const { slug } = request.params as { slug: string };

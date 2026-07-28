@@ -40,6 +40,7 @@ describe("send-dispatch.ts processSendJob durability (SEND-06/SEND-07, CR-03/CR-
     status: number,
     headers: Record<string, string> = {}
   ): (apiKey: string, payload: SendGridMailSendRequest) => Promise<SendTenantMailResult> {
+    // eslint-disable-next-line @typescript-eslint/require-await -- test double: the signature must match the async function it replaces at the DI seam; a stub having nothing to await is the point
     return async () => ({
       status,
       headers: new Headers(headers),
@@ -53,6 +54,7 @@ describe("send-dispatch.ts processSendJob durability (SEND-06/SEND-07, CR-03/CR-
   } {
     let calls = 0;
     return {
+      // eslint-disable-next-line @typescript-eslint/require-await -- test double: the signature must match the async function it replaces at the DI seam; a stub having nothing to await is the point
       fn: async () => {
         calls += 1;
         return { status, headers: new Headers(), messageId: status < 300 ? "sg-message-id-fixture" : null };

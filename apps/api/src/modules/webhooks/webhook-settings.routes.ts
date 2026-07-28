@@ -44,6 +44,7 @@ function provisionErrorMessage(provisionStatus: string, provisionError: string |
  * `application/json` buffer-parser override stays scoped to only its own
  * module (Fastify plugin encapsulation).
  */
+// eslint-disable-next-line @typescript-eslint/require-await -- Fastify plugin contract: app.register() resolves the returned promise, and the declared Promise<void> is part of that signature -- dropping async would change it, not simplify it
 export async function registerWebhookSettingsRoutes(fastify: FastifyInstance): Promise<void> {
   /**
    * GET health (D-03): member-readable, mirrors the sendgrid-key GET status

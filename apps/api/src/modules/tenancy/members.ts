@@ -20,6 +20,7 @@ const updateMemberRoleSchema = z.object({
  * better-auth's own guard only special-cases its built-in `creatorRole`
  * ("owner"), never a project-defined "admin" role.
  */
+// eslint-disable-next-line @typescript-eslint/require-await -- Fastify plugin contract: app.register() resolves the returned promise, and the declared Promise<void> is part of that signature -- dropping async would change it, not simplify it
 export async function registerMemberRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get("/api/workspaces/:slug/members", async (request, reply) => {
     const { slug } = request.params as { slug: string };

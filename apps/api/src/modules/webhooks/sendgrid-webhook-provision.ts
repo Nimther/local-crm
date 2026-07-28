@@ -99,7 +99,6 @@ function redactSecret(text: string, apiKey: string): string {
  */
 async function logNonOkProvisionResponse(context: string, res: Response, apiKey: string): Promise<void> {
   const bodyText = await res.text();
-  // eslint-disable-next-line no-console
   console.warn(`provisionEventWebhook [${context}] non-ok response:`, res.status, redactSecret(bodyText, apiKey));
 }
 
@@ -314,7 +313,6 @@ export async function provisionEventWebhook(
 
     return { id: signedResult.id, publicKey: signedResult.publicKey };
   } catch (err) {
-    // eslint-disable-next-line no-console
     console.error("provisionEventWebhook failed:", redactApiKey(err, apiKey));
     return { error: "failed" };
   }

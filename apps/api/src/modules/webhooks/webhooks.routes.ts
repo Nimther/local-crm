@@ -29,6 +29,7 @@ import { enqueueWebhookBatch } from "./enqueue.js";
  *   ack-fast, never per-event) -- all real processing (dedup insert into
  *   `send_events`) happens asynchronously in apps/worker.
  */
+// eslint-disable-next-line @typescript-eslint/require-await -- Fastify plugin contract: app.register() resolves the returned promise, and the declared Promise<void> is part of that signature -- dropping async would change it, not simplify it
 export async function registerWebhookRoutes(fastify: FastifyInstance): Promise<void> {
   // Scoped to this route module only (Fastify plugin encapsulation) --
   // registerWebhookRoutes is a plain async function (not fastify-plugin),

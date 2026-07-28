@@ -104,7 +104,6 @@ async function main(): Promise<void> {
 const isDirectRun = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
 if (isDirectRun) {
   main().catch((err) => {
-    // eslint-disable-next-line no-console
     console.error(err);
     process.exitCode = 1;
   });

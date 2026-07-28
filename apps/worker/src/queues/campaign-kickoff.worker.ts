@@ -71,7 +71,6 @@ export async function processCampaignKickoffJob(data: CampaignKickoffJob): Promi
     let excludedTotal = 0;
     let canceledMidFanOut = false;
 
-    // eslint-disable-next-line no-constant-condition
     while (true) {
       const page = await withTenantTransaction(async (client) => {
         const { rows: statusRows } = await client.query<{ status: string }>(

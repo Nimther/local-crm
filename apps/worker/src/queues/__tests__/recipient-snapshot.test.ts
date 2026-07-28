@@ -36,6 +36,7 @@ describe("recipient-snapshot.ts materializeBatch (D-02, Pitfall 3)", () => {
     const calls: { sql: string; params: unknown[] }[] = [];
     let pageIndex = 0;
     const client = {
+      // eslint-disable-next-line @typescript-eslint/require-await -- test double: the signature must match the async function it replaces at the DI seam; a stub having nothing to await is the point
       query: vi.fn(async (sql: string, params: unknown[] = []) => {
         calls.push({ sql, params });
         // set_config(statement_timeout, ...) and the UPDATE campaigns SET

@@ -108,6 +108,7 @@ function maskKey(apiKey: string): string {
  * and is never persisted -- only its envelope-encrypted form (via
  * kms/client.ts) and its display mask are stored.
  */
+// eslint-disable-next-line @typescript-eslint/require-await -- Fastify plugin contract: app.register() resolves the returned promise, and the declared Promise<void> is part of that signature -- dropping async would change it, not simplify it
 export async function registerSendgridKeyRoutes(fastify: FastifyInstance): Promise<void> {
   /**
    * GET status (D-22, CR-01): masked key + badge state, gated to workspace

@@ -21,7 +21,6 @@ export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 // shared package dependency-light — callers that want structured logging
 // wrap/observe at their own layer.
 pool.on("error", (err) => {
-  // eslint-disable-next-line no-console
   console.error("idle pg pool client error (connection dropped)", err);
 });
 
