@@ -3,17 +3,17 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Production Hardening
 current_phase: 08
-current_phase_name: Quality Gates & Failure-Injection Foundation
+current_phase_name: quality-gates-failure-injection-foundation
 status: executing
 stopped_at: Phase 8 planned (18 plans, 15 waves)
-last_updated: "2026-07-28T06:36:07.927Z"
+last_updated: "2026-07-28T07:28:49.481Z"
 last_activity: 2026-07-28
 last_activity_desc: Phase 08 execution started
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 18
-  completed_plans: 5
+  completed_plans: 6
   percent: 0
 ---
 
@@ -24,16 +24,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-14)
 
 **Core value:** Маркетолог настраивает триггерную цепочку или кампанию — и письма надёжно и вовремя доходят до нужных контактов, со сквозным отслеживанием статусов (delivered/opened/clicked/bounced).
-**Current focus:** Phase 08 — Quality Gates & Failure-Injection Foundation
+**Current focus:** Phase 08 — quality-gates-failure-injection-foundation
 
 ## Current Position
 
 Milestone: v1.1 Production Hardening (Phases 8-16, 95 requirements)
-Phase: 08 (Quality Gates & Failure-Injection Foundation) — EXECUTING
-Plan: 6 of 18
+Phase: 08 (quality-gates-failure-injection-foundation) — EXECUTING
+Plan: 2 of 18
 Status: Ready to execute
 Last activity: 2026-07-28 — Phase 08 execution started
-Progress: [███░░░░░░░] 28% (0/9 v1.1 phases)
+Progress: [███░░░░░░░] 33% (0/9 v1.1 phases)
 
 ⚠️ **Deadline:** Phase 9 (DB-01/DB-02 partition automation) must complete before **2026-09-01** — ~5 weeks. It depends only on Phase 8 and has no dependents, so it can be scheduled in parallel with Phases 10-16.
 
@@ -168,6 +168,7 @@ Progress: [███░░░░░░░] 28% (0/9 v1.1 phases)
 | Phase 08 P05 | 8min | 2 tasks | 7 files |
 | Phase 08 P03 | 14min | 3 tasks | 8 files |
 | Phase 08 P06 | 20min | 3 tasks | 12 files |
+| Phase 08 P04 | 43 min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
