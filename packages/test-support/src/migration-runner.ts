@@ -30,14 +30,26 @@ export interface MigrationClient {
  * downstream noticing until a deploy failed. Rejecting the filename is the only
  * place that can catch it, because by the time the list is returned the
  * information is gone.
+ *
+ * The capturing group is load-bearing (08-REVIEW WR-05): `parsePrefix` below
+ * uses it to sort numerically instead of lexicographically.
  */
-const PADDED_PREFIX = /^\d{4,}_/;
+const PADDED_PREFIX = /^(\d{4,})_/;
+
+/**
+ * The leading numeric prefix, or `NaN` if the filename does not have one.
+ * Only ever called on filenames that already passed the `PADDED_PREFIX` test
+ * below, so `NaN` should not occur in practice — it exists purely so this
+ * function has a total, rather than partial, type.
+ */
+function parsePrefix(file: string): number {
+  const match = PADDED_PREFIX.exec(file);
+  return match ? Number(match[1]) : NaN;
+}
 
 /** The `.sql` migration filenames in `dir`, in application order. */
 export function listMigrationFiles(dir: string): string[] {
-  const files = readdirSync(dir)
-    .filter((f) => f.endsWith(".sql"))
-    .sort();
+  const files = readdirSync(dir).filter((f) => f.endsWith(".sql"));
 
   for (const file of files) {
     if (!PADDED_PREFIX.test(file)) {
@@ -50,7 +62,21 @@ export function listMigrationFiles(dir: string): string[] {
     }
   }
 
-  return files;
+  // 08-REVIEW WR-05: sort on the PARSED numeric prefix, not the filename
+  // string. `PADDED_PREFIX` only requires AT LEAST 4 digits, not a single
+  // fixed width, so lexicographic order stops agreeing with numeric order
+  // once a 5-digit prefix (>= 10000) sits next to any 4-digit prefix whose
+  // leading digit is >= 1 -- e.g. "0009_x.sql" sorts AFTER "00010_y.sql"
+  // under plain string comparison ('9' > '1' at that position), even though
+  // 9 < 10 numerically. Sorting on the parsed number sidesteps the width
+  // question entirely rather than requiring every prefix to share one fixed
+  // width. Ties (equal numeric prefix) fall back to the filename string so
+  // ordering stays fully deterministic.
+  return files.sort((a, b) => {
+    const delta = parsePrefix(a) - parsePrefix(b);
+    if (delta !== 0) return delta;
+    return a < b ? -1 : a > b ? 1 : 0;
+  });
 }
 
 /**

@@ -59,6 +59,18 @@ describe("listMigrationFiles", () => {
     expect(listMigrationFiles(dir)).toEqual(["0000_a.sql", "10000_z.sql"]);
   });
 
+  // 08-REVIEW WR-05: the previous coincidentally-safe fixture above
+  // ("0000_a.sql" vs "10000_z.sql") never exercises the unsafe pairing --
+  // the leading '0' vs '1' happens to sort correctly under plain string
+  // comparison. This one does not: lexicographically "0009_..." > "00010_..."
+  // (comparing character-by-character, '9' > '1' at position 4), even
+  // though 9 < 10 numerically, so a naive `.sort()` would apply the 10th
+  // migration BEFORE the 9th.
+  it("orders a 5-digit prefix correctly against a 4-digit prefix, even when lexicographic order disagrees", () => {
+    write("00010_tenth.sql", "0009_ninth.sql");
+    expect(listMigrationFiles(dir)).toEqual(["0009_ninth.sql", "00010_tenth.sql"]);
+  });
+
   it("returns an empty list for a directory with no migrations", () => {
     expect(listMigrationFiles(dir)).toEqual([]);
   });
