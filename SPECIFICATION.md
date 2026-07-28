@@ -31,6 +31,7 @@
 | `packages/contacts-core` | Репозиторий контактов, CSV-маппинг, property registry |
 | `packages/segments-core` | Компиляция определения сегмента в SQL |
 | `packages/flows-core` | Схема и валидация определения flow |
+| `packages/test-support` | Fail-closed guard тестовой БД (`assertTestDatabaseUrl`) + vitest `globalSetup`. Далее по фазе 8 сюда переезжают провижининг эфемерной БД, консолидированный migration-фикстур и helper'ы harness'а failure-injection |
 
 ### 1.3 Инфраструктура в репозитории
 
@@ -41,7 +42,13 @@
 
 `docker/init-app-role.sql` создаёт роль `mega_crm_app` `NOSUPERUSER NOCREATEDB NOCREATEROLE **NOBYPASSRLS**` с паролем `mega_crm_dev_pw` и передаёт ей владение БД. Это единственное место, где кодифицировано требование «app-роль не должна иметь BYPASSRLS».
 
-**Dockerfile, CI-конфига, деплой-манифестов, healthcheck-эндпоинта в репозитории нет.** Как api/worker собираются и запускаются в staging/prod — **не определено**.
+`.github/workflows/ci.yml` (добавлен в 08-01): workflow `CI`, триггеры `push` (без фильтра веток) и `pull_request` (`branches: [master]`) — оба обязательны, иначе required status check не появляется на PR. `concurrency` по `${{ github.workflow }}-${{ github.ref }}` с `cancel-in-progress: true`. Один job с id и name `test` на `ubuntu-latest`. Шаги: `actions/checkout` и `actions/setup-node` (оба закреплены на полный 40-символьный commit SHA, тег — только в комментарии) → `npm ci` → `docker compose up -d --wait` (поднимает `db` и `redis` по их существующим healthcheck'ам, без `sleep`) → создание эфемерной БД `mega_crm_test_worker` через `docker compose exec -T db psql -U postgres` → `npm run build --workspaces --if-present` (**это и есть тайпчек**, отдельного `tsc --noEmit` нет) → `npm run test -w apps/worker`. Job-level `env`: `DATABASE_URL`, `TEST_DATABASE_URL`, `TEST_REDIS_URL` (dev-креды, те же что в compose).
+
+`.nvmrc` (добавлен в 08-01): `26` — мажорная версия Node, на которую `actions/setup-node` настраивается через `node-version-file`.
+
+**Расхождение окружения (08-01):** локальная машина разработчика запускает Postgres 17.10 и Redis 8.8.0 нативно через Homebrew, а не через `docker compose` — Docker на ней не установлен. На `ubuntu-latest` `docker compose` доступен, поэтому CI работает как описано; локально эквивалентом `docker compose exec -T db psql -U postgres` служит `psql -U <локальный суперюзер>` (роли `postgres` в Homebrew-инстансе нет). Локальный Redis — версии 8, а не `redis:7` из compose.
+
+**Dockerfile, деплой-манифестов, healthcheck-эндпоинта в репозитории нет.** Как api/worker собираются и запускаются в staging/prod — **не определено**.
 
 ---
 
@@ -123,6 +130,7 @@
 | `packages/flows-core` | `zod` `4.4.3` |
 | `packages/shared-schemas` | `@mega-crm/flows-core`, `zod` |
 | `packages/tenant-context` | `pg` `8.22.0` |
+| `packages/test-support` | `pg` `8.22.0`, `ioredis` `5.11.0`; dev: `@types/node` `^22.10.5`, `@types/pg` `^8.15.6`, `typescript` `^5.9.3`, `vitest` `4.1.9`, `execa` `10.0.0`. **`pg`, `ioredis` и `execa` на данный момент объявлены, но кодом ещё не используются** — они заявлены заранее под провижининг эфемерной БД, проверку конфигурации Redis и SIGKILL-harness последующих планов фазы 8 |
 
 ---
 
@@ -635,6 +643,8 @@ CLAUDE.md описывает **рекомендованный** стек по и
 | `@hookform/resolvers` | `5.4.0` | Мост react-hook-form ↔ zod |
 | `postcss` / `autoprefixer` | `8.5.16` / `10.5.2` | Сборка стилей |
 | `tsx` | `^4.19.2` | Рантайм dev + загрузчик `.env` (`--env-file`) |
+| **GitHub Actions CI** (`.github/workflows/ci.yml`) | — | Гейт качества: тайпчек + тесты на каждый `push` и `pull_request` в `master`, живые Postgres/Redis через `docker compose up -d --wait`. **CLAUDE.md не упоминает CI вообще** — ни GitHub Actions, ни какую-либо другую систему; раздел Technology Stack описывает только рантайм-стек |
+| `execa` | `10.0.0` | Объявлен в `packages/test-support` под spawn/kill дочерних процессов для SIGKILL-сценария; **кодом ещё не используется** |
 
 ### 8.3 Совпадает с CLAUDE.md (для полноты)
 
