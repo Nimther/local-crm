@@ -2,17 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Production Hardening
-current_phase: 8
-status: planned
+current_phase: 08
+current_phase_name: Quality Gates & Failure-Injection Foundation
+status: executing
 stopped_at: Phase 8 planned (18 plans, 15 waves)
-last_updated: "2026-07-28T09:30:00.000Z"
+last_updated: "2026-07-28T05:54:17.707Z"
 last_activity: 2026-07-28
-last_activity_desc: Phase 8 planned — 18 plans across 15 waves, tracer-first, TDD mode
+last_activity_desc: Phase 08 execution started
 progress:
   total_phases: 9
   completed_phases: 0
   total_plans: 18
-  completed_plans: 0
+  completed_plans: 1
   percent: 0
 ---
 
@@ -23,16 +24,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-14)
 
 **Core value:** Маркетолог настраивает триггерную цепочку или кампанию — и письма надёжно и вовремя доходят до нужных контактов, со сквозным отслеживанием статусов (delivered/opened/clicked/bounced).
-**Current focus:** v1.1 Production Hardening — Phases 8-16 roadmapped, Phase 8 planned and ready to execute
+**Current focus:** Phase 08 — Quality Gates & Failure-Injection Foundation
 
 ## Current Position
 
 Milestone: v1.1 Production Hardening (Phases 8-16, 95 requirements)
-Phase: 8 — Quality Gates & Failure-Injection Foundation (planned)
-Plan: 0/18 complete (15 waves, tracer-first)
+Phase: 08 (Quality Gates & Failure-Injection Foundation) — EXECUTING
+Plan: 2 of 18
 Status: Ready to execute
-Last activity: 2026-07-28 — Phase 8 planned (18 plans, 15 waves; 12/12 requirements and 33/33 decisions covered)
-Progress: [░░░░░░░░░░░░░░░░░░░░] 0% (0/9 v1.1 phases)
+Last activity: 2026-07-28 — Phase 08 execution started
+Progress: [█░░░░░░░░░] 6% (0/9 v1.1 phases)
 
 ⚠️ **Deadline:** Phase 9 (DB-01/DB-02 partition automation) must complete before **2026-09-01** — ~5 weeks. It depends only on Phase 8 and has no dependents, so it can be scheduled in parallel with Phases 10-16.
 
@@ -158,6 +159,11 @@ Progress: [░░░░░░░░░░░░░░░░░░░░] 0% (0/9
 | Phase 07 P09 | 20min | 3 tasks | 4 files |
 | Phase 07 P10 | 8min | 2 tasks | 4 files |
 | Phase 07 P11 | 4min | 3 tasks | 3 files |
+**Per-Plan Metrics:**
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 08 P01 | 22min | 3 tasks | 12 files |
 
 ## Accumulated Context
 

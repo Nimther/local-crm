@@ -55,12 +55,12 @@ Full phase details: [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md)
   4. Redis refuses new writes with an error instead of silently evicting when it hits its memory ceiling, and queued jobs survive a Redis container restart.
   5. A migration is automatically verified both from an empty database and on top of the current schema, and expand/contract sequencing is a written, enforced rule; `.env`/`dump.rdb` are out of the repo working root, and `ARCHITECTURE.md`/`CONVENTIONS.md` exist with a binding update rule in `CLAUDE.md`.
 
-**Plans**: 18 plans (15 waves, tracer-first). Waves are largely sequential by necessity: root `package.json`, `SPECIFICATION.md` and `package-lock.json` are hub files touched by most plans, and two concurrent `npm install` runs in one workspace tree corrupt each other — so no two plans in a wave share a file. Parallel pairs: W2 (08-02+08-05), W6 (08-04+08-08), W14 (08-16+08-17).
+**Plans**: 1/18 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 08-01-PLAN.md — Tracer: end-to-end CI gate (one job, minimal fail-closed guard, worker suite, branch protection)
+- [x] 08-01-PLAN.md — Tracer: end-to-end CI gate (one job, minimal fail-closed guard, worker suite, branch protection)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -407,7 +407,7 @@ Phase 9 has no dependents and may be scheduled in parallel at any point after Ph
 | 5. Webhook Processing & Delivery Tracking | v1.0 | 13/13 | Complete | 2026-07-09 |
 | 6. Flows (Triggered Chains) | v1.0 | 24/24 | Complete | 2026-07-13 |
 | 7. Analytics, Dashboard & Send Log | v1.0 | 11/11 | Complete | 2026-07-14 |
-| 8. Quality Gates & Failure-Injection Foundation | v1.1 | 0/TBD | Not started | - |
+| 8. Quality Gates & Failure-Injection Foundation | v1.1 | 1/18 | In Progress|  |
 | 9. Partition Automation & Boundary Safety | v1.1 | 0/TBD | Not started | - |
 | 10. Tenant Isolation & Trust Boundaries | v1.1 | 0/TBD | Not started | - |
 | 11. Delivery Correctness | v1.1 | 0/TBD | Not started | - |
