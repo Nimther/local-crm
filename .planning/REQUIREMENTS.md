@@ -21,16 +21,16 @@
 
 ### Quality Gates
 
-- [ ] **QG-01**: CI прогоняет тесты, проверку типов и сборку на каждый push и pull request; красный прогон блокирует мёрж
-- [ ] **QG-02**: Lint настроен и нарушения блокируют CI
-- [ ] **QG-03**: Coverage измеряется, падение ниже установленного порога блокирует CI
-- [ ] **QG-04**: Playwright E2E работает против эфемерной изолированной БД и технически не может подключиться к dev-БД
-- [ ] **QG-05**: Миграции тестируются автоматически — применение с нуля и поверх существующей схемы
-- [ ] **QG-06**: Failure-injection harness воспроизводит таймаут SendGrid, ответ 429, разрыв соединения и падение процесса
-- [ ] **QG-07**: `.env` и `dump.rdb` вынесены из рабочего корня; служебные и секретные файлы не лежат в директории репозитория
-- [ ] **QG-08**: `ARCHITECTURE.md` создан и описывает фактическую архитектуру системы
-- [ ] **QG-09**: `CONVENTIONS.md` создан и фиксирует кодовые и архитектурные соглашения
-- [ ] **QG-10**: Правило обновления `SPECIFICATION.md`, `ARCHITECTURE.md` и `CONVENTIONS.md` при изменении соответствующих решений закреплено в `CLAUDE.md`
+- [x] **QG-01**: CI прогоняет тесты, проверку типов и сборку на каждый push и pull request; красный прогон блокирует мёрж
+- [x] **QG-02**: Lint настроен и нарушения блокируют CI
+- [x] **QG-03**: Coverage измеряется, падение ниже установленного порога блокирует CI
+- [x] **QG-04**: Playwright E2E работает против эфемерной изолированной БД и технически не может подключиться к dev-БД
+- [x] **QG-05**: Миграции тестируются автоматически — применение с нуля и поверх существующей схемы
+- [x] **QG-06**: Failure-injection harness воспроизводит таймаут SendGrid, ответ 429, разрыв соединения и падение процесса
+- [x] **QG-07**: `.env` и `dump.rdb` вынесены из рабочего корня; служебные и секретные файлы не лежат в директории репозитория
+- [x] **QG-08**: `ARCHITECTURE.md` создан и описывает фактическую архитектуру системы
+- [x] **QG-09**: `CONVENTIONS.md` создан и фиксирует кодовые и архитектурные соглашения
+- [x] **QG-10**: Правило обновления `SPECIFICATION.md`, `ARCHITECTURE.md` и `CONVENTIONS.md` при изменении соответствующих решений закреплено в `CLAUDE.md`
 
 ### Delivery Correctness
 
@@ -88,7 +88,7 @@
 - [ ] **WRK-09**: Failed jobs имеют ограниченную retention-политику вместо бессрочного хранения
 - [ ] **WRK-10**: Dead-letter механизм наблюдаем
 - [ ] **WRK-11**: Redis connection options, `defaultJobOptions` и значения TTL определены в единственном месте
-- [ ] **WRK-12**: Redis настроен на `maxmemory-policy=noeviction` с персистентностью
+- [x] **WRK-12**: Redis настроен на `maxmemory-policy=noeviction` с персистентностью
 - [ ] **WRK-13**: Repeatable jobs имеют централизованную обработку ошибок; код multi-instance-safe и это задокументировано
 
 ### Database Lifecycle
@@ -100,7 +100,7 @@
 - [ ] **DB-05**: Миграции при деплое применяются ровно одним процессом
 - [ ] **DB-06**: Приложение не принимает трафик до завершения миграций
 - [ ] **DB-07**: Процедура rollback / roll-forward задокументирована и отработана
-- [ ] **DB-08**: Дисциплина expand/contract зафиксирована как обязательная для миграций
+- [x] **DB-08**: Дисциплина expand/contract зафиксирована как обязательная для миграций
 - [ ] **DB-09**: Бэкапы выполняются автоматически, PITR доступен
 - [ ] **DB-10**: Восстановление из бэкапа отработано на практике и задокументировано
 - [ ] **DB-11**: Retention данных определён и применяется
@@ -172,16 +172,16 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| QG-01 | Phase 8 | Pending |
-| QG-02 | Phase 8 | Pending |
-| QG-03 | Phase 8 | Pending |
-| QG-04 | Phase 8 | Pending |
-| QG-05 | Phase 8 | Pending |
-| QG-06 | Phase 8 | Pending |
-| QG-07 | Phase 8 | Pending |
-| QG-08 | Phase 8 | Pending |
-| QG-09 | Phase 8 | Pending |
-| QG-10 | Phase 8 | Pending |
+| QG-01 | Phase 8 | Complete |
+| QG-02 | Phase 8 | Complete |
+| QG-03 | Phase 8 | Complete |
+| QG-04 | Phase 8 | Complete |
+| QG-05 | Phase 8 | Complete |
+| QG-06 | Phase 8 | Complete |
+| QG-07 | Phase 8 | Complete |
+| QG-08 | Phase 8 | Complete |
+| QG-09 | Phase 8 | Complete |
+| QG-10 | Phase 8 | Complete |
 | DLV-01 | Phase 11 | Pending |
 | DLV-02 | Phase 11 | Pending |
 | DLV-03 | Phase 11 | Pending |
@@ -227,7 +227,7 @@
 | WRK-09 | Phase 12 | Pending |
 | WRK-10 | Phase 12 | Pending |
 | WRK-11 | Phase 12 | Pending |
-| WRK-12 | Phase 8 | Pending |
+| WRK-12 | Phase 8 | Complete |
 | WRK-13 | Phase 12 | Pending |
 | DB-01 | Phase 9 | Pending |
 | DB-02 | Phase 9 | Pending |
@@ -236,7 +236,7 @@
 | DB-05 | Phase 14 | Pending |
 | DB-06 | Phase 14 | Pending |
 | DB-07 | Phase 14 | Pending |
-| DB-08 | Phase 8 | Pending |
+| DB-08 | Phase 8 | Complete |
 | DB-09 | Phase 14 | Pending |
 | DB-10 | Phase 14 | Pending |
 | DB-11 | Phase 14 | Pending |

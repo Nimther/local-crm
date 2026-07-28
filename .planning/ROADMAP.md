@@ -30,7 +30,7 @@ Full phase details: [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md)
 
 **Source of scope:** `.planning/AUDIT-2026-07-27-production-readiness.md` (external audit of v1.0) plus 9 audit-missed gaps surfaced by research — see `.planning/research/SUMMARY.md`.
 
-- [ ] **Phase 8: Quality Gates & Failure-Injection Foundation** - CI, isolated E2E, migration tests, reproducible failure modes, correct Redis config
+- [x] **Phase 8: Quality Gates & Failure-Injection Foundation** - CI, isolated E2E, migration tests, reproducible failure modes, correct Redis config
 - [ ] **Phase 9: Partition Automation & Boundary Safety** - Partitions always exist ahead of data; missing ones are loud (HARD DEADLINE 2026-09-01)
 - [ ] **Phase 10: Tenant Isolation & Trust Boundaries** - Cross-tenant access prevented by DB identity and policy, proven by negative tests
 - [ ] **Phase 11: Delivery Correctness** - No mail lost, duplicated or misclassified at crash, timeout and ambiguous-outcome boundaries

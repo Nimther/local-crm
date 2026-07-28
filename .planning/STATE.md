@@ -4,17 +4,17 @@ milestone: v1.1
 milestone_name: Production Hardening
 current_phase: 08
 current_phase_name: quality-gates-failure-injection-foundation
-status: executing
-stopped_at: Phase 8 planned (18 plans, 15 waves)
-last_updated: "2026-07-28T14:17:44.142Z"
+status: phase-complete
+stopped_at: Phase 8 complete (18/18 plans, 12/12 requirements)
+last_updated: "2026-07-28T15:25:00.000Z"
 last_activity: 2026-07-28
-last_activity_desc: Phase 08 execution started
+last_activity_desc: Phase 08 complete — four CI jobs, required checks enforced on master
 progress:
   total_phases: 9
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 18
-  completed_plans: 17
-  percent: 0
+  completed_plans: 18
+  percent: 11
 ---
 
 # Project State
@@ -24,16 +24,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-14)
 
 **Core value:** Маркетолог настраивает триггерную цепочку или кампанию — и письма надёжно и вовремя доходят до нужных контактов, со сквозным отслеживанием статусов (delivered/opened/clicked/bounced).
-**Current focus:** Phase 08 — quality-gates-failure-injection-foundation
+**Current focus:** Phase 09 — partition automation (deadline 2026-09-01)
 
 ## Current Position
 
 Milestone: v1.1 Production Hardening (Phases 8-16, 95 requirements)
-Phase: 08 (quality-gates-failure-injection-foundation) — EXECUTING
-Plan: 13 of 18
-Status: Ready to execute
-Last activity: 2026-07-28 — Phase 08 execution started
-Progress: [█████████░] 94% (0/9 v1.1 phases)
+Phase: 08 (quality-gates-failure-injection-foundation) — COMPLETE
+Plan: 18 of 18
+Status: Phase complete — ready for Phase 9
+Last activity: 2026-07-28 — Phase 08 complete; required checks static/test/failure-injection enforced on master
+Progress: [█░░░░░░░░░] 11% (1/9 v1.1 phases)
 
 ⚠️ **Deadline:** Phase 9 (DB-01/DB-02 partition automation) must complete before **2026-09-01** — ~5 weeks. It depends only on Phase 8 and has no dependents, so it can be scheduled in parallel with Phases 10-16.
 
