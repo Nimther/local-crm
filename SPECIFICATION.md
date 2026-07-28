@@ -31,7 +31,7 @@
 | `packages/contacts-core` | Репозиторий контактов, CSV-маппинг, property registry |
 | `packages/segments-core` | Компиляция определения сегмента в SQL |
 | `packages/flows-core` | Схема и валидация определения flow |
-| `packages/test-support` | Fail-closed guard тестовой БД (`assertTestDatabaseUrl`), провижининг эфемерных БД (`createEphemeralDatabase`/`dropEphemeralDatabase`), vitest `globalSetup` и **единственный** migration-фикстур (`ensureTestDbMigrated`/`createTestPool`/`getTestDatabaseUrl`). С 08-06 три прежние копии `db-fixture.ts` (`apps/api/src/test`, `apps/worker/src/test`, `packages/delivery-core/src/test`) — тонкие ре-экспорты отсюда, хранящие только свои workspace-специфичные хелперы (`resetTestData`, `createFixtureFlowRun`). Fallback `TEST_DATABASE_URL ?? DATABASE_URL` удалён: отсутствие тестового DSN — жёсткая ошибка |
+| `packages/test-support` | Fail-closed guard тестовой БД (`assertTestDatabaseUrl`), провижининг эфемерных БД (`createEphemeralDatabase`/`dropEphemeralDatabase`), vitest `globalSetup` и **единственный** migration-фикстур (`ensureTestDbMigrated`/`createTestPool`/`getTestDatabaseUrl`). С 08-06 три прежние копии `db-fixture.ts` (`apps/api/src/test`, `apps/worker/src/test`, `packages/delivery-core/src/test`) — тонкие ре-экспорты отсюда, хранящие только свои workspace-специфичные хелперы (`resetTestData`, `createFixtureFlowRun`). Fallback `TEST_DATABASE_URL ?? DATABASE_URL` удалён: отсутствие тестового DSN — жёсткая ошибка. С 08-04/08-12 пакет также поставляет **доменно-нейтральные** харнесс-хелперы в `src/harness/`: `startTempRedis` (временный `redis-server` на свободном порту) и `spawnAndAwaitReady`/`killAndAwaitExit` (fork дочернего процесса с IPC-каналом, ожидание ready-маркера, SIGKILL и ожидание выхода). Оба намеренно ничего не знают о доменe — именно это позволяет держать worker-специфичный entrypoint в `apps/worker` и не заводить зависимость `packages/*` → `apps/*`, которой в репозитории больше нигде нет |
 
 ### 1.3 Инфраструктура в репозитории
 
@@ -165,7 +165,7 @@ CI — **единственное** место, где проверяется к
 | `packages/flows-core` | `zod` `4.4.3` |
 | `packages/shared-schemas` | `@mega-crm/flows-core`, `zod` |
 | `packages/tenant-context` | `pg` `8.22.0` |
-| `packages/test-support` | `pg` `8.22.0`, `ioredis` `5.11.0`; dev: `@types/node` `^22.10.5`, `@types/pg` `^8.15.6`, `typescript` `^5.9.3`, `vitest` `4.1.9`, `execa` `10.0.0`. `pg` используется с 08-02/08-06 (`provision-db.ts`, `db-fixture.ts`). **`ioredis` и `execa` объявлены, но кодом ещё не используются**: проверка конфигурации Redis (08-04) реализована на встроенных модулях Node, а не на `ioredis`; `execa` заявлен заранее под SIGKILL-harness (08-12) |
+| `packages/test-support` | `pg` `8.22.0`, `ioredis` `5.11.0`; dev: `@types/node` `^22.10.5`, `@types/pg` `^8.15.6`, `typescript` `^5.9.3`, `vitest` `4.1.9`, `execa` `10.0.0`. `pg` используется с 08-02/08-06 (`provision-db.ts`, `db-fixture.ts`). **`ioredis` и `execa` объявлены, но кодом ещё не используются**: проверка конфигурации Redis (08-04) реализована на встроенных модулях Node, а не на `ioredis`; `execa` остаётся неиспользованным и после 08-12: SIGKILL-harness построен на `node:child_process.fork`, потому что IPC-канал — это ровно тот примитив, ради которого харнесс существует, и execa добавил бы слой поверх него |
 
 ---
 
@@ -198,6 +198,7 @@ CI — **единственное** место, где проверяется к
 | `TEST_DATABASE_URL`, `TEST_REDIS_URL`, `TEST_PUBLIC_APP_URL` | `vitest.config.ts`; `TEST_DATABASE_URL` с 08-02 **выставляется самим** `packages/test-support/src/global-setup.ts` (DSN эфемерной БД), а не задаётся вызывающим | — |
 | `TEST_ADMIN_DATABASE_URL` | `packages/test-support/src/provision-db.ts:59` (`resolveAdminDsn`) — административный DSN, под которым создаются и удаляются эфемерные БД | при отсутствии — `postgres://postgres:postgres@localhost:5432/postgres` |
 | `TEST_APP_DB_PASSWORD` | `packages/test-support/src/provision-db.ts:73` (`buildAppDsn`) — пароль роли `mega_crm_app` в DSN созданной БД | при отсутствии — `mega_crm_dev_pw` |
+| `SIGKILL_HARNESS_JOB_DATA` | `apps/worker/src/test/harness/sigkill-entrypoint.ts` — JSON job-payload, который родитель передаёт дочернему процессу SIGKILL-сценария (08-12) | обязателен: без него entrypoint выходит с кодом 1 и явным сообщением, чтобы отсутствие payload не выглядело как таймаут |
 | `TEST_ADMIN_DATABASE_URL` | `packages/test-support/src/provision-db.ts` (`resolveAdminDsn`) | Admin/superuser DSN — используется **только** для `CREATE DATABASE` / `DROP DATABASE`. Дефолт `postgres://postgres:postgres@localhost:5432/postgres` (креды docker-compose). Локально, где сервисы подняты нативно через Homebrew и роли `postgres` нет, задаётся явно |
 | `GSD_TEST_RUN_ID` | `packages/test-support/src/provision-db.ts` | Опциональный дискриминатор прогона в имени эфемерной БД. При отсутствии — `randomUUID().slice(0, 8)`. Задаётся в CI, чтобы имя БД было привязано к конкретному прогону |
 | `TEST_APP_DB_PASSWORD` | `packages/test-support/src/provision-db.ts` (`buildAppDsn`) | Пароль роли `mega_crm_app` в DSN, который получают тесты. Дефолт `mega_crm_dev_pw` (из `docker/init-app-role.sql`) |

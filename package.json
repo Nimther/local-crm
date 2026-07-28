@@ -25,7 +25,8 @@
     "failure:reset": "vitest run --root apps/worker src/queues/__tests__/failure-injection/connection-reset.test.ts",
     "test:migrations": "vitest run --root packages/db",
     "test:e2e": "npm run test:e2e -w apps/web",
-    "coverage": "vitest run --coverage --testTimeout=60000"
+    "coverage": "vitest run --coverage --testTimeout=60000",
+    "failure:sigkill": "vitest run --root apps/worker src/queues/__tests__/failure-injection/sigkill.test.ts"
   },
   "devDependencies": {
     "@vitest/eslint-plugin": "^1.6.24",
