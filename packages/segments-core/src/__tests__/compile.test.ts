@@ -97,14 +97,14 @@ describe("compileSegmentDefinition -- attribute conditions", () => {
 
   it("compiles has_tag/not_has_tag via GIN-friendly array containment, not = ANY()", () => {
     const has = compileSegmentDefinition(
-      def([{ conditions: [{ type: "attribute", source: "standard", field: "tags" as never, operator: "has_tag", value: "vip" }] }]),
+      def([{ conditions: [{ type: "attribute", source: "standard", field: "tags", operator: "has_tag", value: "vip" }] }]),
       WSID
     );
     expect(has.whereSql).toContain("@> ARRAY[");
     expect(has.whereSql).not.toContain("= ANY(");
 
     const notHas = compileSegmentDefinition(
-      def([{ conditions: [{ type: "attribute", source: "standard", field: "tags" as never, operator: "not_has_tag", value: "vip" }] }]),
+      def([{ conditions: [{ type: "attribute", source: "standard", field: "tags", operator: "not_has_tag", value: "vip" }] }]),
       WSID
     );
     expect(notHas.whereSql).toContain("NOT (");

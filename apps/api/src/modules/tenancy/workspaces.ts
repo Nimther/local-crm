@@ -120,7 +120,13 @@ export async function registerWorkspaceRoutes(fastify: FastifyInstance): Promise
         query: { organizationSlug: slug },
       });
 
-      return reply.send(toWorkspaceResponse(org, Array.isArray(role) ? role[0] : role));
+      // better-auth types `role` loosely, so narrow before it reaches the
+      // schema rather than passing an `any` through. A non-string here was
+      // always rejected by workspaceResponseSchema.parse; it still is.
+      const activeRole: unknown = Array.isArray(role) ? role[0] : role;
+      return reply.send(
+        toWorkspaceResponse(org, typeof activeRole === "string" ? activeRole : String(activeRole)),
+      );
     } catch (err) {
       if (err instanceof APIError) {
         return reply.code(err.statusCode ?? 404).send({ error: err.message });

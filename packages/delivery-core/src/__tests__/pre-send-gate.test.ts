@@ -24,7 +24,8 @@ describe("evaluatePreSendGate (SUBS-03/SEND-04/D-04/D-14)", () => {
       contact: { id: "c-1", email: "a@example.com", subscriptionStatus: "suppressed" },
     });
     expect(decision).toEqual({ sendable: false, reason: "suppressed" });
-    expect((client.query as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- asserting that a mocked method was never called requires referencing it unbound; there is no `this` to lose because it is a vi.fn, not a real PoolClient method
+    expect(client.query as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
   });
 
   it("returns 'unsubscribed' for an unsubscribed contact", async () => {

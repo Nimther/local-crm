@@ -287,10 +287,10 @@ export async function registerInviteRoutes(fastify: FastifyInstance): Promise<vo
 
       let signUpResult: { headers: Headers };
       try {
-        signUpResult = (await auth.api.signUpEmail({
+        signUpResult = await auth.api.signUpEmail({
           body: { email: invite.email, password: parsed.data.password, name: parsed.data.name },
           returnHeaders: true,
-        })) as { headers: Headers };
+        });
       } catch (err) {
         if (err instanceof APIError) {
           return reply.code(err.statusCode ?? 400).send({ error: err.message });

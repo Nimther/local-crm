@@ -19,22 +19,37 @@ import { checkLintFileFloor } from "../../../../scripts/check-lint-file-floor.mj
 const REPO_ROOT = path.resolve(import.meta.dirname, "../../../..");
 const FIXTURES = path.join(REPO_ROOT, "tools/lint-fixtures");
 
+/** The slice of `eslint --format json` these assertions actually read. */
+interface EslintReportFile {
+  messages: { ruleId: string | null }[];
+}
+
+/** The shape execFileSync throws on a non-zero exit. */
+interface ExecError {
+  status?: number;
+  stdout?: string;
+}
+
 /** Run ESLint and return { exitCode, report }. --no-ignore reaches the fixtures. */
-function runEslint(args: string[]): { exitCode: number; report: Array<Record<string, any>> } {
+function runEslint(args: string[]): { exitCode: number; report: EslintReportFile[] } {
   try {
     const stdout = execFileSync(
       "npx",
       ["eslint", "--no-ignore", "--format", "json", ...args],
       { cwd: REPO_ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
     );
-    return { exitCode: 0, report: JSON.parse(stdout) };
-  } catch (err: any) {
-    return { exitCode: err.status ?? 1, report: JSON.parse(err.stdout || "[]") };
+    return { exitCode: 0, report: JSON.parse(stdout) as EslintReportFile[] };
+  } catch (err) {
+    const failure = err as ExecError;
+    return {
+      exitCode: failure.status ?? 1,
+      report: JSON.parse(failure.stdout ?? "[]") as EslintReportFile[],
+    };
   }
 }
 
-function ruleIds(report: Array<Record<string, any>>): string[] {
-  return report.flatMap((f) => f.messages).map((m: any) => m.ruleId);
+function ruleIds(report: EslintReportFile[]): (string | null)[] {
+  return report.flatMap((f) => f.messages).map((m) => m.ruleId);
 }
 
 describe("lint gate fails on a single violation", () => {

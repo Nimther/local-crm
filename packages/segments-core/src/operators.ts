@@ -22,7 +22,11 @@ import type { ConditionOperator } from "./types.js";
  * this map exists to close. `Object.create(null)` has no prototype chain to
  * fall through, so only the 7 keys explicitly assigned below ever resolve.
  */
-export const STANDARD_FIELD_COLUMNS: Record<string, string> = Object.assign(Object.create(null), {
+export const STANDARD_FIELD_COLUMNS: Record<string, string> = Object.assign(
+  // `Object.create(null)` is typed `any`; annotating the target keeps the
+  // null-prototype behaviour this map depends on without an `any` flowing out.
+  Object.create(null) as Record<string, string>,
+  {
   country: "c.country",
   city: "c.city",
   firstName: "c.first_name",

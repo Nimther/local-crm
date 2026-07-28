@@ -107,14 +107,14 @@ describe("Segment attribute conditions (SEGM-01)", () => {
 
     const hasTag = await withTenant(workspace.id, () =>
       countSegmentMembers(
-        def([{ conditions: [{ type: "attribute", source: "standard", field: "tags" as never, operator: "has_tag", value: "vip" }] }])
+        def([{ conditions: [{ type: "attribute", source: "standard", field: "tags", operator: "has_tag", value: "vip" }] }])
       )
     );
     expect(hasTag).toBe(2);
 
     const notHasTag = await withTenant(workspace.id, () =>
       countSegmentMembers(
-        def([{ conditions: [{ type: "attribute", source: "standard", field: "tags" as never, operator: "not_has_tag", value: "vip" }] }])
+        def([{ conditions: [{ type: "attribute", source: "standard", field: "tags", operator: "not_has_tag", value: "vip" }] }])
       )
     );
     expect(notHasTag).toBe(1);
@@ -194,7 +194,7 @@ describe("Segment attribute conditions (SEGM-01)", () => {
               { type: "attribute", source: "standard", field: "country", operator: "eq", value: "KZ" },
             ],
           },
-          { conditions: [{ type: "attribute", source: "standard", field: "tags" as never, operator: "has_tag", value: "vip" }] },
+          { conditions: [{ type: "attribute", source: "standard", field: "tags", operator: "has_tag", value: "vip" }] },
         ])
       )
     );

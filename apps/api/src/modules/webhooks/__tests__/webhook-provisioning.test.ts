@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Mock } from "vitest";
 import { provisionEventWebhook } from "../sendgrid-webhook-provision.js";
 
 const API_KEY = "SG.mock_provisioning_key_1234567890abcdef";
@@ -19,7 +20,11 @@ function jsonResponse(status: number, body: unknown): Response {
  * scenarios are independent of call ordering.
  */
 describe("provisionEventWebhook (D-01/D-02/D-05)", () => {
-  let fetchMock: ReturnType<typeof vi.fn>;
+  // 08-07: an untyped vi.fn() is a mock whose call signature returns void, so
+  // every async mockImplementation below was "a promise where void was
+  // expected". Declaring what this mock actually stands in for — fetch — makes
+  // the promise-returning implementations correct rather than suppressed.
+  let fetchMock: Mock<(url: string, init?: RequestInit) => Promise<unknown>>;
 
   beforeEach(() => {
     fetchMock = vi.fn();

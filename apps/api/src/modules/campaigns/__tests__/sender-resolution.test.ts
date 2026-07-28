@@ -48,7 +48,11 @@ describe("Campaign sender resolution (CR-02, CAMP-01/02/04)", () => {
   function stubSendGridFetch(): void {
     // eslint-disable-next-line @typescript-eslint/require-await -- test double: the signature must match the async function it replaces at the DI seam; a stub having nothing to await is the point
     globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
-      const url = typeof input === "string" ? input : input.toString();
+      // Request has no meaningful toString() — it stringifies to
+      // "[object Request]", which would silently match none of the URL
+      // branches below and route every call to the unexpected-call throw.
+      const url =
+        typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
 
       if (url.includes("/v3/scopes")) {
         return new Response(JSON.stringify({ scopes: ["mail.send"] }), {
@@ -67,7 +71,7 @@ describe("Campaign sender resolution (CR-02, CAMP-01/02/04)", () => {
       }
 
       throw new Error(`sender-resolution.test.ts: unexpected fetch to ${url} (init: ${JSON.stringify(init)})`);
-    }) as typeof fetch;
+    });
   }
 
   async function signUp(email: string, password: string, name: string) {

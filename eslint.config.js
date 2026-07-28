@@ -175,6 +175,12 @@ export default tseslint.config(
             "**/*.config.*",
             "scripts/**",
             "apps/web/e2e/**",
+            // 08-07: the per-workspace `src/test/db-fixture.ts` shims re-export
+            // @mega-crm/test-support, a devDependency. They are test scaffolding
+            // by role but live outside __tests__ and are not named *.test.ts,
+            // so they need naming here — the alternative is promoting a
+            // test-only package to a production dependency in three manifests.
+            "**/src/test/**",
           ],
         },
       ],

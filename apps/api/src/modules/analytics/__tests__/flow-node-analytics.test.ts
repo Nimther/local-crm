@@ -130,7 +130,7 @@ describe("Flow node analytics (07-04, ANLT-02)", () => {
            RETURNING id`,
           [workspaceId, flowId, flowVersionId, contactId, status]
         );
-        return rows[0].id as string;
+        return rows[0].id;
       })
     );
   }
