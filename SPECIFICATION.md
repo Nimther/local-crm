@@ -65,6 +65,12 @@ CI — **единственное** место, где проверяется к
 
 `eslint.config.js` (добавлен в 08-03): flat-config ESLint 10 из семи блоков. Type-aware ярус (`recommendedTypeChecked` + `projectService`) намеренно ограничен глобами `apps/*/src/**` и `packages/*/src/**` — каждый `tsconfig.json` в репозитории объявляет `include: ["src"]`, поэтому `projectService` падает с ошибкой парсинга на любом файле вне `src/`. Конфиг-файлы, `scripts/**/*.mjs` и Playwright-спеки покрыты отдельным не-type-aware ярусом. На момент добавления: **396 файлов проверяется, 536 нарушений** (522 error / 14 warning) — приведение к нулю выполняется в 08-07, а не здесь.
 
+`vitest.config.ts` в корне (добавлен в 08-11): агрегирующий конфиг с `test.projects` — **один** прогон по всей backend-области с **одним** знаменателем покрытия. Перечислены восемь проектов: `apps/api`, `apps/worker`, `packages/db`, `packages/delivery-core`, `packages/flows-core`, `packages/test-support` (по путям к их собственным `vitest.config.ts`, чтобы наследовались их настройки — в частности `fileParallelism: false` у воркера), плюс `packages/segments-core` и `packages/shared-schemas` голыми путями к каталогам: своих конфигов у них нет, и Vitest 4.1.9 такой путь принимает (проверено эмпирически в 08-11). `apps/web` **не включён** — вне области покрытия по решению D-16, и смешивать jsdom-проект с node-агрегатом всё равно нельзя. Падение или неисполнение любого проекта роняет весь прогон, поэтому workspace не может тихо выпасть из знаменателя (проверено: намеренно сломанный тест в `flows-core` даёт exit 1).
+
+Покрытие: провайдер `v8`, репортеры `text` и `json-summary`, каталог `./coverage` (гитигнорится), `include` — `apps/api/src/**`, `apps/worker/src/**`, `packages/*/src/**`. Опция `all` оставлена по умолчанию, то есть знаменатель — фактически загруженные прогоном файлы (D-17). Скрипт `npm run coverage` = `vitest run --coverage --testTimeout=60000`: увеличенный таймаут нужен именно инструментированному прогону — `csv-import.test.ts` строит payload >50 МБ и под инструментацией v8 выходит за штатные 20 с (без coverage тот же файл проходит за 6.5 с).
+
+`coverage-baseline.json` в корне (добавлен в 08-11): порог покрытия и его происхождение. `lines` — **недруглённая доля** (не проценты), равная измеренной плюс `increment`; `measuredLines`, `measuredAt` (дата, точные `covered`/`total`) и `scope` записаны рядом, чтобы любое будущее изменение порога было проверяемо против собственного основания. На момент добавления: измерено **3366/4194 = 0.80258**, порог **0.81258**. Порог намеренно **выше** текущего результата — гейт красный по построению, пока 08-16 не добавит целевые тесты на `packages/kms` и `packages/tenant-context`.
+
 **Расхождение окружения (08-01):** локальная машина разработчика запускает Postgres 17.10 и Redis 8.8.0 нативно через Homebrew, а не через `docker compose` — Docker на ней не установлен. На `ubuntu-latest` `docker compose` доступен, поэтому CI работает как описано; локально эквивалентом `docker compose exec -T db psql -U postgres` служит `psql -U <локальный суперюзер>` (роли `postgres` в Homebrew-инстансе нет). Локальный Redis — версии 8, а не `redis:7` из compose.
 
 **Разрешение для административного DSN (08-07):** `provision-db.ts` создаёт и удаляет эфемерные БД под ролью `postgres`, которая есть в compose-сервисе `db`, но отсутствует в Homebrew-инстансе — из-за этого `provision-db.test.ts` и `db-fixture-isolation.test.ts` падали локально с `role "postgres" does not exist`, оставаясь зелёными в CI. Переопределение `TEST_ADMIN_DATABASE_URL` в `resolveAdminDsn` существовало с 08-02, но его негде было задать: `packages/test-support/vitest.config.ts` намеренно не грузил корневой `.env`. С 08-07 грузит (опционально, через `try`/`catch`, как в `apps/worker`), поэтому локально достаточно прописать в `.env` DSN локального суперюзера. Проверка на имя БД перед `DROP` при этом не ослаблена — она валидирует имя, а не DSN.
@@ -113,7 +119,7 @@ CI — **единственное** место, где проверяется к
 | `@sendgrid/eventwebhook` | `^8.0.0` — верификация подписи вебхука |
 | `csv-parse` | `7.0.1` |
 | `nanoid` | `5.1.16` — единственное использование: `tenancy/workspaces.ts` |
-| dev: `@types/node` `^22.10.5`, `@types/pg` `^8.15.6`, `nock` `14.0.16`, `tsx` `^4.19.2`, `typescript` `^5.9.3`, `vitest` `4.1.9` |
+| dev: `@types/node` `^22.10.5`, `@types/pg` `^8.15.6`, `nock` `14.0.16`, `tsx` `^4.19.2`, `typescript` `^5.9.3`, `vitest` `4.1.9`, `@vitest/coverage-v8` `^4.1.9` (08-11, провайдер покрытия; минор совпадает с `vitest`) |
 
 ### 2.3 `apps/worker`
 
@@ -123,7 +129,7 @@ CI — **единственное** место, где проверяется к
 | `ioredis` | `5.11.0` |
 | `pg` | `8.22.0` |
 | `rate-limiter-flexible` | `11.2.0` |
-| dev: `@types/node`, `@types/pg`, `tsx`, `typescript`, `vitest` `4.1.9` |
+| dev: `@types/node`, `@types/pg`, `tsx`, `typescript`, `vitest` `4.1.9`, `@vitest/coverage-v8` `^4.1.9` (08-11) |
 
 Внутренние: `@mega-crm/{contacts-core,db,delivery-core,flows-core,kms,segments-core,shared-schemas,tenant-context}`.
 
