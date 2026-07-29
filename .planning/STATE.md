@@ -245,16 +245,29 @@ Items acknowledged and carried forward from previous milestone close:
 
 | Category | Item | Status | Deferred At |
 |----------|------|--------|-------------|
-| *(none)* | | | |
+| E2E stability | **SEGM-04 flake** — `apps/web/e2e/segments-behavior.spec.ts:146` asserts a live count has resolved away from `—` and intermittently fails. Observed failing three times in Phase 8 CI, including on a commit where the identical job passed in a sibling run. This is why `e2e` is not a required status check. **Explicitly NOT Phase 9 scope** — it is separate work, sequenced after the Phase 8 merge, and must not be folded silently into a phase with a deadline. | Open — scheduled, not carried | 2026-07-28 (08-18) |
+| CI observability | **Playwright trace upload** — `trace: retain-on-failure` produces traces inside the `e2e` job, but `actions/upload-artifact` is not wired, so a CI-only browser failure leaves nothing to inspect. Blocks diagnosing the item above from CI alone. Part of the same follow-up. | Open — scheduled, not carried | 2026-07-28 (08-18) |
+
+### SEGM-04 follow-up — the agreed sequence
+
+Operator decision, recorded so the order is not lost:
+
+1. Merge Phase 8 first.
+2. Fix the flake in its own `/gsd-debug` session — not as a drive-by inside another phase.
+3. Prove it with repeated E2E runs, not a single green one. A flake that fails roughly one run in three is not disproven by one pass.
+4. Wire `actions/upload-artifact` for the Playwright traces on failure, so the next CI-only browser failure is diagnosable.
+
+Once all four hold, `e2e` becomes a candidate for the required-check set — that decision is deliberately left until the lane has a stability record.
 
 ## Session Continuity
 
-Last session: 2026-07-28T04:04:45.829Z
-Stopped at: Phase 8 context gathered
-Resume file: .planning/phases/08-quality-gates-failure-injection-foundation/08-CONTEXT.md
+Last session: 2026-07-28
+Stopped at: Phase 8 complete — code review and two fix rounds applied, all four CI jobs wired and required checks enforced
+Resume file: .planning/phases/08-quality-gates-failure-injection-foundation/08-18-SUMMARY.md
 
 ## Operator Next Steps
 
-- Review `.planning/ROADMAP.md` (9 phases, sequencing constraints, open decisions)
-- Start Phase 8 with `/gsd-discuss-phase 8` → `/gsd-plan-phase 8`
+- Merge the Phase 8 pull request into `master` (three required checks must be green)
+- Then fix the SEGM-04 flake and wire trace upload — see Deferred Items above for the agreed sequence
+- Start Phase 9 with `/gsd-plan-phase 9` — ⚠️ hard deadline **2026-09-01** for DB-01/DB-02 partition automation
 - ⚠️ Schedule Phase 8 → Phase 9 early: DB-01/DB-02 have a hard external deadline of **2026-09-01** (~5 weeks from 2026-07-27)

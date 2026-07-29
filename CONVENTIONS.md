@@ -23,6 +23,11 @@ How to write more of this codebase. [`SPECIFICATION.md`](./SPECIFICATION.md) rec
 **Gate scripts are Node-builtins-only, with a pure exported function and a CLI behind an `import.meta.url` guard.** That shape is what lets the logic be unit-tested with in-memory fixtures instead of temp files.
 → [`scripts/lint-migrations.mjs`](./scripts/lint-migrations.mjs), [`scripts/coverage-gate.mjs`](./scripts/coverage-gate.mjs), [`scripts/check-root-hygiene.mjs`](./scripts/check-root-hygiene.mjs)
 
+**A phase branch is named `gsd/phase-{phase}-{slug}`, from Phase 9 onward.** The name is not decoration: the tooling resolves it from the template and checks it out, so a branch whose name does not match is one the tooling will migrate work off. Work merges to `master` through a pull request, which is where the three required checks apply.
+→ [`.planning/config.json`](./.planning/config.json) — `git.branching_strategy` and `git.phase_branch_template`
+
+**Phase 8's branch is `phase-08-quality-gates`, and that is a recorded exception, not drift.** It was created while the strategy was still `none`, and it keeps its name deliberately — renaming a branch that is already pushed, already CI-verified and already referenced by this phase's reports buys nothing. Do not "fix" it. The consequence to know about while working on it: because the name does not match the template, `gsd-tools query commit` and `query init.phase-op` check out the templated branch and commit there. On that branch, commit reports with plain `git`. No later phase has this problem.
+
 ## Test patterns
 
 **Tests live in a `__tests__/` directory beside the code they cover.**
