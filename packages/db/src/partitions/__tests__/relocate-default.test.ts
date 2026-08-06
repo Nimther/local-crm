@@ -14,6 +14,7 @@ import {
 
 import { PARTITIONED_TABLES, type PartitionedTableConfig } from "../ensure-partitions.js";
 import {
+  RELOCATE_ADVISORY_LOCK_KEY,
   RELOCATE_BATCH_SIZE,
   countDefaultRowsForTable,
   discoverDefaultMonths,
@@ -328,5 +329,37 @@ describe("relocate-default (09-04 task 1, DB-03/DB-04)", () => {
 
     expect(await countRelation(pool, "events_2027_10")).toBe(3);
     expect(await countRelation(pool, "send_events_2027_10")).toBe(4);
+  });
+
+  it("test 10 (09-REVIEW WR-02): refuses to start while another invocation already holds the relocation advisory lock", async () => {
+    // CREATE TABLE IF NOT EXISTS is not atomic against genuine concurrency
+    // -- two sessions can both pass the existence check and both attempt
+    // the CREATE, one raising a duplicate-relation error. Rather than race
+    // two real concurrent invocations (flaky by construction), this
+    // deterministically simulates "another invocation is already running"
+    // by holding the exact same advisory lock relocateAllDefaultRows
+    // itself takes, on a separate session, before calling it.
+    const holder = await relocationPool.connect();
+    try {
+      const { rows } = await holder.query<{ locked: boolean }>(
+        "SELECT pg_try_advisory_lock($1) AS locked",
+        [RELOCATE_ADVISORY_LOCK_KEY],
+      );
+      expect(rows[0]?.locked, "test setup: the holder session must acquire the lock first").toBe(true);
+
+      await expect(relocateAllDefaultRows(relocationPool, PARTITIONED_TABLES)).rejects.toThrow(
+        /already in progress|advisory lock/i,
+      );
+    } finally {
+      await holder.query("SELECT pg_advisory_unlock($1)", [RELOCATE_ADVISORY_LOCK_KEY]);
+      holder.release();
+    }
+
+    // The lock is now free again -- a normal run must still succeed
+    // afterward (this is not a permanent deadlock).
+    const report = await relocateAllDefaultRows(relocationPool, PARTITIONED_TABLES);
+    for (const t of report.tables) {
+      expect(t.residualDefaultCount).toBe(0);
+    }
   });
 });
