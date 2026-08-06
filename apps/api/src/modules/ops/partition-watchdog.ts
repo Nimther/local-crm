@@ -197,9 +197,23 @@ export async function claimAlertSlot(client: PartitionClient, now: Date, dedupHo
  * without touching `last_alert_sent_at`, when the claim is refused (another
  * replica already claimed this window, or this process already sent
  * recently). A `sendMail` rejection is left to propagate (never caught
- * here): the watchdog's own caller decides what to do with a failed send,
- * and swallowing it here would make a failed alert indistinguishable from a
- * healthy run.
+ * here to be swallowed): the watchdog's own caller decides what to do with
+ * a failed send, and swallowing it here would make a failed alert
+ * indistinguishable from a healthy run.
+ *
+ * CR-02: `claimAlertSlot` necessarily commits `last_alert_sent_at` BEFORE
+ * `sendMail` is attempted -- that ordering is what makes the claim atomic
+ * across replicas in the first place (see `claimAlertSlot`'s own doc
+ * comment: a claim-after-send design would let two replicas both decide
+ * "send failed for the other guy, I should still try" and double-send). A
+ * rejected `sendMail` must not leave that claim in place, though: this
+ * releases the slot (resetting `last_alert_sent_at` back to `NULL`) before
+ * rethrowing, so the very next check -- this replica or another, still
+ * inside the same dedup window -- can claim and actually send. The release
+ * is itself guarded (`WHERE ... last_alert_sent_at = $1`) to only clear the
+ * exact value THIS call just set: if a concurrent replica somehow already
+ * claimed a NEWER window by the time this runs, that newer claim is never
+ * clobbered.
  */
 export async function checkPartitionHealthAndAlert(deps: PartitionWatchdogDeps): Promise<void> {
   const row = await readLatestMaintenanceRun(deps.client);
@@ -214,7 +228,20 @@ export async function checkPartitionHealthAndAlert(deps: PartitionWatchdogDeps):
   if (!claimed) return;
 
   const text = renderOperatorAlertText(row, result.reasons, deps.now);
-  await deps.sendMail({ to: deps.operatorEmail, text });
+  try {
+    await deps.sendMail({ to: deps.operatorEmail, text });
+  } catch (err) {
+    await deps.client
+      .query(
+        `UPDATE partition_maintenance_runs
+            SET last_alert_sent_at = NULL
+          WHERE id = 1
+            AND last_alert_sent_at = $1::timestamptz`,
+        [deps.now],
+      )
+      .catch(() => undefined);
+    throw err;
+  }
 }
 
 export interface StartPartitionWatchdogDeps {
