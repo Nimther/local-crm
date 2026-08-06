@@ -31,6 +31,19 @@ closing on a human. You should not need to go looking for this condition;
 the alert finds you. If you are reading this runbook without having received
 that alert, you can still check manually (see **Pre-flight check** below).
 
+## Concurrent invocations are refused, not undefined
+
+Do not run two instances of this command against the same database at the
+same time -- but if you do (e.g. re-running in a second terminal after the
+first appears to hang), you no longer need to guess what happens. Each run
+takes a session-scoped Postgres advisory lock for the whole procedure; a
+second concurrent invocation fails fast with a clear "another
+DEFAULT-relocation run already holds the relocation advisory lock" error
+instead of possibly racing `CREATE TABLE IF NOT EXISTS` (which is not
+atomic against genuine concurrency) into a duplicate-relation error. If you
+see that message, wait for the other invocation to actually finish (check
+its terminal/process), then re-run.
+
 ## Pre-flight check
 
 1. **Confirm which database you are about to modify.** `DATABASE_URL` (or

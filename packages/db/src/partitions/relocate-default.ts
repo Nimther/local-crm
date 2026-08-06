@@ -217,6 +217,14 @@ export interface RelocationReport {
 }
 
 /**
+ * 09-REVIEW WR-02: a distinct int8 key from
+ * `packages/test-support/src/db-fixture.ts`'s `MIGRATION_ADVISORY_LOCK_KEY`
+ * (`8_472_991`) -- two unrelated arbitrary numbers, chosen only so the two
+ * locks can never collide under a coincidental shared value.
+ */
+export const RELOCATE_ADVISORY_LOCK_KEY = 8_472_995;
+
+/**
  * The single callable entrypoint both the operator CLI
  * (`packages/db/scripts/relocate-default-partition-rows.ts`) and the
  * criterion-3 automated test
@@ -231,6 +239,20 @@ export interface RelocationReport {
  * what makes a re-run against an already-relocated database idempotent and
  * silent rather than a special case.
  *
+ * 09-REVIEW WR-02: `CREATE TABLE IF NOT EXISTS` (used by `relocateMonth`
+ * below) is not atomic against genuine concurrency -- two sessions can both
+ * pass the existence check and both attempt the `CREATE`, one raising a
+ * duplicate-relation error instead of a clean, actionable message. This
+ * takes a session-scoped Postgres advisory lock (`pg_try_advisory_lock`,
+ * non-blocking) on a DEDICATED connection for the whole function's
+ * duration, released explicitly before that connection is returned to the
+ * pool -- a plain `conn.release()` would NOT release the lock itself (an
+ * advisory lock lives for the physical session, not the pooled-client
+ * checkout), which would otherwise leave a "permanently held" lock the
+ * moment that connection is recycled for something else. A second
+ * concurrent invocation fails fast with a clear error instead of racing
+ * `relocateMonth`'s own DDL.
+ *
  * Returns the report rather than printing anything -- the CLI formats it
  * for a human, the tests assert on its shape.
  */
@@ -238,31 +260,56 @@ export async function relocateAllDefaultRows(
   client: PartitionClient,
   tables: readonly PartitionedTableConfig[],
 ): Promise<RelocationReport> {
-  const tableReports: TableRelocationReport[] = [];
+  const lockConn = await client.connect();
+  let locked = false;
+  try {
+    const { rows } = await lockConn.query<{ locked: boolean }>(
+      "SELECT pg_try_advisory_lock($1) AS locked",
+      [RELOCATE_ADVISORY_LOCK_KEY],
+    );
+    locked = rows[0]?.locked ?? false;
+    if (!locked) {
+      throw new Error(
+        "relocateAllDefaultRows: another DEFAULT-relocation run already holds the relocation advisory " +
+          "lock against this database -- concurrent invocations are unsupported (CREATE TABLE IF NOT EXISTS " +
+          "is not atomic against genuine concurrency). Wait for the other invocation to finish before retrying.",
+      );
+    }
 
-  for (const table of tables) {
-    const months = await discoverDefaultMonths(client, table);
-    const monthReports: MonthRelocationReport[] = [];
+    const tableReports: TableRelocationReport[] = [];
 
-    for (const monthStart of months) {
-      const monthEnd = nextMonthStart(monthStart);
-      const { childName, rowsMoved, batches } = await relocateMonth(client, table, monthStart, monthEnd);
-      monthReports.push({
-        month: monthLabel(monthStart),
-        partitionName: childName,
-        rowsMoved,
-        batches,
+    for (const table of tables) {
+      const months = await discoverDefaultMonths(client, table);
+      const monthReports: MonthRelocationReport[] = [];
+
+      for (const monthStart of months) {
+        const monthEnd = nextMonthStart(monthStart);
+        const { childName, rowsMoved, batches } = await relocateMonth(client, table, monthStart, monthEnd);
+        monthReports.push({
+          month: monthLabel(monthStart),
+          partitionName: childName,
+          rowsMoved,
+          batches,
+        });
+      }
+
+      const residualDefaultCount = await countDefaultRowsForTable(client, table);
+      tableReports.push({
+        table: table.parentTable,
+        months: monthReports,
+        totalRowsMoved: monthReports.reduce((sum, m) => sum + m.rowsMoved, 0),
+        residualDefaultCount,
       });
     }
 
-    const residualDefaultCount = await countDefaultRowsForTable(client, table);
-    tableReports.push({
-      table: table.parentTable,
-      months: monthReports,
-      totalRowsMoved: monthReports.reduce((sum, m) => sum + m.rowsMoved, 0),
-      residualDefaultCount,
-    });
+    return { tables: tableReports };
+  } finally {
+    try {
+      if (locked) {
+        await lockConn.query("SELECT pg_advisory_unlock($1)", [RELOCATE_ADVISORY_LOCK_KEY]);
+      }
+    } finally {
+      lockConn.release();
+    }
   }
-
-  return { tables: tableReports };
 }
