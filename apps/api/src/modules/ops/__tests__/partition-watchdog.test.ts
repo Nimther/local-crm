@@ -267,16 +267,38 @@ describe("claimAlertSlot dedup / checkPartitionHealthAndAlert (D-02/D-03/T-09-03
     expect(body.toLowerCase()).not.toMatch(/postgres(ql)?:\/\//);
   });
 
-  it("test 8: a rejecting sendMail causes checkPartitionHealthAndAlert to reject, never swallowed", async () => {
-    await seedHealthRow({ lastRunAt: new Date(), bufferMonthsRemaining: 1, lastAlertSentAt: null });
+  it("test 8: a rejecting sendMail causes checkPartitionHealthAndAlert to reject, never swallowed, and does not permanently burn the dedup window (CR-02)", async () => {
+    const now = new Date();
+    await seedHealthRow({ lastRunAt: now, bufferMonthsRemaining: 1, lastAlertSentAt: null });
 
     await expect(
       checkPartitionHealthAndAlert({
         client: pool,
-        now: new Date(),
+        now,
         operatorEmail: "ops@example.com",
         sendMail: () => Promise.reject(new Error("sendgrid down")),
       }),
     ).rejects.toThrow("sendgrid down");
+
+    // CR-02: claimAlertSlot commits last_alert_sent_at BEFORE sendMail is
+    // attempted (it must, to keep the atomic-claim anti-double-send
+    // property intact across replicas -- see claimAlertSlot's own doc
+    // comment). A failed send must not leave that claim in place: the very
+    // next check (this replica, moments later, well inside
+    // ALERT_DEDUP_HOURS) must still be able to claim and actually send --
+    // otherwise a single transient SendGrid failure silently disarms the
+    // alert channel for the rest of the day even though the operator never
+    // received anything.
+    const sent: Array<{ to: string; text: string }> = [];
+    await checkPartitionHealthAndAlert({
+      client: pool,
+      now: new Date(now.getTime() + 1_000),
+      operatorEmail: "ops@example.com",
+      // eslint-disable-next-line @typescript-eslint/require-await -- test spy: intentionally synchronous
+      sendMail: async (message) => {
+        sent.push(message);
+      },
+    });
+    expect(sent).toHaveLength(1);
   });
 });
