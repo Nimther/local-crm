@@ -211,16 +211,39 @@ export function createPartitionMaintenanceWorker(
   // Fire-and-forget registration -- the constructor itself stays
   // synchronous, mirroring every existing tick worker's `void queue.add(...)`
   // shape. This worker's own short-lived Queue handle is closed once both
-  // calls settle, so it never leaks a standalone Redis connection past
-  // construction (the returned Worker keeps its own separate connection).
+  // calls settle (or fail), so it never leaks a standalone Redis connection
+  // past construction (the returned Worker keeps its own separate
+  // connection).
+  //
+  // 09-REVIEW CR-04: nobody in production (`buildWorker()` in
+  // apps/worker/src/server.ts) ever awaits or `.catch()`s this promise --
+  // `waitForPartitionMaintenanceRegistration` below is test-only. Before
+  // this try/catch/finally, a rejecting `upsertJobScheduler`/`add` (a
+  // transient Redis hiccup at boot is entirely plausible) became an
+  // unhandled promise rejection, which under Node's default
+  // `--unhandled-rejections=throw` terminates the WHOLE apps/worker
+  // process -- all 14 registered BullMQ workers, not just this one -- over
+  // a failure in what is meant to be a best-effort boot-time step. The
+  // `finally` also guarantees `queue.close()` always runs, even on failure
+  // (previously it was the last statement in the chain and was skipped
+  // whenever an earlier `await` threw, leaking the internal `Queue`'s Redis
+  // connection).
   const registration = (async () => {
-    await queue.upsertJobScheduler(
-      JOB_SCHEDULER_ID,
-      { pattern: PARTITION_MAINTENANCE_CRON, tz: "UTC" },
-      { name: JOB_NAME, opts: DEFAULT_JOB_OPTIONS },
-    );
-    await queue.add(JOB_NAME, {}, { ...DEFAULT_JOB_OPTIONS, jobId: bootJobId });
-    await queue.close();
+    try {
+      await queue.upsertJobScheduler(
+        JOB_SCHEDULER_ID,
+        { pattern: PARTITION_MAINTENANCE_CRON, tz: "UTC" },
+        { name: JOB_NAME, opts: DEFAULT_JOB_OPTIONS },
+      );
+      await queue.add(JOB_NAME, {}, { ...DEFAULT_JOB_OPTIONS, jobId: bootJobId });
+    } catch (err) {
+      // Best-effort registration: log, don't crash the process. The daily
+      // watchdog (apps/api's partition-watchdog.ts) independently catches a
+      // job that consequently never runs.
+      console.error("partition-maintenance: scheduler registration failed", err);
+    } finally {
+      await queue.close().catch(() => undefined);
+    }
   })();
   registrationSettled.set(worker, registration);
 
