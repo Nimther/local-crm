@@ -50,7 +50,7 @@ export function requirePermission(resource: Resource, action: string) {
     const result = (await auth.api.hasPermission({
       headers: toFetchHeaders(request),
       body: {
-        permissions: { [resource]: [action] } as Record<string, string[]>,
+        permissions: { [resource]: [action] },
         ...(organizationId ? { organizationId } : {}),
       },
     })) as { success?: boolean } | boolean;

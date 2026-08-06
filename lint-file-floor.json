@@ -1,0 +1,6 @@
+{
+  "minFiles": 390,
+  "measuredAt": "2026-07-28",
+  "measuredCount": 396,
+  "note": "GSD 08-03 (D-08). minFiles is measuredCount rounded DOWN to the nearest 10. The small slack absorbs a file being legitimately deleted without a floor edit, while an ignores-glob typo — which drops the count by hundreds — still trips the gate. Do NOT lower this to make a failing run pass; that is the drift the 08-14 coverage ratchet exists to prevent, and the same reasoning applies here."
+}

@@ -39,7 +39,7 @@ export function InviteModal({ slug, canInviteAdmin }: { slug: string; canInviteA
     onSuccess: (invite) => {
       setSent(invite);
       setServerError(null);
-      queryClient.invalidateQueries({ queryKey: ["workspace", slug, "invites"] });
+      void queryClient.invalidateQueries({ queryKey: ["workspace", slug, "invites"] });
       toast.success("Приглашение отправлено");
     },
     onError: (error: unknown) => {
@@ -91,7 +91,7 @@ export function InviteModal({ slug, canInviteAdmin }: { slug: string; canInviteA
             </p>
             <div className="flex items-center gap-2">
               <Input readOnly value={sent.inviteUrl} className="font-mono text-sm" />
-              <Button type="button" variant="outline" onClick={handleCopy}>
+              <Button type="button" variant="outline" onClick={() => void handleCopy()}>
                 {copied ? (
                   <>
                     <Check className="mr-1 h-4 w-4" />
@@ -113,7 +113,7 @@ export function InviteModal({ slug, canInviteAdmin }: { slug: string; canInviteA
           </div>
         ) : (
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+            <form onSubmit={(e) => void form.handleSubmit(onSubmit)(e)} className="space-y-4">
               <FormField
                 control={form.control}
                 name="email"

@@ -1,12 +1,13 @@
-import path from "node:path";
 import { configDefaults, defineConfig } from "vitest/config";
+import { resolveEnvPath } from "../../scripts/env-path.mjs";
 
-// Load the repo-root .env for local dev/test runs (Node >=20.6 native loader).
+// Load this machine's configuration for local dev/test runs, at the path
+// resolveEnvPath() decides (08-15).
 // Optional — CI/shell-exported env vars take precedence when no .env exists.
 try {
-  process.loadEnvFile(path.resolve(import.meta.dirname, "../../.env"));
+  process.loadEnvFile(resolveEnvPath());
 } catch {
-  // .env not present — rely on already-exported environment variables
+  // No configuration file — rely on already-exported environment variables
 }
 
 export default defineConfig({
@@ -18,15 +19,21 @@ export default defineConfig({
     environment: "node",
     testTimeout: 20_000,
     hookTimeout: 20_000,
+    // 08-06 (QG-04): the same setup hook apps/worker got in 08-01 — provisions a
+    // per-workspace ephemeral database, runs the fail-closed guard, and drops
+    // it on teardown even when the suite fails.
+    globalSetup: ["../../packages/test-support/src/global-setup.ts"],
     // `npm run build`'s tsc output (dist/**) mirrors src/**/*.test.ts as
     // compiled .test.js — without this exclude, vitest's default glob picks
     // up BOTH the source and the compiled copy and silently runs every test
     // twice per `vitest run` (with no path filter).
     exclude: [...configDefaults.exclude, "dist/**"],
     env: {
-      // Route every test run at the isolated test database, never the dev
-      // DATABASE_URL, so tests can never touch real dev data.
-      DATABASE_URL: process.env.TEST_DATABASE_URL ?? "",
+      // 08-06: deliberately NOT set here. This config module evaluates BEFORE
+      // the setup hook runs, so an eager read would freeze an empty string and the
+      // per-run ephemeral DSN would never reach the test workers. The forked
+      // processes inherit the value that hook writes into process.env — the
+      // same mechanism 08-02 established for apps/worker.
       // 02-05: REDIS_URL is boot-required by env.ts; tests never open a real
       // Redis connection (no test in apps/api exercises BullMQ/ioredis
       // directly), so a placeholder value just satisfies the Zod schema.
@@ -59,6 +66,21 @@ export default defineConfig({
       // pattern above -- only an explicit TEST_PUBLIC_APP_URL can override
       // the deterministic https default.
       PUBLIC_APP_URL: process.env.TEST_PUBLIC_APP_URL ?? "https://api.test.local",
+      // 08-18: these three are boot-required by env.ts and were the ONLY
+      // required variables this block never supplied — the developer's own
+      // configuration file happened to carry them, so the suite passed
+      // locally and had simply never run anywhere else. The tracer CI job ran
+      // `-w apps/worker` only; the aggregate that includes apps/api first ran
+      // in CI in this plan, and failed immediately on all three.
+      //
+      // The `??` form is deliberate and matches every other entry here: a
+      // developer with these set keeps their values, and the defaults exist
+      // so the suite does not depend on a file outside the repository.
+      // Values mirror apps/web/playwright.config.ts's webServer block so the
+      // two test lanes cannot drift. Neither is a real credential.
+      BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET ?? "test-only-better-auth-secret-value",
+      BETTER_AUTH_URL: process.env.BETTER_AUTH_URL ?? "http://localhost:4000",
+      WEB_URL: process.env.WEB_URL ?? "http://localhost:5173",
     },
   },
 });

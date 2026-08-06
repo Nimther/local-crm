@@ -218,7 +218,6 @@ export async function processFlowEnrollExisting(data: FlowEnrollExistingJob): Pr
     }
 
     let cursor = initial.cursor;
-    // eslint-disable-next-line no-constant-condition
     while (true) {
       const { processed, lastContactId } = await withTenantTransaction((client) =>
         enrollBatch(client, workspaceId, flow, definition, cursor)

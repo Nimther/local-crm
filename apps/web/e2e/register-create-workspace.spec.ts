@@ -19,5 +19,21 @@ test("register, create a workspace, and see Owner at /w/:slug", async ({ page })
   await page.getByRole("button", { name: "Создать воркспейс" }).click();
 
   await page.waitForURL(/\/w\/acme(-[a-z0-9]+)?/);
-  await expect(page.getByText(/owner|владелец/i)).toBeVisible();
+
+  // 08-10: this assertion used to run against the workspace index route, which
+  // rendered the role via WorkspaceHome. 07-07 (aa1c09f) swapped that route to
+  // WorkspaceDashboard, which does not show a role, and left WorkspaceHome
+  // orphaned — so the assertion had been failing since 14 Jul without anyone
+  // noticing, because the E2E lane is not in CI and running it locally attached
+  // to a dev stack via reuseExistingServer.
+  //
+  // The intent is unchanged — the registering user must be the Owner — but the
+  // app no longer prints the role anywhere for a solo owner: MemberRow renders
+  // "Владелец", and TeamPage suppresses the whole table behind
+  // `members.length <= 1 && invites.length === 0`. So this asserts Owner-ness
+  // through an owner-EXCLUSIVE affordance instead, gated on the same viewerRole
+  // the original assertion was about (TeamPage.tsx: `viewerRole === "owner"`).
+  const slug = new URL(page.url()).pathname.split("/")[2];
+  await page.goto(`/w/${slug}/team`);
+  await expect(page.getByRole("button", { name: "Удалить воркспейс" })).toBeVisible();
 });

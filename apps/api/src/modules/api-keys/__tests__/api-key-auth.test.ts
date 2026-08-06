@@ -45,7 +45,7 @@ describe("apiKeyAuth (D-21/D-22/D-23, T-02-03-01/T-02-03-02)", () => {
       payload: { name: "API Key Auth Co" },
     });
     expect(workspaceRes.statusCode, `create workspace failed: ${workspaceRes.body}`).toBe(200);
-    workspaceId = (workspaceRes.json() as { id: string }).id;
+    workspaceId = (workspaceRes.json<{ id: string }>()).id;
   });
 
   afterAll(async () => {

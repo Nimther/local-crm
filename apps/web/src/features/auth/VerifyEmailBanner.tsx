@@ -49,7 +49,7 @@ export function VerifyEmailBanner() {
         Подтвердите email — без этого нельзя подключить SendGrid.{" "}
         <button
           type="button"
-          onClick={handleResend}
+          onClick={() => void handleResend()}
           disabled={sending}
           className="font-semibold underline underline-offset-4 disabled:opacity-60"
         >

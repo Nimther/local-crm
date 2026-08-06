@@ -97,7 +97,7 @@ describe("Webhook health + reconnect routes (D-03)", () => {
       payload: { name },
     });
     expect(res.statusCode, `create workspace failed: ${res.body}`).toBe(200);
-    return res.json() as { id: string; slug: string; name: string };
+    return res.json<{ id: string; slug: string; name: string }>();
   }
 
   async function verifiedOwner(nameSeed: string) {

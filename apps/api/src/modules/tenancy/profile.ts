@@ -21,6 +21,7 @@ const changePasswordSchema = z.object({
  * `/api/workspaces` wraps `auth.api.createOrganization`: one consistent
  * app-facing REST surface.
  */
+// eslint-disable-next-line @typescript-eslint/require-await -- Fastify plugin contract: app.register() resolves the returned promise, and the declared Promise<void> is part of that signature -- dropping async would change it, not simplify it
 export async function registerProfileRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post("/api/profile/name", async (request, reply) => {
     const parsed = updateNameSchema.safeParse(request.body);

@@ -33,7 +33,7 @@ export function SegmentCreatePage() {
       setServerError(null);
       void queryClient.invalidateQueries({ queryKey: ["workspace", slug, "segments"] });
       toast.success("Сегмент создан");
-      navigate(`/w/${slug}/segments`);
+      void navigate(`/w/${slug}/segments`);
     },
     onError: () => {
       setServerError(GENERIC_ERROR);

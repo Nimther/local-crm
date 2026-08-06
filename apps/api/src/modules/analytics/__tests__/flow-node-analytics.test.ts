@@ -48,7 +48,7 @@ describe("Flow node analytics (07-04, ANLT-02)", () => {
       payload: { name },
     });
     expect(res.statusCode, `create workspace failed: ${res.body}`).toBe(200);
-    return res.json() as { id: string; slug: string; name: string };
+    return res.json<{ id: string; slug: string; name: string }>();
   }
 
   async function owner(nameSeed: string) {
@@ -66,7 +66,7 @@ describe("Flow node analytics (07-04, ANLT-02)", () => {
       payload: { email },
     });
     expect(res.statusCode, `create contact failed: ${res.body}`).toBe(201);
-    return res.json() as { id: string };
+    return res.json<{ id: string }>();
   }
 
   async function createFlow(cookie: string, slug: string, name: string) {
@@ -77,7 +77,7 @@ describe("Flow node analytics (07-04, ANLT-02)", () => {
       payload: { name },
     });
     expect(res.statusCode, `create flow failed: ${res.body}`).toBe(201);
-    return res.json() as { id: string };
+    return res.json<{ id: string }>();
   }
 
   const definitionV1 = {
@@ -105,7 +105,7 @@ describe("Flow node analytics (07-04, ANLT-02)", () => {
       headers: { cookie },
     });
     expect(res.statusCode, `publish failed: ${res.body}`).toBe(200);
-    return res.json() as { id: string; status: string; liveVersionId: string };
+    return res.json<{ id: string; status: string; liveVersionId: string }>();
   }
 
   /**
@@ -130,7 +130,7 @@ describe("Flow node analytics (07-04, ANLT-02)", () => {
            RETURNING id`,
           [workspaceId, flowId, flowVersionId, contactId, status]
         );
-        return rows[0].id as string;
+        return rows[0].id;
       })
     );
   }
@@ -232,7 +232,7 @@ describe("Flow node analytics (07-04, ANLT-02)", () => {
       headers: { cookie },
     });
     expect(res.statusCode, `analytics failed: ${res.body}`).toBe(200);
-    const rows = res.json() as Array<{
+    const rows = res.json<Array<{
       nodeId: string;
       nodeType: string;
       contactCount: number;
@@ -241,7 +241,7 @@ describe("Flow node analytics (07-04, ANLT-02)", () => {
       opened?: number;
       clicked?: number;
       bounced?: number;
-    }>;
+    }>>();
 
     const t1Row = rows.find((r) => r.nodeId === "t1")!;
     expect(t1Row.contactCount).toBe(2); // contact A once, contact B once (2 distinct contacts, 3 total visits)
@@ -294,7 +294,7 @@ describe("Flow node analytics (07-04, ANLT-02)", () => {
       headers: { cookie },
     });
     expect(res.statusCode, `analytics failed: ${res.body}`).toBe(200);
-    const rows = res.json() as Array<{ nodeId: string; contactCount: number }>;
+    const rows = res.json<Array<{ nodeId: string; contactCount: number }>>();
 
     // s1 aggregated across BOTH versions: contact A (v1) + contact B (v2).
     const s1Row = rows.find((r) => r.nodeId === "s1")!;

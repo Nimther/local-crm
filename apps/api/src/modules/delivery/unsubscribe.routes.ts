@@ -129,6 +129,7 @@ ${PAGE_STYLE}
  *   fall through the exact same code path with no branching on which one
  *   happened, so the response is byte-identical for all three cases.
  */
+// eslint-disable-next-line @typescript-eslint/require-await -- Fastify plugin contract: app.register() resolves the returned promise, and the declared Promise<void> is part of that signature -- dropping async would change it, not simplify it
 export async function registerUnsubscribeRoutes(fastify: FastifyInstance): Promise<void> {
   // SUBS-04/CR-01: Fastify's default parser set (application/json +
   // text/plain) rejects application/x-www-form-urlencoded with 415

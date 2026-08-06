@@ -144,6 +144,7 @@ async function resolveWorkspaceMember(
  * `requirePermission("flow", "publish")`, the sole action reserved on the
  * `flow` resource (01-01).
  */
+// eslint-disable-next-line @typescript-eslint/require-await -- Fastify plugin contract: app.register() resolves the returned promise, and the declared Promise<void> is part of that signature -- dropping async would change it, not simplify it
 export async function registerFlowsRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get("/api/workspaces/:slug/flows", async (request, reply) => {
     const { slug } = request.params as { slug: string };

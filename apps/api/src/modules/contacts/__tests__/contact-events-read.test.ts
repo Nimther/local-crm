@@ -49,7 +49,7 @@ describe("Contact event feed read route (D-14/EVNT-01)", () => {
       payload: { name },
     });
     expect(res.statusCode, `create workspace failed: ${res.body}`).toBe(200);
-    return res.json() as { id: string; slug: string; name: string };
+    return res.json<{ id: string; slug: string; name: string }>();
   }
 
   async function owner(nameSeed: string) {
@@ -67,7 +67,7 @@ describe("Contact event feed read route (D-14/EVNT-01)", () => {
       payload: { externalId },
     });
     expect(res.statusCode, `create contact failed: ${res.body}`).toBe(201);
-    return res.json() as { id: string };
+    return res.json<{ id: string }>();
   }
 
   /** Seeds one event row directly -- same table the events:ingest worker writes to (0007_events_partitioned.sql). */
@@ -104,7 +104,7 @@ describe("Contact event feed read route (D-14/EVNT-01)", () => {
     });
     expect(res.statusCode, `read failed: ${res.body}`).toBe(200);
 
-    const events = res.json() as Array<{ id: string; name: string; properties: Record<string, unknown>; occurredAt: string }>;
+    const events = res.json<Array<{ id: string; name: string; properties: Record<string, unknown>; occurredAt: string }>>();
     expect(events).toHaveLength(2);
     expect(events[0].name).toBe("order_placed"); // newest first
     expect(events[1].name).toBe("signed_up");

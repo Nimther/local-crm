@@ -40,6 +40,7 @@ describe("send-dispatch.ts processSendJob kind:'flow' (FLOW-01/FLOW-07, T-06-03-
     let calls = 0;
     let lastPayload: SendGridMailSendRequest | undefined;
     return {
+      // eslint-disable-next-line @typescript-eslint/require-await -- test double: the signature must match the async function it replaces at the DI seam; a stub having nothing to await is the point
       fn: async (_apiKey, payload) => {
         calls += 1;
         lastPayload = payload;

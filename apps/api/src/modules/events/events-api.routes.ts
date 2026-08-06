@@ -19,6 +19,7 @@ import { eventsIngestQueue } from "./events-queue.js";
  * checked before per-item parsing.
  */
 export async function registerEventsApiRoutes(fastify: FastifyInstance): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/require-await -- Fastify plugin contract: app.register() resolves the returned promise, and the declared Promise<void> is part of that signature -- dropping async would change it, not simplify it
   await fastify.register(async (scope) => {
     // onRequest (not preHandler): must run BEFORE Fastify parses the body
     // (Pitfall 3) -- this route can receive a batch of up to 1000 events.

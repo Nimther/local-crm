@@ -4,11 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch --env-file=../../.env src/server.ts",
+    "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "dev:e2e": "tsx watch src/server.ts"
   },
   "dependencies": {
     "@fastify/cors": "11.2.0",
@@ -40,8 +41,10 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
+    "@mega-crm/test-support": "0.1.0",
     "@types/node": "^22.10.5",
     "@types/pg": "^8.15.6",
+    "@vitest/coverage-v8": "^4.1.9",
     "nock": "14.0.16",
     "tsx": "^4.19.2",
     "typescript": "^5.9.3",

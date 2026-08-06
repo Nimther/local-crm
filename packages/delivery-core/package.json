@@ -14,6 +14,7 @@
     "pg": "8.22.0"
   },
   "devDependencies": {
+    "@mega-crm/test-support": "0.1.0",
     "@types/node": "^22.10.5",
     "@types/pg": "^8.15.6",
     "typescript": "^5.9.3",

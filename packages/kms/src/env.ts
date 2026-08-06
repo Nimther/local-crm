@@ -14,9 +14,25 @@
  * a redundant, defense-in-depth guard for any process (worker included)
  * that imports this package directly.
  */
-export const env = {
+/**
+ * 08-07: the type is declared here rather than asserted inline on
+ * `KMS_PROVIDER`. The ternary already produces `"aws" | "local"`, so
+ * `no-unnecessary-type-assertion` correctly reported the inline `as` as
+ * redundant *for the expression* — but the property it initializes widens to
+ * `string` without one, silently turning the provider selector into an
+ * unconstrained string. Annotating the binding keeps the union where it
+ * belongs and leaves no assertion to flag.
+ */
+interface KmsEnv {
+  NODE_ENV: string;
+  KMS_PROVIDER: "local" | "aws";
+  KMS_LOCAL_KEK: string | undefined;
+  KMS_KEK_ID: string | undefined;
+}
+
+export const env: KmsEnv = {
   NODE_ENV: process.env.NODE_ENV ?? "development",
-  KMS_PROVIDER: (process.env.KMS_PROVIDER === "aws" ? "aws" : "local") as "local" | "aws",
+  KMS_PROVIDER: process.env.KMS_PROVIDER === "aws" ? "aws" : "local",
   KMS_LOCAL_KEK: process.env.KMS_LOCAL_KEK,
   KMS_KEK_ID: process.env.KMS_KEK_ID,
 };

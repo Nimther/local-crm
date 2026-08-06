@@ -42,6 +42,7 @@ describe("send-dispatch.ts 429/5xx backoff (SEND-07)", () => {
     status: number,
     headers: Record<string, string> = {}
   ): (apiKey: string, payload: SendGridMailSendRequest) => Promise<SendTenantMailResult> {
+    // eslint-disable-next-line @typescript-eslint/require-await -- test double: the signature must match the async function it replaces at the DI seam; a stub having nothing to await is the point
     return async () => ({ status, headers: new Headers(headers), messageId: status < 300 ? "sg-fixture" : null });
   }
 

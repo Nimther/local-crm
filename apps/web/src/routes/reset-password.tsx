@@ -57,7 +57,7 @@ export default function ResetPasswordPage() {
       return;
     }
 
-    navigate("/login");
+    void navigate("/login");
   }
 
   return (
@@ -69,7 +69,7 @@ export default function ResetPasswordPage() {
         </CardHeader>
         <CardContent>
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+            <form onSubmit={(e) => void form.handleSubmit(onSubmit)(e)} className="space-y-4">
               <FormField
                 control={form.control}
                 name="password"

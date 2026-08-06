@@ -57,6 +57,7 @@ describe("RLS pooled-connection isolation chaos test (TENANT-05)", () => {
 
   it("throws when no tenant context is set for a tenant-scoped transaction", async () => {
     await expect(
+      // eslint-disable-next-line @typescript-eslint/require-await -- callback signature is fixed by the function being passed to withTenantTransaction
       withTenantTransaction(async () => {
         return null;
       })

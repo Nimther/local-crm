@@ -51,7 +51,7 @@ describe("subscription_status_history write path (07-01, D-09)", () => {
       payload: { name },
     });
     expect(res.statusCode, `create workspace failed: ${res.body}`).toBe(200);
-    return res.json() as { id: string; slug: string; name: string };
+    return res.json<{ id: string; slug: string; name: string }>();
   }
 
   async function owner(nameSeed: string) {
@@ -73,7 +73,7 @@ describe("subscription_status_history write path (07-01, D-09)", () => {
       payload,
     });
     expect(res.statusCode, `create failed: ${res.body}`).toBe(201);
-    return res.json() as { id: string; subscriptionStatus: string; email: string };
+    return res.json<{ id: string; subscriptionStatus: string; email: string }>();
   }
 
   interface HistoryRow {

@@ -1,10 +1,53 @@
+
 import { defineConfig } from "@playwright/test";
+import { resolveEnvPath } from "../../scripts/env-path.mjs";
+
+import { provisionE2eDatabase } from "./e2e/provision-database.js";
+
+// Load this machine's configuration into the PLAYWRIGHT process (not into the servers it
+// starts), mirroring every vitest.config.ts in the repo. Two things need it:
+// TEST_ADMIN_DATABASE_URL, without which provisioning cannot create a database;
+// and DATABASE_URL, which is what the provisioning guard compares the freshly
+// provisioned DSN AGAINST — with nothing to compare to, that half of the check
+// would pass vacuously.
+try {
+  process.loadEnvFile(resolveEnvPath());
+} catch {
+  // No configuration file — rely on already-exported environment variables
+}
+
+// 08-18: awaited HERE, at module scope, and not in a globalSetup hook. Every
+// Playwright startup task — including the one that starts the webServers —
+// runs after this module has been evaluated, which is the only point in the
+// lifecycle early enough to decide what database the API server boots against.
+// See e2e/provision-database.ts for the ordering this replaced and the
+// evidence that it was wrong.
+const e2eDatabaseUrl = await provisionE2eDatabase();
 
 /**
- * Starts the full stack (API on :4000, web on :5173) against the local dev
- * database (SKELETON.md / 01-01-SUMMARY.md: `mega_crm_app`/`mega_crm`, or
- * `docker compose up -d db`) and drives the register -> create-workspace ->
- * Owner happy path through a real browser (Task 1's failing RED test).
+ * 08-10 (QG-04): the E2E lane runs against an ephemeral database of its own.
+ *
+ * `./e2e/provision-database.ts` provisions one through @mega-crm/test-support —
+ * the same functions the vitest suites use — applies the schema, guards the
+ * resolved DSN and prints it behind the `[e2e:database]` marker.
+ * `./e2e/global-teardown.ts` drops it.
+ *
+ * It is awaited above rather than registered as `globalSetup`, and that is the
+ * whole correctness argument: 08-10 used the hook, and the hook runs AFTER the
+ * webServer plugin, so the server it was meant to redirect had already read
+ * DATABASE_URL. 08-18 moved it and passes the DSN to the server by name.
+ *
+ * The two webServer entries run `dev:e2e`, which is where the API's whole
+ * environment comes from — the block below plus the DSN named in it. The
+ * server has no other source for a connection string, so an unprovisioned run
+ * fails to boot rather than quietly reaching dev.
+ *
+ * `reuseExistingServer` is false on both, deliberately. With it true, a
+ * developer who happens to have a dev stack listening on 4000/5173 gets those
+ * servers reused and their dev database written to, no matter how correctly
+ * provisioning ran.
+ *
+ * Running against built artifacts instead of dev servers is Phase 15 (D-15).
  */
 export default defineConfig({
   testDir: "./e2e",
@@ -12,23 +55,49 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   timeout: 30_000,
+  globalTeardown: "./e2e/global-teardown.ts",
   use: {
     baseURL: "http://localhost:5173",
     trace: "retain-on-failure",
   },
   webServer: [
     {
-      command: "npm run dev -w apps/api",
+      command: "npm run dev:e2e -w apps/api",
       cwd: "../..",
       url: "http://localhost:4000/api/auth/ok",
-      reuseExistingServer: true,
+      reuseExistingServer: false,
       timeout: 60_000,
+      env: {
+        // 08-18: named EXPLICITLY, reversing 08-10's decision to let it be
+        // inherited. Inheritance was the defect: the server starts before
+        // globalSetup, so it inherited the value that was in the environment
+        // at that moment — the developer's dev DSN — and 08-10's ephemeral
+        // assignment arrived too late to matter. Freezing the config-load
+        // value is now correct precisely because provisioning happens at
+        // config load.
+        DATABASE_URL: e2eDatabaseUrl,
+        //
+        // Everything else is enumerated from apps/api/src/env.ts's boot schema
+        // and mirrors apps/api/vitest.config.ts's values so the two test lanes
+        // agree. None of these is a real credential.
+        NODE_ENV: "development",
+        REDIS_URL: process.env.TEST_REDIS_URL ?? "redis://localhost:6379/1",
+        BETTER_AUTH_SECRET: "e2e-only-better-auth-secret-value",
+        BETTER_AUTH_URL: "http://localhost:4000",
+        WEB_URL: "http://localhost:5173",
+        PLATFORM_SENDGRID_API_KEY: "SG.test_platform_key_0000000000000000",
+        PLATFORM_MAIL_FROM: "noreply@megacrm.test",
+        KMS_PROVIDER: "local",
+        KMS_LOCAL_KEK: "grdVCb1fxmhPzylKEPqafcPW4xOMaynE0UwaFUo2OUE=",
+        UNSUBSCRIBE_TOKEN_SECRET: "test-only-unsubscribe-secret-at-least-32-bytes",
+        PUBLIC_APP_URL: "https://api.test.local",
+      },
     },
     {
-      command: "npm run dev",
+      command: "npm run dev:e2e",
       cwd: ".",
       url: "http://localhost:5173",
-      reuseExistingServer: true,
+      reuseExistingServer: false,
       timeout: 60_000,
     },
   ],

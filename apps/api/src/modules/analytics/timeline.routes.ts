@@ -57,6 +57,7 @@ function toTimelineResponse(row: TimelineRow) {
  * explicit `getContact(id)` existence check 404s a foreign-workspace
  * contact id (never an empty 200), on top of RLS on every unioned table.
  */
+// eslint-disable-next-line @typescript-eslint/require-await -- Fastify plugin contract: app.register() resolves the returned promise, and the declared Promise<void> is part of that signature -- dropping async would change it, not simplify it
 export async function registerTimelineRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get("/api/workspaces/:slug/contacts/:id/timeline", async (request, reply) => {
     const { slug, id } = request.params as { slug: string; id: string };

@@ -19,7 +19,20 @@ export interface DeliveryFacts {
   unsubscribedAt?: Date | string | null;
 }
 
-export type CurrentStatus = "bounced" | "dropped" | "spam" | "clicked" | "opened" | "delivered" | "sent" | string;
+// 08-07: the trailing `| string` absorbed every literal before it, so this
+// union WAS exactly `string` and no-redundant-type-constituents reported all
+// seven members. `(string & {})` keeps the known statuses visible to editor
+// completion and to a reader, while still accepting whatever `baseStatus` the
+// ledger supplies — which is the openness the original `| string` intended.
+export type CurrentStatus =
+  | "bounced"
+  | "dropped"
+  | "spam"
+  | "clicked"
+  | "opened"
+  | "delivered"
+  | "sent"
+  | (string & {});
 
 /**
  * D-06 priority order: terminal (bounced/dropped/spam) wins over any

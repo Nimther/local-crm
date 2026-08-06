@@ -141,7 +141,20 @@ function recapForCondition(cond: SegmentCondition, registry: PropertyRegistryIte
     if (HIDDEN_VALUE_OPERATORS.has(cond.operator)) {
       return `${label}: ${opLabel}`;
     }
-    const value = cond.value === undefined || cond.value === "" ? "…" : String(cond.value);
+    // AttributeCondition.value is `unknown` (segments-core/types.ts), so a bare
+    // String() renders "[object Object]" into the human-readable summary for
+    // any non-primitive an operator legitimately carries.
+    const raw: unknown = cond.value;
+    const value =
+      raw === undefined || raw === ""
+        ? "…"
+        : typeof raw === "string"
+          ? raw
+          : typeof raw === "number" || typeof raw === "boolean"
+            ? String(raw)
+            : Array.isArray(raw)
+              ? raw.join(", ")
+              : JSON.stringify(raw);
     return `${label}: ${opLabel} ${value}`;
   }
   if (!cond.eventName) return "Событие не задано";

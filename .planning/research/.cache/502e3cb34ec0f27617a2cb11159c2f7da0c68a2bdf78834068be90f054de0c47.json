@@ -1,1 +1,0 @@
-{"content":"Postgres rollup tables: maintain incrementally on write, correct via periodic reconciliation that OVERWRITES (not adds to) computed aggregates per bucket to avoid double-counting drift.","source":"web","provider":"websearch","confidence":"MEDIUM","fetched_at":"2026-07-13T20:10:31.253Z","ttl":86400000,"kind":"web"}

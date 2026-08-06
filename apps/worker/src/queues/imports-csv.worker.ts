@@ -62,7 +62,6 @@ export async function processImportsCsvJob(data: ImportsCsvJob): Promise<void> {
     );
 
     let cursor = 0;
-    // eslint-disable-next-line no-constant-condition
     while (true) {
       const pendingRows = await withTenantTransaction(async (client) => {
         const { rows } = await client.query<StagedRow>(

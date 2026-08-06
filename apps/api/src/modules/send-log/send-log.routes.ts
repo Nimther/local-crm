@@ -100,6 +100,7 @@ function toSendEventResponse(row: SendEventRow) {
  * more restrictive requirement than the underlying data those roles already
  * read).
  */
+// eslint-disable-next-line @typescript-eslint/require-await -- Fastify plugin contract: app.register() resolves the returned promise, and the declared Promise<void> is part of that signature -- dropping async would change it, not simplify it
 export async function registerSendLogRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get("/api/workspaces/:slug/send-log", async (request, reply) => {
     const { slug } = request.params as { slug: string };

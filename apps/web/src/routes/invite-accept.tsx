@@ -62,7 +62,7 @@ export default function InviteAcceptPage() {
   async function goToWorkspace() {
     await queryClient.invalidateQueries({ queryKey: ["workspaces"] });
     if (previewQuery.data) {
-      navigate(`/w/${previewQuery.data.organizationSlug}`, { replace: true });
+      void navigate(`/w/${previewQuery.data.organizationSlug}`, { replace: true });
     }
   }
 
@@ -174,7 +174,7 @@ export default function InviteAcceptPage() {
               </p>
               <Form {...registerForm}>
                 <form
-                  onSubmit={registerForm.handleSubmit((values) => registerMutation.mutate(values))}
+                  onSubmit={(e) => void registerForm.handleSubmit((values) => registerMutation.mutate(values))(e)}
                   className="space-y-4"
                 >
                   <FormField

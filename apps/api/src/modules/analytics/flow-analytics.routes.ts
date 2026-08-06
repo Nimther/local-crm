@@ -59,6 +59,7 @@ function toFlowNodeAnalyticsResponse(row: FlowNodeAnalyticsRow) {
  * pattern -- an explicit lookup 404s a foreign-workspace flow id (never an
  * empty 200), on top of RLS on flow_run_steps/flow_runs/sends underneath.
  */
+// eslint-disable-next-line @typescript-eslint/require-await -- Fastify plugin contract: app.register() resolves the returned promise, and the declared Promise<void> is part of that signature -- dropping async would change it, not simplify it
 export async function registerFlowAnalyticsRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get("/api/workspaces/:slug/flows/:id/analytics", async (request, reply) => {
     const { slug, id } = request.params as { slug: string; id: string };

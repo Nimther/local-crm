@@ -11,13 +11,29 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-const targetPath = resolve(process.cwd(), process.argv[2] || ".env");
+import { resolveEnvPath } from "./env-path.mjs";
+
+// 08-15 (QG-07): the default target is resolveEnvPath()'s — one decision point
+// for where this machine's configuration lives, overridable with
+// MEGA_CRM_ENV_FILE. The explicit argv[2] override is kept: it is how a
+// developer checks an arbitrary file, and removing it would break an existing
+// workflow for no gain.
+const targetPath = process.argv[2]
+  ? resolve(process.cwd(), process.argv[2])
+  : resolveEnvPath();
 
 if (!existsSync(targetPath)) {
   console.error(
     [
       `Env check failed: ${targetPath} does not exist.`,
-      "Copy .env.example to .env and fill in the required values, then re-run npm run dev.",
+      "",
+      "Create it from the template in the repository:",
+      `  mkdir -p "${targetPath.replace(/\/[^/]*$/, "")}"`,
+      `  cp .env.example "${targetPath}"`,
+      "",
+      "Then fill in the required values and re-run npm run dev.",
+      "The configuration deliberately lives OUTSIDE the repository working root;",
+      "set MEGA_CRM_ENV_FILE to override the location.",
     ].join("\n")
   );
   process.exit(1);
@@ -81,7 +97,7 @@ if (missing.length > 0) {
     [
       `Env check failed: ${missing.length} required variable(s) missing or empty in ${targetPath}:`,
       ...missing.map((name) => `  - ${name}`),
-      "See .env.example.",
+      "See .env.example in the repository for the full template.",
     ].join("\n")
   );
   process.exit(1);

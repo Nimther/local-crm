@@ -55,7 +55,7 @@ describe("Campaign excluded-reason breakdown (D-07)", () => {
       payload: { name },
     });
     expect(res.statusCode, `create workspace failed: ${res.body}`).toBe(200);
-    return res.json() as { id: string; slug: string; name: string };
+    return res.json<{ id: string; slug: string; name: string }>();
   }
 
   async function owner(nameSeed: string) {
@@ -85,7 +85,7 @@ describe("Campaign excluded-reason breakdown (D-07)", () => {
       },
     });
     expect(res.statusCode, `create segment failed: ${res.body}`).toBe(201);
-    return res.json() as { id: string };
+    return res.json<{ id: string }>();
   }
 
   async function createFixtureContact(workspaceId: string): Promise<string> {

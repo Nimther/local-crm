@@ -93,7 +93,7 @@ export function TrendChart({ data }: { data: DashboardTrendPoint[] }) {
         <Tooltip content={<TrendTooltip />} />
         <Legend
           wrapperStyle={{ fontSize: 14, color: "hsl(var(--muted-foreground))" }}
-          formatter={(value) => SERIES.find((s) => s.key === value)?.label ?? value}
+          formatter={(value: string) => SERIES.find((s) => s.key === value)?.label ?? value}
         />
         {SERIES.map((series) => (
           <Area

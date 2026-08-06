@@ -7,7 +7,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-import { computeRate } from "@/lib/rates";
 import { OnboardingChecklist } from "@/features/onboarding/OnboardingChecklist";
 import { getWorkspaceDashboard, type DashboardPeriod } from "@/features/dashboard/api";
 import { TrendChart } from "@/features/dashboard/TrendChart";
@@ -108,7 +107,7 @@ export function WorkspaceDashboard() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Button variant="secondary" onClick={() => navigate(`/w/${slug}/campaigns`)}>
+            <Button variant="secondary" onClick={() => void navigate(`/w/${slug}/campaigns`)}>
               Создать кампанию
             </Button>
           </CardContent>
@@ -164,7 +163,7 @@ export function WorkspaceDashboard() {
                         <TableRow
                           key={campaign.id}
                           className={cn("h-12 cursor-pointer")}
-                          onClick={() => navigate(`/w/${slug}/campaigns/${campaign.id}`)}
+                          onClick={() => void navigate(`/w/${slug}/campaigns/${campaign.id}`)}
                         >
                           <TableCell>{campaign.name}</TableCell>
                           <TableCell className="text-right tabular-nums">{campaign.sentCount}</TableCell>
@@ -199,7 +198,7 @@ export function WorkspaceDashboard() {
                         <TableRow
                           key={flow.id}
                           className={cn("h-12 cursor-pointer")}
-                          onClick={() => navigate(`/w/${slug}/flows/${flow.id}`)}
+                          onClick={() => void navigate(`/w/${slug}/flows/${flow.id}`)}
                         >
                           <TableCell>{flow.name}</TableCell>
                           <TableCell className="text-right tabular-nums">{flow.activeRuns}</TableCell>

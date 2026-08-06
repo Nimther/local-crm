@@ -22,6 +22,7 @@ function toListItem(row: ApiKeyListItemRow) {
  * in 02-04/02-06) will present. Session-authed, distinct from the runtime
  * `apiKeyAuth` hook these keys are verified by (api-key-auth.ts).
  */
+// eslint-disable-next-line @typescript-eslint/require-await -- Fastify plugin contract: app.register() resolves the returned promise, and the declared Promise<void> is part of that signature -- dropping async would change it, not simplify it
 export async function registerApiKeyRoutes(fastify: FastifyInstance): Promise<void> {
   /** GET list -- masked keys only, never the secret or its hash (D-22). */
   fastify.get(

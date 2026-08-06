@@ -46,8 +46,13 @@ describe("Campaign sender resolution (CR-02, CAMP-01/02/04)", () => {
   const realFetch = globalThis.fetch;
 
   function stubSendGridFetch(): void {
+    // eslint-disable-next-line @typescript-eslint/require-await -- test double: the signature must match the async function it replaces at the DI seam; a stub having nothing to await is the point
     globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
-      const url = typeof input === "string" ? input : input.toString();
+      // Request has no meaningful toString() — it stringifies to
+      // "[object Request]", which would silently match none of the URL
+      // branches below and route every call to the unexpected-call throw.
+      const url =
+        typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
 
       if (url.includes("/v3/scopes")) {
         return new Response(JSON.stringify({ scopes: ["mail.send"] }), {
@@ -66,7 +71,7 @@ describe("Campaign sender resolution (CR-02, CAMP-01/02/04)", () => {
       }
 
       throw new Error(`sender-resolution.test.ts: unexpected fetch to ${url} (init: ${JSON.stringify(init)})`);
-    }) as typeof fetch;
+    });
   }
 
   async function signUp(email: string, password: string, name: string) {
@@ -91,7 +96,7 @@ describe("Campaign sender resolution (CR-02, CAMP-01/02/04)", () => {
       payload: { name },
     });
     expect(res.statusCode, `create workspace failed: ${res.body}`).toBe(200);
-    return res.json() as { id: string; slug: string; name: string };
+    return res.json<{ id: string; slug: string; name: string }>();
   }
 
   async function owner(nameSeed: string) {
@@ -121,7 +126,7 @@ describe("Campaign sender resolution (CR-02, CAMP-01/02/04)", () => {
       },
     });
     expect(res.statusCode, `create segment failed: ${res.body}`).toBe(201);
-    return res.json() as { id: string };
+    return res.json<{ id: string }>();
   }
 
   // workspace_sendgrid_keys carries ENABLE + FORCE ROW LEVEL SECURITY --
@@ -152,7 +157,7 @@ describe("Campaign sender resolution (CR-02, CAMP-01/02/04)", () => {
       payload: body,
     });
     expect(res.statusCode, `create campaign failed: ${res.body}`).toBe(201);
-    return res.json() as { id: string; fromEmail: string | null; fromSenderId: string | null };
+    return res.json<{ id: string; fromEmail: string | null; fromSenderId: string | null }>();
   }
 
   async function getCampaign(cookie: string, slug: string, id: string) {
@@ -162,7 +167,7 @@ describe("Campaign sender resolution (CR-02, CAMP-01/02/04)", () => {
       headers: { cookie },
     });
     expect(res.statusCode, `get campaign failed: ${res.body}`).toBe(200);
-    return res.json() as { id: string; fromEmail: string | null; fromSenderId: string | null };
+    return res.json<{ id: string; fromEmail: string | null; fromSenderId: string | null }>();
   }
 
   it("launch resolves a fromSenderId-only campaign to its verified sender email and persists it", async () => {
@@ -235,7 +240,7 @@ describe("Campaign sender resolution (CR-02, CAMP-01/02/04)", () => {
       headers: { cookie },
     });
     expect(launchRes.statusCode, `expected 422, got ${launchRes.statusCode}: ${launchRes.body}`).toBe(422);
-    const body = launchRes.json() as { error?: string; fields?: Record<string, string> };
+    const body = launchRes.json<{ error?: string; fields?: Record<string, string> }>();
     expect(body.fields?.sender ?? body.error).toBeTruthy();
   });
 
@@ -262,7 +267,7 @@ describe("Campaign sender resolution (CR-02, CAMP-01/02/04)", () => {
       testSendRes.statusCode,
       `expected 422, got ${testSendRes.statusCode}: ${testSendRes.body}`
     ).toBe(422);
-    const body = testSendRes.json() as { error?: string; fields?: Record<string, string> };
+    const body = testSendRes.json<{ error?: string; fields?: Record<string, string> }>();
     expect(body.fields?.sender ?? body.error).toBeTruthy();
   });
 });

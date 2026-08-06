@@ -47,7 +47,7 @@ describe("Contact timeline (07-02, ANLT-03)", () => {
       payload: { name },
     });
     expect(res.statusCode, `create workspace failed: ${res.body}`).toBe(200);
-    return res.json() as { id: string; slug: string; name: string };
+    return res.json<{ id: string; slug: string; name: string }>();
   }
 
   async function owner(nameSeed: string) {
@@ -65,7 +65,7 @@ describe("Contact timeline (07-02, ANLT-03)", () => {
       payload,
     });
     expect(res.statusCode, `create contact failed: ${res.body}`).toBe(201);
-    return res.json() as { id: string };
+    return res.json<{ id: string }>();
   }
 
   async function insertEvent(workspaceId: string, contactId: string, name: string, occurredAt: Date) {
@@ -135,7 +135,7 @@ describe("Contact timeline (07-02, ANLT-03)", () => {
     );
   }
 
-  async function timelineUrl(slug: string, contactId: string, query?: string) {
+  function timelineUrl(slug: string, contactId: string, query?: string) {
     return `/api/workspaces/${slug}/contacts/${contactId}/timeline${query ? `?${query}` : ""}`;
   }
 
@@ -161,11 +161,11 @@ describe("Contact timeline (07-02, ANLT-03)", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: await timelineUrl(workspace.slug, contact.id),
+      url: timelineUrl(workspace.slug, contact.id),
       headers: { cookie },
     });
     expect(res.statusCode, `timeline failed: ${res.body}`).toBe(200);
-    const rows = res.json() as Array<{ kind: string; occurredAt: string; label: string; detail: Record<string, unknown> }>;
+    const rows = res.json<Array<{ kind: string; occurredAt: string; label: string; detail: Record<string, unknown> }>>();
 
     expect(rows).toHaveLength(3);
     // Newest first.
@@ -193,11 +193,11 @@ describe("Contact timeline (07-02, ANLT-03)", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: await timelineUrl(workspace.slug, contact.id),
+      url: timelineUrl(workspace.slug, contact.id),
       headers: { cookie },
     });
     expect(res.statusCode, `timeline failed: ${res.body}`).toBe(200);
-    const rows = res.json() as Array<{ kind: string; detail: Record<string, unknown> }>;
+    const rows = res.json<Array<{ kind: string; detail: Record<string, unknown> }>>();
     expect(rows).toHaveLength(1);
     expect(rows[0].detail).toMatchObject({ status: "bounced", reason: "mailbox_full" });
   });
@@ -211,7 +211,7 @@ describe("Contact timeline (07-02, ANLT-03)", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: await timelineUrl(a.workspace.slug, contactInB.id),
+      url: timelineUrl(a.workspace.slug, contactInB.id),
       headers: { cookie: a.cookie },
     });
     expect(res.statusCode).toBe(404);
@@ -228,11 +228,11 @@ describe("Contact timeline (07-02, ANLT-03)", () => {
 
     const res = await app.inject({
       method: "GET",
-      url: await timelineUrl(workspace.slug, contact.id, "type=emails"),
+      url: timelineUrl(workspace.slug, contact.id, "type=emails"),
       headers: { cookie },
     });
     expect(res.statusCode, `timeline failed: ${res.body}`).toBe(200);
-    const rows = res.json() as Array<{ kind: string }>;
+    const rows = res.json<Array<{ kind: string }>>();
     expect(rows).toHaveLength(1);
     expect(rows[0].kind).toBe("send");
   });

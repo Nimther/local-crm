@@ -157,7 +157,7 @@ describe("CSV contact import (CONT-02, D-15..D-20)", () => {
       payload: { name },
     });
     expect(res.statusCode, `create workspace failed: ${res.body}`).toBe(200);
-    return res.json() as { id: string; slug: string; name: string };
+    return res.json<{ id: string; slug: string; name: string }>();
   }
 
   async function owner(nameSeed: string) {
@@ -201,12 +201,12 @@ describe("CSV contact import (CONT-02, D-15..D-20)", () => {
       payload: body,
     });
     expect(res.statusCode, `upload failed: ${res.body}`).toBe(200);
-    return res.json() as {
+    return res.json<{
       importId: string;
       headers: string[];
       previewRows: Record<string, string>[];
       totalRows: number;
-    };
+    }>();
   }
 
   it("upload streams the WHOLE file to staging and returns detected headers + a preview of the first rows", async () => {
@@ -245,7 +245,7 @@ describe("CSV contact import (CONT-02, D-15..D-20)", () => {
       payload: { mapping: MAPPING, duplicatePolicy: "update" },
     });
     expect(dryRunRes.statusCode, `dry-run failed: ${dryRunRes.body}`).toBe(200);
-    const summary = dryRunRes.json() as { willCreate: number; willUpdate: number; errorCount: number };
+    const summary = dryRunRes.json<{ willCreate: number; willUpdate: number; errorCount: number }>();
     expect(summary.willCreate).toBe(2); // ext-1, ext-2
     expect(summary.errorCount).toBe(2); // invalid email row + missing-both-identifiers row
     expect(summary.willUpdate).toBe(0);
@@ -274,7 +274,7 @@ describe("CSV contact import (CONT-02, D-15..D-20)", () => {
       payload: { mapping: MAPPING, duplicatePolicy: "update" },
     });
     expect(dryRunRes.statusCode, `dry-run failed: ${dryRunRes.body}`).toBe(200);
-    const summary = dryRunRes.json() as { willCreate: number; willUpdate: number; errorCount: number };
+    const summary = dryRunRes.json<{ willCreate: number; willUpdate: number; errorCount: number }>();
     expect(summary.willUpdate).toBe(1);
     expect(summary.willCreate).toBe(1);
   });
@@ -291,7 +291,7 @@ describe("CSV contact import (CONT-02, D-15..D-20)", () => {
       payload: body,
     });
     expect(uploadRes.statusCode, `upload failed: ${uploadRes.body}`).toBe(200);
-    const upload = uploadRes.json() as { importId: string };
+    const upload = uploadRes.json<{ importId: string }>();
 
     const dryRunRes = await app.inject({
       method: "POST",
@@ -303,7 +303,7 @@ describe("CSV contact import (CONT-02, D-15..D-20)", () => {
       },
     });
     expect(dryRunRes.statusCode, `dry-run failed: ${dryRunRes.body}`).toBe(200);
-    const summary = dryRunRes.json() as { willCreate: number; willUpdate: number; errorCount: number };
+    const summary = dryRunRes.json<{ willCreate: number; willUpdate: number; errorCount: number }>();
     // Pre-fix: the untyped subscriptionStatus cast lets "yes" through, so
     // this row is (wrongly) counted in willCreate instead of errorCount --
     // the exact dry-run/apply drift WR-05 closes.
@@ -335,7 +335,7 @@ describe("CSV contact import (CONT-02, D-15..D-20)", () => {
       headers: { cookie },
     });
     expect(historyRes.statusCode, `history failed: ${historyRes.body}`).toBe(200);
-    const items = historyRes.json() as Array<{ fileName: string; status: string }>;
+    const items = historyRes.json<Array<{ fileName: string; status: string }>>();
     const failedImport = items.find((i) => i.fileName === "bad.csv");
     // Pre-fix: the import row was created before parsing began and is never
     // updated on error, so it stays stuck at the default 'uploaded' status
@@ -418,7 +418,7 @@ describe("CSV contact import (CONT-02, D-15..D-20)", () => {
       headers: { cookie },
     });
     expect(historyRes.statusCode, `history failed: ${historyRes.body}`).toBe(200);
-    const items = historyRes.json() as Array<{ fileName: string; createdAt: string }>;
+    const items = historyRes.json<Array<{ fileName: string; createdAt: string }>>();
     expect(items.length).toBeGreaterThan(0);
     expect(items[0].fileName).toBe("contacts.csv");
   });
@@ -467,7 +467,7 @@ describe("CSV contact import (CONT-02, D-15..D-20)", () => {
       headers: { cookie },
     });
     expect(historyRes.statusCode).toBe(200);
-    const items = historyRes.json() as Array<{ fileName: string; status: string }>;
+    const items = historyRes.json<Array<{ fileName: string; status: string }>>();
     const createdImport = items.find((i) => i.fileName === "truncated.csv");
     expect(createdImport?.status).toBe("failed");
   });
@@ -489,7 +489,7 @@ describe("CSV contact import (CONT-02, D-15..D-20)", () => {
       payload: body,
     });
     expect(uploadRes.statusCode).toBe(200);
-    const uploadData = uploadRes.json() as { importId: string };
+    const uploadData = uploadRes.json<{ importId: string }>();
 
     // Simulate what the truncation handler does: call markCsvImportFailed
     // directly and verify the status changes to 'failed'.
@@ -502,7 +502,7 @@ describe("CSV contact import (CONT-02, D-15..D-20)", () => {
       headers: { cookie },
     });
     expect(statusRes.statusCode).toBe(200);
-    const status = statusRes.json() as { status: string };
+    const status = statusRes.json<{ status: string }>();
     expect(status.status).toBe("failed");
   });
 });

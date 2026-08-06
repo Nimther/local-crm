@@ -11,14 +11,15 @@
 // No dependencies -- Node built-ins only.
 
 import { execSync } from "node:child_process";
-import { resolve } from "node:path";
+import { resolveEnvPath } from "./env-path.mjs";
 
-// Load the repo-root .env, mirroring apps/api/vitest.config.ts and
+// 08-15: the location comes from resolveEnvPath() — one decision point,
+// overridable with MEGA_CRM_ENV_FILE. Mirrors apps/api/vitest.config.ts and
 // apps/worker/vitest.config.ts's env-loading pattern. This runtime load is
 // done by Node itself (process.loadEnvFile), not by a Claude tool, so it is
 // not affected by the .env* tool-deny.
 try {
-  process.loadEnvFile(resolve(import.meta.dirname, "../.env"));
+  process.loadEnvFile(resolveEnvPath());
 } catch {
   // .env not present -- rely on already-exported environment variables
 }

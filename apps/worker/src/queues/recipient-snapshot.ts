@@ -121,7 +121,6 @@ export async function materializeCampaignSnapshot(campaignId: string): Promise<v
   const { definition } = initial;
   let cursor = initial.cursor;
 
-  // eslint-disable-next-line no-constant-condition
   while (true) {
     const { inserted, lastContactId } = await withTenantTransaction((client) =>
       materializeBatch(client, campaignId, workspaceId, definition, cursor)

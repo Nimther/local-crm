@@ -63,14 +63,14 @@ export function WorkspaceSwitcher({ activeSlug }: { activeSlug: string }) {
               "gap-2",
               workspace.slug === activeSlug && "bg-accent text-primary"
             )}
-            onSelect={() => navigate(`/w/${workspace.slug}`)}
+            onSelect={() => void navigate(`/w/${workspace.slug}`)}
           >
             <Building2 className="h-4 w-4" />
             <span className="truncate">{workspace.name}</span>
           </DropdownMenuItem>
         ))}
         <DropdownMenuSeparator />
-        <DropdownMenuItem className="gap-2" onSelect={() => navigate("/create-workspace")}>
+        <DropdownMenuItem className="gap-2" onSelect={() => void navigate("/create-workspace")}>
           <Plus className="h-4 w-4" />
           Создать воркспейс
         </DropdownMenuItem>

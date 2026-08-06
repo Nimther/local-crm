@@ -79,7 +79,7 @@ export default function ProfilePage() {
         </CardHeader>
         <CardContent>
           <Form {...nameForm}>
-            <form onSubmit={nameForm.handleSubmit(onSubmitName)} className="space-y-4">
+            <form onSubmit={(e) => void nameForm.handleSubmit(onSubmitName)(e)} className="space-y-4">
               <FormField
                 control={nameForm.control}
                 name="name"
@@ -109,7 +109,7 @@ export default function ProfilePage() {
         </CardHeader>
         <CardContent>
           <Form {...passwordForm}>
-            <form onSubmit={passwordForm.handleSubmit(onSubmitPassword)} className="space-y-4">
+            <form onSubmit={(e) => void passwordForm.handleSubmit(onSubmitPassword)(e)} className="space-y-4">
               <FormField
                 control={passwordForm.control}
                 name="currentPassword"

@@ -66,6 +66,7 @@ function toWorkspaceResponse(
  *
  * GET /api/workspaces/:slug: member-only read, 403/404 for non-members.
  */
+// eslint-disable-next-line @typescript-eslint/require-await -- Fastify plugin contract: app.register() resolves the returned promise, and the declared Promise<void> is part of that signature -- dropping async would change it, not simplify it
 export async function registerWorkspaceRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post("/api/workspaces", async (request, reply) => {
     const parsed = createWorkspaceSchema.safeParse(request.body);
@@ -119,7 +120,13 @@ export async function registerWorkspaceRoutes(fastify: FastifyInstance): Promise
         query: { organizationSlug: slug },
       });
 
-      return reply.send(toWorkspaceResponse(org, Array.isArray(role) ? role[0] : role));
+      // better-auth types `role` loosely, so narrow before it reaches the
+      // schema rather than passing an `any` through. A non-string here was
+      // always rejected by workspaceResponseSchema.parse; it still is.
+      const activeRole: unknown = Array.isArray(role) ? role[0] : role;
+      return reply.send(
+        toWorkspaceResponse(org, typeof activeRole === "string" ? activeRole : String(activeRole)),
+      );
     } catch (err) {
       if (err instanceof APIError) {
         return reply.code(err.statusCode ?? 404).send({ error: err.message });

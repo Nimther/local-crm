@@ -91,7 +91,10 @@ async function uploadCsvFile(slug: string, file: File): Promise<CsvUploadRespons
     body: formData,
   });
   const contentType = res.headers.get("content-type") ?? "";
-  const body = contentType.includes("application/json") ? await res.json() : undefined;
+  // res.json() is `any`; `unknown` keeps the narrowing below honest.
+  const body: unknown = contentType.includes("application/json")
+    ? await res.json()
+    : undefined;
   if (!res.ok) {
     const message = (body as { error?: string } | undefined)?.error;
     throw new ApiError(res.status, message ?? `Request failed: ${res.status}`, body);
@@ -527,7 +530,7 @@ function ImportReentryView({ slug, importId }: { slug: string; importId: string 
         </CardDescription>
       </CardHeader>
       <CardFooter>
-        <Button type="button" onClick={() => navigate(`/w/${slug}/contacts/import`)}>
+        <Button type="button" onClick={() => void navigate(`/w/${slug}/contacts/import`)}>
           Загрузить файл
         </Button>
       </CardFooter>

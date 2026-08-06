@@ -15,6 +15,7 @@ import { upsertContactByIdentity } from "./contact.repository.js";
  * call sites.
  */
 export async function registerContactsApiRoutes(fastify: FastifyInstance): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/require-await -- Fastify plugin contract: app.register() resolves the returned promise, and the declared Promise<void> is part of that signature -- dropping async would change it, not simplify it
   await fastify.register(async (scope) => {
     // onRequest (not preHandler): must run BEFORE Fastify parses the request
     // body (Pitfall 3) -- important since this route can receive a batch.

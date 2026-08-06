@@ -1,0 +1,246 @@
+name: CI
+
+# 08-01 (QG-01, D-01): BOTH triggers are required. `push` alone means the check
+# never appears on a pull request, so branch protection has nothing to require
+# and silently allows the merge; `pull_request` alone means a direct push to a
+# phase branch is never checked. See 08-RESEARCH.md § Common Pitfalls → Pitfall 1.
+on:
+  push:
+  pull_request:
+    branches: [master]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# 08-18 (D-02): four jobs. The split exists for feedback latency — the only
+# genuinely slow work is the live-Postgres corpus, so everything that needs no
+# service runs in front of it and reports in about a minute.
+#
+# `static`, `test` and `failure-injection` are the required status checks on
+# master. `e2e` is deliberately NOT: a browser run that flakes would block every
+# merge falsely (SPEC § Boundaries). Its machine-checkable value — which database
+# the run actually touched — is still produced and asserted.
+#
+# Every third-party action is pinned to a full commit SHA with the tag in a
+# trailing comment: a floating tag can be re-pointed at attacker-controlled code
+# that runs with access to this job's token and the checked-out tree.
+jobs:
+  # ---------------------------------------------------------------------------
+  # No services. A lint violation should be reported in a minute, not behind a
+  # full live-database suite.
+  # ---------------------------------------------------------------------------
+  static:
+    name: static
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # D-04: this step IS the typecheck. Every workspace's `build` script is
+      # `tsc -p tsconfig.json` with noEmit, so a type error anywhere in the
+      # monorepo fails the job. There is deliberately no separate tsc pass.
+      - name: Typecheck
+        run: npm run build --workspaces --if-present
+
+      - name: Lint
+        run: npm run lint
+
+      # Without this, an ignores-glob typo makes `eslint .` check nothing and
+      # exit 0 — a green gate that examined no files.
+      - name: Lint file-count floor
+        run: npm run lint:floor
+
+      - name: Migration linter
+        run: npm run lint:migrations
+
+      - name: Working-root hygiene
+        run: npm run check:root-hygiene
+
+  # ---------------------------------------------------------------------------
+  # The full corpus against live services, then the coverage threshold and the
+  # ratchet that stops the threshold being lowered to meet a regression.
+  # ---------------------------------------------------------------------------
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    env:
+      # The test-database guard compares the provisioned DSN against a REAL dev
+      # DSN. Without DATABASE_URL exported here it would have nothing to compare
+      # against and the equality half of the check would pass vacuously.
+      #
+      # TEST_DATABASE_URL is deliberately NOT set: each workspace provisions its
+      # own ephemeral database through globalSetup and publishes it. Presetting
+      # it here would be overwritten anyway, and would suggest a shared database
+      # that no longer exists.
+      DATABASE_URL: postgres://mega_crm_app:mega_crm_dev_pw@localhost:5432/mega_crm
+      TEST_REDIS_URL: redis://localhost:6379/1
+    steps:
+      # The ratchet resolves `git show origin/master:coverage-baseline.json`.
+      # The default shallow clone has no origin/master to read, and the ratchet
+      # treats an unreadable ref as an error rather than a pass — correctly, but
+      # it needs the history to do its job.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The aggregate includes apps/worker's redis-restart scenario, which
+      # starts its own throwaway server from docker/redis.conf. Same ordering
+      # constraint as the failure-injection job: install while 6379 is free,
+      # take the system service down, then let compose bind the port.
+      - name: Install redis-server and free port 6379
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y redis-server
+          sudo systemctl disable --now redis-server
+
+      # `--wait` blocks on the healthcheck blocks already defined for `db` and
+      # `redis` in docker-compose.yml. Never add a `sleep` here — if the runner
+      # genuinely needs longer, raise `--wait-timeout` explicitly instead.
+      - name: Start Postgres and Redis
+        run: docker compose up -d --wait
+
+      # 08-04 (WRK-12): the SAME script the local suite runs against a throwaway
+      # redis-server, here pointed at the container. This is the ONLY place the
+      # `command:` override and the read-only docker/redis.conf mount are
+      # exercised — a machine without Docker cannot prove that path at all.
+      - name: Verify Redis configuration
+        env:
+          REDIS_URL: redis://localhost:6379
+        run: npm run verify:redis-config
+
+      # The aggregated run from 08-11: every backend project, one denominator.
+      - name: Test with coverage
+        run: npm run coverage
+
+      - name: Coverage gate
+        run: npm run coverage:gate
+
+      - name: Coverage ratchet
+        run: npm run coverage:ratchet
+
+  # ---------------------------------------------------------------------------
+  # Five separate steps, deliberately — the aggregate convenience script that
+  # chains all five locally is not used here. SPEC R6's acceptance criterion is
+  # that the five run independently, and one combined step would hide a scenario
+  # that only passes because a sibling ran first, which is exactly what the
+  # requirement exists to catch. It also names which scenario broke in the job
+  # summary instead of pointing at one opaque step.
+  # ---------------------------------------------------------------------------
+  failure-injection:
+    name: failure-injection
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgres://mega_crm_app:mega_crm_dev_pw@localhost:5432/mega_crm
+      TEST_REDIS_URL: redis://localhost:6379/1
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The redis-restart scenario boots its own throwaway redis-server from
+      # docker/redis.conf rather than restarting the container, so the binary
+      # has to be on PATH.
+      #
+      # Ordering is load-bearing, and so is the disable. Installing the package
+      # starts a system service on 6379; the compose `redis` service publishes
+      # the same port. Install first (6379 still free, so the package's own
+      # start succeeds and apt exits 0), then take the service down, then bring
+      # compose up into a port nothing holds. Reversing these two steps makes
+      # the job fail on a port conflict.
+      - name: Install redis-server and free port 6379
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y redis-server
+          sudo systemctl disable --now redis-server
+
+      - name: Start Postgres and Redis
+        run: docker compose up -d --wait
+
+      - name: SendGrid rate limit (429)
+        run: npm run failure:429
+
+      - name: SendGrid timeout
+        run: npm run failure:timeout
+
+      - name: SendGrid connection reset
+        run: npm run failure:reset
+
+      - name: Worker SIGKILL mid-dispatch
+        run: npm run failure:sigkill
+
+      - name: Redis restart under a live queue
+        run: npm run failure:redis-restart
+
+  # ---------------------------------------------------------------------------
+  # Reports, never blocks. What CI needs from this job is not the browser
+  # assertions — it is the evidence of WHICH database the run touched.
+  # ---------------------------------------------------------------------------
+  e2e:
+    name: e2e
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    env:
+      DATABASE_URL: postgres://mega_crm_app:mega_crm_dev_pw@localhost:5432/mega_crm
+      TEST_REDIS_URL: redis://localhost:6379/1
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Start Postgres and Redis
+        run: docker compose up -d --wait
+
+      - name: Install browser
+        run: npx playwright install --with-deps chromium
+
+      # `shell: bash` is not cosmetic here. The default runner shell is `bash -e`
+      # WITHOUT pipefail, so a failing Playwright run piped into `tee` would
+      # report tee's exit code — 0 — and the step would pass while every spec
+      # failed. Naming the shell explicitly turns pipefail on.
+      - name: Run E2E, capturing the reported connection string
+        shell: bash
+        run: npm run test:e2e 2>&1 | tee e2e-output.txt
+
+      # QG-04's criterion is that CI can assert WHICH connection string the run
+      # used. A config value nobody reads back is not evidence.
+      - name: Assert the run used an ephemeral database
+        if: always()
+        run: |
+          if ! grep -q '\[e2e:database\]' e2e-output.txt; then
+            echo "FAILED: the E2E run printed no [e2e:database] marker — it may not have provisioned at all." >&2
+            exit 1
+          fi
+          if ! grep '\[e2e:database\]' e2e-output.txt | grep -q 'mega_crm_test_e2e_'; then
+            echo "FAILED: the E2E run reported a database outside the ephemeral namespace:" >&2
+            grep '\[e2e:database\]' e2e-output.txt >&2
+            exit 1
+          fi
+          grep '\[e2e:database\]' e2e-output.txt

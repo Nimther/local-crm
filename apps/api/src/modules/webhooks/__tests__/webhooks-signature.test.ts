@@ -86,7 +86,7 @@ describe("POST /webhooks/sendgrid/:pathToken (WBHK-01)", () => {
       payload: { name },
     });
     expect(res.statusCode, `create workspace failed: ${res.body}`).toBe(200);
-    return res.json() as { id: string; slug: string; name: string };
+    return res.json<{ id: string; slug: string; name: string }>();
   }
 
   /** Provisions a workspace_webhook_endpoints row directly -- SendGrid auto-provisioning (D-01/D-02) is out of this plan's scope. */

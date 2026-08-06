@@ -1,14 +1,14 @@
-import path from "node:path";
 import { configDefaults, defineConfig } from "vitest/config";
+import { resolveEnvPath } from "../../scripts/env-path.mjs";
 
 // Load the repo-root .env for local dev/test runs (Node >=20.6 native loader),
 // mirroring apps/worker/vitest.config.ts's convention. Optional -- delivery-core's
 // own unit tests never open a real DB/Redis connection (pre-send-gate/send-ledger
 // tests stub the PoolClient directly), so this is only here for parity/future use.
 try {
-  process.loadEnvFile(path.resolve(import.meta.dirname, "../../.env"));
+  process.loadEnvFile(resolveEnvPath());
 } catch {
-  // .env not present -- rely on already-exported environment variables
+  // No configuration file -- rely on already-exported environment variables
 }
 
 export default defineConfig({
@@ -18,6 +18,8 @@ export default defineConfig({
     environment: "node",
     testTimeout: 20_000,
     hookTimeout: 20_000,
+    // 08-06 (QG-04): the same setup hook as apps/api and apps/worker.
+    globalSetup: ["../test-support/src/global-setup.ts"],
     exclude: [...configDefaults.exclude, "dist/**"],
     env: {
       // 04-10: send-ledger-integrity.test.ts is delivery-core's first
@@ -27,7 +29,8 @@ export default defineConfig({
       // apps/worker's vitest.config.ts convention. Every OTHER existing test
       // in this package stubs the PoolClient directly and never opens a real
       // connection, so this is additive and does not change their behavior.
-      DATABASE_URL: process.env.TEST_DATABASE_URL ?? "",
+      // 08-06: see apps/worker/vitest.config.ts — the setup hook populates this
+      // after config evaluation, so an eager read here would freeze "".
     },
   },
 });

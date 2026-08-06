@@ -34,14 +34,6 @@ describe("send-dispatch.ts processSendJob (SEND-01/05/06/07, SUBS-03, D-12)", ()
     await redisClient.quit();
   });
 
-  function fakeSendMail(status: number): (apiKey: string, payload: SendGridMailSendRequest) => Promise<SendTenantMailResult> {
-    return async () => ({
-      status,
-      headers: new Headers(),
-      messageId: status < 300 ? "sg-message-id-fixture" : null,
-    });
-  }
-
   function countingSendMail(): {
     fn: (apiKey: string, payload: SendGridMailSendRequest) => Promise<SendTenantMailResult>;
     callCount: () => number;
@@ -50,6 +42,7 @@ describe("send-dispatch.ts processSendJob (SEND-01/05/06/07, SUBS-03, D-12)", ()
     let calls = 0;
     let lastPayload: SendGridMailSendRequest | undefined;
     return {
+      // eslint-disable-next-line @typescript-eslint/require-await -- test double: the signature must match the async function it replaces at the DI seam; a stub having nothing to await is the point
       fn: async (_apiKey, payload) => {
         calls += 1;
         lastPayload = payload;

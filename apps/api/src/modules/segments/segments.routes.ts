@@ -121,6 +121,7 @@ async function resolveWorkspaceMember(
  * workspace membership is sufficient -- segment management is not an
  * elevated-role action, matching contacts.
  */
+// eslint-disable-next-line @typescript-eslint/require-await -- Fastify plugin contract: app.register() resolves the returned promise, and the declared Promise<void> is part of that signature -- dropping async would change it, not simplify it
 export async function registerSegmentsRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get("/api/workspaces/:slug/segments", async (request, reply) => {
     const { slug } = request.params as { slug: string };

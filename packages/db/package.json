@@ -8,15 +8,18 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "db:migrate": "drizzle-kit migrate",
+    "test": "vitest run"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",
     "pg": "8.22.0"
   },
   "devDependencies": {
-    "drizzle-kit": "0.31.10",
+    "@mega-crm/test-support": "0.1.0",
     "@types/pg": "^8.15.6",
-    "typescript": "^5.9.3"
+    "drizzle-kit": "0.31.10",
+    "typescript": "^5.9.3",
+    "vitest": "4.1.9"
   }
 }

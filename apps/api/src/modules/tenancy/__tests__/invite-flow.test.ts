@@ -69,7 +69,7 @@ describe("invite lifecycle (TENANT-02)", () => {
       payload: { name },
     });
     expect(res.statusCode, `create workspace failed: ${res.body}`).toBe(200);
-    return res.json() as { id: string; slug: string; name: string };
+    return res.json<{ id: string; slug: string; name: string }>();
   }
 
   function mockSendGrid() {

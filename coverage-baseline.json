@@ -1,0 +1,33 @@
+{
+  "lines": 0.8125751072961374,
+  "measuredLines": 0.8025751072961373,
+  "measuredAt": {
+    "date": "2026-07-28",
+    "plan": "08-11",
+    "covered": 3366,
+    "total": 4194,
+    "command": "npm run coverage"
+  },
+  "increment": 0.01,
+  "metric": "lines",
+  "scope": {
+    "included": [
+      "apps/api",
+      "apps/worker",
+      "packages/db",
+      "packages/delivery-core",
+      "packages/flows-core",
+      "packages/kms",
+      "packages/segments-core",
+      "packages/shared-schemas",
+      "packages/tenant-context",
+      "packages/contacts-core",
+      "packages/test-support"
+    ],
+    "excluded": [
+      "apps/web"
+    ],
+    "note": "apps/web is outside the coverage scope by decision (D-16). kms, tenant-context and contacts-core have no tests of their own but appear here because apps/api and apps/worker execute them — a per-workspace report merge would show them at 0% and drag this number down to something meaningless."
+  },
+  "note": "lines is an UNROUNDED fraction, never a percentage: 08-14 compares covered/total against it directly, so a run at 84.996% must fail an 85% threshold rather than round up. The enforced value is deliberately ~1pp ABOVE the measurement, so the gate is RED until 08-16 adds targeted tests to packages/kms and packages/tenant-context. That is the intended sequence — do not lower this number to make the gate pass."
+}

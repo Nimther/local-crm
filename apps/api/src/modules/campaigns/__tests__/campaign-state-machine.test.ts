@@ -58,7 +58,7 @@ describe("Campaign state machine (CAMP-01..05)", () => {
       payload: { name },
     });
     expect(res.statusCode, `create workspace failed: ${res.body}`).toBe(200);
-    return res.json() as { id: string; slug: string; name: string };
+    return res.json<{ id: string; slug: string; name: string }>();
   }
 
   async function owner(nameSeed: string) {
@@ -88,7 +88,7 @@ describe("Campaign state machine (CAMP-01..05)", () => {
       },
     });
     expect(res.statusCode, `create segment failed: ${res.body}`).toBe(201);
-    return res.json() as { id: string };
+    return res.json<{ id: string }>();
   }
 
   it("draft -> sending succeeds when template/sender/segment are set", async () => {

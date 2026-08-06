@@ -167,6 +167,7 @@ async function resolveWorkspaceMember(
  * senders) -- launch/schedule/cancel/duplicate are Owner/Admin-only (D-19)
  * via `requirePermission("campaign", "launch")`.
  */
+// eslint-disable-next-line @typescript-eslint/require-await -- Fastify plugin contract: app.register() resolves the returned promise, and the declared Promise<void> is part of that signature -- dropping async would change it, not simplify it
 export async function registerCampaignsRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get("/api/workspaces/:slug/campaigns", async (request, reply) => {
     const { slug } = request.params as { slug: string };

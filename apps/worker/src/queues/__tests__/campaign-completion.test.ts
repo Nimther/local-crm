@@ -36,6 +36,7 @@ describe("campaign completion + cancel (CR-05/CR-06, CAMP-02/03/05)", () => {
   });
 
   function fakeSendMail(status: number): (apiKey: string, payload: SendGridMailSendRequest) => Promise<SendTenantMailResult> {
+    // eslint-disable-next-line @typescript-eslint/require-await -- test double: the signature must match the async function it replaces at the DI seam; a stub having nothing to await is the point
     return async () => ({
       status,
       headers: new Headers(),
@@ -49,6 +50,7 @@ describe("campaign completion + cancel (CR-05/CR-06, CAMP-02/03/05)", () => {
   } {
     let calls = 0;
     return {
+      // eslint-disable-next-line @typescript-eslint/require-await -- test double: the signature must match the async function it replaces at the DI seam; a stub having nothing to await is the point
       fn: async () => {
         calls += 1;
         return { status, headers: new Headers(), messageId: status < 300 ? "sg-message-id-fixture" : null };

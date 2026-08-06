@@ -1,12 +1,13 @@
-import path from "node:path";
 import { configDefaults, defineConfig } from "vitest/config";
+import { resolveEnvPath } from "../../scripts/env-path.mjs";
 
-// Load the repo-root .env for local dev/test runs (Node >=20.6 native loader).
+// Load this machine's configuration for local dev/test runs, at the path
+// resolveEnvPath() decides (08-15).
 // Optional — CI/shell-exported env vars take precedence when no .env exists.
 try {
-  process.loadEnvFile(path.resolve(import.meta.dirname, "../../.env"));
+  process.loadEnvFile(resolveEnvPath());
 } catch {
-  // .env not present — rely on already-exported environment variables
+  // No configuration file — rely on already-exported environment variables
 }
 
 /**
@@ -29,6 +30,11 @@ export default defineConfig({
     environment: "node",
     testTimeout: 20_000,
     hookTimeout: 20_000,
+    // 08-01 (QG-04): the fail-closed test-database guard. Runs before vitest
+    // collects any test file, so a TEST_DATABASE_URL that is unset, or that
+    // resolves to the same physical database as DATABASE_URL, aborts the run
+    // before a single test opens a connection. There is no opt-out.
+    globalSetup: ["../../packages/test-support/src/global-setup.ts"],
     // 06-12: flow-run-advance-integration.test.ts registers a REAL BullMQ
     // Worker against the SAME shared FLOW_RUN_ADVANCE_QUEUE every other
     // flow-engine test file enqueues onto (real Redis, no per-file
@@ -44,7 +50,12 @@ export default defineConfig({
     fileParallelism: false,
     exclude: [...configDefaults.exclude, "dist/**"],
     env: {
-      DATABASE_URL: process.env.TEST_DATABASE_URL ?? "",
+      // 08-02: deliberately NOT `process.env.TEST_DATABASE_URL ?? ""`. This
+      // config module evaluates BEFORE the setup hook runs, so an eager read here
+      // would freeze an empty string and the per-run ephemeral DSN provisioned
+      // by the setup hook would never reach the test workers. Omitting the key
+      // lets the value that hook writes into process.env be inherited by the
+      // forked test processes instead.
       REDIS_URL: process.env.TEST_REDIS_URL ?? "redis://localhost:6379/1",
       // 04-04: send-dispatch.ts pulls in @mega-crm/kms (decryptTenantSecret)
       // and @mega-crm/delivery-core (signUnsubscribeToken/buildListUnsubscribeUrl),
