@@ -1,11 +1,26 @@
 name: CI
 
-# 08-01 (QG-01, D-01): BOTH triggers are required. `push` alone means the check
-# never appears on a pull request, so branch protection has nothing to require
-# and silently allows the merge; `pull_request` alone means a direct push to a
-# phase branch is never checked. See 08-RESEARCH.md § Common Pitfalls → Pitfall 1.
+# 08-01 (QG-01, D-01): BOTH triggers are still required, for the reasons first
+# recorded here — `push` alone means the check never appears on a pull request,
+# so branch protection has nothing to require and silently allows the merge;
+# `pull_request` alone means master itself is never checked after a merge.
+# See 08-RESEARCH.md § Common Pitfalls → Pitfall 1.
+#
+# What changed: `push` is now SCOPED TO master. Unscoped, a branch that has an
+# open PR matched both triggers and ran the entire matrix twice for every push —
+# once as `push` on refs/heads/<branch> and once as `pull_request` on
+# refs/pull/N/merge. The concurrency group below is keyed on `github.ref`, which
+# differs between those two events, so it could not collapse them either. The
+# duplicate run burned a full Postgres + Redis + browser matrix and doubled the
+# chance of a flaky lane reporting red on an unchanged commit.
+#
+# Scoping `push` to master keeps both guarantees and removes the overlap: a PR is
+# checked by `pull_request`, and master is checked by `push` after the merge.
+# Work reaches master only through a pull request (CONVENTIONS.md), so no path
+# into master is left unchecked.
 on:
   push:
+    branches: [master]
   pull_request:
     branches: [master]
 
@@ -244,3 +259,23 @@ jobs:
             exit 1
           fi
           grep '\[e2e:database\]' e2e-output.txt
+
+      # playwright.config.ts has always set `trace: "retain-on-failure"`, so a
+      # failing spec DID record a full trace — it was just thrown away with the
+      # runner, which is why the SEGM-04 flake had to be diagnosed by reading
+      # source instead of by opening the trace from the run that failed.
+      #
+      # `if: always()` is load-bearing twice over: the job is
+      # `continue-on-error: true`, and the whole point is to collect evidence
+      # from runs that FAILED. `if-no-files-found: ignore` keeps a green run —
+      # which by design records no trace — from reporting a spurious warning.
+      - name: Upload Playwright trace and results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: playwright-results
+          path: |
+            apps/web/test-results/
+            e2e-output.txt
+          retention-days: 14
+          if-no-files-found: ignore
