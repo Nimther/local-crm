@@ -820,3 +820,7 @@ CLAUDE.md описывает **рекомендованный** стек по и
 ## 10. Поддержание документа
 
 При добавлении любой новой библиотеки или технологии — дописать её в соответствующий раздел этого файла (раздел 2 для зависимостей; 3 для секретов/конфигурации; 4 для схемы; 5 для очередей/планировщика; 6 для точек входа; 8 если возникает новое расхождение с CLAUDE.md). Правило закреплено в `.claude/CLAUDE.md`.
+
+### Записи о верификации as-built разделов
+
+- **2026-08-06 (09-05):** записи фазы 9 (partition automation & boundary safety) в разделах 2, 3, 4, 5, 6, 7 и 8 сверены с кодом: `packages/db/package.json` (буквенная версия `tsx`), `apps/api/src/env.ts` (`OPERATOR_ALERT_EMAIL`), `packages/db/migrations/0038_partition_catchup_and_maintenance_runs.sql` и `0039_partition_relocation_admin_scan.sql`, `apps/worker/src/queues/partition-maintenance.worker.ts`, `apps/api/src/modules/ops/partition-watchdog.ts`, `apps/api/src/server.ts`'s `main()`. Полный прогон `npm run lint`/`npm run lint:migrations`/`npm run build`/`npm test` — зелёный (11/11 воркспейсов); каталожный запрос против отдельно поднятой, полностью мигрированной эфемерной БД подтвердил 20 присоединённых месячных партиций (`events`×10 + `send_events`×10, 2026-09…2027-06, все `relispartition=true`). Живая проверка письма оператору — см. SUMMARY плана 09-05, задача 3 (не выполнена в этом прогоне: `OPERATOR_ALERT_EMAIL` не задан во внешнем env-файле этой машины).
