@@ -44,6 +44,12 @@ export default defineConfig({
       PLATFORM_SENDGRID_API_KEY:
         process.env.PLATFORM_SENDGRID_API_KEY ?? "SG.test_platform_key_0000000000000000",
       PLATFORM_MAIL_FROM: process.env.PLATFORM_MAIL_FROM ?? "noreply@megacrm.test",
+      // 09-02 (DB-02, D-01): boot-required by env.ts like PLATFORM_MAIL_FROM
+      // above -- a test-safe default so the suite does not depend on a file
+      // outside the repository; no test in apps/api sends a real partition
+      // watchdog alert (checkPartitionHealthAndAlert's own tests inject
+      // sendMail directly).
+      OPERATOR_ALERT_EMAIL: process.env.OPERATOR_ALERT_EMAIL ?? "ops@megacrm.test",
       // Test-safe local-KMS envelope-encryption config (01-05, RESEARCH.md
       // Pitfall 3) -- a static, test-only KEK, never used past this test
       // suite. KMS_PROVIDER defaults to "local" so envelope.test.ts and

@@ -15,6 +15,16 @@ export const envSchema = z
     // reset, invite) -- structurally separate from any tenant's BYO key.
     PLATFORM_SENDGRID_API_KEY: z.string().min(1, "PLATFORM_SENDGRID_API_KEY is required"),
     PLATFORM_MAIL_FROM: z.string().email("PLATFORM_MAIL_FROM must be a valid email address"),
+    // 09-02 (DB-02, D-01): the address the partition watchdog emails when
+    // the maintenance job stops, when the partition buffer drops below the
+    // threshold, or when a DEFAULT partition holds rows -- it is the only
+    // push channel the platform has before Phase 15's real alerting
+    // arrives, so a missing value must fail the API boot rather than
+    // silently disable the dead-man's switch. Same email validator shape as
+    // PLATFORM_MAIL_FROM so a typo fails at boot rather than at first
+    // alert. Deliberately no `.optional()` and no `.default(` -- a default
+    // would mean alerts going nowhere while every check reports configured.
+    OPERATOR_ALERT_EMAIL: z.string().email("OPERATOR_ALERT_EMAIL must be a valid email address"),
     // 01-05 / RESEARCH.md Pattern 3 + Pitfall 3: envelope encryption of the
     // tenant SendGrid key. "local" is a dev-only static-KEK provider;
     // "aws" is the real KMS path for staging/prod (KMS_KEK_ID required).

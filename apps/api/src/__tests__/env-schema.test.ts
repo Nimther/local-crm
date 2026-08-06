@@ -16,6 +16,7 @@ function baseValidEnv(): Record<string, string> {
     WEB_URL: "http://localhost:5173",
     PLATFORM_SENDGRID_API_KEY: "SG.test_platform_key_0000000000000000",
     PLATFORM_MAIL_FROM: "noreply@megacrm.test",
+    OPERATOR_ALERT_EMAIL: "ops@megacrm.test",
     UNSUBSCRIBE_TOKEN_SECRET: "test-only-unsubscribe-secret-at-least-32-bytes",
     PUBLIC_APP_URL: "https://api.test.local",
     KMS_PROVIDER: "local",
@@ -62,6 +63,46 @@ describe("envSchema PUBLIC_APP_URL https enforcement", () => {
       KMS_PROVIDER: "local",
     });
 
+    expect(result.success).toBe(true);
+  });
+});
+
+/**
+ * OPERATOR_ALERT_EMAIL (09-02, DB-02, D-01): the partition watchdog's only
+ * push channel. A missing or malformed value must fail boot -- a disarmed
+ * dead-man's switch must never look configured.
+ */
+describe("envSchema OPERATOR_ALERT_EMAIL enforcement", () => {
+  it("fails when OPERATOR_ALERT_EMAIL is absent", () => {
+    const { OPERATOR_ALERT_EMAIL: _omit, ...withoutOperatorAlertEmail } = baseValidEnv();
+    const result = envSchema.safeParse(withoutOperatorAlertEmail);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const hasIssue = result.error.issues.some((issue) =>
+        issue.path.includes("OPERATOR_ALERT_EMAIL")
+      );
+      expect(hasIssue).toBe(true);
+    }
+  });
+
+  it("fails when OPERATOR_ALERT_EMAIL is not a valid email address", () => {
+    const result = envSchema.safeParse({
+      ...baseValidEnv(),
+      OPERATOR_ALERT_EMAIL: "not-an-email-host",
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const hasIssue = result.error.issues.some((issue) =>
+        issue.path.includes("OPERATOR_ALERT_EMAIL")
+      );
+      expect(hasIssue).toBe(true);
+    }
+  });
+
+  it("passes with a valid OPERATOR_ALERT_EMAIL", () => {
+    const result = envSchema.safeParse(baseValidEnv());
     expect(result.success).toBe(true);
   });
 });
