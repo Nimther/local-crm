@@ -154,15 +154,52 @@ export interface PartitionWatchdogDeps {
 }
 
 /**
- * Reads the latest health row, evaluates it, and -- on any unhealthy
- * evaluation -- sends the plain-text operator alert. A `sendMail` rejection
- * is left to propagate (never caught here): the watchdog's own caller
- * decides what to do with a failed send, and swallowing it here would make a
- * failed alert indistinguishable from a healthy run.
+ * D-03: repeat alerts are meant to track the DAILY maintenance job's own
+ * cadence ("every run while state stays unhealthy") -- NOT the watchdog's
+ * own `WATCHDOG_INTERVAL_MS` poll (15 min). Tying the two together would let
+ * a single unhealthy state produce up to 96 emails a day. 20 hours is short
+ * enough that a once-daily 03:00 UTC job's next unhealthy run still finds
+ * the dedup window open (a fresh email), and long enough that no realistic
+ * poll interval can produce more than one send per day.
+ */
+export const ALERT_DEDUP_HOURS = 20;
+
+/**
+ * A single conditional `UPDATE ... RETURNING` -- deliberately NOT a
+ * `SELECT` followed by a separate `UPDATE`. `apps/api` runs as multiple
+ * replicas (SEC-11 already requires the API rate limiter to stay correct
+ * across replicas); an in-memory dedup flag or a read-then-write pair would
+ * let N replicas each independently decide "I should send" and all send.
+ * A single statement makes Postgres's own row-level locking the arbiter: two
+ * concurrent claims against the same row can never both succeed, because the
+ * first commit's new `last_alert_sent_at` value makes the second claim's own
+ * WHERE clause re-evaluate to false once it proceeds.
  *
- * 09-01 task 1: sends on EVERY unhealthy evaluation. The atomic
- * once-per-day claim (D-03's actual cadence target) is added in task 2 via
- * `claimAlertSlot`.
+ * The caller sends only when this resolves `true` (the UPDATE actually
+ * matched and returned a row).
+ */
+export async function claimAlertSlot(client: PartitionClient, now: Date, dedupHours: number): Promise<boolean> {
+  const { rows } = await client.query(
+    `UPDATE partition_maintenance_runs
+        SET last_alert_sent_at = $1::timestamptz
+      WHERE id = 1
+        AND (last_alert_sent_at IS NULL OR last_alert_sent_at < $1::timestamptz - make_interval(hours => $2))
+      RETURNING last_alert_sent_at`,
+    [now, dedupHours],
+  );
+  return rows.length > 0;
+}
+
+/**
+ * Reads the latest health row, evaluates it, and -- on any unhealthy
+ * evaluation that WINS the atomic per-`ALERT_DEDUP_HOURS`-window claim --
+ * sends the plain-text operator alert. Returns early without sending, and
+ * without touching `last_alert_sent_at`, when the claim is refused (another
+ * replica already claimed this window, or this process already sent
+ * recently). A `sendMail` rejection is left to propagate (never caught
+ * here): the watchdog's own caller decides what to do with a failed send,
+ * and swallowing it here would make a failed alert indistinguishable from a
+ * healthy run.
  */
 export async function checkPartitionHealthAndAlert(deps: PartitionWatchdogDeps): Promise<void> {
   const row = await readLatestMaintenanceRun(deps.client);
@@ -172,6 +209,9 @@ export async function checkPartitionHealthAndAlert(deps: PartitionWatchdogDeps):
   });
 
   if (result.healthy) return;
+
+  const claimed = await claimAlertSlot(deps.client, deps.now, ALERT_DEDUP_HOURS);
+  if (!claimed) return;
 
   const text = renderOperatorAlertText(row, result.reasons, deps.now);
   await deps.sendMail({ to: deps.operatorEmail, text });
