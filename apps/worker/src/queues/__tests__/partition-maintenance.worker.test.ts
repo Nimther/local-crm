@@ -197,4 +197,36 @@ describe("partition maintenance worker (09-02, DB-01/DB-02)", () => {
     const usedClient = runMaintenance.mock.calls[0]?.[0] as unknown;
     expect(usedClient).not.toBe(tenantContextPool);
   });
+
+  it("test 7 (09-REVIEW CR-04): a scheduler-registration failure is caught (never surfaces as a rejection) and still closes the internal queue", async () => {
+    const connection = buildRedisConnectionOptions(redis.url);
+    const err = new Error("simulated redis hiccup at boot");
+    // Intercepts before any Redis I/O -- deterministic, no dependency on
+    // actually breaking the throwaway Redis connection.
+    const upsertSpy = vi.spyOn(Queue.prototype, "upsertJobScheduler").mockRejectedValueOnce(err);
+    const closeSpy = vi.spyOn(Queue.prototype, "close");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const worker = createPartitionMaintenanceWorker(connection, { autorun: false });
+
+    try {
+      // Before the fix this rejects (the async IIFE has no catch, so the
+      // stored `registration` promise itself rejects with `err`) -- in
+      // production nobody ever awaits/catches it, which is precisely what
+      // makes that an unhandled rejection. After the fix the promise
+      // resolves cleanly: the failure was logged and swallowed instead.
+      await expect(waitForPartitionMaintenanceRegistration(worker)).resolves.toBeUndefined();
+
+      expect(closeSpy).toHaveBeenCalled();
+      expect(errorSpy).toHaveBeenCalled();
+      // queue.add must never be reached on this path -- the failure happened
+      // on the prior await.
+      expect(upsertSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      upsertSpy.mockRestore();
+      closeSpy.mockRestore();
+      errorSpy.mockRestore();
+      await worker.close();
+    }
+  });
 });
