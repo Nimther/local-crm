@@ -196,6 +196,38 @@ export async function attachPartitionCheckFirst(
   try {
     await conn.query("BEGIN");
 
+    // 09-04: some callers (the DEFAULT-relocation procedure) attach a child
+    // already populated with real rows, not just an empty new month.
+    // PostgreSQL automatically re-validates a partitioned table's inherited
+    // FOREIGN KEY constraints against the referenced table whenever a
+    // NON-EMPTY child is attached -- for events.contact_id -> contacts(id)
+    // and send_events.send_id -> sends(id), both referenced tables carry
+    // FORCE ROW LEVEL SECURITY, so without a visibility grant that internal
+    // scan would see zero contacts/sends rows (no single
+    // app.current_workspace_id can cover a backlog spanning many tenants at
+    // once) and the ATTACH would fail with a spurious FK violation. The
+    // migration 0039 SELECT-only `partition_relocation_admin_scan` policy
+    // (same admin-scan-gated precedent as campaign_scheduler_due_scan /
+    // flow_runs_due_scan / flows_segment_sweep_scan) grants exactly that
+    // visibility, scoped to this transaction only via SET LOCAL semantics
+    // (set_config's third argument) -- it reverts automatically on
+    // COMMIT/ROLLBACK and never leaks into a later pooled query. A no-op for
+    // every EMPTY-child attach (09-01's own callers): zero rows means the FK
+    // validation trivially passes regardless of visibility.
+    //
+    // This relies on `client` never being a connection that has previously
+    // run a tenant-scoped `SET LOCAL app.current_workspace_id` (0039's own
+    // comment has the full reasoning: contacts/sends are PRE-PHASE-10
+    // bare-cast RLS baselines -- see
+    // packages/tenant-context/src/__tests__/tenant-context.test.ts -- and a
+    // recycled connection's reverted-to-'' GUC throws inside the OTHER
+    // (bare-cast) permissive policy regardless of this one). In production
+    // the maintenance worker/CLI script that owns `client` here constructs
+    // its own dedicated pool, never shared with the app's tenant-scoped
+    // `@mega-crm/tenant-context` pool, so this invariant holds by
+    // construction, not by convention.
+    await conn.query("SELECT set_config('app.admin_scan', 'true', true)");
+
     // 1. Freestanding table, not yet attached -- fast, no lock contention
     // with the parent (0007/0010's `LIKE ... INCLUDING ALL` precedent).
     await conn.query(`CREATE TABLE IF NOT EXISTS ${childName} (LIKE ${table.parentTable} INCLUDING ALL)`);

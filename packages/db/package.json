@@ -9,6 +9,7 @@
     "build": "tsc -p tsconfig.json",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
+    "relocate:default-partition-rows": "tsx scripts/relocate-default-partition-rows.ts",
     "test": "vitest run"
   },
   "dependencies": {
@@ -19,6 +20,7 @@
     "@mega-crm/test-support": "0.1.0",
     "@types/pg": "^8.15.6",
     "drizzle-kit": "0.31.10",
+    "tsx": "^4.19.2",
     "typescript": "^5.9.3",
     "vitest": "4.1.9"
   }
