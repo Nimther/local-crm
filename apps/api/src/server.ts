@@ -2,6 +2,7 @@ import "./load-env.js";
 import Fastify from "fastify";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
+import sgMail from "@sendgrid/mail";
 import {
   serializerCompiler,
   validatorCompiler,
@@ -9,6 +10,13 @@ import {
 } from "@fastify/type-provider-zod";
 import { logger } from "./logger.js";
 import { env } from "./env.js";
+import { pool } from "./db.js";
+import {
+  startPartitionWatchdog,
+  WATCHDOG_INTERVAL_MS,
+  STALE_THRESHOLD_HOURS,
+  type OperatorAlertMessage,
+} from "./modules/ops/partition-watchdog.js";
 import { authPlugin } from "./modules/auth/plugin.js";
 import { registerWorkspaceRoutes } from "./modules/tenancy/workspaces.js";
 import { registerProfileRoutes } from "./modules/tenancy/profile.js";
@@ -97,9 +105,49 @@ export async function buildServer() {
   return app;
 }
 
+/**
+ * D-04: the partition watchdog's real dispatch -- plain-text only, through
+ * the PLATFORM's own SendGrid account/key (never a tenant's BYO key, never
+ * a Dynamic Template), mirroring `modules/platform-mail/client.ts`'s own
+ * platform-key-only discipline so an emergency channel never depends on a
+ * template existing in the platform SendGrid account.
+ */
+async function sendOperatorAlert(message: OperatorAlertMessage): Promise<void> {
+  await sgMail.send({
+    to: message.to,
+    from: env.PLATFORM_MAIL_FROM,
+    subject: "Mega CRM partition maintenance alert",
+    text: message.text,
+  });
+}
+
 async function main(): Promise<void> {
   const app = await buildServer();
   await app.listen({ port: env.API_PORT, host: "0.0.0.0" });
+
+  // D-02: the watchdog must live in a DIFFERENT process from the BullMQ
+  // worker whose liveness it checks (apps/worker's partition-maintenance
+  // job, 09-02 task 1) -- started here, in apps/api's own process, and
+  // never registered as a queue job. Started in main(), never inside
+  // buildServer(): every apps/api integration test calls buildServer(), so
+  // an interval registered there would keep a timer alive in every test
+  // process, poll a test database on WATCHDOG_INTERVAL_MS's cadence, and
+  // reach the real SendGrid dispatch path from a test run. main() runs
+  // only under the isDirectRun guard below, which is exactly the boundary
+  // wanted.
+  sgMail.setApiKey(env.PLATFORM_SENDGRID_API_KEY);
+  startPartitionWatchdog({
+    client: pool,
+    operatorEmail: env.OPERATOR_ALERT_EMAIL,
+    sendMail: sendOperatorAlert,
+  });
+
+  // Names only the interval/threshold numbers -- never the operator
+  // address or anything derived from the SendGrid key (T-09-11).
+  logger.info(
+    { pollIntervalMs: WATCHDOG_INTERVAL_MS, staleThresholdHours: STALE_THRESHOLD_HOURS },
+    "partition watchdog armed -- watching apps/worker's partition-maintenance job from a separate process"
+  );
 }
 
 const isDirectRun = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
