@@ -47,14 +47,20 @@
 -- documented baseline): a connection that has NEVER been tenant-scoped
 -- reads the GUC as NULL, not '', and `workspace_id = NULL` in the OTHER
 -- (bare-cast) policy evaluates to NULL/false rather than erroring, so the OR
--- with this admin-scan policy resolves cleanly. In production this is
--- already true by construction -- the maintenance worker/CLI script that
--- calls ensurePartitions/attachPartitionCheckFirst constructs its own
--- dedicated pool, entirely separate from the app's tenant-scoped
--- `@mega-crm/tenant-context` pool, so its connections are never
--- SET-LOCAL-contaminated. Task 1's own test suite maintains the same
--- separation (a dedicated pool for the relocation calls, distinct from the
--- pool used for tenant-scoped seeding) for exactly this reason.
+-- with this admin-scan policy resolves cleanly. This is a property each
+-- CALLER of ensurePartitions/attachPartitionCheckFirst must uphold -- it is
+-- not something this policy, or attachPartitionCheckFirst itself, can
+-- verify or enforce. Every caller in this codebase today does uphold it,
+-- each with its own dedicated pool, entirely separate from the app's
+-- tenant-scoped `@mega-crm/tenant-context` pool: the CLI script
+-- (packages/db/scripts/relocate-default-partition-rows.ts), Task 1's own
+-- test suite (a dedicated pool for the relocation calls, distinct from the
+-- pool used for tenant-scoped seeding), and -- since 09-REVIEW CR-03 -- the
+-- daily maintenance worker (apps/worker/src/queues/partition-maintenance.worker.ts's
+-- own dedicated pool; before that fix it defaulted to the shared pool, an
+-- unenforced violation of this same invariant that had not yet been
+-- exploitable only because its own call path never attached a non-empty
+-- child).
 CREATE POLICY partition_relocation_admin_scan ON contacts
   FOR SELECT
   USING (

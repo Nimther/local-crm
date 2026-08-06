@@ -299,9 +299,10 @@ CI — **единственное** место, где проверяется к
 ### 3.6 Креды к БД
 
 - **Единственный источник — `DATABASE_URL`.** Отдельных `PGUSER`/`PGPASSWORD` нет.
-- **Два независимых пула** на одном `DATABASE_URL`:
+- **Три независимых пула** на одном `DATABASE_URL` (было два до 09-REVIEW CR-03):
   1. `packages/tenant-context/src/index.ts` → `new Pool({ connectionString: process.env.DATABASE_URL })` — **tenant-scoped**, через него идёт всё, что защищено RLS. Есть `pool.on("error")`-хендлер (иначе обрыв idle-соединения ронял бы процесс).
   2. `packages/db/src/index.ts` → свой `new Pool(...)` + Drizzle — для better-auth и не-tenant запросов. **`pool.on("error")` здесь нет.**
+  3. `apps/worker/src/queues/partition-maintenance.worker.ts` → собственный `new Pool(...)` (`partitionMaintenancePool`), **не** tenant-scoped, никогда не шарится с пулом #1 — `attachPartitionCheckFirst`'s admin-scan-инвариант (§4.3, §4.4) требует, чтобы соединение для этого пути никогда не выполняло tenant-scoped `SET LOCAL app.current_workspace_id`. Есть `pool.on("error")`-хендлер (тот же паттерн, что и у пула #1). До 09-REVIEW CR-03 этот воркер по умолчанию использовал пул #1 — нарушение того же инварианта, не эксплуатируемое только потому, что единственный путь вызова этого воркера (`ensurePartitions` против всегда-пустых новых месяцев) не тревожил admin-scan-политику на практике.
 - TLS/`ssl` в опциях пулов **не задан** → поведение определяется строкой подключения. Как настроено в prod — **не определено**.
 - PgBouncer/RDS Proxy в репозитории **отсутствуют** (grep по `docker-compose.yml`, `docker/`, исходникам: 0 вхождений).
 
@@ -577,7 +578,7 @@ Restart-safe: следующий тик просто пересканирует;
 - **Boot-time immediate run:** при каждой конструкции воркера (не только по расписанию) в очередь добавляется одна дополнительная джоба с уникальным на каждый запуск `jobId` (`boot-<timestamp36>-<random>`), **не принадлежащая планировщику** — рестарт воркера чинит горизонт партиций за секунды, не дожидаясь ближайших 03:00 UTC.
 - **Константы (`packages/db/src/partitions/ensure-partitions.ts`):** `LOOKAHEAD_MONTHS = 3` (на сколько месяцев вперёд от текущего момента поддерживается горизонт), `BUFFER_ALERT_THRESHOLD_MONTHS = 2` (порог, ниже которого сторож считает буфер нездоровым, см. §4.4/§7).
 - **Что делает процессор на каждом прогоне** (`processPartitionMaintenance` → `runPartitionMaintenance`): (1) вызывает `ensurePartitions` — идемпотентно создаёт недостающие месячные партиции для обеих таблиц через CHECK-constraint-first attach; (2) считает буфер месяцев по каждой таблице (`computeBufferMonths`, до создания — см. §4.4); (3) считает число строк в обеих DEFAULT-партициях; (4) записывает один snapshot-ряд в `partition_maintenance_runs` (upsert по singleton PK). Никакого `try/catch` в файле — необработанный throw переводит BullMQ-джобу в failed-состояние осознанно (см. `removeOnFail: false` выше).
-- **Клиент:** пул `pool` из `@mega-crm/tenant-context`, использован напрямую, **не** через `withTenant`/`withTenantTransaction` — обслуживание партиций платформенное, не tenant-scoped, тем же паттерном, что и `analytics-reconciliation.worker.ts`'s `SELECT id FROM organization` (§5.7).
+- **Клиент:** свой собственный, выделенный `Pool` (`partitionMaintenancePool`, `apps/worker/src/queues/partition-maintenance.worker.ts`) — **не** пул `@mega-crm/tenant-context`, использован напрямую, **не** через `withTenant`/`withTenantTransaction` — обслуживание партиций платформенное, не tenant-scoped, тем же паттерном, что и `analytics-reconciliation.worker.ts`'s `SELECT id FROM organization` (§5.7). **09-REVIEW CR-03:** до этого фикса дефолтом был пул `@mega-crm/tenant-context` — тот же пул, из которого `withTenantTransaction` берёт соединения для всех остальных тиков этого процесса; `attachPartitionCheckFirst`'s admin-scan-инвариант (§4.3/§4.4, миграция `0039`) требует, чтобы соединение здесь никогда не выполняло tenant-scoped `SET LOCAL app.current_workspace_id` — см. §3.6 (пул #3).
 
 ---
 

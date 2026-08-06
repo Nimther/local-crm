@@ -221,11 +221,20 @@ export async function attachPartitionCheckFirst(
     // bare-cast RLS baselines -- see
     // packages/tenant-context/src/__tests__/tenant-context.test.ts -- and a
     // recycled connection's reverted-to-'' GUC throws inside the OTHER
-    // (bare-cast) permissive policy regardless of this one). In production
-    // the maintenance worker/CLI script that owns `client` here constructs
-    // its own dedicated pool, never shared with the app's tenant-scoped
-    // `@mega-crm/tenant-context` pool, so this invariant holds by
-    // construction, not by convention.
+    // (bare-cast) permissive policy regardless of this one). This is a
+    // property of the CALLER, not of this function -- `attachPartitionCheckFirst`
+    // itself has no way to verify what a handed-in `client` has previously
+    // run. In production every caller constructs its own dedicated pool,
+    // never sharing physical connections with the app's tenant-scoped
+    // `@mega-crm/tenant-context` pool: the CLI script
+    // (`packages/db/scripts/relocate-default-partition-rows.ts`), every test
+    // suite, and (09-REVIEW CR-03; previously this worker defaulted to the
+    // shared pool, violating this invariant even though its own call path
+    // never happened to attach a non-empty child) the daily maintenance
+    // worker (`apps/worker/src/queues/partition-maintenance.worker.ts`'s own
+    // `partitionMaintenancePool`). That makes the invariant true of every
+    // caller in this codebase today -- but it remains a discipline each new
+    // caller must uphold, not a guarantee this function enforces.
     await conn.query("SELECT set_config('app.admin_scan', 'true', true)");
 
     // 1. Freestanding table, not yet attached -- fast, no lock contention

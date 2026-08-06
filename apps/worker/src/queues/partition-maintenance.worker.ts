@@ -1,5 +1,5 @@
 import { Queue, Worker, type ConnectionOptions } from "bullmq";
-import { pool } from "@mega-crm/tenant-context";
+import { Pool } from "pg";
 import {
   BUFFER_ALERT_THRESHOLD_MONTHS,
   LOOKAHEAD_MONTHS,
@@ -61,6 +61,35 @@ const DEFAULT_JOB_OPTIONS = {
   removeOnFail: false,
 };
 
+/**
+ * 09-REVIEW CR-03: a dedicated Postgres pool for this worker's DB path,
+ * entirely separate from `@mega-crm/tenant-context`'s shared, tenant-scoped
+ * pool -- mirroring the CLI script
+ * (`packages/db/scripts/relocate-default-partition-rows.ts`) and every test
+ * suite's own two-pool discipline (see `ensure-partitions.ts`'s and
+ * migration `0039`'s comments for the full reasoning, and CONVENTIONS.md's
+ * "Partition maintenance" section for the binding rule this codifies). This
+ * worker previously defaulted to `@mega-crm/tenant-context`'s `pool` --
+ * the exact pool `withTenantTransaction` checks connections out of for
+ * every other tick worker in this same process -- which silently violated
+ * that invariant even though this worker's only call path
+ * (`ensurePartitions` against always-empty new months) never actually
+ * exercised the admin-scan policy the invariant protects. A future change
+ * that lets this call path attach a pre-populated child (a retry/backfill
+ * path, or a refactor that reuses this client for something else) would
+ * have reactivated T-09-06 with no defence in place.
+ */
+const partitionMaintenancePool = new Pool({ connectionString: process.env.DATABASE_URL });
+
+// Mirrors @mega-crm/tenant-context's own pool.on("error", ...): without
+// this listener, an idle-connection termination (Postgres restart/failover/
+// idle timeout) on THIS dedicated pool would surface as an uncaught 'error'
+// event and crash the whole apps/worker process -- the same failure class
+// CR-04 (below) closes for the scheduler-registration path.
+partitionMaintenancePool.on("error", (err) => {
+  console.error("partition-maintenance: idle pg pool client error (connection dropped)", err);
+});
+
 export interface ProcessPartitionMaintenanceDeps {
   client?: PartitionClient;
   now?: () => Date;
@@ -69,9 +98,10 @@ export interface ProcessPartitionMaintenanceDeps {
 
 /**
  * Factored out of the Worker's processor callback so it is testable without
- * a live queue (tests 4/5): defaults to the pooled client from
- * `@mega-crm/tenant-context`, `Date.now`-based `new Date()`, and the real
- * `runPartitionMaintenance`. Used directly, without `withTenant`/
+ * a live queue (tests 4/5): defaults to this file's own dedicated
+ * `partitionMaintenancePool` (CR-03 -- never the shared, tenant-scoped pool
+ * from `@mega-crm/tenant-context`), `Date.now`-based `new Date()`, and the
+ * real `runPartitionMaintenance`. Used directly, without `withTenant`/
  * `withTenantTransaction` -- `events`/`send_events`/`partition_maintenance_runs`
  * maintenance is platform-level, exactly as `analytics-reconciliation.worker.ts`
  * uses the plain pool for its own top-level workspace enumeration.
@@ -85,7 +115,7 @@ export interface ProcessPartitionMaintenanceDeps {
 export async function processPartitionMaintenance(
   deps: ProcessPartitionMaintenanceDeps = {},
 ): Promise<MaintenanceRunSnapshot> {
-  const client = deps.client ?? pool;
+  const client = deps.client ?? partitionMaintenancePool;
   const now = deps.now ?? (() => new Date());
   const runMaintenanceFn = deps.runMaintenance ?? runPartitionMaintenance;
 
