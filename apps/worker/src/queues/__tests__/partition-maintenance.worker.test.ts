@@ -1,5 +1,6 @@
 import { Queue } from "bullmq";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { pool as tenantContextPool } from "@mega-crm/tenant-context";
 import { startTempRedis, type TempRedis } from "@mega-crm/test-support";
 import type { PartitionClient } from "@mega-crm/db/src/partitions/ensure-partitions.js";
 import type { MaintenanceRunSnapshot } from "@mega-crm/db/src/partitions/maintenance-run.js";
@@ -164,5 +165,36 @@ describe("partition maintenance worker (09-02, DB-01/DB-02)", () => {
         runMaintenance,
       }),
     ).rejects.toThrow("ddl failure: could not attach partition");
+  });
+
+  it("test 6 (09-REVIEW CR-03): the default client is NOT @mega-crm/tenant-context's shared, tenant-scoped pool", async () => {
+    // No `client` override -- this exercises the SAME default-wiring line
+    // production hits (`deps.client ?? <default>`), unlike tests 4/5 which
+    // always inject an explicit client. attachPartitionCheckFirst's
+    // admin-scan invariant (ensure-partitions.ts / migration 0039) requires
+    // this worker's connection to have NEVER run a tenant-scoped
+    // `SET LOCAL app.current_workspace_id` -- handing it
+    // @mega-crm/tenant-context's own shared `pool` (which every
+    // withTenantTransaction call in this same process checks connections
+    // out of) would violate that by construction, not merely by accident.
+    const fakeNow = new Date("2026-09-01T03:00:00.000Z");
+    const fakeSnapshot: MaintenanceRunSnapshot = {
+      lastRunAt: fakeNow,
+      lookaheadMonths: 3,
+      bufferAlertThresholdMonths: 2,
+      eventsBufferMonths: 3,
+      sendEventsBufferMonths: 3,
+      bufferMonthsRemaining: 3,
+      eventsDefaultCount: 0,
+      sendEventsDefaultCount: 0,
+      partitionsCreated: [],
+    };
+    const runMaintenance = vi.fn().mockResolvedValue(fakeSnapshot);
+
+    await processPartitionMaintenance({ now: () => fakeNow, runMaintenance });
+
+    expect(runMaintenance).toHaveBeenCalledTimes(1);
+    const usedClient = runMaintenance.mock.calls[0]?.[0] as unknown;
+    expect(usedClient).not.toBe(tenantContextPool);
   });
 });
