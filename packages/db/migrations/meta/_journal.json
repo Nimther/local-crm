@@ -267,6 +267,13 @@
       "when": 1783685963479,
       "tag": "0037_workspace_daily_rollup",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1783685963480,
+      "tag": "0038_partition_catchup_and_maintenance_runs",
+      "breakpoints": true
     }
   ]
 }

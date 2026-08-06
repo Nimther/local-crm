@@ -58,7 +58,18 @@ describe("Partition maintenance tracer (DB-01/DB-02, 09-01 task 1)", () => {
     const created = await createEphemeralDatabase({ workspace: "partition-maintenance-tracer" });
     databaseName = created.databaseName;
     adminDsn = created.adminDsn;
-    pool = new Pool({ connectionString: created.dsn, max: 5 });
+    // Force every physical connection this pool ever opens onto a UTC
+    // session TimeZone, from connection time onward -- the local Postgres
+    // server backing this suite may default to a non-UTC zone (e.g. the
+    // developer machine's own TimeZone), which would otherwise make the
+    // EARLIER, timezone-implicit migrations (0007/0020's bare '2026-08-01'
+    // literals) apply relative to a non-UTC session while THIS migration's
+    // explicit '+00' bounds apply relative to UTC -- a spurious mismatch at
+    // the month boundary that has nothing to do with either migration's own
+    // correctness. A correctly configured production/CI Postgres runs under
+    // UTC by default; this makes the test environment match that assumption
+    // rather than depend on whatever zone the local server happens to use.
+    pool = new Pool({ connectionString: created.dsn, max: 5, options: "-c timezone=UTC" });
 
     const files = listMigrationFiles(MIGRATIONS_DIR);
     for (const file of files) {
@@ -177,6 +188,7 @@ describe("Partition maintenance tracer (DB-01/DB-02, 09-01 task 1)", () => {
       client: pool,
       now,
       operatorEmail: "ops@example.com",
+      // eslint-disable-next-line @typescript-eslint/require-await -- test spy: intentionally synchronous, matches the async PartitionWatchdogDeps.sendMail signature
       sendMail: async (message) => {
         sent.push(message);
       },
@@ -206,6 +218,7 @@ describe("Partition maintenance tracer (DB-01/DB-02, 09-01 task 1)", () => {
       client: pool,
       now,
       operatorEmail: "ops@example.com",
+      // eslint-disable-next-line @typescript-eslint/require-await -- test spy: intentionally synchronous, matches the async PartitionWatchdogDeps.sendMail signature
       sendMail: async (message) => {
         sent.push(message);
       },
