@@ -82,6 +82,44 @@ describe("Partition maintenance tracer (DB-01/DB-02, 09-01 task 1)", () => {
     if (databaseName) await dropEphemeralDatabase(databaseName, adminDsn);
   });
 
+  // 09-REVIEW CR-01: this must run before any other test in this file
+  // touches `partition_maintenance_runs` (test 3/test 4 below are the first
+  // ones that do, via runPartitionMaintenance) -- it asserts on the table's
+  // state exactly as the migration chain alone leaves it, which is the
+  // "maintenance worker has never run" condition the dead-man's-switch
+  // exists to catch. Placed right after the migration chain applies in
+  // beforeAll, before test 1/2 (which never touch this table either).
+  it("test 0 (09-REVIEW CR-01): a freshly migrated database, before the maintenance worker has ever run, still lets the watchdog send", async () => {
+    // Migration 0040 seeds exactly one sentinel row for id = 1, with
+    // last_run_at far enough in the past to trip stale_last_run -- the
+    // table must never be genuinely empty in production, because
+    // claimAlertSlot's single conditional UPDATE ... WHERE id = 1 matches
+    // zero rows (and therefore never claims/sends) against a table that
+    // has never had a row written to it.
+    const { rows: countRows } = await pool.query<{ count: string }>(
+      `SELECT count(*) AS count FROM partition_maintenance_runs`,
+    );
+    expect(Number(countRows[0]?.count)).toBe(1);
+
+    const sent: Array<{ to: string; text: string }> = [];
+    await checkPartitionHealthAndAlert({
+      client: pool,
+      now: new Date(),
+      operatorEmail: "ops@example.com",
+      // eslint-disable-next-line @typescript-eslint/require-await -- test spy: intentionally synchronous, matches the async PartitionWatchdogDeps.sendMail signature
+      sendMail: async (message) => {
+        sent.push(message);
+      },
+    });
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.to).toBe("ops@example.com");
+    // The sentinel row's own last_run_at ('epoch') is the "worker never
+    // ran" signal made concrete -- it is always stale relative to any real
+    // "now", so this reason must always appear here.
+    expect(sent[0]?.text).toMatch(/stale_last_run/i);
+  });
+
   it("test 1: the catch-up migration closes the 2026-09-01 deadline with no gap or overlap at the month boundary", async () => {
     const { rows } = await pool.query<PartitionRow>(
       `SELECT c.relname, c.relispartition, pg_get_expr(c.relpartbound, c.oid) AS bound
