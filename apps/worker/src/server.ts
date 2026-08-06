@@ -14,6 +14,7 @@ import { createFlowReconciliationWorker } from "./queues/flows/flow-reconciliati
 import { createFlowTriggerEvaluatorWorker } from "./queues/flows/flow-trigger-evaluator.worker.js";
 import { createFlowSegmentSweepWorker } from "./queues/flows/flow-segment-sweep.worker.js";
 import { createFlowEnrollExistingWorker } from "./queues/flows/flow-enroll-existing.worker.js";
+import { createPartitionMaintenanceWorker } from "./queues/partition-maintenance.worker.js";
 
 /**
  * The worker process's runtime handle: a standalone shared ioredis
@@ -112,6 +113,13 @@ export async function buildWorker(): Promise<WorkerRuntime> {
     // batch, fired once per publish when the marketer chooses to back-fill
     // current segment members.
     createFlowEnrollExistingWorker(buildRedisConnectionOptions(redisUrl)),
+    // DB-01/DB-02 (09-02): keeps the rolling monthly partition horizon for
+    // `events`/`send_events` self-maintaining (daily 03:00 UTC job-scheduler
+    // tick plus one immediate run per boot) and writes the
+    // `partition_maintenance_runs` health row the API-side watchdog
+    // (`apps/api/src/modules/ops/partition-watchdog.ts`, started in a
+    // DIFFERENT process by this plan's task 3) reads.
+    createPartitionMaintenanceWorker(buildRedisConnectionOptions(redisUrl)),
   ];
 
   const close = async (): Promise<void> => {
@@ -140,7 +148,7 @@ async function main(): Promise<void> {
   process.on("SIGTERM", shutdown);
 
   console.log(
-    `apps/worker started (${runtime.workers.length} BullMQ worker(s) registered: events:ingest, imports:csv, email-broadcast, email-triggered, campaign-kickoff, campaign-scheduler, webhook-events, analytics-reconciliation, flow-run-advance, flow-reconciliation, flow-trigger-evaluator, flow-segment-sweep, flow-enroll-existing)`
+    `apps/worker started (${runtime.workers.length} BullMQ worker(s) registered: events:ingest, imports:csv, email-broadcast, email-triggered, campaign-kickoff, campaign-scheduler, webhook-events, analytics-reconciliation, flow-run-advance, flow-reconciliation, flow-trigger-evaluator, flow-segment-sweep, flow-enroll-existing, partition-maintenance)`
   );
 }
 

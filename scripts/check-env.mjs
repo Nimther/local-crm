@@ -63,6 +63,12 @@ const baseRequired = [
   "WEB_URL",
   "PLATFORM_SENDGRID_API_KEY",
   "PLATFORM_MAIL_FROM",
+  // 09-02 (DB-02, D-01): presence-only check here; apps/api/src/env.ts
+  // enforces the email-format contract. A `npm run dev` stack whose
+  // partition watchdog has nowhere to send is a silently disarmed alert
+  // channel -- hard fail, not a warning like the PUBLIC_APP_URL localhost
+  // heads-up below.
+  "OPERATOR_ALERT_EMAIL",
   "REDIS_URL",
   // 04-16 gap closure: read lazily (and thrown on) inside
   // packages/delivery-core/src/unsubscribe-token.ts at send-time -- every
