@@ -159,6 +159,18 @@ describe("claimAlertSlot dedup / checkPartitionHealthAndAlert (D-02/D-03/T-09-03
     const t1 = new Date("2027-02-01T00:00:00Z");
     await seedHealthRow({ lastRunAt: t1, bufferMonthsRemaining: 1, lastAlertSentAt: null });
 
+    // claimAlertSlot's own return-value contract, directly: the single
+    // conditional UPDATE ... RETURNING resolves true exactly when it
+    // actually claimed the slot.
+    const directFirstClaim = await claimAlertSlot(pool, t1, ALERT_DEDUP_HOURS);
+    expect(directFirstClaim).toBe(true);
+    const directSecondClaim = await claimAlertSlot(pool, new Date(t1.getTime() + 60_000), ALERT_DEDUP_HOURS);
+    expect(directSecondClaim).toBe(false);
+
+    // Reset the claim this direct probe just took, so the
+    // checkPartitionHealthAndAlert flow below starts from a clean slate.
+    await seedHealthRow({ lastRunAt: t1, bufferMonthsRemaining: 1, lastAlertSentAt: null });
+
     const sent: Array<{ to: string; text: string }> = [];
     // eslint-disable-next-line @typescript-eslint/require-await -- test spy: intentionally synchronous
     const sendMail = async (message: { to: string; text: string }) => {
@@ -266,23 +278,5 @@ describe("claimAlertSlot dedup / checkPartitionHealthAndAlert (D-02/D-03/T-09-03
         sendMail: () => Promise.reject(new Error("sendgrid down")),
       }),
     ).rejects.toThrow("sendgrid down");
-  });
-
-  it("claimAlertSlot: a single conditional UPDATE ... RETURNING is the only claim mechanism", async () => {
-    const now = new Date("2027-03-01T00:00:00Z");
-    await seedHealthRow({ lastRunAt: now, lastAlertSentAt: null });
-
-    const firstClaim = await claimAlertSlot(pool, now, ALERT_DEDUP_HOURS);
-    expect(firstClaim).toBe(true);
-
-    const secondClaim = await claimAlertSlot(pool, new Date(now.getTime() + 60_000), ALERT_DEDUP_HOURS);
-    expect(secondClaim).toBe(false);
-
-    const laterClaim = await claimAlertSlot(
-      pool,
-      new Date(now.getTime() + (ALERT_DEDUP_HOURS + 1) * 60 * 60 * 1000),
-      ALERT_DEDUP_HOURS,
-    );
-    expect(laterClaim).toBe(true);
   });
 });
