@@ -30,6 +30,33 @@
 -- PARENT tables, and Postgres propagates a parent's RLS policies to every
 -- child partition automatically -- adding it again here would be redundant,
 -- not incremental.
+--
+-- 09-REVIEW WR-01: the 20 `CREATE TABLE ... PARTITION OF` statements below
+-- are plain DDL, NOT the CHECK-constraint-first sequence
+-- `attachPartitionCheckFirst` (packages/db/src/partitions/ensure-partitions.ts)
+-- uses for every other attach in this codebase -- CONVENTIONS.md's
+-- "Partition maintenance" section names this migration as the ONE
+-- sanctioned exception to "that sequence exists in exactly one function",
+-- precisely so it is not duplicated here. That makes this migration safe
+-- ONLY while `events_default`/`send_events_default` are still genuinely
+-- empty -- true up to (but not on or after) 2026-09-01, the literal
+-- boundary this migration's own partitions start at. If this migration is
+-- applied on or after that date (a slipped deploy, a CI backlog, a
+-- rollback-and-retry), DEFAULT may already hold real rows by then, and
+-- these 20 plain `CREATE TABLE ... PARTITION OF` statements would each pay
+-- the exact "ACCESS EXCLUSIVE scan of DEFAULT" ingestion-outage cost this
+-- phase exists to avoid -- silently, twenty times, in one migration run.
+-- Rather than duplicate the CHECK-constraint-first sequence here (which
+-- CONVENTIONS.md's rule above forbids), this migration refuses to run
+-- unsafely: a hard, loud failure here is strictly better than a silent
+-- twenty-partition lock storm on the live `events`/`send_events` tables.
+DO $$
+BEGIN
+  IF now() >= TIMESTAMPTZ '2026-09-01 00:00:00+00' THEN
+    RAISE EXCEPTION 'migration 0038 (partition catch-up) refuses to apply on/after 2026-09-01: its 20 CREATE TABLE ... PARTITION OF statements are plain DDL (not CHECK-constraint-first) and are only safe while events_default/send_events_default are still empty. Confirm both DEFAULT partitions are empty (or relocate any rows first with npm run relocate:default-partition-rows), then apply this migration only after the operational risk has been reviewed -- do not simply retry it.';
+  END IF;
+END $$;
+
 CREATE TABLE events_2026_09 PARTITION OF events
   FOR VALUES FROM ('2026-09-01 00:00:00+00') TO ('2026-10-01 00:00:00+00');
 CREATE TABLE events_2026_10 PARTITION OF events
