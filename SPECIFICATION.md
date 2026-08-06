@@ -186,7 +186,7 @@ CI — **единственное** место, где проверяется к
 
 | Пакет | Зависимости |
 |---|---|
-| `packages/db` | `drizzle-orm` `0.45.2`, `pg` `8.22.0`; dev: `drizzle-kit` `0.31.10`, `vitest` `4.1.9`, `@mega-crm/test-support` `0.1.0` (обе добавлены в 08-09 — у пакета появилась тестовая дорожка с `vitest.config.ts` и `globalSetup`, под два прогона цепочки миграций) |
+| `packages/db` | `drizzle-orm` `0.45.2`, `pg` `8.22.0`; dev: `drizzle-kit` `0.31.10`, `vitest` `4.1.9`, `@mega-crm/test-support` `0.1.0` (обе добавлены в 08-09 — у пакета появилась тестовая дорожка с `vitest.config.ts` и `globalSetup`, под два прогона цепочки миграций), `tsx` `^4.19.2` (09-04 — единственный runtime для оператор-CLI `scripts/relocate-default-partition-rows.ts`, npm-скрипт `relocate:default-partition-rows`; тот же диапазон версии уже был закреплён в `apps/api`/`apps/worker`, здесь — новое использование в третьем workspace) |
 | `packages/kms` | `@aws-sdk/client-kms` `3.1079.0` |
 | `packages/delivery-core` | `@mega-crm/tenant-context`, `pg` |
 | `packages/contacts-core` | `@mega-crm/delivery-core`, `pg`, `pino` `10.3.1` |
@@ -195,6 +195,8 @@ CI — **единственное** место, где проверяется к
 | `packages/shared-schemas` | `@mega-crm/flows-core`, `zod` |
 | `packages/tenant-context` | `pg` `8.22.0` |
 | `packages/test-support` | `@mega-crm/db` `0.1.0` (09-03, D-05 — `db-fixture.ts` вызывает `ensurePartitions` через глубокий спецификатор `@mega-crm/db/src/partitions/ensure-partitions.js`, минуя `packages/db/src/index.ts`'s `DATABASE_URL`-throw при импорте; создаёт цикл в графе воркспейсов с обратной dev-зависимостью `packages/db` → `@mega-crm/test-support` ниже — признано безопасным: в репозитории нет TypeScript project references, каждый workspace `noEmit` и потребляет соседей как исходники через `main: ./src/index.ts`, поэтому порядка сборки, который цикл мог бы сломать, не существует), `pg` `8.22.0`, `ioredis` `5.11.0`; dev: `@types/node` `^22.10.5`, `@types/pg` `^8.15.6`, `typescript` `^5.9.3`, `vitest` `4.1.9`, `execa` `10.0.0`. `pg` используется с 08-02/08-06 (`provision-db.ts`, `db-fixture.ts`). **`ioredis` и `execa` объявлены, но кодом ещё не используются**: проверка конфигурации Redis (08-04) реализована на встроенных модулях Node, а не на `ioredis`; `execa` остаётся неиспользованным и после 08-12: SIGKILL-harness построен на `node:child_process.fork`, потому что IPC-канал — это ровно тот примитив, ради которого харнесс существует, и execa добавил бы слой поверх него |
+
+**Фаза 9 в целом (09-01…09-05) не добавила ни одного нового third-party npm-пакета.** Единственная запись из раздела 2, появившаяся в этой фазе — `tsx` в `packages/db` (09-04, строка выше): уже существующий в репозитории диапазон версии, добавленный как devDependency в третий workspace ради тонкого оператор-CLI. Если читатель ищет здесь новую библиотеку под партиционирование/сторож/алертинг — её нет: вся автоматизация построена на уже присутствующих `pg`/`bullmq`/`@sendgrid/mail`.
 
 ---
 
@@ -215,7 +217,7 @@ CI — **единственное** место, где проверяется к
   Остальное без изменений: `createEphemeralDatabase` → `assertTestDatabaseUrl` → `ensureTestDbMigrated`, печать DSN с затёртым паролем за маркером `[e2e:database]`, удаление базы в `apps/web/e2e/global-teardown.ts` (состояние между половинами — через временный файл; `globalTeardown` остаётся хуком, потому что удалять надо после остановки серверов). Оба `webServer` запускают `dev:e2e`, вся среда API приходит из блока `webServer[].env` по boot-схеме `apps/api/src/env.ts` — другого источника DSN у сервера нет, поэтому прогон без провижининга не стартует, а не уходит тихо в dev-БД. `reuseExistingServer` на обоих — **`false`**. Обычные `dev`-скрипты не изменены.
 
   `apps/web/e2e/database-isolation.spec.ts` (08-18) — ассерт, которого не хватало: спек регистрируется через реальный UI, затем **сам** открывает соединение к эфемерной базе и требует, чтобы строка оказалась там. Всё, что проверяло 08-10, относилось к стороне провижининга; куда пишет сервер, не проверял никто. Доказан в обе стороны: с сервером, направленным на dev-БД, спек падает (`Expected "1", Received "0"`); после исправления 8 спеков проходят, счётчик пользователей в dev-БД до и после прогона одинаков, эфемерная база удаляется.
-- `scripts/check-env.mjs` (`predev`-хук) читает и парсит `.env` **сам** (без зависимостей) и падает, если пусты: `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `WEB_URL`, `PLATFORM_SENDGRID_API_KEY`, `PLATFORM_MAIL_FROM`, `REDIS_URL`, `UNSUBSCRIBE_TOKEN_SECRET`, `PUBLIC_APP_URL`, плюс `KMS_KEK_ID` (если `KMS_PROVIDER=aws`) либо `KMS_LOCAL_KEK`. Это dev-only проверка — прод её не выполняет.
+- `scripts/check-env.mjs` (`predev`-хук) читает и парсит `.env` **сам** (без зависимостей) и падает, если пусты: `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `WEB_URL`, `PLATFORM_SENDGRID_API_KEY`, `PLATFORM_MAIL_FROM`, `OPERATOR_ALERT_EMAIL` (09-02, DB-02 — presence-only здесь; формат проверяет `apps/api/src/env.ts`; без него сторож партиций был бы бесшумно обезоружен), `REDIS_URL`, `UNSUBSCRIBE_TOKEN_SECRET`, `PUBLIC_APP_URL`, плюс `KMS_KEK_ID` (если `KMS_PROVIDER=aws`) либо `KMS_LOCAL_KEK`. Это dev-only проверка — прод её не выполняет.
 - В рабочем дереве также присутствует `dump.rdb` (Redis-дамп, ~9.8 КБ) — гитигнорится по `*.rdb`, но физически лежит в папке проекта и может содержать данные очередей.
 
 ### 3.2 Полный список читаемых переменных окружения
@@ -230,6 +232,7 @@ CI — **единственное** место, где проверяется к
 | `NODE_ENV` | `apps/api/src/env.ts`, `packages/kms/src/env.ts`, `packages/contacts-core/src/logger.ts` | `z.enum(["development","test","production"]).default("development")` |
 | `PLATFORM_SENDGRID_API_KEY` | `apps/api/src/env.ts` → `modules/platform-mail/client.ts` | `min(1)` |
 | `PLATFORM_MAIL_FROM` | там же | `z.string().email()` |
+| `OPERATOR_ALERT_EMAIL` | `apps/api/src/env.ts` → `apps/api/src/server.ts`'s `main()` (передаётся в `startPartitionWatchdog` как `operatorEmail`) — **читает только `apps/api`**, `apps/worker` эту переменную не видит | `z.string().email(...)`, **обязательна, без `.optional()`/`.default()`** — API отказывается стартовать без адреса, куда слать алерт сторожа партиций (09-02, DB-02, D-01). Резолвится через тот же `MEGA_CRM_ENV_FILE`-путь, что и остальные переменные (см. 3.1); отдельного секретного хранилища не заводит. Новых учётных данных фаза не вводит: алерт использует уже существующую пару `PLATFORM_SENDGRID_API_KEY`/`PLATFORM_MAIL_FROM`, никогда не BYO-ключ тенанта |
 | `KMS_PROVIDER` | `apps/api/src/env.ts`, `packages/kms/src/env.ts:19` | `z.enum(["local","aws"]).default("local")` |
 | `KMS_LOCAL_KEK` | читается в `packages/kms/src/env.ts:20`, потребляется в `local-provider.ts` | optional в схеме; провайдер требует base64 → **ровно 32 байта** |
 | `KMS_KEK_ID` | читается в `packages/kms/src/env.ts:21`, потребляется в `aws-provider.ts` | optional в схеме; обязателен при `KMS_PROVIDER=aws` (superRefine) |
@@ -446,7 +449,7 @@ workspace_id = NULLIF(current_setting('app.current_workspace_id', true), '')::uu
 | `events` | RANGE | `occurred_at` | `events_2026_07`…`events_2026_08` (`0007`), `events_2026_09`…`events_2027_06` (`0038`, 10 месяцев подряд, границы — явные UTC-timestamptz), `events_default` (DEFAULT) | `0007`/`0010`/`0038` |
 | `send_events` | RANGE | `occurred_at` | `send_events_2026_07`…`send_events_2026_08` (`0020`), `send_events_2026_09`…`send_events_2027_06` (`0038`), `send_events_default` (DEFAULT) | `0020`/`0038` |
 
-**09-01 (DB-01/DB-02):** дедлайн 2026-09-01 закрыт миграцией `0038` (catch-up-партиции по июнь 2027 включительно) независимо от того, запускался ли когда-либо воркер. Код, создающий партиции programmatically, теперь есть: `ensurePartitions`/`attachPartitionCheckFirst`/`computeBufferMonths` (`packages/db/src/partitions/ensure-partitions.ts`) — идемпотентная функция, единственный источник партиционного DDL, CHECK-constraint-first на каждом attach (`NOT VALID` → `VALIDATE CONSTRAINT` → `ATTACH PARTITION` → `DROP CONSTRAINT`, одна транзакция на месяц). Константы: `LOOKAHEAD_MONTHS=3`, `BUFFER_ALERT_THRESHOLD_MONTHS=2`, `PARTITION_MAINTENANCE_CRON="0 3 * * *"`. **В этом плане (09-01) функция ещё не вызывается ни из какого репитабл-джоба** — регистрация BullMQ-воркера (`partition-maintenance.worker.ts`, вызов из `apps/worker/src/server.ts`) и вызов из `packages/test-support`'s db-fixture — оба заявлены как работа плана 09-02 и последующих; на момент 09-01 `ensurePartitions` вызывается только из `runPartitionMaintenance` (`maintenance-run.ts`) и из тестов.
+**09-01 (DB-01/DB-02):** дедлайн 2026-09-01 закрыт миграцией `0038` (файл `packages/db/migrations/0038_partition_catchup_and_maintenance_runs.sql`; catch-up-партиции по июнь 2027 включительно) независимо от того, запускался ли когда-либо воркер. Код, создающий партиции programmatically, теперь есть: `ensurePartitions`/`attachPartitionCheckFirst`/`computeBufferMonths` (`packages/db/src/partitions/ensure-partitions.ts`) — идемпотентная функция, единственный источник партиционного DDL, CHECK-constraint-first на каждом attach (`NOT VALID` → `VALIDATE CONSTRAINT` → `ATTACH PARTITION` → `DROP CONSTRAINT`, одна транзакция на месяц). Константы: `LOOKAHEAD_MONTHS=3`, `BUFFER_ALERT_THRESHOLD_MONTHS=2`, `PARTITION_MAINTENANCE_CRON="0 3 * * *"`. **В этом плане (09-01) функция ещё не вызывается ни из какого репитабл-джоба** — регистрация BullMQ-воркера (`partition-maintenance.worker.ts`, вызов из `apps/worker/src/server.ts`) и вызов из `packages/test-support`'s db-fixture — оба заявлены как работа плана 09-02 и последующих; на момент 09-01 `ensurePartitions` вызывается только из `runPartitionMaintenance` (`maintenance-run.ts`) и из тестов.
 
 **Здоровье автоматизации:** `partition_maintenance_runs` (см. 4.2) — платформенная singleton-таблица; `runPartitionMaintenance` пишет туда снапшот на каждый прогон. `apps/api/src/modules/ops/partition-watchdog.ts` — отдельный от воркера процесс-сторож (`evaluatePartitionHealth`/`checkPartitionHealthAndAlert`/`claimAlertSlot`), читает эту таблицу; unhealthy при отсутствующей/устаревшей (>26ч) строке, буфере <2 месяцев или непустой DEFAULT-партиции. Алерт — plain-text письмо через `PLATFORM_SENDGRID_API_KEY` (см. 7), не чаще одного раза в 20 часов на реплику (`claimAlertSlot`, атомарный `UPDATE ... RETURNING`). **Ни воркер, ни сторож ещё не подключены к своим процессам в этом плане** — `startPartitionWatchdog` не вызывается из `apps/api/src/server.ts`.
 
@@ -491,7 +494,7 @@ workspace_id = NULLIF(current_setting('app.current_workspace_id', true), '')::uu
 
 ### 5.1 Чем запускается воркер
 
-**Ни cron, ни `setInterval`/`setTimeout`, ни системный таймер.** Всё — **BullMQ repeatable jobs**, регистрируемые в самом процессе воркера. Grep по `apps/worker/src` и `apps/api/src` (без тестов) на `repeat:|cron|setInterval|setTimeout(` даёт ровно 4 вхождения — все четыре это `repeat: { every: ... }`:
+**Ни системный cron, ни голый `setTimeout`.** Тики воркера — **BullMQ repeatable jobs**, регистрируемые в самом процессе воркера, в двух формах. Четыре преэкзистирующих тика используют форму `repeat: { every: ... }` (интервал, отсчитываемый от boot-момента регистрации, не от фиксированного часа):
 
 | Файл | Очередь-тик | Интервал | jobId |
 |---|---|---|---|
@@ -500,19 +503,21 @@ workspace_id = NULLIF(current_setting('app.current_workspace_id', true), '')::uu
 | `analytics-reconciliation.worker.ts:117` | `analytics-reconcile` | `RECONCILE_INTERVAL_MS = 3 * 60_000` (3 мин) | `reconcile-rollups` |
 | `flows/flow-segment-sweep.worker.ts:183` | `FLOW_SEGMENT_SWEEP_QUEUE` (`flow-segment-sweep`) | `SWEEP_INTERVAL_MS = 15 * 60_000` (15 мин) | `scan-segment-triggered-flows` |
 
-Регистрация идемпотентна: BullMQ дедуплицирует repeatable job по repeat-конфигу + `jobId`, поэтому повторный boot воркера не плодит конкурирующие расписания. Состояние расписаний живёт **в Redis** — потеря Redis теряет и их (перерегистрируются при следующем старте процесса).
+**09-02 (DB-01/DB-02):** `partition-maintenance.worker.ts` добавляет **вторую, до этого не использовавшуюся в кодовой базе форму** — BullMQ's job-scheduler API (`queue.upsertJobScheduler`), а не `repeat: { every }`. Это первый и единственный тик, зарегистрированный так; см. §5.3 ниже и `CONVENTIONS.md`'s соответствующее binding-правило. `apps/api/src/modules/ops/partition-watchdog.ts` отдельно использует голый `setInterval` (см. §6.11) — это не BullMQ-тик воркера, а таймер **внутри процесса `apps/api`**, опрашивающий Postgres, а не Redis-очередь.
+
+Регистрация repeatable-джобов идемпотентна в обеих формах: BullMQ дедуплицирует repeatable job по repeat-конфигу + `jobId` (интервальная форма) либо по стабильному id (`upsertJobScheduler`, форма планировщика) — повторный boot воркера не плодит конкурирующие расписания ни в одном случае. Состояние расписаний живёт **в Redis** — потеря Redis теряет и их (перерегистрируются при следующем старте процесса).
 
 Точка входа процесса: `apps/worker/src/server.ts` → `buildWorker()`. Запускается через `main()` только при прямом запуске (`import.meta.url === file://${process.argv[1]}`). `dev`: `tsx watch --env-file=../../.env src/server.ts`; `start`: `node dist/server.js`. Graceful shutdown на `SIGINT`/`SIGTERM` → `worker.close()` для всех + `connection.disconnect()`.
 
-### 5.2 Зарегистрированные воркеры (13)
+### 5.2 Зарегистрированные воркеры (14)
 
-`events-ingest`, `imports-csv`, `email-broadcast`, `email-triggered`, `campaign-kickoff`, `campaign-scheduler`, `webhook-events`, `analytics-reconciliation`, `flow-run-advance`, `flow-reconciliation`, `flow-trigger-evaluator`, `flow-segment-sweep`, `flow-enroll-existing`.
+`events-ingest`, `imports-csv`, `email-broadcast`, `email-triggered`, `campaign-kickoff`, `campaign-scheduler`, `webhook-events`, `analytics-reconciliation`, `flow-run-advance`, `flow-reconciliation`, `flow-trigger-evaluator`, `flow-segment-sweep`, `flow-enroll-existing`, `partition-maintenance` (09-02, четырнадцатый в композиционном корне `buildWorker()`).
 
 Каждый Worker получает **свои** `RedisOptions` из `buildRedisConnectionOptions(REDIS_URL)`, а не общий инстанс `Redis` (BullMQ бандлит собственную копию ioredis другой версии — номинальный конфликт типов). `maxRetriesPerRequest: null` обязателен для BullMQ. Пароль/юзер Redis берутся из URL.
 
 ### 5.3 Очереди (имена — `packages/shared-schemas/src/queues.ts`)
 
-`events-ingest`, `imports-csv`, `email-broadcast`, `email-triggered`, `campaign-kickoff`, `webhook-events`, `flow-trigger-evaluator`, `flow-run-advance`, `flow-reconciliation`, `flow-segment-sweep`, `flow-enroll-existing`. Плюс два тик-имени, объявленных локально в файлах воркеров: `campaign-scheduler`, `analytics-reconcile`. Дефис вместо двоеточия — BullMQ запрещает `:` в имени очереди.
+`events-ingest`, `imports-csv`, `email-broadcast`, `email-triggered`, `campaign-kickoff`, `webhook-events`, `flow-trigger-evaluator`, `flow-run-advance`, `flow-reconciliation`, `flow-segment-sweep`, `flow-enroll-existing`. Плюс два тик-имени, объявленных локально в файлах воркеров: `campaign-scheduler`, `analytics-reconcile`. Плюс `partition-maintenance` (09-02, объявлена локально в `partition-maintenance.worker.ts` как `PARTITION_MAINTENANCE_QUEUE`) — **самопродюсируемая и самопотребляемая** очередь: единственный producer этой очереди — сам процесс `apps/worker`, тот же файл, что её и consume'ит; никакой роут или другой воркер в неё не пишет. Дефис вместо двоеточия — BullMQ запрещает `:` в имени очереди.
 
 Разделение `email-broadcast` / `email-triggered` — два независимых Worker'а с разной concurrency, а **не** BullMQ `priority`: приоритет разрешает конкуренцию только внутри пула одной очереди.
 
@@ -561,6 +566,18 @@ Restart-safe: следующий тик просто пересканирует;
 ### 5.7 Кросс-тенантные сканы вне RLS-скоупа
 
 `analytics-reconciliation.worker.ts` выполняет `pool.query("SELECT id FROM organization")` **напрямую, вне `withTenant`** — это работает, потому что на `organization` нет RLS (4.3). Отдельной admin-политики для этого не заводили. Дальше каждый воркспейс реконсилится в собственной `withTenant`-транзакции.
+
+### 5.8 Очередь `partition-maintenance` (09-02, DB-01/DB-02)
+
+`apps/worker/src/queues/partition-maintenance.worker.ts` — платформенный (не tenant-scoped) тик, поддерживающий горизонт партиций `events`/`send_events` и здоровье автоматизации (§4.4).
+
+- **Очередь:** `partition-maintenance` (`PARTITION_MAINTENANCE_QUEUE`) — самопродюсируемая/самопотребляемая (см. §5.3).
+- **Регистрация:** BullMQ job-scheduler API, `queue.upsertJobScheduler(JOB_SCHEDULER_ID, { pattern, tz }, { name, opts })` — **первое использование этой формы в кодовой базе**, отдельно от четырёх `repeat: { every }`-тиков (§5.1). Стабильный id планировщика: `partition-maintenance-daily`. Cron-паттерн: `PARTITION_MAINTENANCE_CRON = "0 3 * * *"` (03:00 каждый день), таймзона — **явно `"UTC"`** (передаётся вторым полем опций планировщика, не полагается на таймзону хост-процесса).
+- **`opts` (job options переданной джобы):** `attempts: 5`, `backoff: { type: "exponential", delay: 2000 }`, `removeOnComplete: { age: 86400 }`, `removeOnFail: false` — тот же блок, что и у остальных 8 мест в §5.3 (теперь **9 мест**, все с одинаковым буквальным содержимым, без общего фабричного модуля). `removeOnFail: false` здесь особенно нагружено смыслом: провал DDL-операции должен остаться инспектируемым в Redis, потому что Bull Board не установлен (см. §7) и никакой UI за очередями не следит — единственный громкий сигнал провала внутри самого воркера — это `console.log`/необработанный throw, наружу — только письмо оператору (ниже).
+- **Boot-time immediate run:** при каждой конструкции воркера (не только по расписанию) в очередь добавляется одна дополнительная джоба с уникальным на каждый запуск `jobId` (`boot-<timestamp36>-<random>`), **не принадлежащая планировщику** — рестарт воркера чинит горизонт партиций за секунды, не дожидаясь ближайших 03:00 UTC.
+- **Константы (`packages/db/src/partitions/ensure-partitions.ts`):** `LOOKAHEAD_MONTHS = 3` (на сколько месяцев вперёд от текущего момента поддерживается горизонт), `BUFFER_ALERT_THRESHOLD_MONTHS = 2` (порог, ниже которого сторож считает буфер нездоровым, см. §4.4/§7).
+- **Что делает процессор на каждом прогоне** (`processPartitionMaintenance` → `runPartitionMaintenance`): (1) вызывает `ensurePartitions` — идемпотентно создаёт недостающие месячные партиции для обеих таблиц через CHECK-constraint-first attach; (2) считает буфер месяцев по каждой таблице (`computeBufferMonths`, до создания — см. §4.4); (3) считает число строк в обеих DEFAULT-партициях; (4) записывает один snapshot-ряд в `partition_maintenance_runs` (upsert по singleton PK). Никакого `try/catch` в файле — необработанный throw переводит BullMQ-джобу в failed-состояние осознанно (см. `removeOnFail: false` выше).
+- **Клиент:** пул `pool` из `@mega-crm/tenant-context`, использован напрямую, **не** через `withTenant`/`withTenantTransaction` — обслуживание партиций платформенное, не tenant-scoped, тем же паттерном, что и `analytics-reconciliation.worker.ts`'s `SELECT id FROM organization` (§5.7).
 
 ---
 
@@ -696,6 +713,19 @@ Restart-safe: следующий тик просто пересканирует;
 
 `GET /api/workspaces` (`workspaces.ts:140-147`) вызывает `auth.api.listOrganizations` **без try/catch** — неаутентифицированный вызов даёт 500 вместо 401. Не обход авторизации, но необработанный путь ошибки.
 
+### 6.11 Фоновый процесс внутри `apps/api` (09-02, DB-02) — не HTTP-точка входа
+
+Фаза 9 **не добавила ни одного HTTP-роута, Fastify-плагина, парсера тела, механизма аутентификации или rate limit**. Единственная новая публичная поверхность — не-HTTP: таймер, стартующий внутри самого процесса `apps/api`.
+
+`apps/api/src/server.ts`'s `main()` вызывает `startPartitionWatchdog({ client: pool, operatorEmail: env.OPERATOR_ALERT_EMAIL, sendMail: sendOperatorAlert })` **после** `await app.listen(...)` резолвится — то есть таймер стартует, только когда сервер уже принимает соединения, а не во время построения приложения.
+
+- **Реализация таймера:** голый `setInterval` внутри `apps/api/src/modules/ops/partition-watchdog.ts`'s `startPartitionWatchdog` — единственное место в кодовой базе, где `setInterval` используется как продовый механизм расписания (все остальные тики — BullMQ, §5).
+- **Интервал опроса:** `WATCHDOG_INTERVAL_MS = 15 * 60_000` (15 мин).
+- **Порог устаревания:** `STALE_THRESHOLD_HOURS = 26` — здоровая строка `partition_maintenance_runs` (§4.2/§4.4) не должна быть старше 26 часов (одна ежедневная джоба воркера плюс запас).
+- **Почему именно в `main()`, а не в `buildServer()`:** каждый интеграционный тест `apps/api` вызывает `buildServer()`; таймер, зарегистрированный там, жил бы в каждом тестовом процессе, опрашивал бы тестовую БД на каденции `WATCHDOG_INTERVAL_MS` и мог бы достать реальный SendGrid-путь отправки из тестового прогона. `main()` выполняется только под `isDirectRun`-гардом — ровно та граница, которая нужна.
+- **Что логируется при старте:** одна строка `pollIntervalMs`/`staleThresholdHours` — никогда адрес оператора и ничего производного от SendGrid-ключа (T-09-11).
+- Подробнее о том, что делает сам сторож (health-условия, дедуп алерта, канал доставки): §4.4 и §7.
+
 ---
 
 ## 7. Наблюдаемость
@@ -704,7 +734,9 @@ Restart-safe: следующий тик просто пересканирует;
 - Worker: **структурированного логирования нет** — только `console.log`/`console.error` в `server.ts` и `pool.on("error")` в `tenant-context`.
 - **Bull Board / UI очередей отсутствует** (не объявлен ни в одном package.json). В комментарии `apps/worker/src/server.ts:20` он упомянут как «future wiring».
 - Метрик и трейсинга нет. HTTP-healthcheck'а у приложения нет (см. 6.1). Контейнерные healthcheck'и в `docker-compose.yml` есть, но это проверки самой инфраструктуры, а не приложения: `pg_isready -U postgres` для `db` и `redis-cli ping` для `redis`.
-- **09-01 (DB-02):** первый регулярный alert-канал вне CI — `apps/api/src/modules/ops/partition-watchdog.ts`, plain-text письмо через тот же `PLATFORM_SENDGRID_API_KEY`/`PLATFORM_MAIL_FROM`, что и системные письма (см. 3.5), но НЕ через `platform-mail`'s HTML-шаблоны. **Функция реализована и покрыта тестами, но ещё не подключена**: `startPartitionWatchdog` не вызывается из `apps/api/src/server.ts`, адрес оператора не читается из `env.ts` — оба явно оставлены плану 09-02 (модуль спроектирован parameter-driven именно для этого разделения). Тело письма — только имена таблиц, число месяцев буфера, счётчики строк в DEFAULT-партициях, `last_run_at`; без workspace_id/contact_id/payload/ключей/connection string.
+- **09-01→09-02 (DB-01/DB-02): партиционный health-сигнал и его единственный push-канал.** `partition_maintenance_runs` (§4.2) хранит один snapshot-ряд, который каждый прогон `partition-maintenance`-воркера (§5.8) перезаписывает: `last_run_at`, буфер месяцев по каждой из двух таблиц + агрегированный минимум, оба счётчика строк в DEFAULT-партициях, список `partitions_created`, `last_alert_sent_at`. Сигнал **персистентен в Postgres и читаем чем угодно**, что умеет в неё запросить — отдельного API/дашборда над ним нет.
+  Единственный push-канал — `apps/api/src/modules/ops/partition-watchdog.ts`: c 09-02 **подключён и активен** — `startPartitionWatchdog` вызывается из `apps/api/src/server.ts`'s `main()` (см. §6.11), адрес оператора читается из `env.OPERATOR_ALERT_EMAIL` (обязателен, boot-required, см. §3.2). Сторож — отдельный от воркера процесс, поэтому watchdog-внутри-того-же-процесса-который-он-проверяет не может сообщить, что процесс остановился; вместо этого он в своём процессе (`apps/api`) читает строку, которую пишет чужой процесс (`apps/worker`). Unhealthy-условия (§4.4): строка отсутствует, `last_run_at` старше `STALE_THRESHOLD_HOURS=26`, буфер < `BUFFER_ALERT_THRESHOLD_MONTHS=2` по любой из таблиц, либо любая DEFAULT-партиция непуста — все эти условия трактуются как unhealthy, никогда не по умолчанию healthy при отсутствующих данных. Алерт — plain-text письмо через `PLATFORM_SENDGRID_API_KEY`/`PLATFORM_MAIL_FROM` (§3.5), НЕ через `platform-mail`'s HTML-шаблоны — намеренно, чтобы аварийный канал не зависел от существования шаблона в платформенном SendGrid-аккаунте. Дедуп — `claimAlertSlot`, атомарный `UPDATE ... RETURNING` над `last_alert_sent_at`, не чаще одного письма на `ALERT_DEDUP_HOURS=20` окно, корректно под конкурентными репликами `apps/api`. Тело письма — только имена таблиц, число месяцев буфера по каждой, счётчики строк в DEFAULT-партициях, `last_run_at`; без workspace_id/contact_id/payload/ключей/connection string.
+  **Честно об ограничении:** Bull Board не установлен (§8.1) — упавшая `partition-maintenance`-джоба остаётся инспектируемой в Redis (`removeOnFail: false`, §5.8), но никакой UI за очередями не следит. Настоящий алертинг/дашборды/агрегация ошибок — Phase 15.
 - **Единственный регулярный сигнал о состоянии кода — CI** (`.github/workflows/ci.yml`, см. 1.3): четыре job'а — `static`, `test`, `failure-injection`, `e2e` — на каждый push и на каждый PR в `master`. Обязательных из них три: `static`, `test`, `failure-injection`; `e2e` сообщает, но не блокирует. Никакого мониторинга работающей системы это не заменяет: за пределами CI не наблюдается ничего.
 - Отчёт покрытия (`json-summary`) пишется в `./coverage` и потребляется `coverage:gate` и `coverage:ratchet` внутри job'а `test`. Наружу — в дашборд, бэйдж или внешний сервис — он **не** публикуется, история значений нигде не хранится: единственная зафиксированная точка отсчёта — `coverage-baseline.json` в репозитории.
 - Артефакты Playwright (`trace: retain-on-failure`) создаются в job'е `e2e`, но `actions/upload-artifact` не подключён — при падении трейс остаётся на раннере и пропадает вместе с ним.
@@ -721,7 +753,7 @@ CLAUDE.md описывает **рекомендованный** стек по и
 |---|---|
 | **TypeScript 6.0.x** («TS 6 Corsa-based… no reason to pin lower») | Везде `^5.9.3`, установлено **5.9.3**. TS 6 не используется нигде |
 | **PgBouncer** (или RDS Proxy) — «поставить до инцидента, а не после» | В репозитории отсутствует полностью. В `docker-compose.yml` только postgres и redis; в коде — два прямых `pg.Pool` |
-| **`@bull-board/api` + `@bull-board/fastify` 8.1.x** — «нужен на этих объёмах» | **Не объявлен ни в одном package.json.** UI очередей нет |
+| **`@bull-board/api` + `@bull-board/fastify` 8.1.x** — «нужен на этих объёмах» | **Не объявлен ни в одном package.json.** UI очередей нет. **09-05:** партиционный alert-дизайн (§5.8/§7) спроектирован специально так, чтобы **не полагаться** на Bull Board — единственный громкий сигнал провала `partition-maintenance`-джобы это plain-text письмо оператору, а не UI очереди, ровно потому что UI очереди в этом репозитории нет |
 | **`@fastify/jwt` 10.x** | Не установлен. Аутентификация — `better-auth` 1.6.23 (cookie-сессии) |
 | **`pino-http` 11.0.0** | Объявлен в `apps/api`, но **не используется** (0 вхождений в `src`) |
 | **Zustand** — «для состояния canvas-редактора» | Объявлен в `apps/web`, но **не используется** (0 вхождений в `src`) |
@@ -761,10 +793,10 @@ CLAUDE.md описывает **рекомендованный** стек по и
 
 Перечислено фактами, без оценки серьёзности.
 
-1. `flow_runs_due_scan` (`0027`) и `flows_segment_sweep_scan` (`0032`) — безусловные кросс-тенантные SELECT-гранты по одному GUC, без предиката, в отличие от прецедента `0018`, на который они ссылаются.
-2. 12 таблиц (включая `events` и `send_events`) несут вариант политики с голым кастом, который `0019` чинил на `campaigns`. Безопасность держится на непроверяемом БД инварианте.
+1. `flow_runs_due_scan` (`0027`), `flows_segment_sweep_scan` (`0032`) и `partition_relocation_admin_scan` (`0039`, на `contacts` **и** `sends` — 09-04) — безусловные кросс-тенантные SELECT-гранты по одному GUC, без предиката, в отличие от прецедента `0018`, на который все три ссылаются в своих комментариях. `0039` — третий и самый широкий по площади (две дополнительные, самые тенант-чувствительные таблицы) экземпляр этого же паттерна.
+2. 12 таблиц (включая `events` и `send_events`, а также `contacts` и `sends`, на которые `0039` навесил дополнительную admin-scan политику, но не тронул их собственную `workspace_isolation`) несут вариант политики с голым кастом, который `0019` чинил на `campaigns`. Безопасность держится на непроверяемом БД инварианте; для `attachPartitionCheckFirst`/`relocateAllDefaultRows` (09-04) этот инвариант обеспечен на уровне отдельного, никогда не tenant-scoped пула-вызывающего — см. §4.3's «Эмпирическое подтверждение» абзац и его 09-04-дополнение. Унификация всех 12 таблиц в fail-closed направлении — Phase 10 / SEC-03, не эта фаза.
 3. `organization`, `session`, `account` — вне RLS. Там же `account.password` и `session.token`.
-4. Кода обслуживания партиций нет. С 2026-09-01 всё пишется в DEFAULT-партиции.
+4. **09-01→09-05 закрыли этот пункт:** дедлайн 2026-09-01 закрыт миграцией `0038` (catch-up-партиции по июнь 2027 включительно, независимо от рантайм-поведения); программная поддержка горизонта — `ensurePartitions`, вызываемая ежедневным BullMQ-тиком (`partition-maintenance`, §5.8) плюс boot-time immediate run, плюс тем же путём, которым эфемерные тестовые БД получают партиции (09-03). Оператор-процедура `relocateAllDefaultRows` (09-04) переносит уже осевшие в DEFAULT строки в правильную месячную партицию, если автоматизация когда-либо отстанет. Оставшийся открытый вопрос — не «есть ли код», а живая проверка аварийного канала (см. SUMMARY этого плана, задача 3).
 5. Replay-защиты у вебхука SendGrid нет; rate limit на роуте отсутствует.
 6. `GET /api/invites/:invitationId` — публичный и без лимита, отдаёт email приглашённого и название организации.
 7. `BETTER_AUTH_SECRET` — минимум 16 символов против 32 у `UNSUBSCRIBE_TOKEN_SECRET`; отдельной проверки для production нет.
@@ -781,10 +813,14 @@ CLAUDE.md описывает **рекомендованный** стек по и
 18. Второй пул (`packages/db`) не имеет `pool.on("error")` — обрыв idle-соединения на нём необработан.
 19. В рабочем дереве лежат `.env` (гитигнорится) и `dump.rdb` (дамп Redis).
 20. `resolveWorkspaceMember` существует в 9 независимых копиях; анти-enumeration-инвариант (единый 404) не централизован и на 4 роутах не соблюдён — `GET /api/workspaces/:slug/members` отдаёт 403/401, `GET /api/workspaces/:slug` пробрасывает статус better-auth, оба `/api/profile/*` не резолвят членство вообще (см. 6.4).
-21. Блок `defaultJobOptions` продублирован в 8 файлах, `buildRedisConnectionOptions` — в 4; `UNSUBSCRIBE_TOKEN_TTL_SECONDS` объявлена дважды. Правка в одном месте не распространяется на остальные.
+21. Блок `defaultJobOptions` продублирован в 9 файлах (09-02 добавил девятое место, `partition-maintenance.worker.ts`, с тем же буквальным содержимым), `buildRedisConnectionOptions` — в 4; `UNSUBSCRIBE_TOKEN_TTL_SECONDS` объявлена дважды. Правка в одном месте не распространяется на остальные.
 
 ---
 
 ## 10. Поддержание документа
 
 При добавлении любой новой библиотеки или технологии — дописать её в соответствующий раздел этого файла (раздел 2 для зависимостей; 3 для секретов/конфигурации; 4 для схемы; 5 для очередей/планировщика; 6 для точек входа; 8 если возникает новое расхождение с CLAUDE.md). Правило закреплено в `.claude/CLAUDE.md`.
+
+### Записи о верификации as-built разделов
+
+- **2026-08-06 (09-05):** записи фазы 9 (partition automation & boundary safety) в разделах 2, 3, 4, 5, 6, 7 и 8 сверены с кодом: `packages/db/package.json` (буквенная версия `tsx`), `apps/api/src/env.ts` (`OPERATOR_ALERT_EMAIL`), `packages/db/migrations/0038_partition_catchup_and_maintenance_runs.sql` и `0039_partition_relocation_admin_scan.sql`, `apps/worker/src/queues/partition-maintenance.worker.ts`, `apps/api/src/modules/ops/partition-watchdog.ts`, `apps/api/src/server.ts`'s `main()`. Полный прогон `npm run lint`/`npm run lint:migrations`/`npm run build`/`npm test` — зелёный (11/11 воркспейсов); каталожный запрос против отдельно поднятой, полностью мигрированной эфемерной БД подтвердил 20 присоединённых месячных партиций (`events`×10 + `send_events`×10, 2026-09…2027-06, все `relispartition=true`). Живая проверка письма оператору — см. SUMMARY плана 09-05, задача 3 (не выполнена в этом прогоне: `OPERATOR_ALERT_EMAIL` не задан во внешнем env-файле этой машины).
