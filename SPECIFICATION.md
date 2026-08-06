@@ -323,7 +323,7 @@ CI — **единственное** место, где проверяется к
 
 Диалект: PostgreSQL (`postgres:17` в compose; в коде требований к версии нет). `timestamp` ниже = `timestamp without time zone`, `timestamptz` = `with time zone` — записано ровно так, как в схеме.
 
-> **Оговорка:** Drizzle-схема — не полная истина. Физический DDL таблиц `events` и `send_events` (партиционирование, составные PK, unique) существует **только** в рукописных миграциях `0007`, `0010`, `0020`; в `packages/db/src/schema/{events,send-events}.ts` объявлены лишь формы для вывода типов. Из 38 миграций snapshot в `migrations/meta/` есть только у **11**: `0000`, `0002`, `0003`, `0005`, `0008`, `0011`, `0016`, `0017`, `0024`, `0025`, `0034`. Остальные **27** — рукописные, без snapshot'а. Комментарий в `0034` фиксирует, что на момент его написания baseline drizzle-kit стоял на `0025` и `generate` выдавал ложный diff с полным пересозданием таблиц; `0034_snapshot.json` с тех пор закоммичен, так что это описание относится к диапазону `0026`–`0033`, а не ко всем последующим миграциям.
+> **Оговорка:** Drizzle-схема — не полная истина. Физический DDL таблиц `events` и `send_events` (партиционирование, составные PK, unique) существует **только** в рукописных миграциях `0007`, `0010`, `0020`, `0038`; в `packages/db/src/schema/{events,send-events}.ts` объявлены лишь формы для вывода типов, и `partition_maintenance_runs` (`0038`) не имеет вообще никакого Drizzle-схема-файла (только физический DDL в миграции). Из 39 миграций snapshot в `migrations/meta/` есть только у **11**: `0000`, `0002`, `0003`, `0005`, `0008`, `0011`, `0016`, `0017`, `0024`, `0025`, `0034`. Остальные **28** — рукописные, без snapshot'а. Комментарий в `0034` фиксирует, что на момент его написания baseline drizzle-kit стоял на `0025` и `generate` выдавал ложный diff с полным пересозданием таблиц; `0034_snapshot.json` с тех пор закоммичен, так что это описание относится к диапазону `0026`–`0033`, а не ко всем последующим миграциям.
 
 ### 4.1 Таблицы better-auth (RLS НЕТ)
 
@@ -337,7 +337,7 @@ CI — **единственное** место, где проверяется к
 - **`member`**: `id` uuid PK, `organizationId` uuid NN → `organization(id)` CASCADE, `userId` uuid NN → `user(id)` CASCADE, `role` text NN dflt `'member'`, `createdAt` NN. **UNIQUE на `(organizationId, userId)` отсутствует.**
 - **`invitation`**: `id` uuid PK, `organizationId` uuid NN → CASCADE, `email` text NN, `role` text NULL, `status` text NN dflt `'pending'`, `expiresAt` timestamp NN, `inviterId` uuid NN → `user(id)` CASCADE, `createdAt` timestamp NN dflt `now()` (добавлена в `0002`).
 
-### 4.2 Доменные таблицы (все 22 — с RLS ENABLE + FORCE)
+### 4.2 Доменные таблицы (22 из 23 — с RLS ENABLE + FORCE; исключение — `partition_maintenance_runs`, см. конец раздела)
 
 **`workspace_sendgrid_keys`** (`0000`) — PK `(workspace_id)` → `organization(id)` CASCADE. Колонки: `encrypted_dek`, `ciphertext`, `iv`, `auth_tag`, `key_mask` (все text NN), `status` text NN dflt `'active'`, `last_checked_at` timestamp NULL, `created_at`/`updated_at` NN.
 
@@ -395,6 +395,8 @@ Enum `flow_run_status` = `('waiting','advancing','completed','exited','ejected')
 
 **`workspace_daily_rollup`** (`0037`) — `id` uuid PK, `workspace_id` NN → CASCADE, `day` date NN, `sent_count`/`delivered_count`/`opened_count`/`clicked_count`/`bounced_count`/`unsubscribed_count` int NN dflt `0`. UNIQUE `(workspace_id, day)` — цель `ON CONFLICT` для обоих путей записи. Таймстемпов нет.
 
+**`partition_maintenance_runs`** (`0038`, **RLS НЕТ**) — платформенная операционная таблица, без `workspace_id` и без тенантных данных; single-row (`id integer PK dflt 1 CHECK (id = 1)`). Колонки: `last_run_at` timestamptz NN, `lookahead_months`/`buffer_alert_threshold_months`/`events_buffer_months`/`send_events_buffer_months`/`buffer_months_remaining` int NN, `events_default_count`/`send_events_default_count` bigint NN, `partitions_created` text[] NN dflt `'{}'`, `last_alert_sent_at` timestamptz NULL (пишет только `apps/api`-сторож, см. §7), `updated_at` timestamptz NN dflt `now()`. Пишет `runPartitionMaintenance` (`packages/db/src/partitions/maintenance-run.ts`) — воркер, ещё не подключённый к `apps/worker/src/server.ts` в этом плане (09-02). Читает `checkPartitionHealthAndAlert` (`apps/api/src/modules/ops/partition-watchdog.ts`) — тоже ещё не подключён к `apps/api/src/server.ts`.
+
 ### 4.3 RLS
 
 **GUC:** `app.current_workspace_id` — константа `TENANT_GUC_KEY` в `packages/db/src/rls.ts`, реэкспорт из `packages/db/src/index.ts`.
@@ -438,12 +440,12 @@ workspace_id = NULLIF(current_setting('app.current_workspace_id', true), '')::uu
 
 | Таблица | Стратегия | Ключ | Партиции | Создано в |
 |---|---|---|---|---|
-| `events` | RANGE | `occurred_at` | `events_2026_07` `['2026-07-01','2026-08-01')`, `events_2026_08` `['2026-08-01','2026-09-01')`, `events_default` (DEFAULT) | `0007`; DEFAULT добавлена в `0010` |
-| `send_events` | RANGE | `occurred_at` | `send_events_2026_07`, `send_events_2026_08`, `send_events_default` (DEFAULT) | `0020` |
+| `events` | RANGE | `occurred_at` | `events_2026_07`…`events_2026_08` (`0007`), `events_2026_09`…`events_2027_06` (`0038`, 10 месяцев подряд, границы — явные UTC-timestamptz), `events_default` (DEFAULT) | `0007`/`0010`/`0038` |
+| `send_events` | RANGE | `occurred_at` | `send_events_2026_07`…`send_events_2026_08` (`0020`), `send_events_2026_09`…`send_events_2027_06` (`0038`), `send_events_default` (DEFAULT) | `0020`/`0038` |
 
-**Кода, создающего будущие партиции, в репозитории нет.** Grep по `PARTITION OF` / `PARTITION BY` / `ATTACH PARTITION` / `DETACH PARTITION` / `pg_partman` / `create_parent` / `run_maintenance` во всех `*.ts`/`*.mjs`/`*.js`/`*.sql` (без `node_modules`, `dist`): вне `packages/db/migrations/` — только doc-комментарии (в `schema/events.ts`, `schema/send-events.ts`, `schema/workspace-daily-rollup.ts:8`, `contact.repository.ts:81` и одном тесте). Нет ни cron-джоба, ни pg_partman, ни воркера обслуживания. `0007` называет это «operational follow-up».
+**09-01 (DB-01/DB-02):** дедлайн 2026-09-01 закрыт миграцией `0038` (catch-up-партиции по июнь 2027 включительно) независимо от того, запускался ли когда-либо воркер. Код, создающий партиции programmatically, теперь есть: `ensurePartitions`/`attachPartitionCheckFirst`/`computeBufferMonths` (`packages/db/src/partitions/ensure-partitions.ts`) — идемпотентная функция, единственный источник партиционного DDL, CHECK-constraint-first на каждом attach (`NOT VALID` → `VALIDATE CONSTRAINT` → `ATTACH PARTITION` → `DROP CONSTRAINT`, одна транзакция на месяц). Константы: `LOOKAHEAD_MONTHS=3`, `BUFFER_ALERT_THRESHOLD_MONTHS=2`, `PARTITION_MAINTENANCE_CRON="0 3 * * *"`. **В этом плане (09-01) функция ещё не вызывается ни из какого репитабл-джоба** — регистрация BullMQ-воркера (`partition-maintenance.worker.ts`, вызов из `apps/worker/src/server.ts`) и вызов из `packages/test-support`'s db-fixture — оба заявлены как работа плана 09-02 и последующих; на момент 09-01 `ensurePartitions` вызывается только из `runPartitionMaintenance` (`maintenance-run.ts`) и из тестов.
 
-**Следствие:** выделенные партиции существуют только на июль и август 2026. С 2026-09-01 все события и все send_events бессрочно падают в DEFAULT-партицию. Это не потеря данных, но неограниченный рост и блокировка будущего `ATTACH PARTITION` без полного скана.
+**Здоровье автоматизации:** `partition_maintenance_runs` (см. 4.2) — платформенная singleton-таблица; `runPartitionMaintenance` пишет туда снапшот на каждый прогон. `apps/api/src/modules/ops/partition-watchdog.ts` — отдельный от воркера процесс-сторож (`evaluatePartitionHealth`/`checkPartitionHealthAndAlert`/`claimAlertSlot`), читает эту таблицу; unhealthy при отсутствующей/устаревшей (>26ч) строке, буфере <2 месяцев или непустой DEFAULT-партиции. Алерт — plain-text письмо через `PLATFORM_SENDGRID_API_KEY` (см. 7), не чаще одного раза в 20 часов на реплику (`claimAlertSlot`, атомарный `UPDATE ... RETURNING`). **Ни воркер, ни сторож ещё не подключены к своим процессам в этом плане** — `startPartitionWatchdog` не вызывается из `apps/api/src/server.ts`.
 
 ### 4.5 Индексы
 
@@ -476,7 +478,7 @@ workspace_id = NULLIF(current_setting('app.current_workspace_id', true), '')::uu
 - Скрипты: `db:generate` → `drizzle-kit generate`, `db:migrate` → `drizzle-kit migrate` (проксируются из root).
 - `scripts/migrate-dev.mjs`: `process.loadEnvFile("../.env")` в try/catch → падает, если `DATABASE_URL` не задан → `execSync("npm run db:migrate")`.
 - **Автоприменение только в dev**, через npm lifecycle: `predev` = `check-env.mjs && migrate-dev.mjs`, отрабатывает перед `dev`. **Ни api, ни worker не вызывают мигратор при старте.** Grep по `db:migrate` / `drizzle-kit migrate` / `migrate(`: только три package.json, `scripts/migrate-dev.mjs:37` и `apps/api/src/test/db-fixture.ts:82`. Как миграции доезжают до не-dev окружения — **не определено**.
-- Журнал: `migrations/meta/_journal.json`, version 7, 38 записей (0–37). Snapshot'ы есть только у **11** миграций (`0000`, `0002`, `0003`, `0005`, `0008`, `0011`, `0016`, `0017`, `0024`, `0025`, `0034`); у остальных **27** — нет.
+- Журнал: `migrations/meta/_journal.json`, version 7, 39 записей (0–38). Snapshot'ы есть только у **11** миграций (`0000`, `0002`, `0003`, `0005`, `0008`, `0011`, `0016`, `0017`, `0024`, `0025`, `0034`); у остальных **28** (включая `0038`) — нет.
 
 ---
 
@@ -697,6 +699,7 @@ Restart-safe: следующий тик просто пересканирует;
 - Worker: **структурированного логирования нет** — только `console.log`/`console.error` в `server.ts` и `pool.on("error")` в `tenant-context`.
 - **Bull Board / UI очередей отсутствует** (не объявлен ни в одном package.json). В комментарии `apps/worker/src/server.ts:20` он упомянут как «future wiring».
 - Метрик и трейсинга нет. HTTP-healthcheck'а у приложения нет (см. 6.1). Контейнерные healthcheck'и в `docker-compose.yml` есть, но это проверки самой инфраструктуры, а не приложения: `pg_isready -U postgres` для `db` и `redis-cli ping` для `redis`.
+- **09-01 (DB-02):** первый регулярный alert-канал вне CI — `apps/api/src/modules/ops/partition-watchdog.ts`, plain-text письмо через тот же `PLATFORM_SENDGRID_API_KEY`/`PLATFORM_MAIL_FROM`, что и системные письма (см. 3.5), но НЕ через `platform-mail`'s HTML-шаблоны. **Функция реализована и покрыта тестами, но ещё не подключена**: `startPartitionWatchdog` не вызывается из `apps/api/src/server.ts`, адрес оператора не читается из `env.ts` — оба явно оставлены плану 09-02 (модуль спроектирован parameter-driven именно для этого разделения). Тело письма — только имена таблиц, число месяцев буфера, счётчики строк в DEFAULT-партициях, `last_run_at`; без workspace_id/contact_id/payload/ключей/connection string.
 - **Единственный регулярный сигнал о состоянии кода — CI** (`.github/workflows/ci.yml`, см. 1.3): четыре job'а — `static`, `test`, `failure-injection`, `e2e` — на каждый push и на каждый PR в `master`. Обязательных из них три: `static`, `test`, `failure-injection`; `e2e` сообщает, но не блокирует. Никакого мониторинга работающей системы это не заменяет: за пределами CI не наблюдается ничего.
 - Отчёт покрытия (`json-summary`) пишется в `./coverage` и потребляется `coverage:gate` и `coverage:ratchet` внутри job'а `test`. Наружу — в дашборд, бэйдж или внешний сервис — он **не** публикуется, история значений нигде не хранится: единственная зафиксированная точка отсчёта — `coverage-baseline.json` в репозитории.
 - Артефакты Playwright (`trace: retain-on-failure`) создаются в job'е `e2e`, но `actions/upload-artifact` не подключён — при падении трейс остаётся на раннере и пропадает вместе с ним.
