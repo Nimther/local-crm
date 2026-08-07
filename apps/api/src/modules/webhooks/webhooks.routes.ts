@@ -54,46 +54,80 @@ export async function registerWebhookRoutes(fastify: FastifyInstance): Promise<v
     }
   );
 
-  fastify.post("/webhooks/sendgrid/:pathToken", async (request, reply) => {
-    const { pathToken } = request.params as { pathToken: string };
+  fastify.post(
+    "/webhooks/sendgrid/:pathToken",
+    {
+      // SEC-11/T-10-12-02: this route had NO rate-limit config before this
+      // plan, and `global: false` on the app-root registration (server.ts)
+      // means "no config" is the same as "not limited at all" -- adding
+      // this block is what makes the webhook surface limited in the first
+      // place, not merely what tunes an existing limit.
+      //
+      // It gets its OWN bucket (a distinct child store, keyed by this
+      // route's method+URL -- see @fastify/rate-limit's RedisStore.child())
+      // rather than sharing config.rateLimit with any session-authenticated
+      // route, so a flood on this PUBLIC, unauthenticated-until-signature-
+      // verified surface cannot consume the allowance the invite-accept or
+      // contacts/events ingest routes depend on, and vice versa.
+      //
+      // Sizing: SendGrid's Event Webhook batches multiple events into one
+      // POST rather than posting per-event, and documents batching by size
+      // (not a fixed interval) -- so the number to size against is "how
+      // often can one POST land," not "how many events per second." A
+      // single tenant mid-broadcast, with opens/clicks arriving in a burst
+      // right after send, could plausibly produce a new batch every couple
+      // of seconds; 100 requests / 10 seconds (10/s sustained) is an order
+      // of magnitude above that, which is the headroom this number is
+      // trying to buy. If this ever fires against genuine SendGrid traffic,
+      // that is a signal the assumption above was wrong, not that the
+      // limit is merely "a bit low."
+      config: { rateLimit: { max: 100, timeWindow: "10 seconds" } },
+    },
+    async (request, reply) => {
+      const { pathToken } = request.params as { pathToken: string };
 
-    const endpoint = await findWebhookEndpointByToken(pathToken);
-    if (!endpoint || !endpoint.publicKey) {
-      // Generic 404 -- covers both "no such pathToken" and "provisioned but
-      // no public key yet" identically, so neither state is distinguishable
-      // from the outside (T-05-03).
-      return reply.code(404).send();
+      const endpoint = await findWebhookEndpointByToken(pathToken);
+      if (!endpoint || !endpoint.publicKey) {
+        // Generic 404 -- covers both "no such pathToken" and "provisioned but
+        // no public key yet" identically, so neither state is distinguishable
+        // from the outside (T-05-03).
+        return reply.code(404).send();
+      }
+
+      const rawBody = request.body as Buffer;
+      const signature = request.headers["x-twilio-email-event-webhook-signature"] as
+        | string
+        | undefined;
+      const timestamp = request.headers["x-twilio-email-event-webhook-timestamp"] as
+        | string
+        | undefined;
+
+      const isValid = verifyWebhookSignature(endpoint.publicKey, rawBody, signature, timestamp);
+      const isFresh = isWebhookTimestampFresh(timestamp, env.WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS);
+      if (!isValid || !isFresh) {
+        // Fail closed (T-05-01, T-10-11-01..04): a bad signature and a
+        // stale/future/malformed/missing timestamp all take this SAME
+        // return -- no JSON.parse, no enqueue, no distinguishing message.
+        return reply.code(400).send();
+      }
+
+      let events: unknown[];
+      try {
+        const parsed: unknown = JSON.parse(rawBody.toString("utf8"));
+        events = Array.isArray(parsed) ? parsed : [parsed];
+      } catch {
+        // Should never happen for a genuine SendGrid request (the signature
+        // covers the exact raw bytes, so a signature-valid body is
+        // well-formed JSON by construction) -- defensive-only fail-closed
+        // path, still no enqueue.
+        return reply.code(400).send();
+      }
+
+      await enqueueWebhookBatch(endpoint.workspaceId, events);
+
+      // Ack fast (RESEARCH.md Pattern 2) -- all real processing happens in
+      // apps/worker/src/queues/webhook-events.worker.ts.
+      return reply.code(200).send();
     }
-
-    const rawBody = request.body as Buffer;
-    const signature = request.headers["x-twilio-email-event-webhook-signature"] as string | undefined;
-    const timestamp = request.headers["x-twilio-email-event-webhook-timestamp"] as string | undefined;
-
-    const isValid = verifyWebhookSignature(endpoint.publicKey, rawBody, signature, timestamp);
-    const isFresh = isWebhookTimestampFresh(timestamp, env.WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS);
-    if (!isValid || !isFresh) {
-      // Fail closed (T-05-01, T-10-11-01..04): a bad signature and a
-      // stale/future/malformed/missing timestamp all take this SAME
-      // return -- no JSON.parse, no enqueue, no distinguishing message.
-      return reply.code(400).send();
-    }
-
-    let events: unknown[];
-    try {
-      const parsed: unknown = JSON.parse(rawBody.toString("utf8"));
-      events = Array.isArray(parsed) ? parsed : [parsed];
-    } catch {
-      // Should never happen for a genuine SendGrid request (the signature
-      // covers the exact raw bytes, so a signature-valid body is
-      // well-formed JSON by construction) -- defensive-only fail-closed
-      // path, still no enqueue.
-      return reply.code(400).send();
-    }
-
-    await enqueueWebhookBatch(endpoint.workspaceId, events);
-
-    // Ack fast (RESEARCH.md Pattern 2) -- all real processing happens in
-    // apps/worker/src/queues/webhook-events.worker.ts.
-    return reply.code(200).send();
-  });
+  );
 }
