@@ -52,7 +52,19 @@ its terminal/process), then re-run.
    connection string, which carries credentials) as its first line of
    output. Read it before doing anything else. Do not run this against a
    database you have not verified.
-2. **Record the current state**, so you can verify conservation afterward:
+2. **Set `PARTITION_RELOCATION_ADMIN_DATABASE_URL` (Phase 10, SEC-01/SEC-02)
+   before running the command.** This is a SEPARATE connection string from
+   `DATABASE_URL`, for a Postgres role capable of bypassing row-level
+   security (the cluster superuser, or an operator-managed role with
+   `BYPASSRLS`) — the command uses it ONLY for the final `ATTACH PARTITION`
+   step of each month it relocates, which needs to see every tenant's
+   `contacts`/`sends` rows at once to satisfy Postgres's own inherited-FK
+   re-validation. The command fails fast, before opening either connection,
+   if this variable is unset — you cannot accidentally run a partial
+   relocation without it. **Never set this variable anywhere except your own
+   shell for this one invocation** — it must never appear in `apps/api`'s or
+   `apps/worker`'s environment.
+3. **Record the current state**, so you can verify conservation afterward:
 
    ```sql
    SELECT count(*) FROM events_default;
@@ -68,9 +80,11 @@ its terminal/process), then re-run.
 
 ## The command
 
-From the repository root:
+From the repository root, with `PARTITION_RELOCATION_ADMIN_DATABASE_URL` set
+in your shell (see **Pre-flight check** above):
 
 ```bash
+export PARTITION_RELOCATION_ADMIN_DATABASE_URL="postgres://<elevated-role>:<password>@<host>:<port>/<database>"
 npm run relocate:default-partition-rows
 ```
 
@@ -100,7 +114,12 @@ the procedure:
    `VALIDATE CONSTRAINT` scan under `SHARE UPDATE EXCLUSIVE` (concurrent
    reads and writes to `DEFAULT` continue normally during this scan), then a
    scan-free `ATTACH PARTITION` (fast, because Postgres trusts the
-   just-validated constraint instead of re-scanning `DEFAULT` itself).
+   just-validated constraint instead of re-scanning `DEFAULT` itself). This
+   final `ATTACH PARTITION` statement runs on the elevated
+   `PARTITION_RELOCATION_ADMIN_DATABASE_URL` connection (step 2 of the
+   pre-flight check) — Postgres re-validates the inherited foreign keys to
+   `contacts`/`sends` against the just-populated child, which needs
+   visibility into rows across every tenant at once.
 
 At no point does ingestion into `events` or `send_events` block for the
 duration of the move. The only locks held are: row-level locks on the 500
