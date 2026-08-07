@@ -76,6 +76,10 @@ const baseRequired = [
   // credential). Presence-only check here; apps/worker/src/server.ts
   // enforces the fail-fast contract at boot.
   "SCAN_DATABASE_URL",
+  // Phase 10 (SEC-05, D-04): the API-process-only DSN better-auth's adapter
+  // connects with, under the `mega_crm_auth` role -- presence-only check
+  // here; apps/api/src/env.ts enforces the non-empty contract.
+  "AUTH_DATABASE_URL",
   // 04-16 gap closure: read lazily (and thrown on) inside
   // packages/delivery-core/src/unsubscribe-token.ts at send-time -- every
   // broadcast/test send signs a List-Unsubscribe token, so a missing value

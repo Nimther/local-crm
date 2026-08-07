@@ -16,6 +16,7 @@ const API_SRC_DIR = path.resolve(__dirname, "..");
 function baseValidEnv(): Record<string, string> {
   return {
     DATABASE_URL: "postgres://user:pass@localhost:5432/megacrm_test",
+    AUTH_DATABASE_URL: "postgres://mega_crm_auth:pass@localhost:5432/megacrm_test",
     REDIS_URL: "redis://localhost:6379/1",
     BETTER_AUTH_SECRET: "0123456789abcdef0123",
     BETTER_AUTH_URL: "http://localhost:4000",

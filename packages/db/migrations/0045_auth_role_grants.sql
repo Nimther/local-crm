@@ -69,3 +69,41 @@ REVOKE ALL PRIVILEGES ON organization, member, invitation, "user" FROM mega_crm_
 -- etc.), which runs on the mega_crm_auth connection, not this one.
 GRANT SELECT ON organization, member, invitation, "user" TO mega_crm_app;
 GRANT UPDATE ON organization TO mega_crm_app;
+
+-- Execution-discovered addition (deviation Rule 1/3, not part of the
+-- checkpoint's application-level audit): Postgres enforces every foreign key
+-- referencing "user" (account.userId, session.userId, member.userId,
+-- invitation.inviterId) with an internal row-locking check
+-- (`SELECT ... FOR KEY SHARE`) that runs under the REFERENCING table's OWNER
+-- -- mega_crm_app owns account/session/member/invitation, not
+-- mega_crm_auth -- regardless of which role's connection performs the
+-- INSERT. That lock acquisition requires SELECT *and* UPDATE on "user", not
+-- SELECT alone: verified empirically (a plain "SELECT ... FOR KEY SHARE OF
+-- x" against "user" fails with `permission denied for table user` for a
+-- role holding only SELECT, and a REFERENCES-only grant does not substitute
+-- for it either). Without this grant, every mega_crm_auth insert into
+-- account/session/member/invitation -- i.e. signup, login-session creation,
+-- workspace creation and invite creation -- fails with a 42501 from deep
+-- inside better-auth's adapter, breaking the SPEC R3 acceptance gate this
+-- migration exists to satisfy. `mega_crm_app` gains no new application-level
+-- read/write surface from this grant: no first-party source performs
+-- `UPDATE "user"` outside better-auth's own (mega_crm_auth-backed) adapter,
+-- and the plan 10-09 checkpoint's SELECT-only conclusion for "user" is
+-- unchanged as an application-level fact -- this UPDATE grant exists purely
+-- to satisfy Postgres's own FK-enforcement mechanism, which the plan-time
+-- audit of live query sites had no way to surface (it audits
+-- apps/api/src, not Postgres's constraint-trigger implementation).
+GRANT UPDATE ON "user" TO mega_crm_app;
+
+-- Execution-discovered addition (deviation Rule 1/3), a DDL-time sibling of
+-- the runtime fix above: `ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY
+-- REFERENCES organization(id)` requires the issuing role to hold REFERENCES
+-- on "organization" -- distinct from the SELECT+UPDATE needed for the
+-- runtime RI check above, and checked only at constraint-creation time.
+-- Migrations apply as `mega_crm_app`, and `organization.id` is the FK target
+-- of every one of the 22 tenant tables (see header comment) plus `member`
+-- and `invitation` -- any future migration that needs to add, drop or
+-- re-create a foreign key referencing "organization" needs this grant to
+-- issue that DDL at all. REFERENCES is a schema-authoring privilege, not a
+-- data-access one: it grants no ability to read or write rows.
+GRANT REFERENCES ON organization TO mega_crm_app;

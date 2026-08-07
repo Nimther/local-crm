@@ -1,6 +1,6 @@
 import path from "node:path";
 
-import { getScanTestDatabaseUrl } from "./db-fixture.js";
+import { getAuthTestDatabaseUrl, getScanTestDatabaseUrl } from "./db-fixture.js";
 import { assertTestDatabaseUrl } from "./guard.js";
 import { createEphemeralDatabase, dropEphemeralDatabase } from "./provision-db.js";
 
@@ -56,9 +56,15 @@ export default async function setup(project?: { name?: string }): Promise<() => 
   // Phase 10 (SEC-01/D-02): publish the scan-role DSN for the SAME ephemeral
   // database. vitest forks its test workers AFTER globalSetup returns and
   // hands them the parent's process.env, so every workspace's tests inherit
-  // this without constructing their own DSN. Deliberately no auth DSN here --
-  // plan 10-09 adds that once the auth role first has grants.
+  // this without constructing their own DSN.
   process.env.SCAN_DATABASE_URL = getScanTestDatabaseUrl();
+
+  // Phase 10 (SEC-05/D-04, plan 10-09): publish the auth-role DSN for the
+  // SAME ephemeral database, now that migration 0045 has granted
+  // mega_crm_auth its privileges. apps/api/src/env.ts requires
+  // AUTH_DATABASE_URL to boot, so every API-workspace test that constructs
+  // the server needs this published before buildServer() runs.
+  process.env.AUTH_DATABASE_URL = getAuthTestDatabaseUrl();
 
   return async function teardown(): Promise<void> {
     await dropEphemeralDatabase(databaseName, adminDsn);

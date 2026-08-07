@@ -3,6 +3,14 @@ import { z } from "zod";
 export const envSchema = z
   .object({
     DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
+    // 10-09 (SEC-05, D-04): better-auth's drizzleAdapter pool connects as the
+    // dedicated `mega_crm_auth` login role on its OWN DSN, not `mega_crm_app`
+    // -- the secret-bearing auth tables (session/account/verification) are
+    // reachable only through this credential as of migration 0045. Deliberately
+    // NO cross-workspace-scan variable here -- plan 10-01's P3 negative test
+    // (apps/api/src/__tests__/env-schema.test.ts) asserts this schema's
+    // source never names that variable.
+    AUTH_DATABASE_URL: z.string().min(1, "AUTH_DATABASE_URL is required"),
     // 02-05: BullMQ queue backend (event ingestion + CSV import); the API
     // refuses to boot without a configured Redis, same pattern as DATABASE_URL.
     REDIS_URL: z.string().min(1, "REDIS_URL is required"),
