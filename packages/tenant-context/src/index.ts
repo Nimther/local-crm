@@ -98,3 +98,72 @@ export async function withTenantTransaction<T>(
     client.release(releaseWithError);
   }
 }
+
+/**
+ * Phase 10 plan 10-07 (SEC-03/SEC-04, migration 0044): the all-zeros UUID.
+ * `gen_random_uuid()` cannot produce this value (it is not a valid v4 UUID),
+ * so it matches no real `organization.id` and therefore no real workspace's
+ * rows in any `workspace_isolation`-protected table.
+ */
+export const PRE_TENANT_LOOKUP_SENTINEL_WORKSPACE_ID = "00000000-0000-0000-0000-000000000000";
+
+/**
+ * Runs `fn` inside a transaction whose `app.current_workspace_id` is set to
+ * the sentinel above -- for the two callers (API-key auth, webhook receipt)
+ * that must query a tenant table BEFORE any real workspace is known.
+ *
+ * Migration 0044 made every `workspace_isolation` policy fail-closed: a
+ * connection that has never set `app.current_workspace_id` at all now
+ * THROWS (`unrecognized configuration parameter`) rather than silently
+ * returning zero rows. `lookupApiKeyById` and `findWebhookEndpointByToken`
+ * used to rely on exactly that old fail-open behaviour to survive querying
+ * a tenant table with no workspace in scope; under the fail-closed
+ * predicate they would now throw on every call, not just unknown ids.
+ * `withPreTenantLookup` restores an evaluable (non-throwing) predicate
+ * without depending on the fail-open gap that no longer exists.
+ *
+ * What this grants: NOTHING by itself. Setting the tenant GUC to a value
+ * that matches no real workspace makes `workspace_isolation`'s predicate
+ * evaluate to `false` instead of raising -- the query returns zero rows for
+ * every ordinary tenant-scoped read run inside this helper. Every row a
+ * caller of this helper actually SEES is granted by a SECOND, narrowly-keyed
+ * permissive policy specific to that table (`api_key_runtime_lookup` on
+ * `workspace_api_keys`, `webhook_endpoint_runtime_lookup` on
+ * `workspace_webhook_endpoints`) -- Postgres combines all permissive
+ * policies for a role with OR, so that second policy's own predicate (an
+ * exact id/token match against a caller-supplied, transaction-local GUC) is
+ * what actually grants the one row the caller already knows how to name.
+ * Adding a new caller of this helper therefore requires adding such a
+ * narrowly-keyed policy on the target table -- calling this helper alone
+ * grants access to nothing.
+ *
+ * Mirrors `withTenantTransaction`'s exact BEGIN/COMMIT/ROLLBACK and
+ * `client.release(releaseWithError)` discipline -- deliberately NOT
+ * AsyncLocalStorage-scoped like the tenant context above: there is no
+ * "current pre-tenant lookup" to leak across concurrent lookups the way a
+ * real workspaceId could.
+ */
+export async function withPreTenantLookup<T>(
+  fn: (client: PoolClient) => Promise<T>
+): Promise<T> {
+  const client = await pool.connect();
+  let releaseWithError: Error | undefined;
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT set_config('app.current_workspace_id', $1, true)", [
+      PRE_TENANT_LOOKUP_SENTINEL_WORKSPACE_ID,
+    ]);
+    const result = await fn(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (err) {
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackErr) {
+      releaseWithError = rollbackErr instanceof Error ? rollbackErr : new Error(String(rollbackErr));
+    }
+    throw err;
+  } finally {
+    client.release(releaseWithError);
+  }
+}

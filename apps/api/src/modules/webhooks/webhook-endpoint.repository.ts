@@ -1,5 +1,4 @@
-import { pool } from "../../db.js";
-import { getWorkspaceId, withTenantTransaction } from "../../middleware/tenant-context.js";
+import { getWorkspaceId, withPreTenantLookup, withTenantTransaction } from "../../middleware/tenant-context.js";
 
 export interface WebhookEndpointLookupRow {
   workspaceId: string;
@@ -40,6 +39,15 @@ export interface UpsertWebhookEndpointInput {
  * possessing the specific unguessable token embedded in the webhook URL --
  * this grants no ability to enumerate or scan other tenants' rows.
  *
+ * Phase 10 plan 10-07 (SEC-03/SEC-04, migration 0044): `workspace_isolation`
+ * is now fail-closed, so a connection with no tenant context at all would
+ * THROW rather than silently exclude every row -- this function runs inside
+ * `withPreTenantLookup`, which sets the tenant GUC to a sentinel that
+ * matches no real workspace, making the predicate evaluate to `false`
+ * instead of raising. `withPreTenantLookup` grants nothing by itself; the
+ * `webhook_endpoint_runtime_lookup` policy above is what actually grants
+ * this one row.
+ *
  * `publicKey` is safe to return as-is (not a secret, RESEARCH.md Assumption
  * A1) -- the caller (webhooks.routes.ts) uses it directly for ECDSA
  * verification.
@@ -47,33 +55,15 @@ export interface UpsertWebhookEndpointInput {
 export async function findWebhookEndpointByToken(
   pathToken: string
 ): Promise<WebhookEndpointLookupRow | null> {
-  const client = await pool.connect();
-  let releaseWithError: Error | undefined;
-  try {
-    await client.query("BEGIN");
+  return withPreTenantLookup(async (client) => {
     await client.query("SELECT set_config('app.webhook_path_token', $1, true)", [pathToken]);
     const { rows } = await client.query<WebhookEndpointLookupRow>(
       `SELECT workspace_id as "workspaceId", public_key as "publicKey"
        FROM workspace_webhook_endpoints WHERE path_token = $1`,
       [pathToken]
     );
-    await client.query("COMMIT");
     return rows[0] ?? null;
-  } catch (err) {
-    try {
-      await client.query("ROLLBACK");
-    } catch (rollbackErr) {
-      // The ROLLBACK itself failed -- the connection is dead. Passing the
-      // error to `client.release()` below tells node-postgres to DESTROY
-      // this client instead of returning it to the pool, so the next
-      // checkout on this hot public-webhook-receiver path never inherits a
-      // broken connection (WR-09 precedent).
-      releaseWithError = rollbackErr instanceof Error ? rollbackErr : new Error(String(rollbackErr));
-    }
-    throw err;
-  } finally {
-    client.release(releaseWithError);
-  }
+  });
 }
 
 /**

@@ -2,7 +2,7 @@ import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ensureTestDbMigrated, getTestDatabaseUrl } from "@mega-crm/test-support";
 
-import { getWorkspaceId, pool, withTenant, withTenantTransaction } from "../index.js";
+import { getWorkspaceId, pool, withPreTenantLookup, withTenant, withTenantTransaction } from "../index.js";
 
 /**
  * 08-16 (QG-03) — the tenant context and the RLS session variable.
@@ -139,6 +139,27 @@ describe("tenant context (RLS session variable)", () => {
       }),
     );
     expect(survived, "the insert must not have survived the throw").toBe(0);
+  });
+
+  it("withPreTenantLookup's sentinel grants nothing beyond letting the predicate evaluate -- zero contacts rows visible", async () => {
+    // Seed a real contacts row under a real workspace first, so "zero rows
+    // visible" is a meaningful claim, not vacuously true on an empty table.
+    await withTenant(WORKSPACE_A, () =>
+      withTenantTransaction((client) =>
+        client.query(
+          `INSERT INTO contacts (workspace_id, email, subscription_status) VALUES ($1, $2, 'subscribed')`,
+          [WORKSPACE_A, `sentinel-fixture-${Date.now().toString(36)}@fixture.test`],
+        ),
+      ),
+    );
+
+    const visible = await withPreTenantLookup((client) =>
+      client.query(`SELECT id FROM contacts`).then((res) => res.rows.length),
+    );
+    expect(
+      visible,
+      "the sentinel matches no real organization.id -- it must grant no rows, only make the predicate evaluable",
+    ).toBe(0);
   });
 });
 
@@ -330,4 +351,5 @@ describe("the fail-closed RLS contract (SEC-03/SEC-04)", () => {
       ).toBe(false);
     }
   });
+
 });

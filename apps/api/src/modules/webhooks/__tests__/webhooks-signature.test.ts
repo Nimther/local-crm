@@ -4,6 +4,7 @@ import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { buildServer } from "../../../server.js";
 import { ensureTestDbMigrated, getTestDatabaseUrl } from "../../../test/db-fixture.js";
 import { webhookEventsQueue } from "../enqueue.js";
+import { findWebhookEndpointByToken } from "../webhook-endpoint.repository.js";
 
 /**
  * POST /webhooks/sendgrid/:pathToken (WBHK-01, T-05-01/02/03): drives the
@@ -220,5 +221,29 @@ describe("POST /webhooks/sendgrid/:pathToken (WBHK-01)", () => {
     });
 
     expect(res.statusCode).toBe(404);
+  });
+
+  // ---------------------------------------------------------------------
+  // Phase 10 plan 10-07 (SEC-03/SEC-04): findWebhookEndpointByToken runs
+  // through withPreTenantLookup under migration 0044's fail-closed
+  // workspace_isolation predicate. The HTTP-level tests above already
+  // exercise this indirectly (valid token -> 200, unknown token -> 404);
+  // these two assert the repository function's own return contract
+  // directly.
+  // ---------------------------------------------------------------------
+
+  it("findWebhookEndpointByToken: returns the matching endpoint for a valid path token after migration 0044", async () => {
+    const workspace = await freshWorkspace("wh-repo-lookup");
+    const pathToken = `tok-repo-lookup-${randomUUID()}`;
+    await provisionEndpoint(workspace.id, pathToken, PUBLIC_KEY);
+
+    const row = await findWebhookEndpointByToken(pathToken);
+    expect(row).not.toBeNull();
+    expect(row?.workspaceId).toBe(workspace.id);
+    expect(row?.publicKey).toBe(PUBLIC_KEY);
+  });
+
+  it("findWebhookEndpointByToken: returns null for an unknown token", async () => {
+    await expect(findWebhookEndpointByToken(`unknown-repo-${randomUUID()}`)).resolves.toBeNull();
   });
 });
