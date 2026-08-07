@@ -147,6 +147,7 @@ CI — **единственное** место, где проверяется к
 | `zod` | `4.4.3` |
 | `pino` | `10.3.1` |
 | `pino-http` | `11.0.0` — **объявлен, в коде не используется** (grep по `apps/api/src`: 0 вхождений) |
+| `@mega-crm/redaction` | `0.1.0` — внутренний workspace-пакет, **без runtime-зависимостей** (10-13, SEC-13). `apps/api/src/logger.ts` потребляет его compiled-форму `PINO_REDACT_OPTIONS` вместо инлайн-массива путей (см. §7) |
 | `@sendgrid/mail` | `8.1.6` — используется **только** для платформенной почты (`platform-mail/client.ts`) |
 | `@sendgrid/eventwebhook` | `^8.0.0` — верификация подписи вебхука |
 | `csv-parse` | `7.0.1` |
@@ -161,9 +162,10 @@ CI — **единственное** место, где проверяется к
 | `ioredis` | `5.11.0` |
 | `pg` | `8.22.0` |
 | `rate-limiter-flexible` | `11.2.0` |
+| `@mega-crm/redaction` | `0.1.0` — внутренний workspace-пакет, **без runtime-зависимостей** (10-13, SEC-13). `apps/worker/src`'s `scrubbedConsole` (см. §7) — единственный путь для прямых `console.*`-вызовов вне `__tests__` |
 | dev: `@types/node`, `@types/pg`, `tsx`, `typescript`, `vitest` `4.1.9`, `@vitest/coverage-v8` `^4.1.9` (08-11) |
 
-Внутренние: `@mega-crm/{contacts-core,db,delivery-core,flows-core,kms,segments-core,shared-schemas,tenant-context}`.
+Внутренние: `@mega-crm/{contacts-core,db,delivery-core,flows-core,kms,redaction,segments-core,shared-schemas,tenant-context}`.
 
 ### 2.4 `apps/web`
 
@@ -191,6 +193,7 @@ CI — **единственное** место, где проверяется к
 |---|---|
 | `packages/db` | `drizzle-orm` `0.45.2`, `pg` `8.22.0`; dev: `drizzle-kit` `0.31.10`, `vitest` `4.1.9`, `@mega-crm/test-support` `0.1.0` (обе добавлены в 08-09 — у пакета появилась тестовая дорожка с `vitest.config.ts` и `globalSetup`, под два прогона цепочки миграций), `tsx` `^4.19.2` (09-04 — единственный runtime для оператор-CLI `scripts/relocate-default-partition-rows.ts`, npm-скрипт `relocate:default-partition-rows`; тот же диапазон версии уже был закреплён в `apps/api`/`apps/worker`, здесь — новое использование в третьем workspace) |
 | `packages/kms` | `@aws-sdk/client-kms` `3.1079.0` |
+| `packages/redaction` | **нет runtime-зависимостей** (10-13, SEC-13). dev: `pino` `10.3.1` (использован только в `rules-parity.test.ts`, чтобы прогнать реальный Pino-инстанс через `PINO_REDACT_OPTIONS` и сравнить с `scrub()` — devDependency, не runtime), `typescript` `^5.9.3`, `vitest` `4.1.9`. Потребители: `apps/api`, `apps/worker` — оба объявляют `@mega-crm/redaction` `0.1.0` в `dependencies` (§2.2/§2.3) |
 | `packages/delivery-core` | `@mega-crm/tenant-context`, `pg` |
 | `packages/contacts-core` | `@mega-crm/delivery-core`, `pg`, `pino` `10.3.1` |
 | `packages/segments-core` | нет runtime-зависимостей |
@@ -824,7 +827,12 @@ Repeatable-скан `flow-segment-sweep` (15 мин, §5.1/§5.2) — перио
 ## 7. Наблюдаемость
 
 - API: pino (`apps/api/src/logger.ts`) как `loggerInstance` Fastify. `pino-http` объявлен, но не подключён.
-- Worker: **структурированного логирования нет** — только `console.log`/`console.error` в `server.ts` и `pool.on("error")` в `tenant-context`.
+- Worker: **структурированного логирования по-прежнему нет** (Phase 15/OPS-06 остаётся местом, где это меняется) — но с 10-13 каждый прямой `console.*`-вызов в `apps/worker/src` (вне `__tests__`) идёт через `scrubbedConsole` (см. ниже), а не голый `console.log`/`console.error`. Исключение — `pool.on("error")` в `packages/tenant-context/src/index.ts`: осознанно остался на голом `console.error` (задокументировано в самом файле) — аргумент там всегда driver-level `Error` без tenant-payload, а пакет держится dependency-light, так как импортируется обоими приложениями и каждым воркером очереди.
+- **10-13 (SEC-13): единый источник правил редактирования, `@mega-crm/redaction`** (внутренний workspace-пакет, без runtime-зависимостей — §2.5). Одна таблица правил (`packages/redaction/src/rules.ts`, `REDACTION_RULES`) компилируется в ДВЕ формы:
+  - `PINO_REDACT_OPTIONS` (`pino-redact.ts`) — список путей с фиксированной глубиной (`field`, `*.field`, `*.*.field`), тот же паттерн, что был инлайн в `apps/api/src/logger.ts` до этого плана. Потребитель — **только `apps/api`**: `logger.ts` передаёт это как `redact` опцию pino. Не достаёт до произвольной глубины и матчит только по имени поля, не по значению.
+  - `scrub(value)` (`scrub.ts`) — рекурсивный обходчик без ограничения глубины, редактирует и по имени ключа (case-insensitive), и по паттерну значения (форма SendGrid-ключа `SG.…`, email, телефон) — бэкстоп для freeform-payload'ов (event properties, webhook body), где имя поля не предсказуемо заранее. Потребитель — **`apps/worker`** через `scrubbedConsole` (`scrubbed-console.ts`) — обёртка над `console.log`/`error`/`warn`/`info`/`debug`, пропускающая каждый аргумент через `scrub()` (включая `Error`-объекты: `name`/`message`/`stack` сохраняются, `message` и собственные enumerable-свойства редактируются — иначе `Object.entries(new Error(...))` схлопнул бы ошибку в `{}`).
+  - Категории правил: секретные имена полей (`sendgridKey`, `apiKey`, `password`, `token`, `secret`, `apiSecret`, `clientSecret`, `refreshToken`, `sessionToken`, `accessToken`, `authorization`, `cookie`, `plaintextDek`) и PII-имена (`email`, `phone`) — обе покрыты и списком путей, и рекурсивным обходом; плюс паттерны значений (форма ключа SendGrid, email, телефон), которые может применить только `scrub()`. Parity-тест (`rules-parity.test.ts`) гоняет один payload через реальный Pino с `PINO_REDACT_OPTIONS` и через `scrub()` и сравнивает результат; отдельный тест утверждает, что список путей всё ещё покрывает все четыре поля, которые редактировал прежний инлайн-массив `apps/api/src/logger.ts` (без сужения покрытия при централизации).
+  - **Phase 15's Sentry `beforeSend`-хук ожидается как третий потребитель `scrub()`** — заведён здесь именно для того, чтобы будущий читатель не завёл там второй список правил.
 - **Bull Board / UI очередей отсутствует** (не объявлен ни в одном package.json). В комментарии `apps/worker/src/server.ts:20` он упомянут как «future wiring».
 - Метрик и трейсинга нет. HTTP-healthcheck'а у приложения нет (см. 6.1). Контейнерные healthcheck'и в `docker-compose.yml` есть, но это проверки самой инфраструктуры, а не приложения: `pg_isready -U postgres` для `db` и `redis-cli ping` для `redis`.
 - **09-01→09-02 (DB-01/DB-02): партиционный health-сигнал и его единственный push-канал.** `partition_maintenance_runs` (§4.2) хранит один snapshot-ряд, который каждый прогон `partition-maintenance`-воркера (§5.8) перезаписывает: `last_run_at`, буфер месяцев по каждой из двух таблиц + агрегированный минимум, оба счётчика строк в DEFAULT-партициях, список `partitions_created`, `last_alert_sent_at`. Сигнал **персистентен в Postgres и читаем чем угодно**, что умеет в неё запросить — отдельного API/дашборда над ним нет.
@@ -834,7 +842,7 @@ Repeatable-скан `flow-segment-sweep` (15 мин, §5.1/§5.2) — перио
 - Отчёт покрытия (`json-summary`) пишется в `./coverage` и потребляется `coverage:gate` и `coverage:ratchet` внутри job'а `test`. Наружу — в дашборд, бэйдж или внешний сервис — он **не** публикуется, история значений нигде не хранится: единственная зафиксированная точка отсчёта — `coverage-baseline.json` в репозитории.
 - Артефакты Playwright (`trace: retain-on-failure`) создаются в job'е `e2e`, но `actions/upload-artifact` не подключён — при падении трейс остаётся на раннере и пропадает вместе с ним.
 - **Phase 10, план 10-12 (SEC-11/SEC-08): единственный сигнал деградации распределённого rate-лимитера.** `apps/api/src/server.ts` вешает `error`-листенер на `ioredis`-клиент лимитера (§6.1) и логирует через тот же pino-инстанс (`apps/api/src/logger.ts`), уровень `error`, сообщение `"rate-limiter Redis client error -- requests are proceeding UNTHROTTLED (fail-open, SEC-08)"` с объектом `{ err }`. Это единственное место, где недоступность store лимитера становится наблюдаемой — `skipOnError: true` (§6.1) сам по себе делает деградацию немой с точки зрения ответа API (запрос просто проходит нелимитированным). Дедуп/trottling самого лога нет — при затяжном сбое store каждая неудачная попытка реконнекта (по `retryStrategy`, до 3 попыток) пишет отдельную строку; агрегация логов и алертинг по этой строке — Phase 15 (см. общую оговорку по наблюдаемости ниже).
-- **Phase 10 (SEC-09/WR-01): drop-сигнал `webhook.sibling_workspace_event_dropped`** (§5.9). Тот же `console.log`-путь, что и остальная наблюдаемость воркера (структурированного логирования нет, см. выше) — план 10-13's общая scrubbing-обёртка и Phase 15's структурированное логирование заменят его позже, не в этой фазе. Вызывается `dropSiblingWorkspaceEvents` в `webhook-events.worker.ts`, один раз на владеющий воркспейс за батч. Точный набор полей payload — **ровно три**, никаких других: `receivingWorkspaceId` (uuid принимающего воркспейса), `owningWorkspaceId` (uuid воркспейса, которому реально принадлежит `send_id`), `count` (число событий этого владельца, отброшенных в этом батче). Путь дропа не эмитит содержимое payload'а ни в каком виде — ни `send_id`, ни тип события, ни тело письма, ни email/идентификатор контакта.
+- **Phase 10 (SEC-09/WR-01): drop-сигнал `webhook.sibling_workspace_event_dropped`** (§5.9). Тот же `console.log`-путь, что и остальная наблюдаемость воркера — с 10-13 идёт через `scrubbedConsole` (см. выше), как и весь остальной прямой console-вывод `apps/worker`; структурированное логирование (Phase 15/OPS-06) всё ещё впереди. Вызывается `dropSiblingWorkspaceEvents` в `webhook-events.worker.ts`, один раз на владеющий воркспейс за батч. Точный набор полей payload — **ровно три**, никаких других: `receivingWorkspaceId` (uuid принимающего воркспейса), `owningWorkspaceId` (uuid воркспейса, которому реально принадлежит `send_id`), `count` (число событий этого владельца, отброшенных в этом батче). Путь дропа не эмитит содержимое payload'а ни в каком виде — ни `send_id`, ни тип события, ни тело письма, ни email/идентификатор контакта. Ни одно из трёх полей не совпадает по имени ни с одним `keyRule` из `REDACTION_RULES`, так что `scrub()` пропускает их как есть — намеренно: это ровно то, что делает payload безопасным для лога в первую очередь.
 
 ---
 
