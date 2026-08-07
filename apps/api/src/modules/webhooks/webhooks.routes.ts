@@ -1,7 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import { findWebhookEndpointByToken } from "./webhook-endpoint.repository.js";
-import { verifyWebhookSignature } from "./signature-verify.js";
+import { verifyWebhookSignature, isWebhookTimestampFresh } from "./signature-verify.js";
 import { enqueueWebhookBatch } from "./enqueue.js";
+import { env } from "../../env.js";
 
 /**
  * Public SendGrid Event Webhook receiver (WBHK-01, D-14/D-16). Registered
@@ -9,7 +10,7 @@ import { enqueueWebhookBatch } from "./enqueue.js";
  * SendGrid's own delivery infrastructure must be able to reach this with
  * zero platform context beyond the per-tenant `:pathToken` URL segment.
  *
- * Threat model (T-05-01/T-05-02/T-05-03):
+ * Threat model (T-05-01/T-05-02/T-05-03, T-10-11-01..06):
  * - Unknown `pathToken` -> generic 404 BEFORE any signature attempt -- no
  *   distinction from "valid token, bad signature" beyond this point avoids
  *   leaking which tokens are provisioned (no enumeration oracle).
@@ -21,13 +22,22 @@ import { enqueueWebhookBatch } from "./enqueue.js";
  *   by SendGrid over the exact raw bytes) can be verified before anything
  *   parses/mutates the body (CLAUDE.md "What NOT to Use": parsing the
  *   webhook body before signature verification is explicitly forbidden).
- * - Invalid/missing signature -> 400, DROP: no `JSON.parse`, no enqueue --
- *   fails closed. A bad signature and a technically-valid-but-corrupt
- *   payload are indistinguishable to the caller.
- * - Only after a valid signature does the raw body get `JSON.parse`d and
- *   the ENTIRE verified batch enqueued as one job (RESEARCH.md Pattern 2:
- *   ack-fast, never per-event) -- all real processing (dedup insert into
- *   `send_events`) happens asynchronously in apps/worker.
+ * - Invalid/missing signature, a STALE or FUTURE-dated signature timestamp
+ *   (older/newer than `WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS`, default 600s,
+ *   T-10-11-01/02), and a malformed/missing timestamp header (T-10-11-03)
+ *   are ALL indistinguishable to the caller -> the same 400, DROP: no
+ *   `JSON.parse`, no enqueue -- fails closed. `isWebhookTimestampFresh`
+ *   composes WITH `verifyWebhookSignature`, never replaces it (T-10-11-04)
+ *   -- a fresh timestamp cannot substitute for a valid signature. Note:
+ *   this bounds ONLY the header timestamp the signature is computed over
+ *   (T-10-11-06) -- each event's OWN `timestamp` field inside the batch
+ *   body is a structurally different value (RESEARCH.md Pitfall 6) and is
+ *   deliberately untouched here (Phase 13's CMP-05 territory).
+ * - Only after a valid signature AND a fresh timestamp does the raw body
+ *   get `JSON.parse`d and the ENTIRE verified batch enqueued as one job
+ *   (RESEARCH.md Pattern 2: ack-fast, never per-event) -- all real
+ *   processing (dedup insert into `send_events`) happens asynchronously in
+ *   apps/worker.
  */
 // eslint-disable-next-line @typescript-eslint/require-await -- Fastify plugin contract: app.register() resolves the returned promise, and the declared Promise<void> is part of that signature -- dropping async would change it, not simplify it
 export async function registerWebhookRoutes(fastify: FastifyInstance): Promise<void> {
@@ -60,8 +70,11 @@ export async function registerWebhookRoutes(fastify: FastifyInstance): Promise<v
     const timestamp = request.headers["x-twilio-email-event-webhook-timestamp"] as string | undefined;
 
     const isValid = verifyWebhookSignature(endpoint.publicKey, rawBody, signature, timestamp);
-    if (!isValid) {
-      // Fail closed (T-05-01): no JSON.parse, no enqueue.
+    const isFresh = isWebhookTimestampFresh(timestamp, env.WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS);
+    if (!isValid || !isFresh) {
+      // Fail closed (T-05-01, T-10-11-01..04): a bad signature and a
+      // stale/future/malformed/missing timestamp all take this SAME
+      // return -- no JSON.parse, no enqueue, no distinguishing message.
       return reply.code(400).send();
     }
 

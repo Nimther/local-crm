@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { buildServer } from "../../../server.js";
 import { ensureTestDbMigrated, getTestDatabaseUrl } from "../../../test/db-fixture.js";
@@ -74,6 +74,12 @@ describe("POST /webhooks/sendgrid/:pathToken (WBHK-01)", () => {
     await webhookEventsQueue.close();
   });
 
+  afterEach(() => {
+    // Safety net for the fake-Date test below (10-11, SEC-07) -- restores
+    // real time even if an assertion throws before its own finally runs.
+    vi.useRealTimers();
+  });
+
   async function signUp(email: string, password: string, name: string) {
     const res = await app.inject({
       method: "POST",
@@ -124,16 +130,30 @@ describe("POST /webhooks/sendgrid/:pathToken (WBHK-01)", () => {
     const pathToken = `tok-valid-${randomUUID()}`;
     await provisionEndpoint(workspace.id, pathToken, PUBLIC_KEY);
 
-    const res = await app.inject({
-      method: "POST",
-      url: `/webhooks/sendgrid/${pathToken}`,
-      headers: {
-        "content-type": "application/json",
-        "x-twilio-email-event-webhook-signature": SIGNATURE,
-        "x-twilio-email-event-webhook-timestamp": TIMESTAMP,
-      },
-      payload: PAYLOAD,
-    });
+    // 10-11 (SEC-07): SendGrid's own published fixture's TIMESTAMP
+    // ("1600112502", 2020-09-14) is now genuinely stale relative to real
+    // wall-clock time -- freeze `Date` to that exact instant so this
+    // pinned fixture stays inside the freshness window without touching
+    // its signed bytes (the signature is computed over `timestamp +
+    // payload`; re-timestamping would invalidate it). Only `Date` is
+    // faked, never timers -- ioredis/BullMQ/pg are unaffected.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Number(TIMESTAMP) * 1000);
+    let res;
+    try {
+      res = await app.inject({
+        method: "POST",
+        url: `/webhooks/sendgrid/${pathToken}`,
+        headers: {
+          "content-type": "application/json",
+          "x-twilio-email-event-webhook-signature": SIGNATURE,
+          "x-twilio-email-event-webhook-timestamp": TIMESTAMP,
+        },
+        payload: PAYLOAD,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
 
     expect(res.statusCode, `valid signature request failed: ${res.body}`).toBe(200);
 
