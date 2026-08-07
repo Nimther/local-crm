@@ -27,7 +27,13 @@ interface DueFlowRunRow {
  * row-level lock for the actual transition happens per-tenant in
  * `transitionAndNudge`, below.
  */
-async function findDueFlowRunCandidates(): Promise<DueFlowRunRow[]> {
+// Phase 10 plan 10-14 (SEC-16): exported (mirrors campaign-scheduler.worker.ts's
+// `findDueCampaignCandidates`/`transitionToSending` precedent exactly) so
+// negative-cross-tenant-jobs.test.ts can drive the discovery scan and the
+// per-tenant re-verification directly, the same way that file's own
+// campaign-scheduler-scan.test.ts sibling already does for the campaign
+// scheduler.
+export async function findDueFlowRunCandidates(): Promise<DueFlowRunRow[]> {
   return withCrossWorkspaceScan(async (client) => {
     const { rows } = await client.query<DueFlowRunRow>(
       `SELECT id, workspace_id as "workspaceId" FROM flow_runs
@@ -49,7 +55,7 @@ async function findDueFlowRunCandidates(): Promise<DueFlowRunRow[]> {
  * already has locked. The caller only enqueues an advance job when this
  * actually confirms the row is still due.
  */
-async function transitionAndNudge(row: DueFlowRunRow): Promise<boolean> {
+export async function transitionAndNudge(row: DueFlowRunRow): Promise<boolean> {
   return withTenant(row.workspaceId, () =>
     withTenantTransaction(async (client) => {
       const { rows } = await client.query<{ id: string }>(
