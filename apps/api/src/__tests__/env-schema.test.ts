@@ -115,6 +115,72 @@ describe("envSchema OPERATOR_ALERT_EMAIL enforcement", () => {
 });
 
 /**
+ * BETTER_AUTH_SECRET production floor (10-09, SEC-12): the base field's
+ * existing min(16) is development/test's only guard -- production requires
+ * at least 32 characters, gated the same NODE_ENV-conditional way as the
+ * KMS_PROVIDER=local and PUBLIC_APP_URL guards above.
+ */
+describe("envSchema BETTER_AUTH_SECRET production floor", () => {
+  it("Test 1: production + a 20-character secret fails, with an issue on path BETTER_AUTH_SECRET", () => {
+    const result = envSchema.safeParse({
+      ...baseValidEnv(),
+      NODE_ENV: "production",
+      BETTER_AUTH_SECRET: "0123456789abcdef0123",
+      PUBLIC_APP_URL: "https://app.example.com",
+      KMS_PROVIDER: "aws",
+      KMS_KEK_ID: "arn:aws:kms:us-east-1:123456789012:key/test-kek",
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const issue = result.error.issues.find((i) => i.path.includes("BETTER_AUTH_SECRET"));
+      expect(issue, "expected an issue on BETTER_AUTH_SECRET").toBeTruthy();
+    }
+  });
+
+  it("Test 2: the same 20-character secret in development still passes -- the floor is production-only", () => {
+    const result = envSchema.safeParse({
+      ...baseValidEnv(),
+      NODE_ENV: "development",
+      BETTER_AUTH_SECRET: "0123456789abcdef0123",
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it("Test 3: a 32-character secret in production passes", () => {
+    const result = envSchema.safeParse({
+      ...baseValidEnv(),
+      NODE_ENV: "production",
+      BETTER_AUTH_SECRET: "01234567890123456789012345678901",
+      PUBLIC_APP_URL: "https://app.example.com",
+      KMS_PROVIDER: "aws",
+      KMS_KEK_ID: "arn:aws:kms:us-east-1:123456789012:key/test-kek",
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it("Test 4: the failure message names the variable and the 32-character requirement", () => {
+    const result = envSchema.safeParse({
+      ...baseValidEnv(),
+      NODE_ENV: "production",
+      BETTER_AUTH_SECRET: "0123456789abcdef0123",
+      PUBLIC_APP_URL: "https://app.example.com",
+      KMS_PROVIDER: "aws",
+      KMS_KEK_ID: "arn:aws:kms:us-east-1:123456789012:key/test-kek",
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const issue = result.error.issues.find((i) => i.path.includes("BETTER_AUTH_SECRET"));
+      expect(issue?.message).toMatch(/BETTER_AUTH_SECRET/);
+      expect(issue?.message).toMatch(/32/);
+    }
+  });
+});
+
+/**
  * Phase 10 (SEC-01/SEC-02, P3, D-01): "the API process holds neither
  * scan-role credentials nor membership" is a STRUCTURAL claim -- it must be
  * true of the source, not just of the runtime-parsed env object (a
