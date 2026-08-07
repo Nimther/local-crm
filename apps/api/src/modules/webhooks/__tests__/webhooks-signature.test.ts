@@ -61,7 +61,16 @@ describe("POST /webhooks/sendgrid/:pathToken (WBHK-01)", () => {
 
   afterAll(async () => {
     await app.close();
-    await webhookEventsQueue.obliterate({ force: true }).catch(() => undefined);
+    // Deliberately NOT `.obliterate()` (10-11, SEC-07 deviation): this file
+    // is no longer the only apps/api test file enqueueing real jobs onto
+    // the shared webhookEventsQueue -- webhook-timestamp-window.test.ts does
+    // too, and vitest runs test files concurrently by default, so
+    // obliterating the ENTIRE queue here could wipe a sibling file's
+    // in-flight jobs mid-assertion. This file's own assertions are already
+    // workspace-scoped (unique per test) and never depend on the queue
+    // being empty. CI starts Redis fresh per run (docker compose), so the
+    // only cost is jobs accumulating in a long-lived LOCAL dev Redis across
+    // repeated manual test runs.
     await webhookEventsQueue.close();
   });
 
@@ -115,8 +124,6 @@ describe("POST /webhooks/sendgrid/:pathToken (WBHK-01)", () => {
     const pathToken = `tok-valid-${randomUUID()}`;
     await provisionEndpoint(workspace.id, pathToken, PUBLIC_KEY);
 
-    const before = await webhookEventsQueue.getJobCounts("waiting");
-
     const res = await app.inject({
       method: "POST",
       url: `/webhooks/sendgrid/${pathToken}`,
@@ -130,8 +137,20 @@ describe("POST /webhooks/sendgrid/:pathToken (WBHK-01)", () => {
 
     expect(res.statusCode, `valid signature request failed: ${res.body}`).toBe(200);
 
-    const after = await webhookEventsQueue.getJobCounts("waiting");
-    expect(after.waiting).toBe((before.waiting ?? 0) + 1);
+    // Scoped by workspaceId (unique per test), not a global before/after
+    // getJobCounts() delta -- 10-11 (SEC-07) added a second apps/api test
+    // file that also enqueues real jobs onto this same shared
+    // webhookEventsQueue, and vitest runs test files concurrently by
+    // default, so two files racing the queue's TOTAL depth produced a
+    // genuine cross-file flake (mirrors apps/worker/vitest.config.ts's
+    // documented "steals sibling files' jobs mid-assertion" class of bug).
+    // No worker runs in this test process, so an enqueued job stays
+    // "waiting" and is directly countable.
+    const waitingJobs = await webhookEventsQueue.getJobs(["waiting"]);
+    const forThisWorkspace = waitingJobs.filter(
+      (job) => (job.data as { workspaceId?: string }).workspaceId === workspace.id
+    );
+    expect(forThisWorkspace.length).toBe(1);
   });
 
   it("tampered signature -> 400, and no job is enqueued (fail-closed, no JSON.parse reached)", async () => {

@@ -151,7 +151,7 @@ CI — **единственное** место, где проверяется к
 | `@sendgrid/eventwebhook` | `^8.0.0` — верификация подписи вебхука |
 | `csv-parse` | `7.0.1` |
 | `nanoid` | `5.1.16` — единственное использование: `tenancy/workspaces.ts` |
-| dev: `@types/node` `^22.10.5`, `@types/pg` `^8.15.6`, `nock` `14.0.16`, `tsx` `^4.19.2`, `typescript` `^5.9.3`, `vitest` `4.1.9`, `@vitest/coverage-v8` `^4.1.9` (08-11, провайдер покрытия; минор совпадает с `vitest`) |
+| dev: `@types/node` `^22.10.5`, `@types/pg` `^8.15.6`, `nock` `14.0.16`, `tsx` `^4.19.2`, `typescript` `^5.9.3`, `vitest` `4.1.9`, `@vitest/coverage-v8` `^4.1.9` (08-11, провайдер покрытия; минор совпадает с `vitest`), `starkbank-ecdsa` `1.2.0` (10-11, SEC-07 — уже транзитивная зависимость `@sendgrid/eventwebhook`, объявлена явно только в `apps/api/package.json` `devDependencies`; `webhook-timestamp-window.test.ts` использует её напрямую для генерации собственной EC key pair и подписи фикстур на произвольных тестовых timestamp'ах — фиксированный published-фикстур SendGrid из `webhooks-signature.test.ts` не может проверить временное окно) |
 
 ### 2.3 `apps/worker`
 
