@@ -16,13 +16,27 @@ import { relocateAllDefaultRows, type RelocationReport } from "../src/partitions
  * formatting and process lifecycle only.
  *
  * Constructs its OWN dedicated `Pool`, entirely separate from the app's
- * tenant-scoped `@mega-crm/tenant-context` pool -- required by
- * `attachPartitionCheckFirst`'s admin-scan invariant (see
- * `ensure-partitions.ts`'s and migration `0039`'s comments): a connection
- * that has ever run a tenant-scoped `SET LOCAL app.current_workspace_id`
- * reverts that GUC to `''` (not NULL) once released, which throws inside
+ * tenant-scoped `@mega-crm/tenant-context` pool -- a connection that has
+ * ever run a tenant-scoped `SET LOCAL app.current_workspace_id` reverts
+ * that GUC to `''` (not NULL) once released, which throws inside
  * `contacts`'/`sends`' pre-Phase-10 bare-cast RLS policy. A standalone CLI
  * process's own fresh pool never has that history.
+ *
+ * 10-06 (SEC-01/SEC-02, checkpoint option-b): ALSO constructs a SECOND,
+ * separate `Pool` from `PARTITION_RELOCATION_ADMIN_DATABASE_URL` -- an
+ * operator-supplied DSN for a Postgres role capable of bypassing row-level
+ * security (BYPASSRLS or superuser), read ONLY here, never by
+ * `apps/api`/`apps/worker` (structurally asserted by this package's own
+ * test suite, mirroring plan 10-01's P3 pattern for `SCAN_DATABASE_URL`).
+ * `relocateAllDefaultRows` needs this second connection for the ATTACH half
+ * of each non-empty month it relocates: Postgres's automatic inherited-FK
+ * re-validation against `contacts`/`sends` (both FORCE ROW LEVEL SECURITY)
+ * requires a connection that can see every tenant's rows, which the
+ * ordinary `mega_crm_app`-backed `DATABASE_URL` connection cannot provide
+ * now that migration 0043 drops the legacy `app.admin_scan`-gated policy
+ * that used to grant it. Held only by this operator-invoked CLI --
+ * documented in SPECIFICATION.md §3 and ARCHITECTURE.md §7, and must never
+ * be set in any service environment.
  *
  * NEVER wired into `predev`, `pretest`, or any CI workflow (T-09-22) --
  * this changes live partitioned data and runs only when an operator
@@ -68,17 +82,36 @@ async function main(): Promise<void> {
     return;
   }
 
+  // 10-06 (SEC-01/SEC-02, checkpoint option-b): the elevated DSN for the
+  // ATTACH step's FK re-validation visibility. Fails fast, before any
+  // connection is opened, rather than letting the first non-empty month's
+  // ATTACH fail deep inside relocateAllDefaultRows with a spurious FK
+  // violation and no actionable message.
+  const adminDatabaseUrl = process.env.PARTITION_RELOCATION_ADMIN_DATABASE_URL;
+  if (!adminDatabaseUrl) {
+    console.error(
+      "PARTITION_RELOCATION_ADMIN_DATABASE_URL is required to run the DEFAULT relocation " +
+        "procedure -- set it to a DSN for a Postgres role capable of bypassing row-level " +
+        "security (e.g. the cluster superuser), held only by the operator running this CLI. " +
+        "Never set this variable in any service (apps/api/apps/worker) environment.",
+    );
+    process.exitCode = 1;
+    return;
+  }
+
   // Print only the resolved database NAME, never the full connection
   // string -- the DSN carries credentials (T-09-20).
   const databaseName = new URL(databaseUrl).pathname.replace(/^\//, "");
   console.log(`Relocating DEFAULT partition rows on database: ${databaseName}`);
 
   const pool = new Pool({ connectionString: databaseUrl });
+  const adminPool = new Pool({ connectionString: adminDatabaseUrl });
   let report: RelocationReport;
   try {
-    report = await relocateAllDefaultRows(pool, PARTITIONED_TABLES);
+    report = await relocateAllDefaultRows(pool, adminPool, PARTITIONED_TABLES);
   } finally {
     await pool.end();
+    await adminPool.end();
   }
 
   console.log(formatReport(report));

@@ -57,6 +57,22 @@ function monthLabel(d: Date): string {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
+/**
+ * `createEphemeralDatabase`'s own `adminDsn` field points at the CLUSTER's
+ * maintenance database (`postgres`, used for CREATE/DROP DATABASE), not at
+ * the ephemeral database itself -- swap only the pathname, keeping whatever
+ * superuser credentials `adminDsn` already carries, to get a connection that
+ * (a) targets the ephemeral database's own tables and (b) is backed by the
+ * same RLS-bypassing role class production's
+ * `PARTITION_RELOCATION_ADMIN_DATABASE_URL` documents (superuser or
+ * BYPASSRLS).
+ */
+function adminDsnForDatabase(adminDsn: string, databaseName: string): string {
+  const url = new URL(adminDsn);
+  url.pathname = `/${databaseName}`;
+  return url.toString();
+}
+
 async function seedEvents(
   pool: Pool,
   workspaceId: string,
@@ -151,6 +167,7 @@ function tableReport(report: RelocationReport, table: string) {
 describe("relocate-default (09-04 task 1, DB-03/DB-04)", () => {
   let pool: Pool;
   let relocationPool: Pool;
+  let relocationAdminPool: Pool;
   let databaseName: string;
   let adminDsn: string;
   let workspaceId: string;
@@ -177,9 +194,23 @@ describe("relocate-default (09-04 task 1, DB-03/DB-04)", () => {
     // tenant-scoped transaction reverts `app.current_workspace_id` to ''
     // (not NULL), and contacts'/sends' PRE-PHASE-10 bare-cast RLS policies
     // (pinned by packages/tenant-context/src/__tests__/tenant-context.test.ts)
-    // throw on that, independent of the admin-scan policy migration 0039
-    // adds (see that migration's own comment, and ensure-partitions.ts's).
+    // throw on that.
     relocationPool = new Pool({ connectionString: created.dsn, max: 5, options: "-c timezone=UTC" });
+
+    // 10-06 (SEC-01/SEC-02, checkpoint option-b): `relocateAllDefaultRows`
+    // now REQUIRES a separate `adminClient` for its ATTACH steps' FK
+    // re-validation visibility, since migration 0043 drops the legacy
+    // `app.admin_scan`-gated policy this suite used to rely on implicitly.
+    // `created.adminDsn` is the ephemeral database's own Postgres superuser
+    // DSN (already used below for teardown) -- the same role shape
+    // production's operator-supplied `PARTITION_RELOCATION_ADMIN_DATABASE_URL`
+    // is documented to require (BYPASSRLS or superuser), so reusing it here
+    // exercises the real mechanism, not a stand-in.
+    relocationAdminPool = new Pool({
+      connectionString: adminDsnForDatabase(adminDsn, databaseName),
+      max: 5,
+      options: "-c timezone=UTC",
+    });
 
     const files = listMigrationFiles(MIGRATIONS_DIR);
     for (const file of files) {
@@ -213,6 +244,7 @@ describe("relocate-default (09-04 task 1, DB-03/DB-04)", () => {
   }, 60_000);
 
   afterAll(async () => {
+    await relocationAdminPool?.end();
     await relocationPool?.end();
     await pool?.end();
     if (databaseName) await dropEphemeralDatabase(databaseName, adminDsn);
@@ -232,7 +264,7 @@ describe("relocate-default (09-04 task 1, DB-03/DB-04)", () => {
   let firstRunReport: RelocationReport;
 
   it("test 2: a month far outside any expected window is relocated like any other (D-09)", async () => {
-    firstRunReport = await relocateAllDefaultRows(relocationPool, PARTITIONED_TABLES);
+    firstRunReport = await relocateAllDefaultRows(relocationPool, relocationAdminPool, PARTITIONED_TABLES);
 
     const { rows } = await pool.query<{ relispartition: boolean }>(
       `SELECT relispartition FROM pg_class WHERE relname = 'events_2031_04'`,
@@ -267,7 +299,7 @@ describe("relocate-default (09-04 task 1, DB-03/DB-04)", () => {
     await seedEvents(pool, workspaceId, contactId, MONTH_BATCH, seededCount);
     const totalBefore = await countParentRows(pool, workspaceId, "events");
 
-    const report = await relocateAllDefaultRows(relocationPool, [EVENTS_TABLE]);
+    const report = await relocateAllDefaultRows(relocationPool, relocationAdminPool, [EVENTS_TABLE]);
     const eventsReport = tableReport(report, "events");
     const monthReport = eventsReport.months.find((m) => m.month === "2027-09");
 
@@ -304,7 +336,7 @@ describe("relocate-default (09-04 task 1, DB-03/DB-04)", () => {
   });
 
   it("test 8: a second run against an already-empty DEFAULT reports zero months/rows and throws nothing", async () => {
-    const report = await relocateAllDefaultRows(relocationPool, PARTITIONED_TABLES);
+    const report = await relocateAllDefaultRows(relocationPool, relocationAdminPool, PARTITIONED_TABLES);
 
     for (const t of report.tables) {
       expect(t.months, `${t.table} should report zero months on an idempotent re-run`).toEqual([]);
@@ -317,7 +349,7 @@ describe("relocate-default (09-04 task 1, DB-03/DB-04)", () => {
     await seedEvents(pool, workspaceId, contactId, MONTH_BOTH, 3);
     await seedSendEvents(pool, workspaceId, MONTH_BOTH, 4);
 
-    const report = await relocateAllDefaultRows(relocationPool, PARTITIONED_TABLES);
+    const report = await relocateAllDefaultRows(relocationPool, relocationAdminPool, PARTITIONED_TABLES);
 
     const eventsReport = tableReport(report, "events");
     const sendEventsReport = tableReport(report, "send_events");
@@ -347,7 +379,7 @@ describe("relocate-default (09-04 task 1, DB-03/DB-04)", () => {
       );
       expect(rows[0]?.locked, "test setup: the holder session must acquire the lock first").toBe(true);
 
-      await expect(relocateAllDefaultRows(relocationPool, PARTITIONED_TABLES)).rejects.toThrow(
+      await expect(relocateAllDefaultRows(relocationPool, relocationAdminPool, PARTITIONED_TABLES)).rejects.toThrow(
         /already in progress|advisory lock/i,
       );
     } finally {
@@ -357,7 +389,7 @@ describe("relocate-default (09-04 task 1, DB-03/DB-04)", () => {
 
     // The lock is now free again -- a normal run must still succeed
     // afterward (this is not a permanent deadlock).
-    const report = await relocateAllDefaultRows(relocationPool, PARTITIONED_TABLES);
+    const report = await relocateAllDefaultRows(relocationPool, relocationAdminPool, PARTITIONED_TABLES);
     for (const t of report.tables) {
       expect(t.residualDefaultCount).toBe(0);
     }

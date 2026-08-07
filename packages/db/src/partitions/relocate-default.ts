@@ -13,6 +13,18 @@
  * (the criterion-3 automated test) call this exact function, never a parallel
  * reimplementation (D-08).
  *
+ * 10-06 (SEC-01/SEC-02, checkpoint option-b): every month this module
+ * relocates attaches a NON-EMPTY child (the whole point of the procedure),
+ * which needs the elevated `adminClient` connection
+ * `attachPartitionCheckFirst` (ensure-partitions.ts) documents -- the ordinary
+ * `client` this module also threads through is never sufficient on its own
+ * once migration 0043 drops the legacy `app.admin_scan`-gated policy. Both
+ * `relocateMonth` and `relocateAllDefaultRows` REQUIRE `adminClient` as an
+ * explicit, separate parameter (never optional here, unlike
+ * `attachPartitionCheckFirst`'s own default) -- every caller of this module
+ * always populates a non-empty child, so there is no legitimate call that
+ * could omit it.
+ *
  * Threat T-09-17 (Tampering): every partition/table identifier in this file
  * is built ONLY from `monthPartitionName` (calendar arithmetic against the
  * frozen `PARTITIONED_TABLES` allowlist) -- never from a discovery-query
@@ -135,9 +147,14 @@ export interface MonthRelocationResult {
  * so a crash between delete and insert is impossible -- that single-statement
  * atomicity is what conserves rows. The loop stops the first time a batch
  * moves fewer rows than `RELOCATE_BATCH_SIZE`.
+ *
+ * `adminClient` (10-06, SEC-01/SEC-02): passed straight through to
+ * `attachPartitionCheckFirst` below as `options.adminClient` -- the DELETE/
+ * INSERT batch loop above never uses it, only the final ATTACH does.
  */
 export async function relocateMonth(
   client: PartitionClient,
+  adminClient: PartitionClient,
   table: PartitionedTableConfig,
   monthStart: Date,
   monthEnd: Date,
@@ -191,8 +208,10 @@ export async function relocateMonth(
   // The child's rows are now confirmed to fit [monthStart, monthEnd) --
   // attach it through the one place the CHECK-constraint-first sequence
   // lives. `attachPartitionCheckFirst`'s own CREATE TABLE IF NOT EXISTS is a
-  // no-op against the table this function just created and populated.
-  await attachPartitionCheckFirst(client, table, monthStart, monthEnd);
+  // no-op against the table this function just created and populated. The
+  // child is non-empty, so `adminClient` is required here (see this
+  // function's own doc comment and `attachPartitionCheckFirst`'s).
+  await attachPartitionCheckFirst(client, table, monthStart, monthEnd, { adminClient });
 
   return { childName, rowsMoved, batches };
 }
@@ -255,9 +274,16 @@ export const RELOCATE_ADVISORY_LOCK_KEY = 8_472_995;
  *
  * Returns the report rather than printing anything -- the CLI formats it
  * for a human, the tests assert on its shape.
+ *
+ * `adminClient` (10-06, SEC-01/SEC-02, checkpoint option-b): a connection
+ * source backed by a role capable of bypassing row-level security --
+ * threaded straight through to every `relocateMonth` call below, which needs
+ * it for its own `attachPartitionCheckFirst` call. Required, not optional:
+ * every month this function relocates attaches a non-empty child.
  */
 export async function relocateAllDefaultRows(
   client: PartitionClient,
+  adminClient: PartitionClient,
   tables: readonly PartitionedTableConfig[],
 ): Promise<RelocationReport> {
   const lockConn = await client.connect();
@@ -284,7 +310,13 @@ export async function relocateAllDefaultRows(
 
       for (const monthStart of months) {
         const monthEnd = nextMonthStart(monthStart);
-        const { childName, rowsMoved, batches } = await relocateMonth(client, table, monthStart, monthEnd);
+        const { childName, rowsMoved, batches } = await relocateMonth(
+          client,
+          adminClient,
+          table,
+          monthStart,
+          monthEnd,
+        );
         monthReports.push({
           month: monthLabel(monthStart),
           partitionName: childName,

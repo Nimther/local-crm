@@ -66,18 +66,23 @@ const DEFAULT_JOB_OPTIONS = {
  * entirely separate from `@mega-crm/tenant-context`'s shared, tenant-scoped
  * pool -- mirroring the CLI script
  * (`packages/db/scripts/relocate-default-partition-rows.ts`) and every test
- * suite's own two-pool discipline (see `ensure-partitions.ts`'s and
- * migration `0039`'s comments for the full reasoning, and CONVENTIONS.md's
- * "Partition maintenance" section for the binding rule this codifies). This
- * worker previously defaulted to `@mega-crm/tenant-context`'s `pool` --
- * the exact pool `withTenantTransaction` checks connections out of for
- * every other tick worker in this same process -- which silently violated
- * that invariant even though this worker's only call path
- * (`ensurePartitions` against always-empty new months) never actually
- * exercised the admin-scan policy the invariant protects. A future change
- * that lets this call path attach a pre-populated child (a retry/backfill
- * path, or a refactor that reuses this client for something else) would
- * have reactivated T-09-06 with no defence in place.
+ * suite's own two-pool discipline (see `ensure-partitions.ts`'s comments for
+ * the full reasoning, and CONVENTIONS.md's "Partition maintenance" section
+ * for the binding rule this codifies). This worker previously defaulted to
+ * `@mega-crm/tenant-context`'s `pool` -- the exact pool
+ * `withTenantTransaction` checks connections out of for every other tick
+ * worker in this same process -- which silently violated that invariant
+ * even though this worker's only call path (`ensurePartitions` against
+ * always-empty new months) never actually needed FK re-validation
+ * visibility into `contacts`/`sends`. A future change that lets this call
+ * path attach a pre-populated child (a retry/backfill path, or a refactor
+ * that reuses this client for something else) would reintroduce T-09-06
+ * with no defence in place -- and, unlike the DEFAULT-relocation CLI (10-06,
+ * SEC-01/SEC-02), this worker never holds the elevated
+ * `PARTITION_RELOCATION_ADMIN_DATABASE_URL` credential
+ * `attachPartitionCheckFirst`'s `options.adminClient` needs for a non-empty
+ * attach, so such a change would also need to plumb that credential through
+ * deliberately, not merely reuse this pool.
  */
 const partitionMaintenancePool = new Pool({ connectionString: process.env.DATABASE_URL });
 

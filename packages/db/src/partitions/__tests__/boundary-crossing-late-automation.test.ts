@@ -56,6 +56,22 @@ const LATE_MONTH_YEAR = 2027;
 const LATE_MONTH_INDEX = 5; // June (0-based)
 const LATE_MONTH_MID = new Date(Date.UTC(LATE_MONTH_YEAR, LATE_MONTH_INDEX, 15, 12, 0, 0));
 
+/**
+ * `createEphemeralDatabase`'s own `adminDsn` field points at the CLUSTER's
+ * maintenance database (`postgres`, used for CREATE/DROP DATABASE), not at
+ * the ephemeral database itself -- swap only the pathname, keeping whatever
+ * superuser credentials `adminDsn` already carries, to get a connection that
+ * (a) targets the ephemeral database's own tables and (b) is backed by the
+ * same RLS-bypassing role class production's
+ * `PARTITION_RELOCATION_ADMIN_DATABASE_URL` documents (superuser or
+ * BYPASSRLS).
+ */
+function adminDsnForDatabase(adminDsn: string, databaseName: string): string {
+  const url = new URL(adminDsn);
+  url.pathname = `/${databaseName}`;
+  return url.toString();
+}
+
 async function seedWorkspaceAndContact(pool: Pool): Promise<{ workspaceId: string; contactId: string }> {
   const workspaceId = randomUUID();
   await pool.query(`INSERT INTO organization (id, name, slug) VALUES ($1, $2, $3)`, [
@@ -183,6 +199,7 @@ describe("boundary-crossing-late-automation (09-04 task 3, ROADMAP success crite
   describe("Scenario A: relocate first, then ensurePartitions restores the cheap-attach state", () => {
     let pool: Pool;
     let relocationPool: Pool;
+    let relocationAdminPool: Pool;
     let databaseName: string;
     let adminDsn: string;
     let workspaceId: string;
@@ -200,8 +217,18 @@ describe("boundary-crossing-late-automation (09-04 task 3, ROADMAP success crite
       pool = new Pool({ connectionString: created.dsn, max: 5, options: "-c timezone=UTC" });
       // Dedicated pool for relocate-default.ts/ensure-partitions.ts calls --
       // never shared with the tenant-scoped seeding pool above (see 09-04
-      // task 1's commit and migration 0039's comment for why).
+      // task 1's commit for why).
       relocationPool = new Pool({ connectionString: created.dsn, max: 5, options: "-c timezone=UTC" });
+      // 10-06 (SEC-01/SEC-02, checkpoint option-b): relocateAllDefaultRows
+      // now REQUIRES a separate elevated adminClient for its ATTACH steps'
+      // FK re-validation visibility (migration 0043 drops the legacy
+      // app.admin_scan-gated policy this suite used to rely on implicitly)
+      // -- same shape as relocate-default.test.ts's relocationAdminPool.
+      relocationAdminPool = new Pool({
+        connectionString: adminDsnForDatabase(adminDsn, databaseName),
+        max: 5,
+        options: "-c timezone=UTC",
+      });
 
       const files = listMigrationFiles(MIGRATIONS_DIR);
       for (const file of files) {
@@ -227,6 +254,7 @@ describe("boundary-crossing-late-automation (09-04 task 3, ROADMAP success crite
     }, 60_000);
 
     afterAll(async () => {
+      await relocationAdminPool?.end();
       await relocationPool?.end();
       await pool?.end();
       if (databaseName) await dropEphemeralDatabase(databaseName, adminDsn);
@@ -236,7 +264,7 @@ describe("boundary-crossing-late-automation (09-04 task 3, ROADMAP success crite
       expect(await countDefaultRows(pool, "events_default")).toBeGreaterThan(0);
       expect(await countDefaultRows(pool, "send_events_default")).toBeGreaterThan(0);
 
-      await relocateAllDefaultRows(relocationPool, PARTITIONED_TABLES);
+      await relocateAllDefaultRows(relocationPool, relocationAdminPool, PARTITIONED_TABLES);
 
       expect(await countDefaultRows(pool, "events_default")).toBe(0);
       expect(await countDefaultRows(pool, "send_events_default")).toBe(0);
