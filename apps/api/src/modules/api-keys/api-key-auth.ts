@@ -6,8 +6,20 @@ declare module "fastify" {
   interface FastifyRequest {
     /** Set by apiKeyAuth once a presented key is verified -- the workspace the caller is scoped to. */
     apiKeyWorkspaceId?: string;
+    /** Set by apiKeyAuth once a presented key is verified -- the scope list stored on that key row. */
+    apiKeyScopes?: string[];
   }
 }
+
+/**
+ * SEC-06 (D-06): the frozen `resource:action` scope vocabulary, covering the
+ * two API-key route modules that exist today (Contacts API, Event API).
+ * Future routes EXTEND this list rather than inventing scope strings at
+ * call sites -- `requireApiKeyScope` below is the only place a string here
+ * is ever compared against a key's stored scopes.
+ */
+export const API_KEY_SCOPES = ["contacts:read", "contacts:write", "events:write"] as const;
+export type ApiKeyScope = (typeof API_KEY_SCOPES)[number];
 
 export interface GeneratedApiKey {
   /** The full secret, shown to the caller exactly once (D-22) -- never persisted. */
@@ -82,4 +94,37 @@ export async function apiKeyAuth(request: FastifyRequest, reply: FastifyReply): 
   }
 
   request.apiKeyWorkspaceId = row.workspaceId;
+  request.apiKeyScopes = row.scopes ?? [];
+}
+
+/**
+ * SEC-06 (T-10-10-01/02/03/05): every failure path returns this exact same
+ * body -- a missing scope on one route and a missing scope on a completely
+ * different route must be indistinguishable, so a caller cannot enumerate
+ * the scope vocabulary by diffing responses across routes (mirrors
+ * `UNAUTHORIZED_BODY`'s precedent above).
+ */
+const FORBIDDEN_SCOPE_BODY = { error: "Forbidden" };
+
+/**
+ * Returns an `onRequest` handler that refuses the request with 403 unless
+ * `request.apiKeyScopes` (set by `apiKeyAuth` above) includes `scope`.
+ *
+ * MUST be registered as an additional `onRequest` entry AFTER `apiKeyAuth`
+ * in the route's hook list -- authentication always resolves before
+ * authorization, so an invalid/revoked key gets `apiKeyAuth`'s 401 rather
+ * than this function's 403 (T-10-10-05: reversing the order would let a
+ * caller distinguish "key doesn't exist" from "key exists but lacks this
+ * scope" purely from status code, without ever presenting a valid key).
+ * A plain set-membership check with no empty-list special case: a key
+ * whose `scopes` is `[]` is refused on every scoped route, same as any
+ * other missing scope (T-10-10-02).
+ */
+export function requireApiKeyScope(scope: ApiKeyScope) {
+  return async function requireApiKeyScopeHandler(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+    const scopes = request.apiKeyScopes ?? [];
+    if (!scopes.includes(scope)) {
+      await reply.code(403).send(FORBIDDEN_SCOPE_BODY);
+    }
+  };
 }

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { upsertContactApiSchema } from "@mega-crm/shared-schemas";
 import { withTenant, withTenantTransaction } from "../../middleware/tenant-context.js";
-import { apiKeyAuth } from "../api-keys/api-key-auth.js";
+import { apiKeyAuth, requireApiKeyScope } from "../api-keys/api-key-auth.js";
 import { upsertContactByIdentity } from "./contact.repository.js";
 
 /**
@@ -30,6 +30,10 @@ export async function registerContactsApiRoutes(fastify: FastifyInstance): Promi
         // `config.rateLimit` applies it to just this route.
         config: { rateLimit: { max: 100, timeWindow: "1 minute" } },
         bodyLimit: 1024 * 1024,
+        // SEC-06 (D-06, T-10-10-01/05): registered AFTER apiKeyAuth in the
+        // scope-level onRequest hook above -- authentication always resolves
+        // before this authorization check runs.
+        onRequest: requireApiKeyScope("contacts:write"),
       },
       async (request, reply) => {
         const parsed = upsertContactApiSchema.safeParse(request.body);
