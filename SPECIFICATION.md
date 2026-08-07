@@ -365,7 +365,7 @@ Enum `subscription_status` = `('subscribed','unsubscribed','suppressed')`.
 
 **`workspace_suppressions`** (`0003`) — `id` uuid PK, `workspace_id` NN → CASCADE, `email` text NN, `reason` text NN dflt `'manual'`, `created_at` NN. UNIQUE `(workspace_id, email)`.
 
-**`workspace_api_keys`** (`0005`) — `id` **text** PK (без default, генерится приложением), `workspace_id` NN → CASCADE, `name` text NN, `secret_hash` text NN, `key_mask` text NN, `scopes` text[] NN dflt `'{}'` (**не используется**), `created_at` NN, `revoked_at` timestamp NULL.
+**`workspace_api_keys`** (`0005`, изм. `0046`) — `id` **text** PK (без default, генерится приложением), `workspace_id` NN → CASCADE, `name` text NN, `secret_hash` text NN, `key_mask` text NN, `scopes` text[] NN dflt `ARRAY['contacts:read','contacts:write','events:write']` (**Phase 10, план 10-10, SEC-06**: до `0046` дефолт был `'{}'` и колонка не проверялась нигде — миграция `0046` бэкфиллит все существующие строки полным набором из трёх скоупов той же UPDATE-командой, что меняет дефолт для новых ключей, и с этого же изменения скоуп проверяется на каждом `/v1`-роуте, см. §6.3/§6.7), `created_at` NN, `revoked_at` timestamp NULL.
 
 **`events`** (DDL: `0007` + `0010`) — `id` uuid NN **без default** (приходит от клиента), `workspace_id` uuid NN → CASCADE, `contact_id` uuid NN → `contacts(id)` CASCADE, `name` text NN, `properties` jsonb NN dflt `'{}'`, `occurred_at` timestamptz NN dflt `now()`, `received_at` timestamptz NN dflt `now()`.
 **PK `(workspace_id, id, occurred_at)`** — расширен в `0010`; в комментарии миграции зафиксировано, что исходный `(id, occurred_at)` был дефектом изоляции тенантов (CR-01): чужой тенант мог занять eventId, и вставка жертвы молча гасилась `ON CONFLICT DO NOTHING` уже после отданного `202`.
@@ -550,7 +550,8 @@ ALTER POLICY workspace_isolation ON <table> TO mega_crm_app
 - Скрипты: `db:generate` → `drizzle-kit generate`, `db:migrate` → `drizzle-kit migrate` (проксируются из root).
 - `scripts/migrate-dev.mjs`: `process.loadEnvFile("../.env")` в try/catch → падает, если `DATABASE_URL` не задан → `execSync("npm run db:migrate")`.
 - **Автоприменение только в dev**, через npm lifecycle: `predev` = `check-env.mjs && migrate-dev.mjs`, отрабатывает перед `dev`. **Ни api, ни worker не вызывают мигратор при старте.** Grep по `db:migrate` / `drizzle-kit migrate` / `migrate(`: только три package.json, `scripts/migrate-dev.mjs:37` и `apps/api/src/test/db-fixture.ts:82`. Как миграции доезжают до не-dev окружения — **не определено**.
-- Журнал: `migrations/meta/_journal.json`, version 7, 45 записей (0–44, `0040` добавлена 09-REVIEW CR-01 — сид singleton-строки `partition_maintenance_runs`; `0041`/`0042` — Phase 10, план 10-01/10-03, scan-role бутстрап и расширение грантов/политик; `0043` — план 10-06, снятие последних пяти `app.admin_scan`-политик; `0044` — план 10-07, унификация всех 22 `workspace_isolation`-политик в один fail-closed, роль-скоупленный предикат, SEC-03/SEC-04). Snapshot'ы есть только у **11** миграций (`0000`, `0002`, `0003`, `0005`, `0008`, `0011`, `0016`, `0017`, `0024`, `0025`, `0034`); у остальных **34** (включая `0038`, `0039`, `0040`, `0041`, `0042`, `0043`, `0044`) — нет.
+- Журнал: `migrations/meta/_journal.json`, version 7, 47 записей (0–46, `0040` добавлена 09-REVIEW CR-01 — сид singleton-строки `partition_maintenance_runs`; `0041`/`0042` — Phase 10, план 10-01/10-03, scan-role бутстрап и расширение грантов/политик; `0043` — план 10-06, снятие последних пяти `app.admin_scan`-политик; `0044` — план 10-07, унификация всех 22 `workspace_isolation`-политик в один fail-closed, роль-скоупленный предикат, SEC-03/SEC-04; `0045` — план 10-09, грант-матрица семи better-auth-таблиц между `mega_crm_auth`/`mega_crm_app`, SEC-05; `0046` — план 10-10, бэкфилл + новый дефолт `workspace_api_keys.scopes`, SEC-06). Snapshot'ы есть только у **11** миграций (`0000`, `0002`, `0003`, `0005`, `0008`, `0011`, `0016`, `0017`, `0024`, `0025`, `0034`); у остальных **36** (включая `0038`–`0046`) — нет.
+- **Миграция `0046` (план 10-10) — единственная в текущей цепочке, применяющая `ALTER TABLE ... DISABLE/ENABLE ROW LEVEL SECURITY`** (execution-discovered, deviation Rule 3): бэкфилл-`UPDATE` по всем воркспейсам сразу не может пройти fail-closed `workspace_isolation`-политику `0044` (та требует ровно один `app.current_workspace_id` на сессию, а миграция применяется как `mega_crm_app` вообще без tenant-контекста) — RLS выключается и включается обратно с `FORCE` внутри одной неявной транзакции файла, окна с выключенным RLS для конкурентных подключений нет.
 
 ---
 
@@ -699,12 +700,14 @@ Repeatable-скан `flow-segment-sweep` (15 мин, §5.1/§5.2) — перио
 
 ### 6.3 Роуты по bearer API-ключу
 
-| METHOD | Путь | Rate limit | Лимит тела |
-|---|---|---|---|
-| POST | `/v1/contacts` | 100 / 1 мин | 1 MB |
-| POST | `/v1/events` | 100 / 1 мин | 5 MB |
+| METHOD | Путь | Rate limit | Лимит тела | Требуемый scope |
+|---|---|---|---|---|
+| POST | `/v1/contacts` | 100 / 1 мин | 1 MB | `contacts:write` |
+| POST | `/v1/events` | 100 / 1 мин | 5 MB | `events:write` |
 
 Воркспейс резолвится **только** из `request.apiKeyWorkspaceId` — никогда из slug или сессии. Хук — `onRequest` (до парсинга тела).
+
+**Phase 10, план 10-10 (SEC-06, D-06/D-07): скоуп проверяется на каждом роуте.** Вокабуляр — `contacts:read`, `contacts:write`, `events:write` (третий, `contacts:read`, зарезервирован под будущий read-роут — сегодня им не пользуется ни один роут). `requireApiKeyScope(scope)` (`api-key-auth.ts`) регистрируется как ДОПОЛНИТЕЛЬНЫЙ `onRequest` в опциях самого роута — Fastify выполняет его строго ПОСЛЕ плагин-уровневого `apiKeyAuth`, поэтому невалидный/отозванный ключ всегда получает 401 (аутентификация), а не 403 (авторизация): порядок закреплён тестом. Отказ — фиксированное тело `{ error: "Forbidden" }`, ОДНО и то же для любого роута и любого недостающего скоупа (не называет сам скоуп) — байт-идентичность между `/v1/contacts` и `/v1/events` проверена тестом, чтобы вызывающий не мог перечислить вокабуляр диффом ответов. Пустой список скоупов не имеет отдельной ветки — это обычный случай "скоуп отсутствует", отказ такой же. Для новых ключей нет UI выбора скоупов (отложено) — колонка дефолтится в полный набор (§4.2).
 
 ### 6.4 Роуты по сессии (членство в воркспейсе)
 
@@ -768,7 +771,7 @@ Repeatable-скан `flow-segment-sweep` (15 мин, §5.1/§5.2) — перио
 
 Формат `mcrm_<id>.<secret>` в `Authorization: Bearer`. Сверка: `createHash("sha256")` от секрета → `timingSafeEqual` с предварительной проверкой длины. Проверяется `revoked_at`. Все ветки отказа (нет заголовка, кривой токен, неизвестный id, неверный секрет, отозван) возвращают идентичный 401 `{ error: "Invalid or missing API key" }`.
 Оговорка: `lookupApiKeyById(id)` — запрос в БД по несекретному префиксу — выполняется **до** timing-safe сравнения, поэтому существование ключа остаётся различимым по времени ответа (round-trip в БД против раннего выхода), несмотря на идентичные тела.
-**Скоупов нет** — валидный ключ даёт полный доступ к обоим `/v1`-роутам своего воркспейса.
+**Phase 10, план 10-10 (SEC-06): скоупы теперь проверяются.** `apiKeyAuth` пишет `row.scopes ?? []` в `request.apiKeyScopes` сразу после `request.apiKeyWorkspaceId`; per-route проверку выполняет `requireApiKeyScope` — см. §6.3 (вокабуляр, порядок 401-до-403, форма отказа). `lookupApiKeyById`'s SELECT теперь включает `scopes`.
 **Phase 10 (SEC-03/SEC-04, план 10-07):** `lookupApiKeyById` — по определению pre-tenant чтение (workspace ещё не известен) — теперь выполняется внутри `withPreTenantLookup` (§4.3) вместо голого `pool.connect()`; продолжает возвращать `null`, а не бросать, для неизвестного id (проверено тестом) — контракт анти-enumeration в `api-key-auth.ts` не меняется.
 
 ### 6.8 Вебхук SendGrid
