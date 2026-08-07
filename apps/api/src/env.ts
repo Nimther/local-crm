@@ -47,6 +47,12 @@ export const envSchema = z
       .string()
       .min(32, "UNSUBSCRIBE_TOKEN_SECRET must be at least 32 characters"),
     PUBLIC_APP_URL: z.string().url(),
+    // 10-11 (SEC-07): the SendGrid Event Webhook's signature-timestamp
+    // replay/staleness window, in seconds -- overridable without a deploy.
+    // Same coercion shape as API_PORT. Default matches
+    // signature-verify.ts's DEFAULT_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS;
+    // keep the two in sync if either changes.
+    WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS: z.coerce.number().int().positive().default(600),
   })
   .superRefine((val, ctx) => {
     // Boot-time guard (RESEARCH.md Pitfall 3 / Open Question 2): the
