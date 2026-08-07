@@ -31,6 +31,14 @@ const DEFAULT_APP_ROLE = "mega_crm_app";
 const DEFAULT_APP_PASSWORD = "mega_crm_dev_pw";
 
 /**
+ * Phase 10 (SEC-01/SEC-05, D-01/D-04) — the two additional least-privilege
+ * login roles this phase introduces. Exported so callers (and their own
+ * tests) reference the same constant rather than re-typing the role name.
+ */
+export const SCAN_ROLE = "mega_crm_scan";
+export const AUTH_ROLE = "mega_crm_auth";
+
+/**
  * Double-quote a Postgres identifier, doubling any embedded double quote.
  *
  * Exported for direct unit assertion. It is defense in depth, not the primary
@@ -78,19 +86,74 @@ function resolveAdminDsn(explicit?: string): string {
 }
 
 /**
- * Build the app-role DSN for a freshly created database by swapping the admin
- * DSN's credentials and pathname.
+ * Phase 10 (SEC-01/SEC-05, D-01/D-04) — ensure the two cluster-level login
+ * roles this phase introduces exist, idempotently.
+ *
+ * Mirrors `scripts/ensure-db-roles.mjs`'s DO-block shape and
+ * `docker/init-app-role.sql`'s role definition exactly (NOSUPERUSER
+ * NOCREATEDB NOCREATEROLE NOBYPASSRLS). Called from `createEphemeralDatabase`
+ * below so every ephemeral test database is provisioned against a cluster
+ * that already has both roles, the same way a fresh docker-compose volume
+ * does via `docker/init-app-role.sql` (RESEARCH.md Pitfall 5: role creation
+ * cannot live inside a numbered migration, and CI's runner always starts
+ * from a fresh volume where a stale-volume gap can't occur — but a
+ * developer's long-lived local Postgres, exercised by this same test path,
+ * can).
+ */
+export async function ensureClusterRoles(adminDsn?: string): Promise<void> {
+  const pool = new Pool({ connectionString: resolveAdminDsn(adminDsn) });
+  try {
+    for (const role of [SCAN_ROLE, AUTH_ROLE]) {
+      const { rows } = await pool.query("SELECT 1 FROM pg_roles WHERE rolname = $1", [role]);
+      if (rows.length > 0) continue;
+
+      // Role names are module constants (SCAN_ROLE/AUTH_ROLE), never
+      // caller-supplied -- no injection surface in this literal interpolation.
+      await pool.query(
+        `CREATE ROLE ${role} WITH LOGIN PASSWORD 'mega_crm_dev_pw' NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS`,
+      );
+    }
+  } finally {
+    await pool.end();
+  }
+}
+
+/**
+ * Build a role-scoped DSN for a database by swapping the admin DSN's
+ * credentials and pathname.
+ *
+ * Generalized from the former `buildAppDsn` (Phase 10, D-01/D-04): the same
+ * swap-credentials-and-pathname shape now serves the app role, the scan role
+ * and the auth role, since all three connect to the same physical database
+ * under different identities.
+ */
+export function buildRoleDsn(
+  adminDsn: string,
+  databaseName: string,
+  role: string,
+  password: string,
+): string {
+  const url = new URL(adminDsn);
+  url.username = role;
+  url.password = password;
+  url.pathname = `/${databaseName}`;
+  return url.toString();
+}
+
+/**
+ * Build the app-role DSN for a freshly created database.
  *
  * Returning an app-role DSN rather than the admin one is load-bearing: under a
  * superuser DSN Row-Level Security is not enforced, and every RLS assertion in
  * the existing suites would silently become vacuous (D-11).
  */
 function buildAppDsn(adminDsn: string, databaseName: string): string {
-  const url = new URL(adminDsn);
-  url.username = DEFAULT_APP_ROLE;
-  url.password = process.env.TEST_APP_DB_PASSWORD ?? DEFAULT_APP_PASSWORD;
-  url.pathname = `/${databaseName}`;
-  return url.toString();
+  return buildRoleDsn(
+    adminDsn,
+    databaseName,
+    DEFAULT_APP_ROLE,
+    process.env.TEST_APP_DB_PASSWORD ?? DEFAULT_APP_PASSWORD,
+  );
 }
 
 /**
@@ -144,6 +207,10 @@ export async function createEphemeralDatabase(options: {
   const adminDsn = resolveAdminDsn();
   const runId = options.runId ?? process.env.GSD_TEST_RUN_ID ?? randomUUID().slice(0, 8);
   const databaseName = buildEphemeralDatabaseName(options.workspace, runId);
+
+  // Phase 10: the two new cluster roles must exist before the migration
+  // chain's GRANT statements run against this database (0041 onward).
+  await ensureClusterRoles(adminDsn);
 
   // Reuse the guarded drop path rather than issuing a raw DROP here, so the
   // namespace check applies to creation's cleanup too.

@@ -1,5 +1,6 @@
 import path from "node:path";
 
+import { getScanTestDatabaseUrl } from "./db-fixture.js";
 import { assertTestDatabaseUrl } from "./guard.js";
 import { createEphemeralDatabase, dropEphemeralDatabase } from "./provision-db.js";
 
@@ -51,6 +52,13 @@ export default async function setup(project?: { name?: string }): Promise<() => 
   // it pointed at dev would send tenant-scoped pools to the dev database.
   process.env.TEST_DATABASE_URL = dsn;
   process.env.DATABASE_URL = dsn;
+
+  // Phase 10 (SEC-01/D-02): publish the scan-role DSN for the SAME ephemeral
+  // database. vitest forks its test workers AFTER globalSetup returns and
+  // hands them the parent's process.env, so every workspace's tests inherit
+  // this without constructing their own DSN. Deliberately no auth DSN here --
+  // plan 10-09 adds that once the auth role first has grants.
+  process.env.SCAN_DATABASE_URL = getScanTestDatabaseUrl();
 
   return async function teardown(): Promise<void> {
     await dropEphemeralDatabase(databaseName, adminDsn);

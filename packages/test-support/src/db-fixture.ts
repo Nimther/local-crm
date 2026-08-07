@@ -6,6 +6,7 @@ import { Pool } from "pg";
 
 import { assertTestDatabaseUrl } from "./guard.js";
 import { applyMigrationFile, listMigrationFiles } from "./migration-runner.js";
+import { AUTH_ROLE, buildRoleDsn, SCAN_ROLE } from "./provision-db.js";
 
 // Deep specifier, not the package root (09-03 task 2, D-05): `packages/db/src/index.ts`
 // constructs a Drizzle client at import time and throws when DATABASE_URL is
@@ -179,6 +180,30 @@ export function ensureTestDbMigrated(): Promise<void> {
 /** A fresh pg Pool pointed at the test database. Caller owns its lifecycle (must `.end()`). */
 export function createTestPool(): Pool {
   return new Pool({ connectionString: getTestDatabaseUrl(), max: 5 });
+}
+
+/**
+ * Phase 10 (SEC-01/SEC-05, D-01/D-04) — the scan/auth-role equivalents of
+ * `getTestDatabaseUrl()`.
+ *
+ * Both go THROUGH `getTestDatabaseUrl()` first, so the dev-DSN fail-closed
+ * guard still applies before any role swap happens — only the username and
+ * password change; the database (already validated) stays identical.
+ */
+function swapRole(testUrl: string, role: string): string {
+  const url = new URL(testUrl);
+  const databaseName = url.pathname.replace(/^\//, "");
+  return buildRoleDsn(testUrl, databaseName, role, process.env.TEST_APP_DB_PASSWORD ?? "mega_crm_dev_pw");
+}
+
+/** The scan-role DSN for the SAME ephemeral database `getTestDatabaseUrl()` returns. */
+export function getScanTestDatabaseUrl(): string {
+  return swapRole(getTestDatabaseUrl(), SCAN_ROLE);
+}
+
+/** The auth-role DSN for the SAME ephemeral database `getTestDatabaseUrl()` returns. */
+export function getAuthTestDatabaseUrl(): string {
+  return swapRole(getTestDatabaseUrl(), AUTH_ROLE);
 }
 
 /** The absolute migrations directory this fixture applies from. Exported for path assertions. */

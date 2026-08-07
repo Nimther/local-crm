@@ -1,15 +1,21 @@
 export { assertTestDatabaseUrl } from "./guard.js";
 export {
+  AUTH_ROLE,
+  SCAN_ROLE,
   buildEphemeralDatabaseName,
+  buildRoleDsn,
   createEphemeralDatabase,
   dropEphemeralDatabase,
+  ensureClusterRoles,
   quoteIdentifier,
 } from "./provision-db.js";
 export {
   MIGRATION_ADVISORY_LOCK_KEY,
   createTestPool,
   ensureTestDbMigrated,
+  getAuthTestDatabaseUrl,
   getMigrationsDir,
+  getScanTestDatabaseUrl,
   getTestDatabaseUrl,
 } from "./db-fixture.js";
 export {

@@ -10,7 +10,7 @@
     "packages/*"
   ],
   "scripts": {
-    "predev": "node scripts/check-env.mjs && node scripts/migrate-dev.mjs",
+    "predev": "node scripts/check-env.mjs && node scripts/ensure-db-roles.mjs && node scripts/migrate-dev.mjs",
     "dev": "concurrently -n api,web,worker -c blue,green,yellow \"npm run dev -w apps/api\" \"npm run dev -w apps/web\" \"npm run dev -w apps/worker\"",
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
@@ -20,6 +20,7 @@
     "verify:redis-config": "node scripts/verify-redis-config.mjs",
     "db:generate": "npm run db:generate -w packages/db",
     "db:migrate": "npm run db:migrate -w packages/db",
+    "db:roles": "node scripts/ensure-db-roles.mjs",
     "relocate:default-partition-rows": "npm run relocate:default-partition-rows -w packages/db",
     "failure:429": "vitest run --root apps/worker src/queues/__tests__/failure-injection/rate-limit-429.test.ts",
     "failure:timeout": "vitest run --root apps/worker src/queues/__tests__/failure-injection/timeout.test.ts",

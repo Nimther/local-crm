@@ -288,6 +288,13 @@
       "when": 1783685963482,
       "tag": "0040_partition_maintenance_runs_seed",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1783685963483,
+      "tag": "0041_scan_role_bootstrap",
+      "breakpoints": true
     }
   ]
 }
