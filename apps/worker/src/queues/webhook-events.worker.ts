@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Worker, type Job, type ConnectionOptions } from "bullmq";
 import type { PoolClient } from "pg";
-import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
+import { withCrossWorkspaceScan, withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { recordSubscriptionStatusChange } from "@mega-crm/contacts-core";
 import { incrementWorkspaceDailyRollup } from "./analytics-rollup.js";
 import {
@@ -410,9 +410,88 @@ async function debounceWebhookHealth(client: PoolClient, workspaceId: string): P
 }
 
 /**
- * The webhook-events job handler (WBHK-01/02/03/04, SUBS-02, D-14): re-derives
- * `workspaceId` from `job.data` (never ambient state), performs ONE multi-row
- * parameterized INSERT into `send_events` with
+ * SEC-09 / WR-01 (RESEARCH.md Pitfall 4): resolves each candidate `send_id`'s
+ * TRUE owning workspace via the scan role, and drops the events for any
+ * `send_id` that resolves to a DIFFERENT workspace than the one receiving
+ * this batch -- a sibling's raw event payload must never reach the
+ * receiving workspace's `send_events`. This runs on the scan pool BEFORE any
+ * tenant transaction opens (never nested inside `withTenant`/
+ * `withTenantTransaction`): under RLS, a tenant-scoped query genuinely
+ * cannot distinguish "this send_id belongs to a sibling workspace" from
+ * "this send_id does not exist at all" -- both resolve to zero rows from
+ * inside `withTenant(receivingWorkspaceId, ...)`. Only the scan role's
+ * unrestricted `sends_scan` policy (migration 0042) can answer the ownership
+ * question.
+ *
+ * The SELECT list is exactly `id, workspace_id` -- this is what makes the
+ * payload-free drop-signal prohibition (P1: MUST NOT log or persist
+ * sibling-workspace payload content) true BY CONSTRUCTION rather than by
+ * review discipline: the query physically cannot read anything else to
+ * leak.
+ *
+ * Filtering is per event, never a batch-level early return or throw
+ * (T-10-08-03) -- one sibling event must never fail the whole delivery.
+ * Three outcomes per candidate `send_id`:
+ *   - resolves to the receiving workspace -> unchanged, flows into the
+ *     existing per-tenant liveness check and insert path below;
+ *   - resolves to a DIFFERENT workspace -> the event rows carrying that id
+ *     are dropped from the surviving set entirely, and the drop is
+ *     signalled (grouped by owning workspace, counts and workspace ids
+ *     only -- never the send_id, event type, payload, or a contact
+ *     identifier, which is itself a sibling workspace's identifier);
+ *   - resolves to nothing (genuinely no such send anywhere) -> unchanged,
+ *     keeps the existing D-15 orphan behaviour (stored with a null
+ *     `send_id`, side effects skipped) via the per-tenant liveness check.
+ */
+async function dropSiblingWorkspaceEvents(
+  workspaceId: string,
+  rows: ExtractedEventRow[]
+): Promise<ExtractedEventRow[]> {
+  const candidateSendIds = [...new Set(rows.map((row) => row.sendId).filter((id): id is string => id !== null))];
+  if (candidateSendIds.length === 0) {
+    // Test 6: a batch with no send_id values at all performs no
+    // cross-workspace lookup -- the scan pool is never touched.
+    return rows;
+  }
+
+  const ownerRows = await withCrossWorkspaceScan(async (client) => {
+    const { rows: owners } = await client.query<{ id: string; workspaceId: string }>(
+      `SELECT id, workspace_id as "workspaceId" FROM sends WHERE id = ANY($1::uuid[])`,
+      [candidateSendIds]
+    );
+    return owners;
+  });
+  const ownerBySendId = new Map(ownerRows.map((r) => [r.id, r.workspaceId]));
+
+  const dropCountsByOwner = new Map<string, number>();
+  const survivingRows = rows.filter((row) => {
+    if (row.sendId === null) return true;
+    const owningWorkspaceId = ownerBySendId.get(row.sendId);
+    if (owningWorkspaceId === undefined || owningWorkspaceId === workspaceId) return true;
+    dropCountsByOwner.set(owningWorkspaceId, (dropCountsByOwner.get(owningWorkspaceId) ?? 0) + 1);
+    return false;
+  });
+
+  for (const [owningWorkspaceId, count] of dropCountsByOwner) {
+    // P1: the payload is exactly these three scalar fields -- no send_id, no
+    // event type, no payload, no contact identifier.
+    console.log("webhook.sibling_workspace_event_dropped", {
+      receivingWorkspaceId: workspaceId,
+      owningWorkspaceId,
+      count,
+    });
+  }
+
+  return survivingRows;
+}
+
+/**
+ * The webhook-events job handler (WBHK-01/02/03/04, SUBS-02, D-14, SEC-09):
+ * re-derives `workspaceId` from `job.data` (never ambient state). Before
+ * opening the tenant transaction, resolves and drops sibling-workspace
+ * events via `dropSiblingWorkspaceEvents` -- that ownership fact cannot come
+ * from inside the tenant transaction (see that function's doc comment).
+ * Then performs ONE multi-row parameterized INSERT into `send_events` with
  * `ON CONFLICT (workspace_id, sg_event_id, occurred_at) DO NOTHING
  * RETURNING id` -- only rows Postgres actually returns are "new"
  * (RESEARCH.md Pattern 3). For each genuinely-new, non-test event whose
@@ -428,8 +507,16 @@ async function debounceWebhookHealth(client: PoolClient, workspaceId: string): P
 export async function processWebhookEventBatch(data: WebhookEventsJob): Promise<{ inserted: number }> {
   const { workspaceId, events } = webhookEventsJobSchema.parse(data);
 
-  const rows = events.map(extractEventRow).filter((row): row is ExtractedEventRow => row !== null);
+  const extractedRows = events.map(extractEventRow).filter((row): row is ExtractedEventRow => row !== null);
+  if (extractedRows.length === 0) {
+    return { inserted: 0 };
+  }
+
+  const rows = await dropSiblingWorkspaceEvents(workspaceId, extractedRows);
   if (rows.length === 0) {
+    // Every surviving row was a sibling-workspace event -- nothing left to
+    // insert. Returning here also avoids an empty `VALUES ()` clause below,
+    // which the insert's placeholder-join would otherwise produce.
     return { inserted: 0 };
   }
 
@@ -441,6 +528,10 @@ export async function processWebhookEventBatch(data: WebhookEventsJob): Promise<
       // corresponds to a live send (deleted, or Pitfall 2's kind='test'
       // dispatch that never writes a `sends` row at all) MUST be nulled out
       // here before insertion, not passed through as a dangling FK value.
+      // (SEC-09: `rows` here has already had sibling-workspace events
+      // dropped by `dropSiblingWorkspaceEvents` above -- a send_id that
+      // resolves to THIS workspace or to nothing at all still needs this
+      // per-tenant re-check, which is unchanged.)
       const candidateSendIds = [...new Set(rows.map((row) => row.sendId).filter((id): id is string => id !== null))];
       let liveSendIds = new Set<string>();
       if (candidateSendIds.length > 0) {
