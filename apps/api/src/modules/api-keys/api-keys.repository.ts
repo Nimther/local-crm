@@ -13,6 +13,8 @@ export interface ApiKeyLookupRow {
   workspaceId: string;
   secretHash: string;
   revokedAt: Date | null;
+  /** SEC-06 (D-06): the key's stored scope list -- apiKeyAuth copies this onto `request.apiKeyScopes`. */
+  scopes: string[];
 }
 
 const LIST_COLUMNS = `
@@ -101,7 +103,7 @@ export async function lookupApiKeyById(id: string): Promise<ApiKeyLookupRow | nu
   return withPreTenantLookup(async (client) => {
     await client.query("SELECT set_config('app.api_key_lookup_id', $1, true)", [id]);
     const { rows } = await client.query<ApiKeyLookupRow>(
-      `SELECT id, workspace_id as "workspaceId", secret_hash as "secretHash", revoked_at as "revokedAt"
+      `SELECT id, workspace_id as "workspaceId", secret_hash as "secretHash", revoked_at as "revokedAt", scopes
        FROM workspace_api_keys WHERE id = $1`,
       [id]
     );

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { eventEnvelopeSchema, MAX_EVENT_BATCH_SIZE, type EventIngestResultItem } from "@mega-crm/shared-schemas";
-import { apiKeyAuth } from "../api-keys/api-key-auth.js";
+import { apiKeyAuth, requireApiKeyScope } from "../api-keys/api-key-auth.js";
 import { eventsIngestQueue } from "./events-queue.js";
 
 /**
@@ -32,6 +32,10 @@ export async function registerEventsApiRoutes(fastify: FastifyInstance): Promise
         // unauthenticated-until-key-checked, high-volume surface.
         config: { rateLimit: { max: 100, timeWindow: "1 minute" } },
         bodyLimit: 5 * 1024 * 1024,
+        // SEC-06 (D-06, T-10-10-01/05): registered AFTER apiKeyAuth in the
+        // scope-level onRequest hook above -- authentication always resolves
+        // before this authorization check runs.
+        onRequest: requireApiKeyScope("events:write"),
       },
       async (request, reply) => {
         // T-02-06-04: workspace resolved SOLELY from the verified API key --

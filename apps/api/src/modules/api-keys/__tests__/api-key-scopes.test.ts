@@ -217,7 +217,7 @@ describe("API-key route scope enforcement (D-06/D-07)", () => {
     expect(new Set(row.scopes)).toEqual(new Set(FULL_SCOPE_SET));
   });
 
-  it("Test 8: every route in the API-key route modules is covered by this file", async () => {
+  it("Test 8: every route in the API-key route modules is covered by this file", () => {
     // The route-enumeration set this file actually exercises (Tests 1-6):
     // POST /v1/contacts and POST /v1/events.
     const exercisedRoutes = new Set(["POST /v1/contacts", "POST /v1/events"]);
