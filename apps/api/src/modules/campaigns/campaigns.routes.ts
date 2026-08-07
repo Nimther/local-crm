@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { FastifyInstance } from "fastify";
 import {
   createCampaignSchema,
   updateCampaignSchema,
@@ -11,8 +11,8 @@ import { decryptTenantSecret } from "@mega-crm/kms";
 import { auth } from "../auth/auth.js";
 import { requirePermission, toFetchHeaders } from "../../middleware/role-guard.js";
 import { withTenant, withTenantTransaction } from "../../middleware/tenant-context.js";
-import { findActiveWorkspaceBySlug, type ActiveWorkspace } from "../tenancy/workspace-lookup.js";
-import { getCallerRoles } from "../tenancy/member-roles.js";
+import { findActiveWorkspaceBySlug } from "../tenancy/workspace-lookup.js";
+import { resolveWorkspaceMember } from "../tenancy/resolve-workspace-member.js";
 import { getKey } from "../tenancy/sendgrid-key.repository.js";
 import { listTenantSendGridTemplates, validateTenantSendGridKey } from "../tenancy/sendgrid-client.js";
 import { getSegment, countSegmentMembers, listSegmentMembers } from "../segments/segment.repository.js";
@@ -133,34 +133,6 @@ function toCampaignResponse(row: CampaignRow) {
 }
 
 /**
- * Resolves `:slug` to a workspace AND confirms the caller is a member --
- * ANY throw from getCallerRoles (unauthenticated, unknown slug, non-member)
- * maps to the SAME 404 a nonexistent workspace returns, so campaign routes
- * cannot be used as a workspace-enumeration oracle (mirrors
- * segments.routes.ts's resolveWorkspaceMember exactly).
- */
-async function resolveWorkspaceMember(
-  request: FastifyRequest,
-  reply: FastifyReply,
-  slug: string
-): Promise<ActiveWorkspace | null> {
-  const workspace = await findActiveWorkspaceBySlug(slug);
-  if (!workspace) {
-    await reply.code(404).send({ error: "Workspace not found" });
-    return null;
-  }
-
-  try {
-    await getCallerRoles(toFetchHeaders(request), slug);
-  } catch {
-    await reply.code(404).send({ error: "Workspace not found" });
-    return null;
-  }
-
-  return workspace;
-}
-
-/**
  * Campaign lifecycle API (CAMP-01..05, SUBS-03). Ordinary workspace
  * membership is sufficient for create/edit/delete drafts, test-send, and
  * every read route (progress/audience-breakdown/test-sample/templates/
@@ -176,8 +148,9 @@ export async function registerCampaignsRoutes(fastify: FastifyInstance): Promise
       return reply.code(400).send({ error: parsed.error.flatten() });
     }
 
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     const result = await withTenant(workspace.id, () => listCampaigns(parsed.data));
     return reply.send({
@@ -195,8 +168,9 @@ export async function registerCampaignsRoutes(fastify: FastifyInstance): Promise
       return reply.code(400).send({ error: parsed.error.flatten() });
     }
 
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     const session = await auth.api.getSession({ headers: toFetchHeaders(request) });
     if (!session) {
@@ -220,8 +194,9 @@ export async function registerCampaignsRoutes(fastify: FastifyInstance): Promise
   // routing never has to disambiguate `sendgrid` from a campaign uuid.
   fastify.get("/api/workspaces/:slug/campaigns/sendgrid/templates", async (request, reply) => {
     const { slug } = request.params as { slug: string };
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     const row = await withTenant(workspace.id, () => getKey());
     if (!row) {
@@ -240,8 +215,9 @@ export async function registerCampaignsRoutes(fastify: FastifyInstance): Promise
 
   fastify.get("/api/workspaces/:slug/campaigns/sendgrid/senders", async (request, reply) => {
     const { slug } = request.params as { slug: string };
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     const row = await withTenant(workspace.id, () => getKey());
     if (!row) {
@@ -263,8 +239,9 @@ export async function registerCampaignsRoutes(fastify: FastifyInstance): Promise
 
   fastify.get("/api/workspaces/:slug/campaigns/:id", async (request, reply) => {
     const { slug, id } = request.params as { slug: string; id: string };
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     const campaign = await withTenant(workspace.id, () => getCampaign(id));
     if (!campaign) {
@@ -280,8 +257,9 @@ export async function registerCampaignsRoutes(fastify: FastifyInstance): Promise
       return reply.code(400).send({ error: parsed.error.flatten() });
     }
 
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     try {
       const updated = await withTenant(workspace.id, () => updateCampaign(id, parsed.data));
@@ -295,8 +273,9 @@ export async function registerCampaignsRoutes(fastify: FastifyInstance): Promise
 
   fastify.delete("/api/workspaces/:slug/campaigns/:id", async (request, reply) => {
     const { slug, id } = request.params as { slug: string; id: string };
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     try {
       const deleted = await withTenant(workspace.id, () => deleteCampaign(id));
@@ -456,8 +435,9 @@ export async function registerCampaignsRoutes(fastify: FastifyInstance): Promise
       return reply.code(400).send({ error: parsed.error.flatten() });
     }
 
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     const campaign = await withTenant(workspace.id, () => getCampaign(id));
     if (!campaign) {
@@ -509,8 +489,9 @@ export async function registerCampaignsRoutes(fastify: FastifyInstance): Promise
   // never drift from what the dispatch worker actually sends.
   fastify.get("/api/workspaces/:slug/campaigns/:id/test-sample", async (request, reply) => {
     const { slug, id } = request.params as { slug: string; id: string };
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     const campaign = await withTenant(workspace.id, () => getCampaign(id));
     if (!campaign) {
@@ -541,8 +522,9 @@ export async function registerCampaignsRoutes(fastify: FastifyInstance): Promise
 
   fastify.get("/api/workspaces/:slug/campaigns/:id/progress", async (request, reply) => {
     const { slug, id } = request.params as { slug: string; id: string };
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     const progress = await withTenant(workspace.id, () => getCampaignProgress(id));
     if (!progress) {
@@ -556,8 +538,9 @@ export async function registerCampaignsRoutes(fastify: FastifyInstance): Promise
   // the same way segments.routes.ts's own evaluation paths already are.
   fastify.get("/api/workspaces/:slug/campaigns/:id/audience-breakdown", async (request, reply) => {
     const { slug, id } = request.params as { slug: string; id: string };
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     const campaign = await withTenant(workspace.id, () => getCampaign(id));
     if (!campaign) {

@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { FastifyInstance } from "fastify";
 import {
   createSegmentSchema,
   updateSegmentSchema,
@@ -10,8 +10,7 @@ import type { ContactRow } from "@mega-crm/contacts-core";
 import { auth } from "../auth/auth.js";
 import { toFetchHeaders } from "../../middleware/role-guard.js";
 import { withTenant } from "../../middleware/tenant-context.js";
-import { findActiveWorkspaceBySlug, type ActiveWorkspace } from "../tenancy/workspace-lookup.js";
-import { getCallerRoles } from "../tenancy/member-roles.js";
+import { resolveWorkspaceMember } from "../tenancy/resolve-workspace-member.js";
 import {
   countSegmentMembers,
   createSegment,
@@ -88,35 +87,6 @@ function toSegmentResponse(row: SegmentRow) {
 }
 
 /**
- * Resolves `:slug` to a workspace AND confirms the caller is a member --
- * ANY throw from getCallerRoles (unauthenticated, unknown slug, non-member)
- * maps to the SAME 404 a nonexistent workspace returns, so segment routes
- * cannot be used as a workspace-enumeration oracle (V4, matching
- * contacts.routes.ts's precedent -- segment management is ordinary-member
- * level, not an elevated-role action).
- */
-async function resolveWorkspaceMember(
-  request: FastifyRequest,
-  reply: FastifyReply,
-  slug: string
-): Promise<ActiveWorkspace | null> {
-  const workspace = await findActiveWorkspaceBySlug(slug);
-  if (!workspace) {
-    await reply.code(404).send({ error: "Workspace not found" });
-    return null;
-  }
-
-  try {
-    await getCallerRoles(toFetchHeaders(request), slug);
-  } catch {
-    await reply.code(404).send({ error: "Workspace not found" });
-    return null;
-  }
-
-  return workspace;
-}
-
-/**
  * Session-authed segment CRUD + evaluation (SEGM-01..04). Ordinary
  * workspace membership is sufficient -- segment management is not an
  * elevated-role action, matching contacts.
@@ -130,8 +100,9 @@ export async function registerSegmentsRoutes(fastify: FastifyInstance): Promise<
       return reply.code(400).send({ error: parsed.error.flatten() });
     }
 
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     const result = await withTenant(workspace.id, () => listSegments(parsed.data));
     return reply.send({
@@ -149,8 +120,9 @@ export async function registerSegmentsRoutes(fastify: FastifyInstance): Promise<
       return reply.code(400).send({ error: parsed.error.flatten() });
     }
 
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     const session = await auth.api.getSession({ headers: toFetchHeaders(request) });
     if (!session) {
@@ -175,8 +147,9 @@ export async function registerSegmentsRoutes(fastify: FastifyInstance): Promise<
 
   fastify.get("/api/workspaces/:slug/segments/event-names", async (request, reply) => {
     const { slug } = request.params as { slug: string };
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     const names = await withTenant(workspace.id, () => listObservedEventNames());
     return reply.send({ names });
@@ -192,8 +165,9 @@ export async function registerSegmentsRoutes(fastify: FastifyInstance): Promise<
       return reply.code(400).send({ error: parsed.error.flatten() });
     }
 
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     try {
       const count = await withTenant(workspace.id, () =>
@@ -210,8 +184,9 @@ export async function registerSegmentsRoutes(fastify: FastifyInstance): Promise<
 
   fastify.get("/api/workspaces/:slug/segments/:id", async (request, reply) => {
     const { slug, id } = request.params as { slug: string; id: string };
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     const segment = await withTenant(workspace.id, () => getSegment(id));
     if (!segment) {
@@ -229,8 +204,9 @@ export async function registerSegmentsRoutes(fastify: FastifyInstance): Promise<
       return reply.code(400).send({ error: parsed.error.flatten() });
     }
 
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     const segment = await withTenant(workspace.id, () => getSegment(id));
     if (!segment) {
@@ -263,8 +239,9 @@ export async function registerSegmentsRoutes(fastify: FastifyInstance): Promise<
       return reply.code(400).send({ error: parsed.error.flatten() });
     }
 
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     try {
       const updated = await withTenant(workspace.id, () =>
@@ -288,8 +265,9 @@ export async function registerSegmentsRoutes(fastify: FastifyInstance): Promise<
   // otherwise surface.
   fastify.delete("/api/workspaces/:slug/segments/:id", async (request, reply) => {
     const { slug, id } = request.params as { slug: string; id: string };
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     try {
       const deleted = await withTenant(workspace.id, () => deleteSegment(id));

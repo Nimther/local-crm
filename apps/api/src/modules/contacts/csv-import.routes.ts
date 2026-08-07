@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { FastifyInstance } from "fastify";
 import multipart from "@fastify/multipart";
 import { parse } from "csv-parse";
 import { csvDryRunRequestSchema, type CsvDryRunSummary, type DuplicatePolicy } from "@mega-crm/shared-schemas";
@@ -6,8 +6,7 @@ import { applyCsvRowMapping, findContactIdByIdentity } from "@mega-crm/contacts-
 import { auth } from "../auth/auth.js";
 import { toFetchHeaders } from "../../middleware/role-guard.js";
 import { withTenant, withTenantTransaction, getWorkspaceId } from "../../middleware/tenant-context.js";
-import { findActiveWorkspaceBySlug, type ActiveWorkspace } from "../tenancy/workspace-lookup.js";
-import { getCallerRoles } from "../tenancy/member-roles.js";
+import { resolveWorkspaceMember } from "../tenancy/resolve-workspace-member.js";
 import { importsCsvQueue } from "./imports-csv-queue.js";
 import {
   createCsvImport,
@@ -27,31 +26,6 @@ import {
 const UPLOAD_MAX_BYTES = 50 * 1024 * 1024; // T-02-07-01: bound upload size (streamed, never fully buffered)
 const STAGING_CHUNK_SIZE = 500;
 const DRY_RUN_PAGE_SIZE = 500;
-
-/**
- * Resolves `:slug` to a workspace AND confirms the caller is a member --
- * same 404-non-enumeration shape as contacts.routes.ts's own
- * resolveWorkspaceMember (any throw from getCallerRoles maps to the same
- * 404 a nonexistent workspace returns).
- */
-async function resolveWorkspaceMember(
-  request: FastifyRequest,
-  reply: FastifyReply,
-  slug: string
-): Promise<ActiveWorkspace | null> {
-  const workspace = await findActiveWorkspaceBySlug(slug);
-  if (!workspace) {
-    await reply.code(404).send({ error: "Workspace not found" });
-    return null;
-  }
-  try {
-    await getCallerRoles(toFetchHeaders(request), slug);
-  } catch {
-    await reply.code(404).send({ error: "Workspace not found" });
-    return null;
-  }
-  return workspace;
-}
 
 function toStatusResponse(row: CsvImportRow) {
   return {
@@ -144,8 +118,9 @@ export async function registerCsvImportRoutes(fastify: FastifyInstance): Promise
 
     scope.post("/api/workspaces/:slug/imports", async (request, reply) => {
       const { slug } = request.params as { slug: string };
-      const workspace = await resolveWorkspaceMember(request, reply, slug);
-      if (!workspace) return;
+      const resolved = await resolveWorkspaceMember(request, reply, slug);
+      if (!resolved) return;
+      const workspace = resolved.workspace;
 
       const session = await auth.api.getSession({ headers: toFetchHeaders(request) });
       if (!session) {
@@ -223,8 +198,9 @@ export async function registerCsvImportRoutes(fastify: FastifyInstance): Promise
   /** D-20: import history, newest first. */
   fastify.get("/api/workspaces/:slug/imports", async (request, reply) => {
     const { slug } = request.params as { slug: string };
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     const rows = await withTenant(workspace.id, () => listCsvImports());
     return reply.send(rows.map(toStatusResponse));
@@ -233,8 +209,9 @@ export async function registerCsvImportRoutes(fastify: FastifyInstance): Promise
   /** D-16: progress polling (processed/total, summary, current status). */
   fastify.get("/api/workspaces/:slug/imports/:id", async (request, reply) => {
     const { slug, id } = request.params as { slug: string; id: string };
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     const row = await withTenant(workspace.id, () => getCsvImport(id));
     if (!row) return reply.code(404).send({ error: "Import not found" });
@@ -249,8 +226,9 @@ export async function registerCsvImportRoutes(fastify: FastifyInstance): Promise
       return reply.code(400).send({ error: parsed.error.flatten() });
     }
 
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     const summary = await withTenant(workspace.id, async () => {
       const existing = await getCsvImport(id);
@@ -274,8 +252,9 @@ export async function registerCsvImportRoutes(fastify: FastifyInstance): Promise
   /** Enqueues the background apply job (CONT-02) -- must follow a dry-run (D-17 ordering: mapping must already be persisted). */
   fastify.post("/api/workspaces/:slug/imports/:id/apply", async (request, reply) => {
     const { slug, id } = request.params as { slug: string; id: string };
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     const existing = await withTenant(workspace.id, () => getCsvImport(id));
     if (!existing) return reply.code(404).send({ error: "Import not found" });
@@ -292,8 +271,9 @@ export async function registerCsvImportRoutes(fastify: FastifyInstance): Promise
   /** D-18: downloadable CSV of only the errored rows, with a reason column. */
   fastify.get("/api/workspaces/:slug/imports/:id/errors", async (request, reply) => {
     const { slug, id } = request.params as { slug: string; id: string };
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     const errorRows = await withTenant(workspace.id, () => getErrorRows(id));
 

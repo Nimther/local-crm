@@ -1,37 +1,8 @@
-import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { toFetchHeaders } from "../../middleware/role-guard.js";
+import type { FastifyInstance } from "fastify";
 import { withTenant } from "../../middleware/tenant-context.js";
-import { findActiveWorkspaceBySlug, type ActiveWorkspace } from "../tenancy/workspace-lookup.js";
-import { getCallerRoles } from "../tenancy/member-roles.js";
+import { resolveWorkspaceMember } from "../tenancy/resolve-workspace-member.js";
 import { getFlow } from "../flows/flow.repository.js";
 import { getFlowNodeAnalytics, type FlowNodeAnalyticsRow } from "./flow-analytics.repository.js";
-
-/**
- * Resolves `:slug` to a workspace AND confirms the caller is a member --
- * copied verbatim from timeline.routes.ts's `resolveWorkspaceMember` (not
- * exported there) so every analytics route gets the identical
- * workspace-enumeration-safe 404 behavior.
- */
-async function resolveWorkspaceMember(
-  request: FastifyRequest,
-  reply: FastifyReply,
-  slug: string
-): Promise<ActiveWorkspace | null> {
-  const workspace = await findActiveWorkspaceBySlug(slug);
-  if (!workspace) {
-    await reply.code(404).send({ error: "Workspace not found" });
-    return null;
-  }
-
-  try {
-    await getCallerRoles(toFetchHeaders(request), slug);
-  } catch {
-    await reply.code(404).send({ error: "Workspace not found" });
-    return null;
-  }
-
-  return workspace;
-}
 
 function toFlowNodeAnalyticsResponse(row: FlowNodeAnalyticsRow) {
   return {
@@ -63,8 +34,9 @@ function toFlowNodeAnalyticsResponse(row: FlowNodeAnalyticsRow) {
 export async function registerFlowAnalyticsRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get("/api/workspaces/:slug/flows/:id/analytics", async (request, reply) => {
     const { slug, id } = request.params as { slug: string; id: string };
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     const body = await withTenant(workspace.id, async () => {
       const flow = await getFlow(id);

@@ -1,9 +1,7 @@
-import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { toFetchHeaders } from "../../middleware/role-guard.js";
 import { withTenant } from "../../middleware/tenant-context.js";
-import { findActiveWorkspaceBySlug, type ActiveWorkspace } from "../tenancy/workspace-lookup.js";
-import { getCallerRoles } from "../tenancy/member-roles.js";
+import { resolveWorkspaceMember } from "../tenancy/resolve-workspace-member.js";
 import { getWorkspaceDashboard, type DashboardPeriod } from "./dashboard.repository.js";
 
 /** D-08: closed set of period presets -- validated against the query-string literal, then transformed to the numeric period the repository expects. Any other value 400s. */
@@ -14,33 +12,6 @@ const dashboardQuerySchema = z.object({
     .default("30")
     .transform((value): DashboardPeriod => Number(value) as DashboardPeriod),
 });
-
-/**
- * Resolves `:slug` to a workspace AND confirms the caller is a member --
- * copied verbatim from timeline.routes.ts's `resolveWorkspaceMember` (not
- * exported there) so every analytics route gets the identical
- * workspace-enumeration-safe 404 behavior.
- */
-async function resolveWorkspaceMember(
-  request: FastifyRequest,
-  reply: FastifyReply,
-  slug: string
-): Promise<ActiveWorkspace | null> {
-  const workspace = await findActiveWorkspaceBySlug(slug);
-  if (!workspace) {
-    await reply.code(404).send({ error: "Workspace not found" });
-    return null;
-  }
-
-  try {
-    await getCallerRoles(toFetchHeaders(request), slug);
-  } catch {
-    await reply.code(404).send({ error: "Workspace not found" });
-    return null;
-  }
-
-  return workspace;
-}
 
 /**
  * ANLT-04/D-08: the workspace summary dashboard's sole read route. Ordinary
@@ -60,8 +31,9 @@ export async function registerDashboardRoutes(fastify: FastifyInstance): Promise
       return reply.code(400).send({ error: parsed.error.flatten() });
     }
 
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     const result = await withTenant(workspace.id, () => getWorkspaceDashboard(parsed.data.period));
     return reply.send(result);
