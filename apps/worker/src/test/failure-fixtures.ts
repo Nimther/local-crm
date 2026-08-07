@@ -1,4 +1,5 @@
 import { Pool } from "pg";
+import { scrubbedConsole } from "@mega-crm/redaction";
 import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { encryptTenantSecret } from "@mega-crm/kms";
 import { getAuthTestDatabaseUrl } from "@mega-crm/test-support";
@@ -39,7 +40,7 @@ function getAuthTestPool(): Pool {
   if (!authPool) {
     authPool = new Pool({ connectionString: getAuthTestDatabaseUrl() });
     authPool.on("error", (err) => {
-      console.error("idle auth test pool client error (connection dropped)", err);
+      scrubbedConsole.error("idle auth test pool client error (connection dropped)", err);
     });
   }
   return authPool;

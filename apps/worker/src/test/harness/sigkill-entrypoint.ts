@@ -1,5 +1,6 @@
 import type { SendGridMailSendRequest, SendTenantMailResult } from "@mega-crm/delivery-core";
 import type { EmailBroadcastJob, EmailTriggeredJob } from "@mega-crm/shared-schemas";
+import { scrubbedConsole } from "@mega-crm/redaction";
 
 import { processSendJob } from "../../queues/send-dispatch.js";
 
@@ -39,7 +40,7 @@ export const SIGKILL_HARNESS_READY = "sigkill-harness:frozen-in-claim-window";
 export const SIGKILL_HARNESS_RUN = "run";
 
 function fail(message: string): never {
-  console.error(`sigkill-entrypoint: ${message}`);
+  scrubbedConsole.error(`sigkill-entrypoint: ${message}`);
   process.exit(1);
 }
 
@@ -90,7 +91,7 @@ process.on("message", (message: unknown) => {
     // Reaching here means the freeze did not hold and dispatch failed for some
     // other reason — surface it rather than exiting silently, or the parent
     // sees an unexplained early exit.
-    console.error(
+    scrubbedConsole.error(
       `sigkill-entrypoint: processSendJob rejected before the freeze: ${
         err instanceof Error ? err.stack ?? err.message : String(err)
       }`,

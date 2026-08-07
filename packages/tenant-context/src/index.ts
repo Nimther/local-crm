@@ -26,6 +26,16 @@ export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 // on its own. Uses console.error (not a structured logger) to keep this
 // shared package dependency-light — callers that want structured logging
 // wrap/observe at their own layer.
+//
+// 10-13 (SEC-13) decision: stays on bare console.error rather than adopting
+// @mega-crm/redaction's scrubbedConsole. This package is imported by
+// literally everything (both apps, every worker queue) specifically to stay
+// dependency-light, and the argument here is never a payload -- `err` is a
+// driver-level Error ("Connection terminated unexpectedly" and similar) with
+// no tenant data, no workspace id, no query parameters. There is nothing for
+// scrubbing to protect at this call site. If a future change ever attaches a
+// payload to this listener, that is the point to revisit this decision, not
+// before.
 pool.on("error", (err) => {
   console.error("idle pg pool client error (connection dropped)", err);
 });

@@ -1,5 +1,6 @@
 import { Queue, Worker, type ConnectionOptions } from "bullmq";
 import { Pool } from "pg";
+import { scrubbedConsole } from "@mega-crm/redaction";
 import {
   BUFFER_ALERT_THRESHOLD_MONTHS,
   LOOKAHEAD_MONTHS,
@@ -92,7 +93,7 @@ const partitionMaintenancePool = new Pool({ connectionString: process.env.DATABA
 // event and crash the whole apps/worker process -- the same failure class
 // CR-04 (below) closes for the scheduler-registration path.
 partitionMaintenancePool.on("error", (err) => {
-  console.error("partition-maintenance: idle pg pool client error (connection dropped)", err);
+  scrubbedConsole.error("partition-maintenance: idle pg pool client error (connection dropped)", err);
 });
 
 export interface ProcessPartitionMaintenanceDeps {
@@ -132,7 +133,7 @@ export async function processPartitionMaintenance(
   // Pino arrives in Phase 15 / OPS-06 -- console.log carries the same
   // numbers the operator alert email would, so a human reading worker
   // output sees what the watchdog sees.
-  console.log("partition-maintenance: run complete", {
+  scrubbedConsole.log("partition-maintenance: run complete", {
     lastRunAt: snapshot.lastRunAt.toISOString(),
     eventsBufferMonths: snapshot.eventsBufferMonths,
     sendEventsBufferMonths: snapshot.sendEventsBufferMonths,
@@ -245,7 +246,7 @@ export function createPartitionMaintenanceWorker(
       // Best-effort registration: log, don't crash the process. The daily
       // watchdog (apps/api's partition-watchdog.ts) independently catches a
       // job that consequently never runs.
-      console.error("partition-maintenance: scheduler registration failed", err);
+      scrubbedConsole.error("partition-maintenance: scheduler registration failed", err);
     } finally {
       await queue.close().catch(() => undefined);
     }
