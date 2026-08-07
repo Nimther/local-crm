@@ -1,9 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import {
-  ensureTestDbMigrated,
-  getScanTestDatabaseUrl,
-  getTestDatabaseUrl,
-} from "@mega-crm/test-support";
+import { ensureTestDbMigrated, getScanTestDatabaseUrl } from "@mega-crm/test-support";
 
 import { closeScanPool, pool, withCrossWorkspaceScan, withTenant, withTenantTransaction } from "../index.js";
 
