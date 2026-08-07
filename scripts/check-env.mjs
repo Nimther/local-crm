@@ -70,6 +70,12 @@ const baseRequired = [
   // heads-up below.
   "OPERATOR_ALERT_EMAIL",
   "REDIS_URL",
+  // Phase 10 (SEC-01/SEC-02, P3): worker-only DSN for the mega_crm_scan
+  // role's cross-workspace scans -- deliberately absent from
+  // apps/api/src/env.ts's schema (the API process must never hold this
+  // credential). Presence-only check here; apps/worker/src/server.ts
+  // enforces the fail-fast contract at boot.
+  "SCAN_DATABASE_URL",
   // 04-16 gap closure: read lazily (and thrown on) inside
   // packages/delivery-core/src/unsubscribe-token.ts at send-time -- every
   // broadcast/test send signs a List-Unsubscribe token, so a missing value

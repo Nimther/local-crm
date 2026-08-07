@@ -2,6 +2,12 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { Pool } from "pg";
 import type { PoolClient } from "pg";
 
+// Phase 10 (SEC-01/SEC-02, D-02): the cross-workspace scan helper lives in
+// its own module (scan.ts) but is re-exported here so `withTenantTransaction`
+// and `withCrossWorkspaceScan` share one public entry point, same as every
+// other consumer of this package.
+export { closeScanPool, withCrossWorkspaceScan } from "./scan.js";
+
 /**
  * The tenant-scoped pg Pool — shared by both apps/api and apps/worker, so
  * request-path and worker-path code run `SET LOCAL app.current_workspace_id`

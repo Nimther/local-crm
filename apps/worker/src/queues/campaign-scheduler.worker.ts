@@ -1,5 +1,5 @@
 import { Queue, Worker, type ConnectionOptions } from "bullmq";
-import { pool, withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
+import { withCrossWorkspaceScan, withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { CAMPAIGN_KICKOFF_QUEUE, type CampaignKickoffJob } from "@mega-crm/shared-schemas";
 
 /** The scheduler's own repeatable-tick queue -- self-produced and self-consumed within this file/process only. */
@@ -13,43 +13,35 @@ const DEFAULT_JOB_OPTIONS = {
   removeOnFail: false,
 };
 
-interface DueCampaignRow {
+export interface DueCampaignRow {
   id: string;
   workspaceId: string;
 }
 
 /**
  * Admin-side DISCOVERY scan for due scheduled campaigns (CAMP-02,
- * T-04-06-01): `pool.connect()` directly (NOT `withTenant`/
- * `withTenantTransaction` -- this scan doesn't know which workspace a
- * campaign belongs to until it reads one) inside a short, READ-ONLY
- * transaction that sets ONLY the narrow `app.admin_scan` GUC (migration
- * 0018's `campaign_scheduler_due_scan` policy, a SELECT-only permissive
- * policy -- this connection is never granted any write visibility across
- * tenants). Deliberately NOT `FOR UPDATE` here: Postgres RLS requires a
- * row to also satisfy an UPDATE-applicable policy before a locking SELECT
- * can return it, which `campaign_scheduler_due_scan` intentionally does
- * NOT grant (it's SELECT-only) -- the row-level lock for the actual
- * mutation happens per-campaign in `transitionToSending`, properly
- * tenant-scoped, below.
+ * T-04-06-01; Phase 10 SEC-01/SEC-02, D-01/D-02): runs on the dedicated
+ * `mega_crm_scan` login role via `withCrossWorkspaceScan` -- this scan
+ * doesn't know which workspace a campaign belongs to until it reads one, so
+ * it can never go through `withTenant`/`withTenantTransaction`. Access
+ * control is the role's identity plus migration 0041's role-scoped
+ * `campaigns_scan` policy (narrowed to `status = 'scheduled' AND
+ * scheduled_at <= now()`), not a session GUC -- `mega_crm_scan` is
+ * `NOBYPASSRLS`, owns no tables, and holds only the grants migration 0041
+ * adds. Deliberately NOT `FOR UPDATE` here: Postgres RLS requires a row to
+ * also satisfy an UPDATE-applicable policy before a locking SELECT can
+ * return it, which `campaigns_scan` intentionally does NOT grant (it's
+ * SELECT-only) -- the row-level lock for the actual mutation happens
+ * per-campaign in `transitionToSending`, properly tenant-scoped, below.
  */
-async function findDueCampaignCandidates(): Promise<DueCampaignRow[]> {
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    await client.query(`SELECT set_config('app.admin_scan', 'true', true)`);
+export async function findDueCampaignCandidates(): Promise<DueCampaignRow[]> {
+  return withCrossWorkspaceScan(async (client) => {
     const { rows } = await client.query<DueCampaignRow>(
       `SELECT id, workspace_id as "workspaceId" FROM campaigns
        WHERE status = 'scheduled' AND scheduled_at <= now()`
     );
-    await client.query("COMMIT");
     return rows;
-  } catch (err) {
-    await client.query("ROLLBACK").catch(() => undefined);
-    throw err;
-  } finally {
-    client.release();
-  }
+  });
 }
 
 /**
@@ -66,7 +58,7 @@ async function findDueCampaignCandidates(): Promise<DueCampaignRow[]> {
  * a concurrent tick/process already has locked. The caller only enqueues a
  * kickoff job when this actually transitions the row.
  */
-async function transitionToSending(row: DueCampaignRow): Promise<boolean> {
+export async function transitionToSending(row: DueCampaignRow): Promise<boolean> {
   return withTenant(row.workspaceId, () =>
     withTenantTransaction(async (client) => {
       const { rows } = await client.query<{ id: string }>(

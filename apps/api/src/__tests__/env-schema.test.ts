@@ -1,5 +1,11 @@
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { envSchema } from "../env.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const API_SRC_DIR = path.resolve(__dirname, "..");
 
 /**
  * envSchema (05-12 gap-closure, defense-in-depth #2): a production boot with
@@ -104,5 +110,43 @@ describe("envSchema OPERATOR_ALERT_EMAIL enforcement", () => {
   it("passes with a valid OPERATOR_ALERT_EMAIL", () => {
     const result = envSchema.safeParse(baseValidEnv());
     expect(result.success).toBe(true);
+  });
+});
+
+/**
+ * Phase 10 (SEC-01/SEC-02, P3, D-01): "the API process holds neither
+ * scan-role credentials nor membership" is a STRUCTURAL claim -- it must be
+ * true of the source, not just of the runtime-parsed env object (a
+ * Zod-parsed object strips unknown keys, so testing `env.SCAN_DATABASE_URL`
+ * at runtime would pass vacuously even if the schema declared it). These
+ * two assertions read the source directly.
+ */
+describe("P3 -- apps/api holds no scan-role credential or entry point", () => {
+  it("apps/api/src/env.ts does not reference SCAN_DATABASE_URL", () => {
+    const envSource = readFileSync(path.join(API_SRC_DIR, "env.ts"), "utf8");
+    expect(envSource).not.toMatch(/SCAN_DATABASE_URL/);
+  });
+
+  function collectTsFiles(dir: string): string[] {
+    const entries = readdirSync(dir);
+    const files: string[] = [];
+    for (const entry of entries) {
+      if (entry === "__tests__") continue;
+      const entryPath = path.join(dir, entry);
+      const stat = statSync(entryPath);
+      if (stat.isDirectory()) {
+        files.push(...collectTsFiles(entryPath));
+      } else if (entry.endsWith(".ts") || entry.endsWith(".tsx")) {
+        files.push(entryPath);
+      }
+    }
+    return files;
+  }
+
+  it("no file under apps/api/src (outside __tests__) imports withCrossWorkspaceScan", () => {
+    const offenders = collectTsFiles(API_SRC_DIR).filter((file) =>
+      readFileSync(file, "utf8").includes("withCrossWorkspaceScan"),
+    );
+    expect(offenders).toEqual([]);
   });
 });
