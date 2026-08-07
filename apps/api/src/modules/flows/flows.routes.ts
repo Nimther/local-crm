@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { FastifyInstance } from "fastify";
 import {
   createFlowSchema,
   flowListQuerySchema,
@@ -11,8 +11,8 @@ import type { FlowDefinition } from "@mega-crm/flows-core";
 import { auth } from "../auth/auth.js";
 import { requirePermission, toFetchHeaders } from "../../middleware/role-guard.js";
 import { withTenant } from "../../middleware/tenant-context.js";
-import { findActiveWorkspaceBySlug, type ActiveWorkspace } from "../tenancy/workspace-lookup.js";
-import { getCallerRoles } from "../tenancy/member-roles.js";
+import { findActiveWorkspaceBySlug } from "../tenancy/workspace-lookup.js";
+import { resolveWorkspaceMember } from "../tenancy/resolve-workspace-member.js";
 import { getSegment, countSegmentMembers } from "../segments/segment.repository.js";
 import {
   FlowStateError,
@@ -110,34 +110,6 @@ function toFlowRunSummaryResponse(row: FlowRunRow) {
 }
 
 /**
- * Resolves `:slug` to a workspace AND confirms the caller is a member --
- * ANY throw from getCallerRoles (unauthenticated, unknown slug, non-member)
- * maps to the SAME 404 a nonexistent workspace returns, so flow routes
- * cannot be used as a workspace-enumeration oracle (mirrors
- * campaigns.routes.ts's resolveWorkspaceMember exactly).
- */
-async function resolveWorkspaceMember(
-  request: FastifyRequest,
-  reply: FastifyReply,
-  slug: string
-): Promise<ActiveWorkspace | null> {
-  const workspace = await findActiveWorkspaceBySlug(slug);
-  if (!workspace) {
-    await reply.code(404).send({ error: "Workspace not found" });
-    return null;
-  }
-
-  try {
-    await getCallerRoles(toFetchHeaders(request), slug);
-  } catch {
-    await reply.code(404).send({ error: "Workspace not found" });
-    return null;
-  }
-
-  return workspace;
-}
-
-/**
  * Flow lifecycle API (FLOW-01/FLOW-04/FLOW-05/FLOW-06/FLOW-07). Ordinary
  * workspace membership is sufficient for create/list/read/draft-update and
  * duplicate -- publish/pause/resume are Owner/Admin-only (D-23) via
@@ -153,8 +125,9 @@ export async function registerFlowsRoutes(fastify: FastifyInstance): Promise<voi
       return reply.code(400).send({ error: parsed.error.flatten() });
     }
 
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     // NOTE: toFlowResponse's definition-fetch (getPinnedVersion) itself needs
     // ambient tenant context -- it MUST run inside the same withTenant scope
@@ -179,8 +152,9 @@ export async function registerFlowsRoutes(fastify: FastifyInstance): Promise<voi
       return reply.code(400).send({ error: parsed.error.flatten() });
     }
 
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     const session = await auth.api.getSession({ headers: toFetchHeaders(request) });
     if (!session) {
@@ -196,8 +170,9 @@ export async function registerFlowsRoutes(fastify: FastifyInstance): Promise<voi
 
   fastify.get("/api/workspaces/:slug/flows/:id", async (request, reply) => {
     const { slug, id } = request.params as { slug: string; id: string };
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     const body = await withTenant(workspace.id, async () => {
       const flow = await getFlow(id);
@@ -216,8 +191,9 @@ export async function registerFlowsRoutes(fastify: FastifyInstance): Promise<voi
       return reply.code(400).send({ error: parsed.error.flatten() });
     }
 
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     try {
       const body = await withTenant(workspace.id, async () => {
@@ -239,8 +215,9 @@ export async function registerFlowsRoutes(fastify: FastifyInstance): Promise<voi
   // for an event-triggered (or not-yet-configured) flow.
   fastify.get("/api/workspaces/:slug/flows/:id/enroll-preview", async (request, reply) => {
     const { slug, id } = request.params as { slug: string; id: string };
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     const body = await withTenant(workspace.id, async () => {
       const flow = await getFlow(id);
@@ -370,8 +347,9 @@ export async function registerFlowsRoutes(fastify: FastifyInstance): Promise<voi
   // live/paused flow's state.
   fastify.post("/api/workspaces/:slug/flows/:id/duplicate", async (request, reply) => {
     const { slug, id } = request.params as { slug: string; id: string };
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     const session = await auth.api.getSession({ headers: toFetchHeaders(request) });
     if (!session) {
@@ -400,8 +378,9 @@ export async function registerFlowsRoutes(fastify: FastifyInstance): Promise<voi
       return reply.code(400).send({ error: parsed.error.flatten() });
     }
 
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     const body = await withTenant(workspace.id, async () => {
       const flow = await getFlow(id);

@@ -1,9 +1,7 @@
-import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { toFetchHeaders } from "../../middleware/role-guard.js";
 import { withTenant } from "../../middleware/tenant-context.js";
-import { findActiveWorkspaceBySlug, type ActiveWorkspace } from "../tenancy/workspace-lookup.js";
-import { getCallerRoles } from "../tenancy/member-roles.js";
+import { resolveWorkspaceMember } from "../tenancy/resolve-workspace-member.js";
 import { getContact } from "../contacts/contact.repository.js";
 import { listContactTimeline, type TimelineRow } from "./timeline.repository.js";
 
@@ -11,33 +9,6 @@ const timelineQuerySchema = z.object({
   page: z.coerce.number().int().min(1).optional(),
   type: z.enum(["all", "events", "emails", "statuses"]).optional(),
 });
-
-/**
- * Resolves `:slug` to a workspace AND confirms the caller is a member --
- * copied verbatim from contacts.routes.ts's `resolveWorkspaceMember` (not
- * exported there) so every analytics route gets the identical
- * workspace-enumeration-safe 404 behavior (T-02-01-04 precedent).
- */
-async function resolveWorkspaceMember(
-  request: FastifyRequest,
-  reply: FastifyReply,
-  slug: string
-): Promise<ActiveWorkspace | null> {
-  const workspace = await findActiveWorkspaceBySlug(slug);
-  if (!workspace) {
-    await reply.code(404).send({ error: "Workspace not found" });
-    return null;
-  }
-
-  try {
-    await getCallerRoles(toFetchHeaders(request), slug);
-  } catch {
-    await reply.code(404).send({ error: "Workspace not found" });
-    return null;
-  }
-
-  return workspace;
-}
 
 function toTimelineResponse(row: TimelineRow) {
   return {
@@ -66,8 +37,9 @@ export async function registerTimelineRoutes(fastify: FastifyInstance): Promise<
       return reply.code(400).send({ error: parsed.error.flatten() });
     }
 
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     const contact = await withTenant(workspace.id, () => getContact(id));
     if (!contact) {
