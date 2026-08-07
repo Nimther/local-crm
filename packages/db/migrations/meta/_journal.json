@@ -309,6 +309,13 @@
       "when": 1783685963485,
       "tag": "0043_retire_admin_scan_guc_policies",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1783685963486,
+      "tag": "0044_workspace_isolation_fail_closed",
+      "breakpoints": true
     }
   ]
 }

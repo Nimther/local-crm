@@ -204,50 +204,79 @@ describe("the fail-closed RLS contract (SEC-03/SEC-04)", () => {
   });
 
   it("rejects on a connection that has never been scoped (contacts)", async () => {
-    await expect(
-      fresh.query(`SELECT id FROM contacts`),
-      "an unset GUC must raise, not silently exclude every row",
-    ).rejects.toThrow(/unrecognized configuration parameter/);
+    // A DEDICATED, single-use pool -- never `fresh` (shared with the catalog
+    // tests below, and reused by the recycled-connection tests via
+    // `fresh.connect()`). With `max: 1`, sharing `fresh` across the
+    // never-scoped and recycled-connection tests would hand the recycled
+    // tests' already-touched physical connection back to a later
+    // never-scoped test, turning "unrecognized configuration parameter"
+    // (never touched) into "invalid input syntax for type uuid" (touched,
+    // reverted to '') purely from test-ordering leakage, not from anything
+    // this contract itself asserts.
+    const neverScoped = new Pool({ connectionString: getTestDatabaseUrl(), max: 1 });
+    try {
+      await expect(
+        neverScoped.query(`SELECT id FROM contacts`),
+        "an unset GUC must raise, not silently exclude every row",
+      ).rejects.toThrow(/unrecognized configuration parameter/);
+    } finally {
+      await neverScoped.end();
+    }
   });
 
   it("rejects on a connection recycled from a committed tenant-scoped transaction (contacts)", async () => {
-    const client = await fresh.connect();
+    const recycled = new Pool({ connectionString: getTestDatabaseUrl(), max: 1 });
     try {
-      // Reproduce what withTenantTransaction leaves behind.
-      await client.query("BEGIN");
-      await client.query("SELECT set_config('app.current_workspace_id', $1, true)", [WORKSPACE_A]);
-      await client.query("COMMIT");
+      const client = await recycled.connect();
+      try {
+        // Reproduce what withTenantTransaction leaves behind.
+        await client.query("BEGIN");
+        await client.query("SELECT set_config('app.current_workspace_id', $1, true)", [WORKSPACE_A]);
+        await client.query("COMMIT");
 
-      // The GUC has now reverted to '' rather than being unset.
-      await expect(
-        client.query(`SELECT id FROM contacts`),
-        "the fail-closed predicate evaluates ''::uuid here and errors",
-      ).rejects.toThrow(/invalid input syntax for type uuid/);
+        // The GUC has now reverted to '' rather than being unset.
+        await expect(
+          client.query(`SELECT id FROM contacts`),
+          "the fail-closed predicate evaluates ''::uuid here and errors",
+        ).rejects.toThrow(/invalid input syntax for type uuid/);
+      } finally {
+        client.release();
+      }
     } finally {
-      client.release();
+      await recycled.end();
     }
   });
 
   it("rejects on a connection that has never been scoped — a second, previously null-tolerating table (flows)", async () => {
-    await expect(
-      fresh.query(`SELECT id FROM flows`),
-      "flows was NULLIF-guarded before this phase and silently returned zero rows here; the unification must be uniform, not contacts-specific",
-    ).rejects.toThrow(/unrecognized configuration parameter/);
+    const neverScoped = new Pool({ connectionString: getTestDatabaseUrl(), max: 1 });
+    try {
+      await expect(
+        neverScoped.query(`SELECT id FROM flows`),
+        "flows was NULLIF-guarded before this phase and silently returned zero rows here; the unification must be uniform, not contacts-specific",
+      ).rejects.toThrow(/unrecognized configuration parameter/);
+    } finally {
+      await neverScoped.end();
+    }
   });
 
   it("rejects on a connection recycled from a committed tenant-scoped transaction — flows", async () => {
-    const client = await fresh.connect();
+    const recycled = new Pool({ connectionString: getTestDatabaseUrl(), max: 1 });
     try {
-      await client.query("BEGIN");
-      await client.query("SELECT set_config('app.current_workspace_id', $1, true)", [WORKSPACE_A]);
-      await client.query("COMMIT");
+      const client = await recycled.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SELECT set_config('app.current_workspace_id', $1, true)", [WORKSPACE_A]);
+        await client.query("COMMIT");
 
-      await expect(
-        client.query(`SELECT id FROM flows`),
-        "flows' old NULLIF guard converted this leftover '' into NULL (excluded, not an error) -- the fail-closed rewrite must remove that too",
-      ).rejects.toThrow(/invalid input syntax for type uuid/);
+        await expect(
+          client.query(`SELECT id FROM flows`),
+          "flows' old NULLIF guard converted this leftover '' into NULL (excluded, not an error) -- the fail-closed rewrite must remove that too",
+        ).rejects.toThrow(/invalid input syntax for type uuid/);
+      } finally {
+        client.release();
+      }
     } finally {
-      client.release();
+      await recycled.end();
     }
   });
 
