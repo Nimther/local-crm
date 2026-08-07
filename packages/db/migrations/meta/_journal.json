@@ -302,6 +302,13 @@
       "when": 1783685963484,
       "tag": "0042_scan_role_grants_and_policies",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1783685963485,
+      "tag": "0043_retire_admin_scan_guc_policies",
+      "breakpoints": true
     }
   ]
 }

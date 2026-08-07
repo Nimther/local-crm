@@ -1,5 +1,6 @@
+import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ensureTestDbMigrated, getScanTestDatabaseUrl } from "@mega-crm/test-support";
+import { ensureTestDbMigrated, getScanTestDatabaseUrl, getTestDatabaseUrl } from "@mega-crm/test-support";
 
 import { closeScanPool, pool, withCrossWorkspaceScan, withTenant, withTenantTransaction } from "../index.js";
 
@@ -275,5 +276,123 @@ describe("cross-workspace scan role (Phase 10 SEC-01/SEC-02)", () => {
     } finally {
       if (saved !== undefined) process.env.SCAN_DATABASE_URL = saved;
     }
+  });
+
+  // ---------------------------------------------------------------------
+  // Phase 10 plan 10-06 (SEC-01/SEC-02): the legacy app.admin_scan marker
+  // GUC is retired everywhere -- migration 0043 drops the last five
+  // policies that read it (campaign_scheduler_due_scan, flow_runs_due_scan,
+  // flows_segment_sweep_scan, partition_relocation_admin_scan x2), and
+  // ensure-partitions.ts's attachPartitionCheckFirst no longer sets it.
+  // These two tests are the SPEC R2 negative proof: no policy still
+  // references the marker, and setting it grants nothing.
+  // ---------------------------------------------------------------------
+
+  /** Seeds one contact and one send in a fresh workspace, for the marker-retirement negative test below. */
+  async function seedContactAndSend(nameSeed: string): Promise<{ workspaceId: string; contactId: string; sendId: string }> {
+    const workspaceId = await seedOrganization(nameSeed);
+    const { contactId, sendId } = await withTenant(workspaceId, () =>
+      withTenantTransaction(async (client) => {
+        const email = `${nameSeed}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@fixture.test`;
+        const { rows: contactRows } = await client.query<{ id: string }>(
+          `INSERT INTO contacts (workspace_id, email, subscription_status)
+           VALUES ($1, $2, 'subscribed') RETURNING id`,
+          [workspaceId, email],
+        );
+        const { rows: sendRows } = await client.query<{ id: string }>(
+          `INSERT INTO sends (workspace_id, contact_id, kind, status)
+           VALUES ($1, $2, 'campaign', 'sent') RETURNING id`,
+          [workspaceId, contactRows[0].id],
+        );
+        return { contactId: contactRows[0].id, sendId: sendRows[0].id };
+      }),
+    );
+    return { workspaceId, contactId, sendId };
+  }
+
+  const MARKER_GATED_TABLES = ["campaigns", "flow_runs", "flows", "contacts", "sends"] as const;
+
+  /**
+   * Counts every row visible in each of `MARKER_GATED_TABLES` on a genuinely
+   * fresh connection off `dedicatedPool` (never previously tenant-scoped, so
+   * `app.current_workspace_id` reads as NULL, not the empty string a
+   * recycled connection would leave behind -- see
+   * `tenant-context.test.ts`'s own "no tenant in scope" baseline for why
+   * that distinction matters). Optionally sets the legacy marker
+   * transaction-locally first.
+   */
+  async function countMarkerGatedTables(
+    dedicatedPool: Pool,
+    setMarker: boolean,
+  ): Promise<Record<(typeof MARKER_GATED_TABLES)[number], number>> {
+    const client = await dedicatedPool.connect();
+    const counts = {} as Record<(typeof MARKER_GATED_TABLES)[number], number>;
+    try {
+      await client.query("BEGIN");
+      if (setMarker) {
+        await client.query("SELECT set_config('app.admin_scan', 'true', true)");
+      }
+      for (const table of MARKER_GATED_TABLES) {
+        const { rows } = await client.query<{ id: string }>(`SELECT id FROM ${table}`);
+        counts[table] = rows.length;
+      }
+      await client.query("COMMIT");
+    } finally {
+      client.release();
+    }
+    return counts;
+  }
+
+  it("10-06 Test 1: setting the legacy admin-scan marker on a tenant-pool connection grants no additional rows across five tables", async () => {
+    // Seed two workspaces' worth of real rows in every table the marker
+    // used to gate visibility on, so "zero rows visible" below is a
+    // meaningful claim, not vacuously true on an empty table.
+    await seedDueCampaign("marker-retired-campaign-a");
+    await seedDueCampaign("marker-retired-campaign-b");
+    const pastWake = new Date(Date.now() - 60_000);
+    await seedFlowRun("marker-retired-flow-run-a", { status: "waiting", nextWakeAt: pastWake });
+    await seedFlowRun("marker-retired-flow-run-b", { status: "waiting", nextWakeAt: pastWake });
+    await seedSegmentFlow("marker-retired-segment-flow-a", { status: "live" });
+    await seedSegmentFlow("marker-retired-segment-flow-b", { status: "live" });
+    await seedContactAndSend("marker-retired-contact-send-a");
+    await seedContactAndSend("marker-retired-contact-send-b");
+
+    // A DEDICATED, single-connection pool -- never shared with `pool` above
+    // (which every seed helper's withTenantTransaction call already reused
+    // many times in this file, leaving `app.current_workspace_id` reverted
+    // to '' on some of its physical connections). A genuinely fresh
+    // connection is what makes "zero rows without the marker" the correct,
+    // non-throwing baseline for contacts/sends' bare-cast policy.
+    const freshPool = new Pool({ connectionString: getTestDatabaseUrl(), max: 1 });
+    try {
+      const withoutMarker = await countMarkerGatedTables(freshPool, false);
+      const withMarker = await countMarkerGatedTables(freshPool, true);
+
+      for (const table of MARKER_GATED_TABLES) {
+        expect(
+          withMarker[table],
+          `${table}: setting the legacy admin-scan marker must not reveal any row the same connection could not already see`,
+        ).toBe(withoutMarker[table]);
+        expect(withMarker[table], `${table}: expected zero rows visible without a tenant in scope`).toBe(0);
+      }
+    } finally {
+      await freshPool.end();
+    }
+  });
+
+  it("10-06 Test 2: no policy in pg_policies references the legacy admin-scan marker variable", async () => {
+    const { rows } = await pool.query<{
+      policyname: string;
+      qual: string | null;
+      withCheck: string | null;
+    }>(`SELECT policyname, qual, with_check AS "withCheck" FROM pg_policies WHERE schemaname = 'public'`);
+
+    const offenders = rows.filter(
+      (r) => (r.qual ?? "").includes("app.admin_scan") || (r.withCheck ?? "").includes("app.admin_scan"),
+    );
+    expect(
+      offenders,
+      `expected zero policies referencing app.admin_scan, found: ${JSON.stringify(offenders)}`,
+    ).toEqual([]);
   });
 });
