@@ -6,6 +6,7 @@ import { encryptTenantSecret } from "@mega-crm/kms";
 import type { SendGridMailSendRequest, SendTenantMailResult } from "@mega-crm/delivery-core";
 import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool } from "../../test/db-fixture.js";
 import { processSendJob } from "../send-dispatch.js";
+import { insertFixtureOrganization } from "../../test/failure-fixtures.js";
 
 /**
  * SEND-07: a SendGrid 429/5xx response must yield a rate-limit signal
@@ -46,13 +47,11 @@ describe("send-dispatch.ts 429/5xx backoff (SEND-07)", () => {
     return async () => ({ status, headers: new Headers(headers), messageId: status < 300 ? "sg-fixture" : null });
   }
 
+  // 10-09 (SEC-05): delegates to the mega_crm_auth-backed INSERT in
+  // failure-fixtures.ts instead of duplicating it -- mega_crm_app holds
+  // only SELECT on organization post-migration-0045.
   async function freshWorkspaceId(nameSeed: string): Promise<string> {
-    const slug = `${nameSeed}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const { rows } = await pool.query<{ id: string }>(
-      `INSERT INTO organization (name, slug) VALUES ($1, $2) RETURNING id`,
-      [`${nameSeed} Co`, slug]
-    );
-    return rows[0].id;
+    return insertFixtureOrganization(nameSeed);
   }
 
   async function connectFixtureSendgridKey(workspaceId: string): Promise<void> {

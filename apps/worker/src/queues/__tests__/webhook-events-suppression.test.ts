@@ -4,6 +4,7 @@ import type { Pool } from "pg";
 import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool } from "../../test/db-fixture.js";
 import { processWebhookEventBatch } from "../webhook-events.worker.js";
+import { insertFixtureOrganization } from "../../test/failure-fixtures.js";
 
 /**
  * 05-03 (SUBS-02, D-10/D-11/D-12/D-13): the full suppression state machine --
@@ -25,13 +26,11 @@ describe("webhook-events worker: suppression state machine (SUBS-02, D-10/D-11/D
     await pool.end();
   });
 
+  // 10-09 (SEC-05): delegates to the mega_crm_auth-backed INSERT in
+  // failure-fixtures.ts instead of duplicating it -- mega_crm_app holds
+  // only SELECT on organization post-migration-0045.
   async function freshWorkspaceId(nameSeed: string): Promise<string> {
-    const slug = `${nameSeed}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const { rows } = await pool.query<{ id: string }>(
-      `INSERT INTO organization (name, slug) VALUES ($1, $2) RETURNING id`,
-      [`${nameSeed} Co`, slug]
-    );
-    return rows[0].id;
+    return insertFixtureOrganization(nameSeed);
   }
 
   async function createFixtureCampaign(workspaceId: string): Promise<string> {

@@ -106,8 +106,12 @@ describe("relocate-default-partition-rows CLI mechanism -- elevated adminClient 
       await applyMigrationFile(pool, MIGRATIONS_DIR, file);
     }
 
+    // 10-09 (SEC-05): the full migration chain above now includes 0045 --
+    // mega_crm_app (`pool`) holds only SELECT on organization from this
+    // point on, so seeding a workspace row goes through the superuser
+    // `adminPool` constructed above instead.
     workspaceId = randomUUID();
-    await pool.query(`INSERT INTO organization (id, name, slug) VALUES ($1, $2, $3)`, [
+    await adminPool.query(`INSERT INTO organization (id, name, slug) VALUES ($1, $2, $3)`, [
       workspaceId,
       "Relocate Admin DSN Test Co",
       `relocate-admin-dsn-${workspaceId.slice(0, 8)}`,

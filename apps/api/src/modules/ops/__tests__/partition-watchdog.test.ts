@@ -3,7 +3,10 @@ import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { db as sharedDb, organization } from "@mega-crm/db";
+// 10-09 (SEC-05): seeding an organization row directly for test setup is not
+// a live application query site -- as of migration 0045 it needs the
+// mega_crm_auth-backed client, not the app-role `db`.
+import { authDb as sharedDb, organization } from "@mega-crm/db";
 import { pool, withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import {
   BUFFER_ALERT_THRESHOLD_MONTHS,

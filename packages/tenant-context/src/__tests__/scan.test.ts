@@ -1,8 +1,22 @@
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ensureTestDbMigrated, getScanTestDatabaseUrl, getTestDatabaseUrl } from "@mega-crm/test-support";
+import {
+  ensureTestDbMigrated,
+  getAuthTestDatabaseUrl,
+  getScanTestDatabaseUrl,
+  getTestDatabaseUrl,
+} from "@mega-crm/test-support";
 
 import { closeScanPool, pool, withCrossWorkspaceScan, withTenant, withTenantTransaction } from "../index.js";
+
+// 10-09 (SEC-05): mega_crm_app (`pool` above) holds only SELECT on
+// organization post-migration-0045 -- seeding a fixture workspace row needs
+// the mega_crm_auth-backed connection instead.
+let authPool: Pool | undefined;
+function getAuthTestPool(): Pool {
+  if (!authPool) authPool = new Pool({ connectionString: getAuthTestDatabaseUrl() });
+  return authPool;
+}
 
 /**
  * Phase 10 (SEC-01/SEC-02, D-01/D-02) — the tracer slice for the whole
@@ -20,11 +34,12 @@ describe("cross-workspace scan role (Phase 10 SEC-01/SEC-02)", () => {
   afterAll(async () => {
     await closeScanPool();
     await pool.end();
+    await authPool?.end();
   });
 
   async function seedDueCampaign(nameSeed: string): Promise<{ workspaceId: string; campaignId: string }> {
     const slug = `${nameSeed}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const { rows: orgRows } = await pool.query<{ id: string }>(
+    const { rows: orgRows } = await getAuthTestPool().query<{ id: string }>(
       `INSERT INTO organization (name, slug) VALUES ($1, $2) RETURNING id`,
       [`${nameSeed} Co`, slug],
     );
@@ -118,7 +133,7 @@ describe("cross-workspace scan role (Phase 10 SEC-01/SEC-02)", () => {
 
   async function seedOrganization(nameSeed: string): Promise<string> {
     const slug = `${nameSeed}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const { rows } = await pool.query<{ id: string }>(
+    const { rows } = await getAuthTestPool().query<{ id: string }>(
       `INSERT INTO organization (name, slug) VALUES ($1, $2) RETURNING id`,
       [`${nameSeed} Co`, slug],
     );

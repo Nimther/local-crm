@@ -9,6 +9,7 @@ import { processFlowTriggerCheck } from "../flows/flow-trigger-evaluator.worker.
 import { runFlowSegmentSweepTick } from "../flows/flow-segment-sweep.worker.js";
 import { processFlowEnrollExisting } from "../flows/flow-enroll-existing.worker.js";
 import { flowRunAdvanceQueue } from "../flows/flow-queues.js";
+import { insertFixtureOrganization } from "../../test/failure-fixtures.js";
 
 /**
  * 06-08's overall `<verification>`/`<test_plan>`: (1) the binary branch
@@ -36,13 +37,11 @@ describe("06-08: branch node + segment-entry trigger (sweep + enroll-existing)",
     await pool.end();
   });
 
+  // 10-09 (SEC-05): delegates to the mega_crm_auth-backed INSERT in
+  // failure-fixtures.ts instead of duplicating it -- mega_crm_app holds
+  // only SELECT on organization post-migration-0045.
   async function freshWorkspaceId(nameSeed: string): Promise<string> {
-    const slug = `${nameSeed}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const { rows } = await pool.query<{ id: string }>(
-      `INSERT INTO organization (name, slug) VALUES ($1, $2) RETURNING id`,
-      [`${nameSeed} Co`, slug]
-    );
-    return rows[0].id;
+    return insertFixtureOrganization(nameSeed);
   }
 
   async function createFixtureContact(workspaceId: string, properties: Record<string, unknown> = {}): Promise<string> {

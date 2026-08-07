@@ -6,6 +6,7 @@ import { encryptTenantSecret } from "@mega-crm/kms";
 import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool } from "../../test/db-fixture.js";
 import { processSendJob } from "../send-dispatch.js";
 import type { SendGridMailSendRequest, SendTenantMailResult } from "@mega-crm/delivery-core";
+import { insertFixtureOrganization } from "../../test/failure-fixtures.js";
 
 /**
  * CR-05/CR-06 regression tests (04-13, CAMP-02/03/05): pins that a
@@ -59,13 +60,11 @@ describe("campaign completion + cancel (CR-05/CR-06, CAMP-02/03/05)", () => {
     };
   }
 
+  // 10-09 (SEC-05): delegates to the mega_crm_auth-backed INSERT in
+  // failure-fixtures.ts instead of duplicating it -- mega_crm_app holds
+  // only SELECT on organization post-migration-0045.
   async function freshWorkspaceId(nameSeed: string): Promise<string> {
-    const slug = `${nameSeed}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const { rows } = await pool.query<{ id: string }>(
-      `INSERT INTO organization (name, slug) VALUES ($1, $2) RETURNING id`,
-      [`${nameSeed} Co`, slug]
-    );
-    return rows[0].id;
+    return insertFixtureOrganization(nameSeed);
   }
 
   async function connectFixtureSendgridKey(workspaceId: string): Promise<void> {

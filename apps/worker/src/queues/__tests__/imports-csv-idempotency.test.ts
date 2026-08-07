@@ -3,6 +3,7 @@ import type { Pool } from "pg";
 import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool } from "../../test/db-fixture.js";
 import { processImportsCsvJob } from "../imports-csv.worker.js";
+import { insertFixtureOrganization } from "../../test/failure-fixtures.js";
 
 interface CsvImportRowStatus {
   rowNumber: number;
@@ -42,13 +43,11 @@ describe("imports:csv worker (CONT-02, D-15/D-16, Pitfall 1)", () => {
 
   const MAPPING = { external_id: "externalId", email: "email", first_name: "firstName", tags: "tags" };
 
+  // 10-09 (SEC-05): delegates to the mega_crm_auth-backed INSERT in
+  // failure-fixtures.ts instead of duplicating it -- mega_crm_app holds
+  // only SELECT on organization post-migration-0045.
   async function freshWorkspaceId(nameSeed: string): Promise<string> {
-    const slug = `${nameSeed}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const { rows } = await pool.query<{ id: string }>(
-      `INSERT INTO organization (name, slug) VALUES ($1, $2) RETURNING id`,
-      [`${nameSeed} Co`, slug]
-    );
-    return rows[0].id;
+    return insertFixtureOrganization(nameSeed);
   }
 
   // csv_imports/csv_import_rows carry ENABLE + FORCE ROW LEVEL SECURITY --

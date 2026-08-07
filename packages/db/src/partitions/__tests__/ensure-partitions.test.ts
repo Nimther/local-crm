@@ -6,7 +6,9 @@ import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  AUTH_ROLE,
   applyMigrationFile,
+  buildRoleDsn,
   createEphemeralDatabase,
   dropEphemeralDatabase,
   listMigrationFiles,
@@ -168,12 +170,23 @@ describe("ensure-partitions (09-03 task 3, DB-01/DB-04)", () => {
       await applyMigrationFile(pool, MIGRATIONS_DIR, file);
     }
 
+    // 10-09 (SEC-05): the full chain above now includes migration 0045 --
+    // mega_crm_app (this suite's `pool`) holds only SELECT on organization
+    // from this point on, so seeding a workspace row needs the
+    // mega_crm_auth-backed DSN for this SAME ephemeral database instead.
+    const authPool = new Pool({
+      connectionString: buildRoleDsn(adminDsn, databaseName, AUTH_ROLE, "mega_crm_dev_pw"),
+    });
     workspaceId = randomUUID();
-    await pool.query(`INSERT INTO organization (id, name, slug) VALUES ($1, $2, $3)`, [
-      workspaceId,
-      "Ensure Partitions Boundary Test Co",
-      `ensure-partitions-boundary-${workspaceId.slice(0, 8)}`,
-    ]);
+    try {
+      await authPool.query(`INSERT INTO organization (id, name, slug) VALUES ($1, $2, $3)`, [
+        workspaceId,
+        "Ensure Partitions Boundary Test Co",
+        `ensure-partitions-boundary-${workspaceId.slice(0, 8)}`,
+      ]);
+    } finally {
+      await authPool.end();
+    }
 
     contactId = randomUUID();
     const client = await pool.connect();

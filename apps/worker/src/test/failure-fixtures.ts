@@ -1,6 +1,7 @@
-import type { Pool } from "pg";
+import { Pool } from "pg";
 import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { encryptTenantSecret } from "@mega-crm/kms";
+import { getAuthTestDatabaseUrl } from "@mega-crm/test-support";
 import type { SendGridMailSendRequest, SendTenantMailResult } from "@mega-crm/delivery-core";
 
 /**
@@ -20,8 +21,29 @@ import type { SendGridMailSendRequest, SendTenantMailResult } from "@mega-crm/de
  * carry ENABLE + FORCE ROW LEVEL SECURITY. Every insert below therefore runs
  * inside `withTenant`/`withTenantTransaction` and never a bare `pool.query`.
  * `organization` is the one exception — it is not tenant-scoped, which is why
- * `freshWorkspaceId` takes the pool directly.
+ * `freshWorkspaceId` used to take the app-role pool directly.
+ *
+ * 10-09 (SEC-05): as of migration 0045, `mega_crm_app` (the app-role `pool`
+ * every caller here used to pass) holds only SELECT on `organization` --
+ * inserting a fixture workspace row now needs the mega_crm_auth-backed
+ * connection instead, exactly like the production write sites that stayed
+ * app-readable-only. Built lazily and cached module-level (mirrors
+ * `packages/tenant-context/src/scan.ts`'s `getScanPool`) so importing this
+ * file does not require `AUTH_DATABASE_URL` to be set until a test actually
+ * calls `freshWorkspaceId`.
  */
+
+let authPool: Pool | undefined;
+
+function getAuthTestPool(): Pool {
+  if (!authPool) {
+    authPool = new Pool({ connectionString: getAuthTestDatabaseUrl() });
+    authPool.on("error", (err) => {
+      console.error("idle auth test pool client error (connection dropped)", err);
+    });
+  }
+  return authPool;
+}
 
 type SendMailFn = (apiKey: string, payload: SendGridMailSendRequest) => Promise<SendTenantMailResult>;
 
@@ -73,10 +95,30 @@ export function throwingSendMail(error: unknown): { fn: SendMailFn; callCount: (
   };
 }
 
-/** `organization` is not tenant-scoped, so this one takes the pool directly. */
-export async function freshWorkspaceId(pool: Pool, nameSeed: string): Promise<string> {
+/**
+ * `organization` is not tenant-scoped, so this one takes its own connection
+ * rather than a tenant-scoped `withTenantTransaction`.
+ *
+ * 10-09 (SEC-05): the `pool` parameter is unused as of migration 0045 --
+ * kept so every existing call site (which passes its own app-role
+ * `createTestPool()` result) does not need to change -- the actual INSERT
+ * now runs on the module-level auth-role pool above, since `mega_crm_app`
+ * (whatever `pool` the caller passes) holds only SELECT on `organization`.
+ */
+export async function freshWorkspaceId(_pool: Pool, nameSeed: string): Promise<string> {
+  return insertFixtureOrganization(nameSeed);
+}
+
+/**
+ * The pool-free equivalent of `freshWorkspaceId` above, for the many test
+ * files that define their own local `freshWorkspaceId(nameSeed)` wrapper
+ * (each one previously duplicated this exact INSERT against the app-role
+ * pool) -- 10-09 (SEC-05): call this instead of duplicating the
+ * mega_crm_auth-backed INSERT a further 21 times.
+ */
+export async function insertFixtureOrganization(nameSeed: string): Promise<string> {
   const slug = `${nameSeed}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const { rows } = await pool.query<{ id: string }>(
+  const { rows } = await getAuthTestPool().query<{ id: string }>(
     `INSERT INTO organization (name, slug) VALUES ($1, $2) RETURNING id`,
     [`${nameSeed} Co`, slug],
   );

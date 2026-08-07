@@ -1,8 +1,17 @@
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ensureTestDbMigrated, getTestDatabaseUrl } from "@mega-crm/test-support";
+import { ensureTestDbMigrated, getAuthTestDatabaseUrl, getTestDatabaseUrl } from "@mega-crm/test-support";
 
 import { getWorkspaceId, pool, withPreTenantLookup, withTenant, withTenantTransaction } from "../index.js";
+
+// 10-09 (SEC-05): mega_crm_app (`pool` above) holds only SELECT on
+// organization post-migration-0045 -- seeding fixture workspace rows needs
+// the mega_crm_auth-backed connection instead.
+let authPool: Pool | undefined;
+function getAuthTestPool(): Pool {
+  if (!authPool) authPool = new Pool({ connectionString: getAuthTestDatabaseUrl() });
+  return authPool;
+}
 
 /**
  * 08-16 (QG-03) — the tenant context and the RLS session variable.
@@ -26,7 +35,7 @@ async function seedOrganizations(): Promise<void> {
     [WORKSPACE_A, "tenant-ctx-a"],
     [WORKSPACE_B, "tenant-ctx-b"],
   ]) {
-    await pool.query(
+    await getAuthTestPool().query(
       `INSERT INTO organization (id, name, slug) VALUES ($1, $2, $3)
        ON CONFLICT (id) DO NOTHING`,
       [id, `Tenant ${slug}`, `${slug}-${Date.now().toString(36)}`],
@@ -42,6 +51,7 @@ describe("tenant context (RLS session variable)", () => {
 
   afterAll(async () => {
     await pool.end();
+    await authPool?.end();
   });
 
   it("binds the workspace id into the session for the transaction's duration", async () => {

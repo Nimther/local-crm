@@ -7,7 +7,9 @@ import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  AUTH_ROLE,
   applyMigrationFile,
+  buildRoleDsn,
   createEphemeralDatabase,
   dropEphemeralDatabase,
   listMigrationFiles,
@@ -72,13 +74,30 @@ function adminDsnForDatabase(adminDsn: string, databaseName: string): string {
   return url.toString();
 }
 
-async function seedWorkspaceAndContact(pool: Pool): Promise<{ workspaceId: string; contactId: string }> {
+/**
+ * 10-09 (SEC-05): `adminDsn`/`databaseName` identify the SAME ephemeral
+ * database `pool` connects to -- the organization insert below now needs
+ * the mega_crm_auth-backed DSN for it (built fresh and closed immediately),
+ * since the full migration chain applied by every caller's `beforeAll`
+ * includes migration 0045, under which mega_crm_app (`pool`) holds only
+ * SELECT on organization.
+ */
+async function seedWorkspaceAndContact(
+  pool: Pool,
+  adminDsn: string,
+  databaseName: string,
+): Promise<{ workspaceId: string; contactId: string }> {
   const workspaceId = randomUUID();
-  await pool.query(`INSERT INTO organization (id, name, slug) VALUES ($1, $2, $3)`, [
-    workspaceId,
-    "Late Automation Test Co",
-    `late-automation-${workspaceId.slice(0, 8)}`,
-  ]);
+  const authPool = new Pool({ connectionString: buildRoleDsn(adminDsn, databaseName, AUTH_ROLE, "mega_crm_dev_pw") });
+  try {
+    await authPool.query(`INSERT INTO organization (id, name, slug) VALUES ($1, $2, $3)`, [
+      workspaceId,
+      "Late Automation Test Co",
+      `late-automation-${workspaceId.slice(0, 8)}`,
+    ]);
+  } finally {
+    await authPool.end();
+  }
 
   const contactId = randomUUID();
   const client = await pool.connect();
@@ -241,7 +260,7 @@ describe("boundary-crossing-late-automation (09-04 task 3, ROADMAP success crite
       await pool.query(`DROP TABLE events_2027_06`);
       await pool.query(`DROP TABLE send_events_2027_06`);
 
-      const seeded = await seedWorkspaceAndContact(pool);
+      const seeded = await seedWorkspaceAndContact(pool, adminDsn, databaseName);
       workspaceId = seeded.workspaceId;
       contactId = seeded.contactId;
 
@@ -334,7 +353,7 @@ describe("boundary-crossing-late-automation (09-04 task 3, ROADMAP success crite
       await pool.query(`DROP TABLE events_2027_06`);
       await pool.query(`DROP TABLE send_events_2027_06`);
 
-      const { workspaceId, contactId } = await seedWorkspaceAndContact(pool);
+      const { workspaceId, contactId } = await seedWorkspaceAndContact(pool, adminDsn, databaseName);
       // Rows for June 2027 land in DEFAULT and are DELIBERATELY left there
       // for this scenario -- no relocation call happens before
       // ensurePartitions runs.

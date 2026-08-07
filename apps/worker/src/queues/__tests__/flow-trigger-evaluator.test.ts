@@ -5,6 +5,7 @@ import type { FlowDefinition } from "@mega-crm/flows-core";
 import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool } from "../../test/db-fixture.js";
 import { processFlowTriggerCheck } from "../flows/flow-trigger-evaluator.worker.js";
 import { flowRunAdvanceQueue } from "../flows/flow-queues.js";
+import { insertFixtureOrganization } from "../../test/failure-fixtures.js";
 
 /**
  * `flow-trigger-evaluator.worker.ts`'s `processFlowTriggerCheck`
@@ -30,13 +31,11 @@ describe("flow-trigger-evaluator.worker.ts processFlowTriggerCheck (FLOW-02/FLOW
     await pool.end();
   });
 
+  // 10-09 (SEC-05): delegates to the mega_crm_auth-backed INSERT in
+  // failure-fixtures.ts instead of duplicating it -- mega_crm_app holds
+  // only SELECT on organization post-migration-0045.
   async function freshWorkspaceId(nameSeed: string): Promise<string> {
-    const slug = `${nameSeed}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const { rows } = await pool.query<{ id: string }>(
-      `INSERT INTO organization (name, slug) VALUES ($1, $2) RETURNING id`,
-      [`${nameSeed} Co`, slug]
-    );
-    return rows[0].id;
+    return insertFixtureOrganization(nameSeed);
   }
 
   async function createFixtureContact(workspaceId: string): Promise<string> {

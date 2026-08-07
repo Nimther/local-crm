@@ -1,6 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
-import { db, organization } from "@mega-crm/db";
+// 10-09 (SEC-05): seeding an organization row directly for test setup is not
+// a live application query site -- as of migration 0045 it needs the
+// mega_crm_auth-backed client, not the app-role `db`.
+import { authDb, organization } from "@mega-crm/db";
 import { ensureTestDbMigrated, getTestDatabaseUrl } from "../../../test/db-fixture.js";
 import { withTenant, withTenantTransaction } from "../../../middleware/tenant-context.js";
 import { pool } from "../../../db.js";
@@ -36,7 +39,7 @@ describe("deleteSegment canceled-campaign conflict (06-20/WR-01)", () => {
 
   it("06-20/WR-01: deleting a segment referenced by a canceled campaign throws SegmentConflictError (referenced_by_campaign), not a raw 25P02", async () => {
     const workspaceId = randomUUID();
-    await db.insert(organization).values({
+    await authDb.insert(organization).values({
       id: workspaceId,
       name: "WR-01 workspace",
       slug: `wr-01-${workspaceId.slice(0, 8)}`,

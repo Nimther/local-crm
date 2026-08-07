@@ -8,6 +8,7 @@ import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool } from "../../
 import { processFlowRunAdvance, MAX_STEPS_PER_RUN } from "../flows/flow-run-advance.worker.js";
 import { emailTriggeredQueue, flowRunAdvanceQueue } from "../flows/flow-queues.js";
 import { upsertWorkspaceSendSettings } from "@mega-crm/delivery-core";
+import { insertFixtureOrganization } from "../../test/failure-fixtures.js";
 
 // 06-15/D-08/FLOW-05: two DST-free IANA zones with a large, stable wall-clock
 // separation (~15.5h) so assertions never depend on the exact wall-clock
@@ -44,13 +45,11 @@ describe("flow-run-advance.worker.ts processFlowRunAdvance (FLOW-01/03/06/07)", 
     await pool.end();
   });
 
+  // 10-09 (SEC-05): delegates to the mega_crm_auth-backed INSERT in
+  // failure-fixtures.ts instead of duplicating it -- mega_crm_app holds
+  // only SELECT on organization post-migration-0045.
   async function freshWorkspaceId(nameSeed: string): Promise<string> {
-    const slug = `${nameSeed}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const { rows } = await pool.query<{ id: string }>(
-      `INSERT INTO organization (name, slug) VALUES ($1, $2) RETURNING id`,
-      [`${nameSeed} Co`, slug]
-    );
-    return rows[0].id;
+    return insertFixtureOrganization(nameSeed);
   }
 
   async function createFixtureContact(workspaceId: string): Promise<string> {

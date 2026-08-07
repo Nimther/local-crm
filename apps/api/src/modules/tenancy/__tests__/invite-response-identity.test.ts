@@ -1,8 +1,18 @@
 import { randomUUID } from "node:crypto";
+import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildServer } from "../../../server.js";
 import { ensureTestDbMigrated, getTestDatabaseUrl } from "../../../test/db-fixture.js";
 import { pool } from "../../../db.js";
+
+// 10-09 (SEC-05): `DELETE FROM organization` below needs a role that still
+// holds DELETE on it -- mega_crm_app (the `pool` above) keeps SELECT+UPDATE
+// only post-migration-0045, so this test-only orphaning helper runs its
+// DELETE through a raw connection under mega_crm_auth instead. The ALTER
+// TABLE statements stay on `pool`: dropping/adding a constraint requires
+// table OWNERSHIP, which only mega_crm_app (the migration-applying role)
+// holds -- mega_crm_auth owns no tables at all.
+const authPool = new Pool({ connectionString: process.env.AUTH_DATABASE_URL });
 
 /**
  * SEC-10/SEC-15/T-10-04-03: `GET /api/invites/:invitationId` -- the public,
@@ -26,6 +36,7 @@ describe("Invite preview response identity (SEC-10, T-10-04-03)", () => {
 
   afterAll(async () => {
     await app.close();
+    await authPool.end();
   });
 
   async function signUp(email: string, password: string, name: string) {
@@ -72,18 +83,36 @@ describe("Invite preview response identity (SEC-10, T-10-04-03)", () => {
    * Momentarily suspends `organization`'s constraint-enforcement triggers
    * for a single DELETE, then restores them immediately -- the FK stays
    * fully enforced for every other row and every other test.
+   *
+   * Also drops (and restores) `member`'s FK to `organization` for the
+   * DELETE's duration -- 10-09 (SEC-05): the owner-creating workspace flow
+   * always inserts the creator's own `member` row, so `organization`'s
+   * ON DELETE CASCADE would otherwise fan out into `member` too. Postgres
+   * runs that cascade under `member`'s OWNER (`mega_crm_app`), regardless of
+   * which role's connection issued the DELETE -- and `mega_crm_app` holds
+   * only SELECT on `member` post-migration-0045 (D-04/D-05's audited
+   * grant), so the cascade would fail with a permission error rather than
+   * (silently or otherwise) deleting a row no live application path ever
+   * hard-deletes. Dropping the FK sidesteps the cascade entirely instead of
+   * widening the production grant matrix for a test-only edge case.
    */
   async function deleteOrganizationLeavingInvitationOrphaned(organizationId: string) {
     await pool.query('ALTER TABLE invitation DROP CONSTRAINT "invitation_organizationId_organization_id_fk"');
+    await pool.query('ALTER TABLE member DROP CONSTRAINT "member_organizationId_organization_id_fk"');
     try {
-      await pool.query("DELETE FROM organization WHERE id = $1", [organizationId]);
+      await authPool.query("DELETE FROM organization WHERE id = $1", [organizationId]);
     } finally {
-      // NOT VALID: skips re-validating the now-orphaned row this DELETE
+      // NOT VALID: skips re-validating the now-orphaned row(s) this DELETE
       // just created, while still enforcing the FK for every future
-      // insert/update -- the constraint stays live for every other test.
+      // insert/update -- both constraints stay live for every other test.
       await pool.query(
         `ALTER TABLE invitation
            ADD CONSTRAINT "invitation_organizationId_organization_id_fk"
+           FOREIGN KEY ("organizationId") REFERENCES organization(id) ON DELETE CASCADE NOT VALID`
+      );
+      await pool.query(
+        `ALTER TABLE member
+           ADD CONSTRAINT "member_organizationId_organization_id_fk"
            FOREIGN KEY ("organizationId") REFERENCES organization(id) ON DELETE CASCADE NOT VALID`
       );
     }

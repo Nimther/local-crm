@@ -1,7 +1,11 @@
 import nock from "nock";
 import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { db, member, user } from "@mega-crm/db";
+// 10-09 (SEC-05): `db.update(user)` below still works post-migration-0045 --
+// mega_crm_app keeps UPDATE on "user" (required for Postgres's own FK-check
+// locking, see 0045's header) -- but seeding a member row directly is not a
+// live application query site, so it needs the mega_crm_auth-backed client.
+import { authDb, db, member, user } from "@mega-crm/db";
 import { buildServer } from "../../../server.js";
 import { ensureTestDbMigrated, getTestDatabaseUrl } from "../../../test/db-fixture.js";
 import { withTenant } from "../../../middleware/tenant-context.js";
@@ -146,7 +150,7 @@ describe("SendGrid key connect (TENANT-04, D-02/D-19/D-21)", () => {
     const memberEmail = `role-member-${Date.now()}@example.com`;
     const memberAccount = await signUp(memberEmail, "correct horse battery staple 42", "Role Member");
     await markVerified(memberAccount.userId);
-    await db.insert(member).values({ organizationId: workspace.id, userId: memberAccount.userId, role: "member" });
+    await authDb.insert(member).values({ organizationId: workspace.id, userId: memberAccount.userId, role: "member" });
 
     mockScopes(VALID_KEY, ["mail.send"]);
 
@@ -222,7 +226,7 @@ describe("SendGrid key connect (TENANT-04, D-02/D-19/D-21)", () => {
     const memberEmail = `get-member-${Date.now()}@example.com`;
     const memberAccount = await signUp(memberEmail, "correct horse battery staple 42", "Get Member");
     await markVerified(memberAccount.userId);
-    await db.insert(member).values({ organizationId: workspace.id, userId: memberAccount.userId, role: "member" });
+    await authDb.insert(member).values({ organizationId: workspace.id, userId: memberAccount.userId, role: "member" });
 
     const res = await app.inject({
       method: "GET",

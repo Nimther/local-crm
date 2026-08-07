@@ -217,8 +217,13 @@ describe("relocate-default (09-04 task 1, DB-03/DB-04)", () => {
       await applyMigrationFile(pool, MIGRATIONS_DIR, file);
     }
 
+    // 10-09 (SEC-05): the full migration chain above now includes 0045 --
+    // mega_crm_app (`pool`) holds only SELECT on organization from this
+    // point on, so seeding a workspace row goes through the superuser
+    // `relocationAdminPool` constructed above (already open, bypasses the
+    // grant matrix entirely, same as production's operator-only DSN would).
     workspaceId = randomUUID();
-    await pool.query(`INSERT INTO organization (id, name, slug) VALUES ($1, $2, $3)`, [
+    await relocationAdminPool.query(`INSERT INTO organization (id, name, slug) VALUES ($1, $2, $3)`, [
       workspaceId,
       "Relocate Test Co",
       `relocate-test-${workspaceId.slice(0, 8)}`,
