@@ -82,6 +82,20 @@ export const envSchema = z
         path: ["PUBLIC_APP_URL"],
       });
     }
+    // 10-09 (SEC-12): the base field above only enforces min(16) -- fine for
+    // development/test, where a short fixture secret is convenient and the
+    // cost of guessing it is zero. Production sessions are signed with this
+    // secret, so a weak value there silently weakens every session in the
+    // system; the floor is gated the same NODE_ENV-conditional way as the
+    // KMS_PROVIDER=local and PUBLIC_APP_URL guards above, so
+    // development/test are unaffected.
+    if (val.NODE_ENV === "production" && val.BETTER_AUTH_SECRET.length < 32) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "BETTER_AUTH_SECRET must be at least 32 characters when NODE_ENV=production",
+        path: ["BETTER_AUTH_SECRET"],
+      });
+    }
   });
 
 const parsed = envSchema.safeParse(process.env);

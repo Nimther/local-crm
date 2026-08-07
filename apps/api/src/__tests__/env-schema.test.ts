@@ -57,6 +57,10 @@ describe("envSchema PUBLIC_APP_URL https enforcement", () => {
       PUBLIC_APP_URL: "https://app.example.com",
       KMS_PROVIDER: "aws",
       KMS_KEK_ID: "arn:aws:kms:us-east-1:123456789012:key/test-kek",
+      // 10-09 (SEC-12): baseValidEnv()'s 20-char secret is below the
+      // production floor added in this same plan -- override it here so
+      // this test still exercises only the PUBLIC_APP_URL guard.
+      BETTER_AUTH_SECRET: "01234567890123456789012345678901",
     });
 
     expect(result.success).toBe(true);
