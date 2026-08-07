@@ -1,6 +1,6 @@
 import { Queue, Worker, type ConnectionOptions } from "bullmq";
 import type { PoolClient } from "pg";
-import { pool, withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
+import { withCrossWorkspaceScan, withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 
 /** The reconciliation job's own repeatable-tick queue -- self-produced and self-consumed within this file/process only. */
 const ANALYTICS_RECONCILE_QUEUE = "analytics-reconcile";
@@ -93,13 +93,16 @@ async function reconcileWorkspace(workspaceId: string, windowDays: number): Prom
 }
 
 /**
- * Constructs the repeatable analytics-reconciliation Worker (07-06, ANLT-04):
- * enumerates known workspaces via `SELECT id FROM organization` -- a small,
- * non-sensitive list, so (per RESEARCH.md's explicit Anti-Pattern note) NO
- * new admin-scan RLS policy is needed here, unlike `campaign-scheduler.worker.ts`'s
- * genuine need for one (that job doesn't know which workspace a *due
- * campaign* belongs to ahead of time; this job already knows every
- * workspace id up front). Reconciles each workspace's recent window from a
+ * Constructs the repeatable analytics-reconciliation Worker (07-06, ANLT-04;
+ * Phase 10 SEC-01/SEC-02, D-01/D-02): enumerates known workspaces via
+ * `SELECT id FROM organization`, read through `withCrossWorkspaceScan` on
+ * the dedicated `mega_crm_scan` login role -- the SAME single audited
+ * cross-workspace read entry point every other cross-tenant discovery scan
+ * in this codebase now uses, regardless of how sensitive the underlying
+ * data is. `organization` carries no RLS of its own (it is the top-level
+ * tenant identity table), so migration 0042 grants SELECT on it with no
+ * accompanying policy; the boundary that matters here is role identity, not
+ * a per-table predicate. Reconciles each workspace's recent window from a
  * fresh scan of its own `sends`, overwriting (never adding to) the
  * incrementally-maintained rollup rows. Self-healing/restart-safe by
  * construction, mirroring `createCampaignSchedulerWorker`'s repeatable-tick
@@ -120,7 +123,10 @@ export function createAnalyticsReconciliationWorker(connection: ConnectionOption
   return new Worker(
     ANALYTICS_RECONCILE_QUEUE,
     async () => {
-      const { rows } = await pool.query<WorkspaceRow>(`SELECT id FROM organization`);
+      const rows = await withCrossWorkspaceScan(async (client) => {
+        const { rows: workspaceRows } = await client.query<WorkspaceRow>(`SELECT id FROM organization`);
+        return workspaceRows;
+      });
       for (const row of rows) {
         await reconcileWorkspace(row.id, RECONCILE_WINDOW_DAYS);
       }

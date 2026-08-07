@@ -1,6 +1,6 @@
 import { Queue, Worker, type ConnectionOptions } from "bullmq";
 import type { PoolClient } from "pg";
-import { pool, withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
+import { withCrossWorkspaceScan, withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { compileSegmentDefinition, type SegmentDefinition } from "@mega-crm/segments-core";
 import { FLOW_SEGMENT_SWEEP_QUEUE } from "@mega-crm/shared-schemas";
 import { enterSegmentTriggeredFlow, type LiveSegmentFlowRow } from "./flow-trigger-evaluator.worker.js";
@@ -37,18 +37,19 @@ interface DueSegmentFlowRow {
 /**
  * Admin-side DISCOVERY scan (T-06-08-02, mirrors
  * `campaign-scheduler.worker.ts`'s `findDueCampaignCandidates` and
- * `flow-reconciliation.worker.ts`'s due-run scan exactly): `pool.connect()`
- * directly (NOT `withTenant`/`withTenantTransaction` -- this scan doesn't
- * know which workspace a flow belongs to until it reads one) inside a short,
- * READ-ONLY transaction scoped ONLY by the narrow `app.admin_scan` GUC
- * (migration 0032's `flows_segment_sweep_scan` policy, SELECT-only -- this
- * connection is never granted any write visibility across tenants).
+ * `flow-reconciliation.worker.ts`'s due-run scan exactly; Phase 10
+ * SEC-01/SEC-02, D-01/D-02): runs on the dedicated `mega_crm_scan` login
+ * role via `withCrossWorkspaceScan` -- this scan doesn't know which
+ * workspace a flow belongs to until it reads one, so it can never go
+ * through `withTenant`/`withTenantTransaction`. Access control is the
+ * role's identity plus migration 0042's role-scoped `flows_scan` policy
+ * (narrowed to `status = 'live' AND trigger_type = 'segment' AND
+ * trigger_segment_id IS NOT NULL AND live_version_id IS NOT NULL`), not a
+ * session GUC -- this connection is never granted any write visibility
+ * across tenants (`flows_scan` is SELECT-only).
  */
 async function findLiveSegmentTriggeredFlows(): Promise<DueSegmentFlowRow[]> {
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    await client.query(`SELECT set_config('app.admin_scan', 'true', true)`);
+  return withCrossWorkspaceScan(async (client) => {
     const { rows } = await client.query<DueSegmentFlowRow>(
       `SELECT id, workspace_id as "workspaceId", trigger_segment_id as "triggerSegmentId",
               live_version_id as "liveVersionId", reentry_mode as "reentryMode",
@@ -57,14 +58,8 @@ async function findLiveSegmentTriggeredFlows(): Promise<DueSegmentFlowRow[]> {
        WHERE status = 'live' AND trigger_type = 'segment'
          AND trigger_segment_id IS NOT NULL AND live_version_id IS NOT NULL`
     );
-    await client.query("COMMIT");
     return rows;
-  } catch (err) {
-    await client.query("ROLLBACK").catch(() => undefined);
-    throw err;
-  } finally {
-    client.release();
-  }
+  });
 }
 
 async function loadSegmentDefinition(
