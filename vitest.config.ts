@@ -47,6 +47,7 @@ export default defineConfig({
       "packages/tenant-context/vitest.config.ts",
       "packages/segments-core/vitest.config.ts",
       "packages/shared-schemas/vitest.config.ts",
+      "scripts/vitest.config.ts",
     ],
     coverage: {
       provider: "v8",
