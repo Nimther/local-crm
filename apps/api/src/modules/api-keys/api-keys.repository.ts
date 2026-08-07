@@ -1,5 +1,4 @@
-import { pool } from "../../db.js";
-import { getWorkspaceId, withTenantTransaction } from "../../middleware/tenant-context.js";
+import { getWorkspaceId, withPreTenantLookup, withTenantTransaction } from "../../middleware/tenant-context.js";
 
 export interface ApiKeyListItemRow {
   id: string;
@@ -81,41 +80,31 @@ export async function revokeApiKey(id: string): Promise<boolean> {
  * ENABLE + FORCE ROW LEVEL SECURITY + the standard `workspace_isolation`
  * policy for every workspace-scoped read/write above (T-02-03-05); this
  * function additionally relies on a second, SELECT-only permissive policy
- * (`api_key_runtime_lookup`, see migrations/0005_api_keys.sql) that permits
- * a read matched EXACTLY by primary key `id` when the session-local GUC
- * `app.api_key_lookup_id` is set to that same id. A caller can only reach a
- * row here by already possessing the specific non-secret id embedded in the
- * presented key -- this grants no ability to enumerate or scan other
- * tenants' rows, and mirrors how better-auth's own tables are read outside
- * the tenant-scoped RLS path (see 0001_rls_policies.sql's comment on
- * better-auth tables).
+ * (`api_key_runtime_lookup`, see migrations/0006_api_keys_rls_policies.sql)
+ * that permits a read matched EXACTLY by primary key `id` when the
+ * session-local GUC `app.api_key_lookup_id` is set to that same id. A caller
+ * can only reach a row here by already possessing the specific non-secret id
+ * embedded in the presented key -- this grants no ability to enumerate or
+ * scan other tenants' rows, and mirrors how better-auth's own tables are
+ * read outside the tenant-scoped RLS path (see 0001_rls_policies.sql's
+ * comment on better-auth tables).
+ *
+ * Phase 10 plan 10-07 (SEC-03/SEC-04, migration 0044): `workspace_isolation`
+ * is now fail-closed, so a connection with no tenant context at all would
+ * THROW rather than silently exclude every row -- this function runs inside
+ * `withPreTenantLookup`, which sets the tenant GUC to a sentinel that
+ * matches no real workspace, making the predicate evaluate to `false`
+ * instead of raising. `withPreTenantLookup` grants nothing by itself; the
+ * `api_key_runtime_lookup` policy above is what actually grants this one row.
  */
 export async function lookupApiKeyById(id: string): Promise<ApiKeyLookupRow | null> {
-  const client = await pool.connect();
-  let releaseWithError: Error | undefined;
-  try {
-    await client.query("BEGIN");
+  return withPreTenantLookup(async (client) => {
     await client.query("SELECT set_config('app.api_key_lookup_id', $1, true)", [id]);
     const { rows } = await client.query<ApiKeyLookupRow>(
       `SELECT id, workspace_id as "workspaceId", secret_hash as "secretHash", revoked_at as "revokedAt"
        FROM workspace_api_keys WHERE id = $1`,
       [id]
     );
-    await client.query("COMMIT");
     return rows[0] ?? null;
-  } catch (err) {
-    try {
-      await client.query("ROLLBACK");
-    } catch (rollbackErr) {
-      // The ROLLBACK itself failed -- the connection is dead. Passing the
-      // error to `client.release()` below tells node-postgres to DESTROY
-      // this client instead of returning it to the pool, so the next
-      // checkout on this hot auth-lookup path never inherits a broken
-      // connection (WR-09).
-      releaseWithError = rollbackErr instanceof Error ? rollbackErr : new Error(String(rollbackErr));
-    }
-    throw err;
-  } finally {
-    client.release(releaseWithError);
-  }
+  });
 }

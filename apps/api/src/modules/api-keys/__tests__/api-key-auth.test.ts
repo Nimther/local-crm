@@ -1,10 +1,11 @@
+import { randomUUID } from "node:crypto";
 import Fastify from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildServer } from "../../../server.js";
 import { ensureTestDbMigrated, getTestDatabaseUrl } from "../../../test/db-fixture.js";
 import { withTenant } from "../../../middleware/tenant-context.js";
 import { generateApiKey, apiKeyAuth } from "../api-key-auth.js";
-import { createApiKey, revokeApiKey } from "../api-keys.repository.js";
+import { createApiKey, lookupApiKeyById, revokeApiKey } from "../api-keys.repository.js";
 
 /**
  * apiKeyAuth (Pattern 3, D-21/D-22/D-23, T-02-03-01/T-02-03-02): the
@@ -160,6 +161,37 @@ describe("apiKeyAuth (D-21/D-22/D-23, T-02-03-01/T-02-03-02)", () => {
       headers: { authorization: `Bearer ${generated.fullKey}` },
     });
     expect(res.statusCode).toBe(401);
+  });
+
+  // ---------------------------------------------------------------------
+  // Phase 10 plan 10-07 (SEC-03/SEC-04): lookupApiKeyById runs through
+  // withPreTenantLookup under migration 0044's fail-closed
+  // workspace_isolation predicate. The end-to-end tests above already
+  // exercise this indirectly via apiKeyAuth (valid key -> 200, unknown
+  // id/wrong secret -> uniform 401); these two assert the repository
+  // function's own return contract directly.
+  // ---------------------------------------------------------------------
+
+  it("lookupApiKeyById: returns the matching row for a valid key id after migration 0044, on a connection with no tenant context", async () => {
+    const generated = generateApiKey();
+    await withTenant(workspaceId, () =>
+      createApiKey({
+        id: generated.id,
+        name: "pre-tenant-lookup fixture",
+        secretHash: generated.secretHash,
+        keyMask: generated.keyMask,
+      })
+    );
+
+    const row = await lookupApiKeyById(generated.id);
+    expect(row).not.toBeNull();
+    expect(row?.id).toBe(generated.id);
+    expect(row?.workspaceId).toBe(workspaceId);
+    expect(row?.secretHash).toBe(generated.secretHash);
+  });
+
+  it("lookupApiKeyById: returns null (not a thrown error) for an unknown key id", async () => {
+    await expect(lookupApiKeyById(randomUUID())).resolves.toBeNull();
   });
 
   it("the stored row holds only a hash + mask -- never the plaintext secret (D-22)", async () => {

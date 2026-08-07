@@ -235,6 +235,39 @@ export async function attachPartitionCheckFirst(
   try {
     await conn.query("BEGIN");
 
+    // Phase 10 plan 10-07 (SEC-03/SEC-04, migration 0044): every
+    // `workspace_isolation` policy is now fail-closed -- a connection that
+    // has never set `app.current_workspace_id` at all now THROWS rather
+    // than returning zero rows. Postgres's own internal FK re-validation
+    // during step 4's ATTACH PARTITION below queries `contacts`/`sends`
+    // (both FORCE ROW LEVEL SECURITY) as part of validating
+    // events.contact_id -> contacts(id) / send_events.send_id -> sends(id),
+    // and does so REGARDLESS of whether the child being attached is empty
+    // -- the query plan Postgres builds for that validation evaluates the
+    // RLS predicate before it can know the child holds zero rows (contrary
+    // to this function's own prior assumption, corrected here). Setting the
+    // GUC to a value matching no real workspace makes the predicate
+    // evaluate to `false` (harmless exclusion) instead of raising -- for an
+    // EMPTY child (every `ensurePartitions` call) this is exactly as safe
+    // as the old fail-open behaviour this code implicitly relied on: zero
+    // rows in the child means the FK check has nothing to validate either
+    // way. Same sentinel value as `@mega-crm/tenant-context`'s
+    // `PRE_TENANT_LOOKUP_SENTINEL_WORKSPACE_ID` (duplicated, not imported:
+    // this package has no dependency on tenant-context) -- the all-zeros
+    // UUID, which `gen_random_uuid()` cannot produce.
+    //
+    // Skipped when `adminClient` is supplied: that connection is a
+    // genuinely elevated (BYPASSRLS) role that must see every workspace's
+    // contacts/sends rows for the non-empty-child ATTACH this function's
+    // own doc comment above describes (`relocateMonth`/
+    // `relocateAllDefaultRows`) -- setting a sentinel there would UNDERMINE
+    // that visibility, not restore it.
+    if (!options.adminClient) {
+      await conn.query("SELECT set_config('app.current_workspace_id', $1, true)", [
+        "00000000-0000-0000-0000-000000000000",
+      ]);
+    }
+
     // 1. Freestanding table, not yet attached -- fast, no lock contention
     // with the parent (0007/0010's `LIKE ... INCLUDING ALL` precedent).
     await conn.query(`CREATE TABLE IF NOT EXISTS ${childName} (LIKE ${table.parentTable} INCLUDING ALL)`);

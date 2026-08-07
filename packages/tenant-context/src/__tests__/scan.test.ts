@@ -313,40 +313,57 @@ describe("cross-workspace scan role (Phase 10 SEC-01/SEC-02)", () => {
   const MARKER_GATED_TABLES = ["campaigns", "flow_runs", "flows", "contacts", "sends"] as const;
 
   /**
-   * Counts every row visible in each of `MARKER_GATED_TABLES` on a genuinely
-   * fresh connection off `dedicatedPool` (never previously tenant-scoped, so
-   * `app.current_workspace_id` reads as NULL, not the empty string a
-   * recycled connection would leave behind -- see
-   * `tenant-context.test.ts`'s own "no tenant in scope" baseline for why
-   * that distinction matters). Optionally sets the legacy marker
-   * transaction-locally first.
+   * Phase 10 plan 10-07 (SEC-03/SEC-04, migration 0044): all five of these
+   * tables now carry the fail-closed `workspace_isolation` predicate, so a
+   * genuinely fresh connection (never previously tenant-scoped, so
+   * `app.current_workspace_id` reads as unset rather than the empty string a
+   * recycled connection would leave behind -- see `tenant-context.test.ts`'s
+   * "the fail-closed RLS contract" describe block) now THROWS on every one
+   * of these tables instead of returning zero rows. The marker-retirement
+   * negative proof this helper backs still holds under that predicate: it
+   * is re-expressed as "the marker changes nothing about whether the query
+   * throws" rather than "the marker changes nothing about the row count" --
+   * a stronger claim, since a thrown error can never be misread as "no such
+   * record" the way a silent zero-row result could.
+   *
+   * Runs each table's query in its OWN transaction (BEGIN per table, not
+   * once for the whole loop): once a query throws, Postgres aborts the
+   * transaction and every subsequent statement on it fails with "current
+   * transaction is aborted" rather than the real per-table error -- a fresh
+   * BEGIN/ROLLBACK per table keeps every table's outcome independently
+   * observable on the SAME physical connection (dedicatedPool has max: 1).
    */
-  async function countMarkerGatedTables(
+  async function probeMarkerGatedTables(
     dedicatedPool: Pool,
     setMarker: boolean,
-  ): Promise<Record<(typeof MARKER_GATED_TABLES)[number], number>> {
+  ): Promise<Record<(typeof MARKER_GATED_TABLES)[number], { threw: boolean; message?: string }>> {
     const client = await dedicatedPool.connect();
-    const counts = {} as Record<(typeof MARKER_GATED_TABLES)[number], number>;
+    const outcomes = {} as Record<(typeof MARKER_GATED_TABLES)[number], { threw: boolean; message?: string }>;
     try {
-      await client.query("BEGIN");
-      if (setMarker) {
-        await client.query("SELECT set_config('app.admin_scan', 'true', true)");
-      }
       for (const table of MARKER_GATED_TABLES) {
-        const { rows } = await client.query<{ id: string }>(`SELECT id FROM ${table}`);
-        counts[table] = rows.length;
+        await client.query("BEGIN");
+        if (setMarker) {
+          await client.query("SELECT set_config('app.admin_scan', 'true', true)");
+        }
+        try {
+          await client.query<{ id: string }>(`SELECT id FROM ${table}`);
+          outcomes[table] = { threw: false };
+          await client.query("COMMIT");
+        } catch (err) {
+          outcomes[table] = { threw: true, message: err instanceof Error ? err.message : String(err) };
+          await client.query("ROLLBACK");
+        }
       }
-      await client.query("COMMIT");
     } finally {
       client.release();
     }
-    return counts;
+    return outcomes;
   }
 
-  it("10-06 Test 1: setting the legacy admin-scan marker on a tenant-pool connection grants no additional rows across five tables", async () => {
+  it("10-06 Test 1: setting the legacy admin-scan marker on a tenant-pool connection grants no additional access across five tables", async () => {
     // Seed two workspaces' worth of real rows in every table the marker
-    // used to gate visibility on, so "zero rows visible" below is a
-    // meaningful claim, not vacuously true on an empty table.
+    // used to gate visibility on, so this is a meaningful claim, not
+    // vacuously true on an empty table.
     await seedDueCampaign("marker-retired-campaign-a");
     await seedDueCampaign("marker-retired-campaign-b");
     const pastWake = new Date(Date.now() - 60_000);
@@ -361,19 +378,23 @@ describe("cross-workspace scan role (Phase 10 SEC-01/SEC-02)", () => {
     // (which every seed helper's withTenantTransaction call already reused
     // many times in this file, leaving `app.current_workspace_id` reverted
     // to '' on some of its physical connections). A genuinely fresh
-    // connection is what makes "zero rows without the marker" the correct,
-    // non-throwing baseline for contacts/sends' bare-cast policy.
+    // connection is what makes "the marker changes nothing" a meaningful
+    // claim about the fail-closed predicate's behaviour.
     const freshPool = new Pool({ connectionString: getTestDatabaseUrl(), max: 1 });
     try {
-      const withoutMarker = await countMarkerGatedTables(freshPool, false);
-      const withMarker = await countMarkerGatedTables(freshPool, true);
+      const withoutMarker = await probeMarkerGatedTables(freshPool, false);
+      const withMarker = await probeMarkerGatedTables(freshPool, true);
 
       for (const table of MARKER_GATED_TABLES) {
         expect(
-          withMarker[table],
-          `${table}: setting the legacy admin-scan marker must not reveal any row the same connection could not already see`,
-        ).toBe(withoutMarker[table]);
-        expect(withMarker[table], `${table}: expected zero rows visible without a tenant in scope`).toBe(0);
+          withMarker[table].threw,
+          `${table}: setting the legacy admin-scan marker must not change whether the fail-closed predicate throws`,
+        ).toBe(withoutMarker[table].threw);
+        expect(
+          withMarker[table].threw,
+          `${table}: a connection with no tenant context must raise, not silently reveal rows, under Phase 10's fail-closed predicate`,
+        ).toBe(true);
+        expect(withMarker[table].message).toMatch(/unrecognized configuration parameter/);
       }
     } finally {
       await freshPool.end();
