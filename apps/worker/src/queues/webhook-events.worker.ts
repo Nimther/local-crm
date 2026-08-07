@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Worker, type Job, type ConnectionOptions } from "bullmq";
 import type { PoolClient } from "pg";
+import { scrubbedConsole } from "@mega-crm/redaction";
 import { withCrossWorkspaceScan, withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { recordSubscriptionStatusChange } from "@mega-crm/contacts-core";
 import { incrementWorkspaceDailyRollup } from "./analytics-rollup.js";
@@ -474,8 +475,10 @@ async function dropSiblingWorkspaceEvents(
 
   for (const [owningWorkspaceId, count] of dropCountsByOwner) {
     // P1: the payload is exactly these three scalar fields -- no send_id, no
-    // event type, no payload, no contact identifier.
-    console.log("webhook.sibling_workspace_event_dropped", {
+    // event type, no payload, no contact identifier. 10-13 (SEC-13): routed
+    // through scrubbedConsole like every other apps/worker log call site, so
+    // that guarantee is mechanical rather than reviewed.
+    scrubbedConsole.log("webhook.sibling_workspace_event_dropped", {
       receivingWorkspaceId: workspaceId,
       owningWorkspaceId,
       count,

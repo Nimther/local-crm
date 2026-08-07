@@ -1,5 +1,6 @@
 import "./load-env.js";
 import type { Worker } from "bullmq";
+import { scrubbedConsole } from "@mega-crm/redaction";
 import { buildRedisConnectionOptions, createRedisConnection } from "./queues/connection.js";
 import { createEventsIngestWorker } from "./queues/events-ingest.worker.js";
 import { createImportsCsvWorker } from "./queues/imports-csv.worker.js";
@@ -147,12 +148,12 @@ async function main(): Promise<void> {
   const runtime = await buildWorker();
 
   const shutdown = (signal: NodeJS.Signals) => {
-    console.log(`apps/worker received ${signal}, shutting down gracefully`);
+    scrubbedConsole.log(`apps/worker received ${signal}, shutting down gracefully`);
     runtime
       .close()
       .then(() => process.exit(0))
       .catch((err) => {
-        console.error("apps/worker shutdown error", err);
+        scrubbedConsole.error("apps/worker shutdown error", err);
         process.exit(1);
       });
   };
@@ -160,7 +161,7 @@ async function main(): Promise<void> {
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
 
-  console.log(
+  scrubbedConsole.log(
     `apps/worker started (${runtime.workers.length} BullMQ worker(s) registered: events:ingest, imports:csv, email-broadcast, email-triggered, campaign-kickoff, campaign-scheduler, webhook-events, analytics-reconciliation, flow-run-advance, flow-reconciliation, flow-trigger-evaluator, flow-segment-sweep, flow-enroll-existing, partition-maintenance)`
   );
 }
@@ -168,7 +169,7 @@ async function main(): Promise<void> {
 const isDirectRun = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
 if (isDirectRun) {
   main().catch((err) => {
-    console.error(err);
+    scrubbedConsole.error(err);
     process.exitCode = 1;
   });
 }

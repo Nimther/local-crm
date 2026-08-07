@@ -89,7 +89,19 @@ export const REDACTION_RULES: { keyRules: readonly KeyRule[]; valueRules: readon
     },
     {
       name: "phone",
-      pattern: /(?:\+?\d[\d\s().-]{7,}\d)/,
+      // Requires 10-15 total digits (E.164 range) -- NOT just "7+ digit-ish
+      // characters", which is what the first version of this pattern used
+      // and which matched substrings of every v4 UUID in the system
+      // (workspace_id/contact_id/send_id etc. are logged constantly, and a
+      // UUID's first hex group is frequently all-digit by chance, e.g.
+      // `41449741-1da4-...` -- caught live by
+      // webhook-events-sibling-drop.test.ts's Test 4 when this package was
+      // wired into the worker). `\b` boundaries plus the widened
+      // digit-count floor keep realistic phone formats
+      // (`+1 415-555-0199`, `(415) 555-0199`, `+14155550199`) matching
+      // while a UUID -- whose digit runs are broken up by hex letters
+      // outside this charclass -- no longer does.
+      pattern: /\+?\(?\d(?:[\s().-]*\d){9,14}\b/,
       protects: "phone number in value position under any field name -- the freeform-event-properties backstop",
     },
   ],
