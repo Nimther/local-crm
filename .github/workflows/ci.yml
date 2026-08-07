@@ -61,6 +61,14 @@ jobs:
       - name: Migration linter
         run: npm run lint:migrations
 
+      # GSD 10-05 (SEC-16): the machine half of "transaction-local session
+      # state only" (CONVENTIONS.md) -- a connection-scoped SET or role
+      # switch reintroduced anywhere in the source tree fails here instead of
+      # only being caught by review, which matters most once Phase 14 puts
+      # PgBouncer in transaction-pooling mode in front of Postgres.
+      - name: Session-state audit
+        run: npm run lint:session-state
+
       - name: Working-root hygiene
         run: npm run check:root-hygiene
 

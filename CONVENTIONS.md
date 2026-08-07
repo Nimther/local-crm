@@ -21,7 +21,7 @@ How to write more of this codebase. [`SPECIFICATION.md`](./SPECIFICATION.md) rec
 → [`scripts/env-path.mjs`](./scripts/env-path.mjs) is the only decision about where configuration lives; eleven call sites use it.
 
 **Gate scripts are Node-builtins-only, with a pure exported function and a CLI behind an `import.meta.url` guard.** That shape is what lets the logic be unit-tested with in-memory fixtures instead of temp files.
-→ [`scripts/lint-migrations.mjs`](./scripts/lint-migrations.mjs), [`scripts/coverage-gate.mjs`](./scripts/coverage-gate.mjs), [`scripts/check-root-hygiene.mjs`](./scripts/check-root-hygiene.mjs)
+→ [`scripts/lint-migrations.mjs`](./scripts/lint-migrations.mjs), [`scripts/coverage-gate.mjs`](./scripts/coverage-gate.mjs), [`scripts/check-root-hygiene.mjs`](./scripts/check-root-hygiene.mjs), [`scripts/lint-session-state.mjs`](./scripts/lint-session-state.mjs)
 
 **A phase branch is named `gsd/phase-{phase}-{slug}`, from Phase 9 onward.** The name is not decoration: the tooling resolves it from the template and checks it out, so a branch whose name does not match is one the tooling will migrate work off. Work merges to `master` through a pull request, which is where the three required checks apply.
 → [`.planning/config.json`](./.planning/config.json) — `git.branching_strategy` and `git.phase_branch_template`
@@ -83,6 +83,16 @@ The marker must be a single-line SQL comment beginning `-- destructive:` followe
 
 Adding a `NOT NULL` column with no default to a populated table is separately proven to be rejected by the incremental migration test, against a database that genuinely holds rows.
 → [`packages/db/src/__tests__/migrate-incremental.test.ts`](./packages/db/src/__tests__/migrate-incremental.test.ts)
+
+## Session state is transaction-local only
+
+**Binding rule.** Session state set on a pooled `pg` connection is transaction-local, never connection-scoped. The accepted forms are the `LOCAL` assignment qualifier (`SET LOCAL <name> = <value>`) and `set_config(name, value, true)` -- the third argument must be the literal `true`. Role switching is not used at all in this codebase, in any form: cross-tenant access (the admin-scan pool, `withCrossWorkspaceScan`) is a separate connection under a separate least-privilege login role, never a `SET ROLE` / `SET SESSION AUTHORIZATION` on an existing one.
+
+**Reason.** A connection-scoped assignment (`SET` with no `LOCAL`, or `set_config(..., false)`/`set_config(..., <2 args>)`) survives COMMIT/ROLLBACK and leaks into the next request or job that reuses the same connection when it is returned to the pool. Phase 14's transaction-mode PgBouncer pooling makes that reuse both more frequent and less predictable than the current session-mode pooling does, so a violation that is harmless today becomes a cross-tenant leak the day that ships.
+
+**The rule is enforced, not merely written.** The checker is [`scripts/lint-session-state.mjs`](./scripts/lint-session-state.mjs), run as `npm run lint:session-state`, in the `static` CI job. It recursively walks `apps/api/src`, `apps/worker/src`, `packages/*/src`, and `packages/db/scripts` -- enumerated from the filesystem, not hand-listed -- and is proven against fixtures in [`scripts/__fixtures__/session-state/`](./scripts/__fixtures__/session-state/): `violating.ts` (three distinct violations, one per rule) and `compliant.ts` (every accepted form, plus a documented exception).
+
+**The exception marker.** A single-line `// session-state-exception: <reason>` comment on the line immediately preceding a statement suppresses only that statement -- the same "no blanket file-header suppression" shape as the destructive-DDL marker above. A marker with no reason after the colon does not suppress. Documented in full, with the format a reviewer should expect, in [`docs/lint-rule-exceptions.md`](./docs/lint-rule-exceptions.md).
 
 ## Partition maintenance
 
