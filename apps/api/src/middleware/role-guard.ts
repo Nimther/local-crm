@@ -54,13 +54,13 @@ export function requirePermission(resource: Resource, action: string) {
 
     let result: { success?: boolean } | boolean;
     try {
-      result = (await auth.api.hasPermission({
+      result = await auth.api.hasPermission({
         headers: toFetchHeaders(request),
         body: {
           permissions: { [resource]: [action] },
           ...(organizationId ? { organizationId } : {}),
         },
-      })) as { success?: boolean } | boolean;
+      });
     } catch (err) {
       // SEC-10/SEC-15/T-10-04-02 (anti-enumeration sweep caught this, Rule
       // 1 auto-fix): better-auth's hasPermission THROWS -- it doesn't
