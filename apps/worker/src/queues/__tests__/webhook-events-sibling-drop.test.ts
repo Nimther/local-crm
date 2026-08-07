@@ -253,7 +253,7 @@ describe("webhook-events worker: sibling-workspace event drop (SEC-09, WR-01)", 
     await processWebhookEventBatch({ workspaceId: receivingWorkspaceId, events: [siblingEvent] });
 
     const dropCalls = consoleLogSpy.mock.calls.filter(
-      (call) => call[0] === "webhook.sibling_workspace_event_dropped"
+      (call: unknown[]) => call[0] === "webhook.sibling_workspace_event_dropped"
     );
     expect(dropCalls.length).toBe(1);
 
