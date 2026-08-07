@@ -54,6 +54,19 @@ export async function buildWorker(): Promise<WorkerRuntime> {
     throw new Error("REDIS_URL is required for apps/worker to start");
   }
 
+  // Phase 10 (SEC-01/SEC-02, P3): the worker is the ONLY process that may
+  // hold this credential -- apps/api/src/env.ts's schema deliberately does
+  // not declare SCAN_DATABASE_URL at all, which is the structural half of
+  // the "API process holds neither scan-role credentials nor membership"
+  // proof. Fail fast here rather than let the first cross-workspace scan
+  // throw lazily deep inside a BullMQ job.
+  const scanDatabaseUrl = process.env.SCAN_DATABASE_URL;
+  if (!scanDatabaseUrl) {
+    throw new Error(
+      "SCAN_DATABASE_URL is required for apps/worker to start -- cross-workspace scans connect as the dedicated least-privilege mega_crm_scan role"
+    );
+  }
+
   // 04-16 gap closure: the send workers registered below (email-broadcast,
   // email-triggered) call signUnsubscribeToken/buildListUnsubscribeUrl
   // (packages/delivery-core/src/unsubscribe-token.ts) on every send --
