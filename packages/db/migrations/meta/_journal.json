@@ -316,6 +316,13 @@
       "when": 1783685963486,
       "tag": "0044_workspace_isolation_fail_closed",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1783685963487,
+      "tag": "0045_auth_role_grants",
+      "breakpoints": true
     }
   ]
 }
