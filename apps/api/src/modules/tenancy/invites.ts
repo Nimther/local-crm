@@ -14,6 +14,7 @@ import { requirePermission, toFetchHeaders } from "../../middleware/role-guard.j
 import { env } from "../../env.js";
 import { findActiveWorkspaceBySlug } from "./workspace-lookup.js";
 import { getCallerRoles } from "./member-roles.js";
+import { NOT_FOUND_BODY } from "./resolve-workspace-member.js";
 
 function toIsoString(value: Date | string): string {
   return value instanceof Date ? value.toISOString() : value;
@@ -67,7 +68,7 @@ export async function registerInviteRoutes(fastify: FastifyInstance): Promise<vo
 
       const workspace = await findActiveWorkspaceBySlug(slug);
       if (!workspace) {
-        return reply.code(404).send({ error: "Workspace not found" });
+        return reply.code(404).send(NOT_FOUND_BODY);
       }
 
       const headers = toFetchHeaders(request);
@@ -102,7 +103,7 @@ export async function registerInviteRoutes(fastify: FastifyInstance): Promise<vo
       const { slug } = request.params as { slug: string };
       const workspace = await findActiveWorkspaceBySlug(slug);
       if (!workspace) {
-        return reply.code(404).send({ error: "Workspace not found" });
+        return reply.code(404).send(NOT_FOUND_BODY);
       }
 
       try {
@@ -133,7 +134,7 @@ export async function registerInviteRoutes(fastify: FastifyInstance): Promise<vo
 
       const workspace = await findActiveWorkspaceBySlug(slug);
       if (!workspace) {
-        return reply.code(404).send({ error: "Workspace not found" });
+        return reply.code(404).send(NOT_FOUND_BODY);
       }
 
       const existing = await db.query.invitation.findFirst({
@@ -165,7 +166,7 @@ export async function registerInviteRoutes(fastify: FastifyInstance): Promise<vo
       const { slug, invitationId } = request.params as { slug: string; invitationId: string };
       const workspace = await findActiveWorkspaceBySlug(slug);
       if (!workspace) {
-        return reply.code(404).send({ error: "Workspace not found" });
+        return reply.code(404).send(NOT_FOUND_BODY);
       }
 
       const existing = await db.query.invitation.findFirst({

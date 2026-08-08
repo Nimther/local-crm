@@ -12,7 +12,7 @@ import { auth } from "../auth/auth.js";
 import { requirePermission, toFetchHeaders } from "../../middleware/role-guard.js";
 import { withTenant, withTenantTransaction } from "../../middleware/tenant-context.js";
 import { findActiveWorkspaceBySlug } from "../tenancy/workspace-lookup.js";
-import { resolveWorkspaceMember } from "../tenancy/resolve-workspace-member.js";
+import { resolveWorkspaceMember, NOT_FOUND_BODY } from "../tenancy/resolve-workspace-member.js";
 import { getKey } from "../tenancy/sendgrid-key.repository.js";
 import { listTenantSendGridTemplates, validateTenantSendGridKey } from "../tenancy/sendgrid-client.js";
 import { getSegment, countSegmentMembers, listSegmentMembers } from "../segments/segment.repository.js";
@@ -298,7 +298,7 @@ export async function registerCampaignsRoutes(fastify: FastifyInstance): Promise
       const { slug, id } = request.params as { slug: string; id: string };
       const workspace = await findActiveWorkspaceBySlug(slug);
       if (!workspace) {
-        return reply.code(404).send({ error: "Workspace not found" });
+        return reply.code(404).send(NOT_FOUND_BODY);
       }
 
       try {
@@ -348,7 +348,7 @@ export async function registerCampaignsRoutes(fastify: FastifyInstance): Promise
 
       const workspace = await findActiveWorkspaceBySlug(slug);
       if (!workspace) {
-        return reply.code(404).send({ error: "Workspace not found" });
+        return reply.code(404).send(NOT_FOUND_BODY);
       }
 
       const scheduledAtDate = new Date(parsed.data.scheduledAt);
@@ -384,7 +384,7 @@ export async function registerCampaignsRoutes(fastify: FastifyInstance): Promise
       const { slug, id } = request.params as { slug: string; id: string };
       const workspace = await findActiveWorkspaceBySlug(slug);
       if (!workspace) {
-        return reply.code(404).send({ error: "Workspace not found" });
+        return reply.code(404).send(NOT_FOUND_BODY);
       }
 
       try {
@@ -405,7 +405,7 @@ export async function registerCampaignsRoutes(fastify: FastifyInstance): Promise
       const { slug, id } = request.params as { slug: string; id: string };
       const workspace = await findActiveWorkspaceBySlug(slug);
       if (!workspace) {
-        return reply.code(404).send({ error: "Workspace not found" });
+        return reply.code(404).send(NOT_FOUND_BODY);
       }
 
       const session = await auth.api.getSession({ headers: toFetchHeaders(request) });

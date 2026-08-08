@@ -12,7 +12,7 @@ import { auth } from "../auth/auth.js";
 import { requirePermission, toFetchHeaders } from "../../middleware/role-guard.js";
 import { withTenant } from "../../middleware/tenant-context.js";
 import { findActiveWorkspaceBySlug } from "../tenancy/workspace-lookup.js";
-import { resolveWorkspaceMember } from "../tenancy/resolve-workspace-member.js";
+import { resolveWorkspaceMember, NOT_FOUND_BODY } from "../tenancy/resolve-workspace-member.js";
 import { getSegment, countSegmentMembers } from "../segments/segment.repository.js";
 import {
   FlowStateError,
@@ -253,7 +253,7 @@ export async function registerFlowsRoutes(fastify: FastifyInstance): Promise<voi
 
       const workspace = await findActiveWorkspaceBySlug(slug);
       if (!workspace) {
-        return reply.code(404).send({ error: "Workspace not found" });
+        return reply.code(404).send(NOT_FOUND_BODY);
       }
 
       try {
@@ -301,7 +301,7 @@ export async function registerFlowsRoutes(fastify: FastifyInstance): Promise<voi
       const { slug, id } = request.params as { slug: string; id: string };
       const workspace = await findActiveWorkspaceBySlug(slug);
       if (!workspace) {
-        return reply.code(404).send({ error: "Workspace not found" });
+        return reply.code(404).send(NOT_FOUND_BODY);
       }
 
       try {
@@ -325,7 +325,7 @@ export async function registerFlowsRoutes(fastify: FastifyInstance): Promise<voi
       const { slug, id } = request.params as { slug: string; id: string };
       const workspace = await findActiveWorkspaceBySlug(slug);
       if (!workspace) {
-        return reply.code(404).send({ error: "Workspace not found" });
+        return reply.code(404).send(NOT_FOUND_BODY);
       }
 
       try {
@@ -415,7 +415,7 @@ export async function registerFlowsRoutes(fastify: FastifyInstance): Promise<voi
 
       const workspace = await findActiveWorkspaceBySlug(slug);
       if (!workspace) {
-        return reply.code(404).send({ error: "Workspace not found" });
+        return reply.code(404).send(NOT_FOUND_BODY);
       }
 
       const body = await withTenant(workspace.id, async () => {
@@ -443,7 +443,7 @@ export async function registerFlowsRoutes(fastify: FastifyInstance): Promise<voi
       const { slug, id } = request.params as { slug: string; id: string };
       const workspace = await findActiveWorkspaceBySlug(slug);
       if (!workspace) {
-        return reply.code(404).send({ error: "Workspace not found" });
+        return reply.code(404).send(NOT_FOUND_BODY);
       }
 
       try {
