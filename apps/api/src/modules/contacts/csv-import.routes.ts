@@ -44,10 +44,15 @@ function toStatusResponse(row: CsvImportRow) {
 }
 
 function csvEscape(value: string): string {
-  if (/["\n,]/.test(value)) {
-    return `"${value.replace(/"/g, '""')}"`;
+  // WR-04: neutralize spreadsheet formula characters (CWE-1236) before
+  // RFC 4180 quoting -- a cell value beginning with =, +, -, @, tab, or CR
+  // is interpreted as a formula by Excel/LibreOffice/Google Sheets when this
+  // downloaded error-report CSV is opened.
+  const neutralized = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+  if (/["\n,]/.test(neutralized)) {
+    return `"${neutralized.replace(/"/g, '""')}"`;
   }
-  return value;
+  return neutralized;
 }
 
 /**
