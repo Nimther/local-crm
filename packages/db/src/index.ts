@@ -57,6 +57,13 @@ if (!databaseUrl) {
 
 const pool = new Pool({ connectionString: databaseUrl });
 
+// CR-03 precedent (see authPool below / @mega-crm/tenant-context's pool.on):
+// without this listener an idle-connection termination surfaces as an
+// uncaught 'error' event and crashes the process.
+pool.on("error", (err) => {
+  console.error("idle pg pool client error (connection dropped)", err);
+});
+
 /**
  * Drizzle client used for any non-tenant, app-role query (e.g. workspace-slug
  * uniqueness lookups, the four workspace-shaped better-auth tables' own
