@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { z } from "zod";
 import { createContactSchema, updateContactSchema, contactListQuerySchema } from "@mega-crm/shared-schemas";
 import { withTenant } from "../../middleware/tenant-context.js";
 import { resolveWorkspaceMember } from "../tenancy/resolve-workspace-member.js";
@@ -15,6 +16,10 @@ import {
   type ContactRow,
 } from "./contact.repository.js";
 import { listPropertyRegistry } from "./property-registry.js";
+
+const contactEventsQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).optional(),
+});
 
 function toContactEventResponse(row: ContactEventRow) {
   return {
@@ -118,8 +123,11 @@ export async function registerContactsRoutes(fastify: FastifyInstance): Promise<
   // workspace) AND by RLS on the `events` table underneath (T-02-08-01).
   fastify.get("/api/workspaces/:slug/contacts/:id/events", async (request, reply) => {
     const { slug, id } = request.params as { slug: string; id: string };
-    const query = request.query as { page?: string };
-    const page = query.page ? Math.max(1, Number(query.page) || 1) : 1;
+    const parsed = contactEventsQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: parsed.error.flatten() });
+    }
+    const page = parsed.data.page ?? 1;
 
     const resolved = await resolveWorkspaceMember(request, reply, slug);
     if (!resolved) return;
