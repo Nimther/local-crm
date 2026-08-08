@@ -76,12 +76,14 @@ export async function findWebhookEndpointByToken(
  */
 export async function getWebhookEndpointByWorkspace(): Promise<WebhookEndpointRow | null> {
   return withTenantTransaction(async (client) => {
+    const workspaceId = getWorkspaceId();
     const { rows } = await client.query<WebhookEndpointRow>(
       `SELECT path_token as "pathToken", sendgrid_webhook_id as "sendgridWebhookId",
               public_key as "publicKey", provision_status as "provisionStatus",
               provision_error as "provisionError", last_event_at as "lastEventAt"
        FROM workspace_webhook_endpoints
-       WHERE workspace_id = current_setting('app.current_workspace_id', true)::uuid`
+       WHERE workspace_id = $1`,
+      [workspaceId]
     );
     return rows[0] ?? null;
   });
