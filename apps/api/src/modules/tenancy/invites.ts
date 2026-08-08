@@ -129,7 +129,20 @@ export async function registerInviteRoutes(fastify: FastifyInstance): Promise<vo
     "/api/workspaces/:slug/invites/:invitationId/revoke",
     { preHandler: requirePermission("invitation", "cancel") },
     async (request, reply) => {
-      const { invitationId } = request.params as { invitationId: string };
+      const { slug, invitationId } = request.params as { slug: string; invitationId: string };
+
+      const workspace = await findActiveWorkspaceBySlug(slug);
+      if (!workspace) {
+        return reply.code(404).send({ error: "Workspace not found" });
+      }
+
+      const existing = await db.query.invitation.findFirst({
+        where: eq(invitation.id, invitationId),
+      });
+      if (!existing || existing.organizationId !== workspace.id) {
+        return reply.code(404).send({ error: "Invitation not found" });
+      }
+
       try {
         await auth.api.cancelInvitation({
           headers: toFetchHeaders(request),
