@@ -68,7 +68,8 @@ describe("failure injection: SendGrid 429 rate limit (QG-06)", () => {
       { sendMail: fakeSendMail(429, { "retry-after": "3" }), redisClient },
     );
 
-    expect(result).toEqual({ outcome: "rate_limited", rateLimitMs: 3000 });
+    // Phase 11 (D-10): a SendGrid 429/5xx now carries cause: "provider_backoff".
+    expect(result).toEqual({ outcome: "rate_limited", rateLimitMs: 3000, cause: "provider_backoff" });
 
     // The assertion that matters. A claim left at `dispatching` would send the
     // retry into the interrupted branch and resolve this contact to `failed`.
@@ -113,7 +114,7 @@ describe("failure injection: SendGrid 429 rate limit (QG-06)", () => {
     );
 
     // 2000 is parseRetryAfter's final fallback in send-dispatch.ts.
-    expect(result).toEqual({ outcome: "rate_limited", rateLimitMs: 2000 });
+    expect(result).toEqual({ outcome: "rate_limited", rateLimitMs: 2000, cause: "provider_backoff" });
     expect(counting.callCount(), "the send must be attempted exactly once before backing off").toBe(1);
     expect(await sendsRowCountFor(workspaceId, campaignId, contactId)).toBe(0);
   });

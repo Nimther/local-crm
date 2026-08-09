@@ -74,8 +74,8 @@ describe("sendTenantMailV3 timeout/abort (D-15, DLV-06)", () => {
   it("a normal 2xx response is returned unchanged -- the happy path is not altered by the added timeout", async () => {
     const originalFetch = globalThis.fetch;
     // eslint-disable-next-line @typescript-eslint/require-await -- test double: matches fetch's signature, nothing to await
-    globalThis.fetch = (async () =>
-      new Response(null, { status: 202, headers: { "x-message-id": "sg-fixture-message-id" } })) as typeof fetch;
+    globalThis.fetch = async () =>
+      new Response(null, { status: 202, headers: { "x-message-id": "sg-fixture-message-id" } });
     try {
       const result = await sendTenantMailV3("SG.fixture_key", buildMailSendRequest(sampleParams()));
       expect(result.status).toBe(202);
@@ -133,9 +133,9 @@ describe("sendTenantMailV3 timeout/abort (D-15, DLV-06)", () => {
 
     const originalFetch = globalThis.fetch;
     // eslint-disable-next-line @typescript-eslint/require-await -- test double: matches fetch's signature, the throw IS the behaviour under test
-    globalThis.fetch = (async () => {
+    globalThis.fetch = async () => {
       throw abortLikeError;
-    }) as typeof fetch;
+    };
 
     let caught: Error | undefined;
     try {

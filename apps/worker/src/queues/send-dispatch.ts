@@ -45,7 +45,20 @@ export type SendJobResult =
   | { outcome: "skipped" }
   | { outcome: "excluded"; reason: string }
   | { outcome: "failed"; sendId: string }
-  | { outcome: "rate_limited"; rateLimitMs: number }
+  // Phase 11 (D-10, plan 11-05): `cause` discriminates WHY the send is being
+  // rate-limited, because the two causes now get different retry treatment.
+  // `tenant_bucket` (the per-tenant rate-limiter-flexible token bucket
+  // denied the call) is NOT a failure -- the Worker wrapper keeps turning it
+  // into `worker.rateLimit()` + `Worker.RateLimitError()`, consuming none of
+  // the job's `attempts`. `provider_backoff` (SendGrid itself returned
+  // 429/5xx) now consumes ONE of the job's BOUNDED `attempts`, with BullMQ's
+  // exponential backoff applying between redeliveries -- the previous
+  // unbounded Retry-After-driven `worker.rateLimit()` loop for this case is
+  // deliberately gone. Introduced now (not deferred) because Phase 12's
+  // WRK-01 is documented to split exactly this cause discriminator further
+  // (per-tenant fairness, queue-depth-aware backoff, etc.) -- shaping the
+  // field now means WRK-01 extends this shape instead of reshaping it.
+  | { outcome: "rate_limited"; rateLimitMs: number; cause: "tenant_bucket" | "provider_backoff" }
   // Phase 11 (DLV-02, plan 11-03): a prior attempt already committed the
   // 'dispatching' claim and never reached a terminal write (worker crash
   // between the claim commit and the SendGrid call, or between the call and
@@ -350,7 +363,7 @@ export async function processSendJob(
         // The claim was already committed (unit 1) -- release it so it
         // isn't left stranded blocking a legitimate retry (T-04-12-03).
         await withTenantTransaction((client) => releaseDispatchClaim(client, claim.sendId));
-        return { outcome: "rate_limited", rateLimitMs: rateResult.msBeforeNext };
+        return { outcome: "rate_limited", rateLimitMs: rateResult.msBeforeNext, cause: "tenant_bucket" };
       }
 
       // Unit 2: the external SendGrid call -- NOT inside any transaction.
@@ -373,7 +386,7 @@ export async function processSendJob(
         // SEND-07: SendGrid did not accept the message -- release the
         // claim so a clean backoff retry re-claims and re-attempts.
         await withTenantTransaction((client) => releaseDispatchClaim(client, claim.sendId));
-        return { outcome: "rate_limited", rateLimitMs: parseRetryAfter(response.headers) };
+        return { outcome: "rate_limited", rateLimitMs: parseRetryAfter(response.headers), cause: "provider_backoff" };
       }
 
       if (response.status >= 400) {
@@ -441,7 +454,7 @@ export async function processSendJob(
 
     const rateResult = await consumeTenantToken(redisClient, workspaceId, prereqs.rps);
     if (!rateResult.allowed) {
-      return { outcome: "rate_limited", rateLimitMs: rateResult.msBeforeNext };
+      return { outcome: "rate_limited", rateLimitMs: rateResult.msBeforeNext, cause: "tenant_bucket" };
     }
 
     const payload = buildMailSendRequest({
@@ -458,7 +471,7 @@ export async function processSendJob(
     const response = await sendMail(prereqs.apiKey, payload);
 
     if (response.status === 429 || response.status >= 500) {
-      return { outcome: "rate_limited", rateLimitMs: parseRetryAfter(response.headers) };
+      return { outcome: "rate_limited", rateLimitMs: parseRetryAfter(response.headers), cause: "provider_backoff" };
     }
 
     // SEND-07: mirrors the kind='campaign' branch's >=400 -> failed
@@ -516,7 +529,7 @@ async function processFlowSendJob(
     const rateResult = await consumeTenantToken(redisClient, workspaceId, claim.rps);
     if (!rateResult.allowed) {
       await withTenantTransaction((client) => releaseDispatchClaim(client, claim.sendId));
-      return { outcome: "rate_limited", rateLimitMs: rateResult.msBeforeNext };
+      return { outcome: "rate_limited", rateLimitMs: rateResult.msBeforeNext, cause: "tenant_bucket" };
     }
 
     // Unit 2: the external SendGrid call -- NOT inside any transaction.
@@ -537,7 +550,7 @@ async function processFlowSendJob(
     // ever entered after SendGrid has responded.
     if (response.status === 429 || response.status >= 500) {
       await withTenantTransaction((client) => releaseDispatchClaim(client, claim.sendId));
-      return { outcome: "rate_limited", rateLimitMs: parseRetryAfter(response.headers) };
+      return { outcome: "rate_limited", rateLimitMs: parseRetryAfter(response.headers), cause: "provider_backoff" };
     }
 
     if (response.status >= 400) {

@@ -124,7 +124,9 @@ describe("send-dispatch.ts 429/5xx backoff (SEND-07)", () => {
       { sendMail: sendMailReturning(429, { "retry-after": "3" }), redisClient }
     );
 
-    expect(result).toEqual({ outcome: "rate_limited", rateLimitMs: 3000 });
+    // Phase 11 (D-10): a SendGrid 429/5xx now carries cause: "provider_backoff",
+    // distinct from a tenant token-bucket denial's cause: "tenant_bucket".
+    expect(result).toEqual({ outcome: "rate_limited", rateLimitMs: 3000, cause: "provider_backoff" });
     expect(
       await sendsStatusFor(workspaceId, campaignId, contactId),
       "the claim must be released, not left stranded 'dispatching'"
@@ -142,7 +144,7 @@ describe("send-dispatch.ts 429/5xx backoff (SEND-07)", () => {
       { sendMail: sendMailReturning(500), redisClient }
     );
 
-    expect(result).toEqual({ outcome: "rate_limited", rateLimitMs: 2000 });
+    expect(result).toEqual({ outcome: "rate_limited", rateLimitMs: 2000, cause: "provider_backoff" });
   });
 
   it("prefers X-RateLimit-Reset (unix seconds) over the fixed fallback when Retry-After is absent", async () => {
