@@ -27,6 +27,16 @@ function webhookFriendlyName(workspaceId: string): string {
 }
 
 const EVENT_FLAGS = {
+  // Phase 11 (D-06, 11-07): primary acceptance evidence for the send
+  // reconciler (packages/delivery-core/send-ledger.ts's resolveReconcilingSend,
+  // apps/worker/src/queues/send-reconciler.worker.ts) -- SendGrid fires
+  // `processed` within seconds of accepting a message, directly answering
+  // "did SendGrid accept this?" without waiting on `delivered`, which can lag
+  // by minutes to hours. Stored via webhook-events.worker.ts's raw
+  // send_events INSERT like every other event type; normalizeEventType
+  // returns null for it (out of WBHK-02 scope) so it never drives a
+  // fact-column write, suppression, or status change -- evidence only.
+  processed: true,
   delivered: true,
   bounce: true,
   dropped: true,
@@ -36,6 +46,12 @@ const EVENT_FLAGS = {
   group_unsubscribe: true, // D-11: group_unsubscribe also -> unsubscribed
   spam_report: true,
 } as const;
+// `deferred` is deliberately NOT enabled (Phase 11 D-06, explicit exclusion):
+// it fires repeatedly per message (once per retry attempt SendGrid makes
+// against the recipient's mail server), which would multiply send_events
+// volume for marginal proof -- `processed` plus the delivery/bounce events
+// above already give the reconciler enough evidence. Revisit only if that
+// evidence set proves insufficient in practice (deferred idea, 11-CONTEXT.md).
 
 export type ProvisionEventWebhookError = "missing_scope" | "cap_reached" | "failed" | "insecure_url";
 
@@ -269,6 +285,19 @@ async function enableSignedVerification(
  * (D-01 fallback). Any genuinely unexpected exception (network failure,
  * JSON parse error) is redacted (T-05-10) and also mapped to
  * `{ error: "failed" }` -- this function never throws.
+ *
+ * Phase 11 (D-06, 11-07): because this function is the single chokepoint
+ * connect (sendgrid-key.ts), recheck, and reconnect (webhook-settings.routes.ts)
+ * all route through, an existing tenant's subscription only picks up an
+ * `EVENT_FLAGS` change (e.g. the `processed` addition above) the next time
+ * ANY of those three paths runs for that tenant -- never automatically, and
+ * never retroactively. See docs/runbooks/reprovision-webhook-event-types.md
+ * for the operator procedure that brings an already-connected tenant
+ * forward. The reconciler (send-reconciler.worker.ts) is written to accept
+ * ANY correlated send_events row as acceptance evidence, not `processed`
+ * specifically, precisely so a not-yet-reprovisioned tenant degrades to
+ * slower resolution (waiting on `delivered`/`bounce`/etc.) rather than to no
+ * resolution at all.
  */
 export async function provisionEventWebhook(
   apiKey: string,
