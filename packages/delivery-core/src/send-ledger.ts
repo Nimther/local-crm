@@ -48,6 +48,17 @@ export async function dispatchSendGate(
     if (existingStatus === "sent" || existingStatus === "failed" || existingStatus === "excluded") {
       return "skipped";
     }
+    // Phase 11 (DLV-04, T-11-03-02): 'reconciling'/'unknown' are "not my
+    // job" for the job processor, not "try again" -- only
+    // resolveReconcilingSend, called from the reconciler
+    // (send-reconciler.worker.ts), may leave these states (D-03). This
+    // branch -- not row locking -- is what closes the
+    // reconciler-vs-retry-worker half of DLV-04's exclusivity guarantee:
+    // `FOR UPDATE SKIP LOCKED` in the reconciler's own claim only protects
+    // reconciler-vs-reconciler.
+    if (existingStatus === "reconciling" || existingStatus === "unknown") {
+      return "skipped";
+    }
     sendId = existing[0]?.id;
     if (sendId && existingStatus === "dispatching") {
       return { sendId, interrupted: true };
@@ -169,15 +180,24 @@ export async function resolveReconcilingSend(
  * exclusion breakdown) instead of ever calling SendGrid for them.
  *
  * CR-07 (SEND-04/SEND-06): the ON CONFLICT ... DO UPDATE is guarded by
- * `WHERE sends.status NOT IN ('sent', 'dispatching', 'failed')` so an
- * at-least-once BullMQ kickoff redelivery's exclusion re-walk can never
- * demote an already-terminal 'sent'/'failed' row or an in-flight
- * 'dispatching' claim back to 'excluded' -- that would both erase delivery
- * history and let pre-send-gate's rolling frequency-cap count (which counts
- * this campaign's own status='sent' rows) undercount, allowing a re-send
- * past the cap. When the conflicting row's status IS preserved, Postgres
- * simply skips the update (no error) -- a no-op, not a failure. An existing
- * 'excluded' row still has its exclusion_reason updated (re-classification).
+ * `WHERE sends.status NOT IN ('sent', 'dispatching', 'failed', 'reconciling',
+ * 'unknown')` so an at-least-once BullMQ kickoff redelivery's exclusion
+ * re-walk can never demote an already-terminal 'sent'/'failed' row or an
+ * in-flight 'dispatching' claim back to 'excluded' -- that would both erase
+ * delivery history and let pre-send-gate's rolling frequency-cap count
+ * (which counts this campaign's own status='sent' rows) undercount,
+ * allowing a re-send past the cap. When the conflicting row's status IS
+ * preserved, Postgres simply skips the update (no error) -- a no-op, not a
+ * failure. An existing 'excluded' row still has its exclusion_reason
+ * updated (re-classification).
+ *
+ * Phase 11 (T-11-03-03, RESEARCH.md Pitfall 3): 'reconciling'/'unknown' were
+ * added to this guard's list in the SAME change that introduced code
+ * consuming them (this file), not in the enum-add migration itself (0047/
+ * 0048) -- Postgres does not warn about an enum value missing from a `NOT
+ * IN` list, so leaving the original three-value list unchanged would let a
+ * redelivered exclusion re-walk silently stomp an in-flight reconciliation
+ * back to 'excluded', erasing the row the reconciler was about to resolve.
  */
 export async function recordExcluded(
   client: PoolClient,
@@ -190,7 +210,7 @@ export async function recordExcluded(
      ON CONFLICT (workspace_id, campaign_id, contact_id) DO UPDATE SET
        status = 'excluded',
        exclusion_reason = EXCLUDED.exclusion_reason
-     WHERE sends.status NOT IN ('sent', 'dispatching', 'failed')`,
+     WHERE sends.status NOT IN ('sent', 'dispatching', 'failed', 'reconciling', 'unknown')`,
     [params.workspaceId, params.campaignId, params.contactId, reason]
   );
 }
@@ -237,6 +257,17 @@ export async function claimFlowSend(
     );
     const existingStatus = existing[0]?.status;
     if (existingStatus === "sent" || existingStatus === "failed" || existingStatus === "excluded") {
+      return "skipped";
+    }
+    // Phase 11 (DLV-04, T-11-03-02): 'reconciling'/'unknown' are "not my
+    // job" for the job processor, not "try again" -- only
+    // resolveReconcilingSend, called from the reconciler
+    // (send-reconciler.worker.ts), may leave these states (D-03). This
+    // branch -- not row locking -- is what closes the
+    // reconciler-vs-retry-worker half of DLV-04's exclusivity guarantee:
+    // `FOR UPDATE SKIP LOCKED` in the reconciler's own claim only protects
+    // reconciler-vs-reconciler.
+    if (existingStatus === "reconciling" || existingStatus === "unknown") {
       return "skipped";
     }
     sendId = existing[0]?.id;
@@ -290,11 +321,16 @@ export async function recordFlowStepResult(
  * (workspace_id, campaign_id, contact_id).
  *
  * Mirrors `recordExcluded`'s CR-07 guard: the ON CONFLICT ... DO UPDATE is
- * guarded by `WHERE sends.status NOT IN ('sent', 'dispatching', 'failed')`
- * so a redelivered exclusion re-walk can never demote an already-terminal
- * 'sent'/'failed' row or an in-flight 'dispatching' claim back to
- * 'excluded'. An existing 'excluded' row still has its exclusion_reason
- * updated (re-classification).
+ * guarded by `WHERE sends.status NOT IN ('sent', 'dispatching', 'failed',
+ * 'reconciling', 'unknown')` so a redelivered exclusion re-walk can never
+ * demote an already-terminal 'sent'/'failed' row, an in-flight 'dispatching'
+ * claim, or an in-flight reconciliation back to 'excluded'. An existing
+ * 'excluded' row still has its exclusion_reason updated (re-classification).
+ *
+ * Phase 11 (T-11-03-03, RESEARCH.md Pitfall 3): same rationale as
+ * `recordExcluded`'s own comment above -- 'reconciling'/'unknown' were added
+ * to this guard in the same change that introduced consuming code, not the
+ * enum-add migration itself.
  */
 export async function recordFlowExcluded(
   client: PoolClient,
@@ -307,7 +343,7 @@ export async function recordFlowExcluded(
      ON CONFLICT (workspace_id, flow_run_id, node_id) WHERE kind = 'flow' DO UPDATE SET
        status = 'excluded',
        exclusion_reason = EXCLUDED.exclusion_reason
-     WHERE sends.status NOT IN ('sent', 'dispatching', 'failed')`,
+     WHERE sends.status NOT IN ('sent', 'dispatching', 'failed', 'reconciling', 'unknown')`,
     [params.workspaceId, params.flowRunId, params.nodeId, params.contactId, reason]
   );
 }
