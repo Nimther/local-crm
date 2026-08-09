@@ -14,6 +14,7 @@ import {
   backfillCampaignSendCounter,
   tryCompleteCampaign,
   STALE_DISPATCHING_AGE_MS,
+  RECONCILE_RESCAN_HORIZON_MS,
   type SendStatus,
 } from "@mega-crm/delivery-core";
 
@@ -112,17 +113,30 @@ export interface ReconcilableCandidateRow {
  * resolution happens per-tenant, in `resolveOneSend` below.
  *
  * The predicate covers every candidate `classifyReconcilableSend` can act
- * on: `reconciling`/`unknown` rows (D-03/D-04) and stale-`dispatching` rows
- * (D-08, the age bound passed as `$1`, a bound bigint parameter -- NEVER
- * interpolated into the SQL string, so the value can never become a SQL
- * injection surface or a query-plan-cache-busting literal). SELECT-list is
- * every field `classifyReconcilableSend` needs EXCEPT `hasEvidence`, which
- * cannot be read here: `mega_crm_scan` holds no grant on `send_events`
- * (migration 0042), so evidence classification belongs entirely to the
- * per-tenant step below.
+ * on: `reconciling` rows (D-03, deliberately UNBOUNDED by age -- ageing out
+ * of `reconciling` into `unknown` is itself a verdict this worker must
+ * still be able to issue, `resolve_unknown`), `unknown` rows bounded by
+ * `RECONCILE_RESCAN_HORIZON_MS` (D-04, code review CR-01: a row past its
+ * 72h re-scan horizon can only ever classify to `hold` in
+ * `classifyReconcilableSend` -- see that function's own `queuedAt` age
+ * check -- so this discovery query must stop selecting it, or a growing
+ * backlog of such permanently-inert rows eventually fills every tick's
+ * `RECONCILER_BATCH_LIMIT` and starves out genuinely fresh `reconciling`
+ * rows forever), and stale-`dispatching` rows (D-08, the age bound passed
+ * as `$1`). Both age bounds are passed as bound bigint parameters -- NEVER
+ * interpolated into the SQL string, so neither value can ever become a SQL
+ * injection surface or a query-plan-cache-busting literal. The `unknown`
+ * bound uses `queued_at`, the SAME column `classifyReconcilableSend` itself
+ * compares against for that branch (`reconciler.ts`'s `unknown -> sent`
+ * check) -- using any other column here would make discovery and
+ * classification disagree at the horizon boundary. SELECT-list is every
+ * field `classifyReconcilableSend` needs EXCEPT `hasEvidence`, which cannot
+ * be read here: `mega_crm_scan` holds no grant on `send_events` (migration
+ * 0042), so evidence classification belongs entirely to the per-tenant step
+ * below.
  */
-export async function findReconcilableCandidates(): Promise<ReconcilableCandidateRow[]> {
-  const { candidates } = await discoverReconcilableCandidatesWithOldestReconciling();
+export async function findReconcilableCandidates(batchLimit?: number): Promise<ReconcilableCandidateRow[]> {
+  const { candidates } = await discoverReconcilableCandidatesWithOldestReconciling(batchLimit);
   return candidates;
 }
 
@@ -140,18 +154,29 @@ export interface ReconcilableDiscovery {
  * adds no second scan-role round trip. `findReconcilableCandidates` (above)
  * delegates to this for its own unchanged candidates-only contract, so the
  * discovery SQL exists in exactly one place.
+ *
+ * `batchLimit` defaults to `RECONCILER_BATCH_LIMIT` (500) for every
+ * production call site (`runReconcilerTick`, `findReconcilableCandidates`
+ * called with no argument). It is overridable ONLY so
+ * `send-reconciler-verdicts.test.ts`'s starvation regression (code review
+ * CR-01) can reproduce "more past-horizon `unknown` rows than the batch
+ * admits, alongside a fresh `reconciling` row" without actually seeding
+ * 500+ rows per test run -- the production default never changes.
  */
-async function discoverReconcilableCandidatesWithOldestReconciling(): Promise<ReconcilableDiscovery> {
+async function discoverReconcilableCandidatesWithOldestReconciling(
+  batchLimit: number = RECONCILER_BATCH_LIMIT
+): Promise<ReconcilableDiscovery> {
   return withCrossWorkspaceScan(async (client) => {
     const { rows } = await client.query<ReconcilableCandidateRow>(
       `SELECT id, workspace_id AS "workspaceId", campaign_id AS "campaignId", kind, status,
               queued_at AS "queuedAt", reconciling_since AS "reconcilingSince"
        FROM sends
-       WHERE status IN ('reconciling', 'unknown')
+       WHERE status = 'reconciling'
+          OR (status = 'unknown' AND queued_at >= now() - ($2::bigint * INTERVAL '1 millisecond'))
           OR (status = 'dispatching' AND queued_at < now() - ($1::bigint * INTERVAL '1 millisecond'))
        ORDER BY queued_at
-       LIMIT ${RECONCILER_BATCH_LIMIT}`,
-      [STALE_DISPATCHING_AGE_MS]
+       LIMIT $3`,
+      [STALE_DISPATCHING_AGE_MS, RECONCILE_RESCAN_HORIZON_MS, batchLimit]
     );
     const { rows: oldestRows } = await client.query<{ oldestReconcilingSince: Date | null }>(
       `SELECT MIN(reconciling_since) AS "oldestReconcilingSince" FROM sends WHERE status = 'reconciling'`
@@ -274,14 +299,21 @@ export async function resolveOneSend(row: ReconcilableCandidateRow): Promise<Res
  * so a run that did not finish never reports itself alive (T-11-09-04). This
  * matches `processPartitionMaintenance`'s own precedent (no try/catch: an
  * unhandled throw is what puts the BullMQ job in the failed set).
+ *
+ * `options.batchLimit` mirrors `discoverReconcilableCandidatesWithOldestReconciling`'s
+ * own override -- test-only (code review CR-01's starvation regression),
+ * defaults to `RECONCILER_BATCH_LIMIT` for every production call
+ * (`createSendReconcilerWorker`'s processor calls this with no argument).
  */
-export async function runReconcilerTick(): Promise<{
+export async function runReconcilerTick(options: { batchLimit?: number } = {}): Promise<{
   scanned: number;
   resolvedSent: number;
   markedUnknown: number;
   swept: number;
 }> {
-  const { candidates, oldestReconcilingSince } = await discoverReconcilableCandidatesWithOldestReconciling();
+  const { candidates, oldestReconcilingSince } = await discoverReconcilableCandidatesWithOldestReconciling(
+    options.batchLimit
+  );
   let resolvedSent = 0;
   let markedUnknown = 0;
   let swept = 0;

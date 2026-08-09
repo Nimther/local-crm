@@ -455,6 +455,124 @@ describe("send-reconciler.worker.ts full verdict wiring (DLV-03/DLV-04, plan 11-
   });
 
   /**
+   * Code review CR-01: discovery's `unknown` arm must be bounded by
+   * `RECONCILE_RESCAN_HORIZON_MS`, using the SAME `queued_at` column
+   * `classifyReconcilableSend` itself compares against for that branch --
+   * otherwise a permanently-inert past-horizon `unknown` row remains
+   * eligible for `findReconcilableCandidates`/`runReconcilerTick`'s
+   * `ORDER BY queued_at ASC LIMIT` forever, and (see the starvation test
+   * below) can eventually starve every genuinely-live `reconciling` row out
+   * of every tick's batch.
+   */
+  describe("discovery's unknown-arm horizon bound (code review CR-01)", () => {
+    it("excludes an unknown row past the re-scan horizon from discovery", async () => {
+      const workspaceId = await freshWorkspaceId("verdicts-discovery-unknown-past-horizon");
+      await connectFixtureSendgridKey(workspaceId);
+      const campaignId = await createFixtureCampaign(workspaceId, { sendableTotal: 1, fanOutComplete: true });
+      const contactId = await createFixtureContact(workspaceId);
+
+      const sendId = await claimCampaignSendAt(workspaceId, campaignId, contactId, {
+        status: "unknown",
+        queuedAgoMs: RECONCILE_RESCAN_HORIZON_MS + 60_000,
+      });
+
+      const candidates = await findReconcilableCandidates();
+      expect(
+        candidates.some((c) => c.id === sendId),
+        "a past-horizon unknown row can only ever classify to hold -- discovery must stop selecting it"
+      ).toBe(false);
+    });
+
+    it("still returns an unknown row inside the re-scan horizon from discovery (late-evidence upgrade preserved)", async () => {
+      const workspaceId = await freshWorkspaceId("verdicts-discovery-unknown-within-horizon");
+      await connectFixtureSendgridKey(workspaceId);
+      const campaignId = await createFixtureCampaign(workspaceId, { sendableTotal: 1, fanOutComplete: true });
+      const contactId = await createFixtureContact(workspaceId);
+
+      const sendId = await claimCampaignSendAt(workspaceId, campaignId, contactId, {
+        status: "unknown",
+        queuedAgoMs: RECONCILE_RESCAN_HORIZON_MS - 60_000,
+      });
+
+      const candidates = await findReconcilableCandidates();
+      expect(
+        candidates.some((c) => c.id === sendId),
+        "the horizon bound must not over-exclude a row still eligible for the unknown -> sent late-evidence upgrade"
+      ).toBe(true);
+    });
+
+    it("does not let a backlog of past-horizon unknown rows starve a fresh reconciling row out of its batch (starvation regression)", async () => {
+      const workspaceId = await freshWorkspaceId("verdicts-starvation-regression");
+      await connectFixtureSendgridKey(workspaceId);
+      const campaignId = await createFixtureCampaign(workspaceId, { sendableTotal: 1, fanOutComplete: true });
+
+      // Ground truth, not a hardcoded literal (this phase's own known
+      // cross-file shared-database pollution risk): however many candidates
+      // already exist, across every workspace, at this exact moment.
+      const preexisting = await findReconcilableCandidates();
+      const smallBatchLimit = preexisting.length + 10;
+      const deadRowCount = smallBatchLimit + 20;
+
+      const { rows: contactRows } = await withTenant(workspaceId, () =>
+        withTenantTransaction((client) =>
+          client.query<{ id: string }>(
+            `INSERT INTO contacts (workspace_id, email, first_name, subscription_status)
+             SELECT $1, 'starve-' || gs || '-' || $2 || '@fixture.test', 'Fixture', 'subscribed'
+             FROM generate_series(1, $3) AS gs
+             RETURNING id`,
+            [workspaceId, Date.now(), deadRowCount]
+          )
+        )
+      );
+      expect(contactRows.length).toBe(deadRowCount);
+
+      // Every seeded row is `unknown`, already past the re-scan horizon --
+      // pre-CR-01-fix, the discovery predicate had NO upper age bound on
+      // `unknown` rows, so this whole backlog stayed eligible forever, and
+      // (being older by `queued_at` than anything queued after it) would
+      // occupy the ENTIRE `smallBatchLimit`-sized batch on every tick.
+      await withTenant(workspaceId, () =>
+        withTenantTransaction((client) =>
+          client.query(
+            `INSERT INTO sends (workspace_id, contact_id, kind, status, queued_at)
+             SELECT $1, id, 'campaign', 'unknown', now() - ($3::bigint * INTERVAL '1 millisecond')
+             FROM contacts WHERE id = ANY($2::uuid[])`,
+            [workspaceId, contactRows.map((r) => r.id), RECONCILE_RESCAN_HORIZON_MS + 60_000]
+          )
+        )
+      );
+
+      // A fresh `reconciling` row, queued strictly AFTER every dead row
+      // seeded above, so it sorts LAST by `queued_at` -- exactly the
+      // ordering that, pre-fix, would starve a genuinely-live row out of
+      // every tick's batch forever.
+      const freshContactId = await createFixtureContact(workspaceId);
+      const freshSendId = await claimCampaignSendAt(workspaceId, campaignId, freshContactId, {
+        status: "reconciling",
+      });
+      await insertSendEventEvidence(workspaceId, freshSendId);
+
+      const tick = await runReconcilerTick({ batchLimit: smallBatchLimit });
+      expect(tick.scanned).toBeLessThanOrEqual(smallBatchLimit);
+
+      const freshRow = await sendRowById(workspaceId, freshSendId);
+      expect(
+        freshRow.status,
+        "the fresh reconciling row must still be classified despite a dead-row backlog that alone exceeds the batch limit -- this is the CR-01 regression this test exists to catch"
+      ).toBe("sent");
+
+      // Cleanup: keeps later ground-truth counts in this shared database
+      // meaningful for any subsequent test in this file or elsewhere in the
+      // run (the dead rows above are already excluded from every future
+      // scan by the fix itself, but the fresh contact/campaign remain
+      // tenant-scoped fixtures worth tidying regardless).
+      await withTenant(workspaceId, () =>
+        withTenantTransaction((client) => client.query(`DELETE FROM contacts WHERE workspace_id = $1`, [workspaceId]))
+      );
+    });
+  });
+
+  /**
    * Deliberately LAST in this file: this describe block's second test seeds
    * MORE 'reconciling' rows than `RECONCILER_BATCH_LIMIT` itself. Since
    * discovery orders by `queued_at ASC`, those rows would sort ahead of any
