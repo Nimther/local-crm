@@ -45,6 +45,15 @@ export {
 } from "./send-ledger.js";
 
 export {
+  classifyReconcilableSend,
+  RECONCILE_RESOLUTION_WINDOW_MS,
+  RECONCILE_RESCAN_HORIZON_MS,
+  STALE_DISPATCHING_AGE_MS,
+  type ReconcileVerdict,
+  type ReconcileInput,
+} from "./reconciler.js";
+
+export {
   getWorkspaceSendSettings,
   upsertWorkspaceSendSettings,
   type WorkspaceSendSettings,
