@@ -89,19 +89,40 @@ export const REDACTION_RULES: { keyRules: readonly KeyRule[]; valueRules: readon
     },
     {
       name: "phone",
-      // Requires 10-15 total digits (E.164 range) -- NOT just "7+ digit-ish
-      // characters", which is what the first version of this pattern used
-      // and which matched substrings of every v4 UUID in the system
-      // (workspace_id/contact_id/send_id etc. are logged constantly, and a
-      // UUID's first hex group is frequently all-digit by chance, e.g.
-      // `41449741-1da4-...` -- caught live by
-      // webhook-events-sibling-drop.test.ts's Test 4 when this package was
-      // wired into the worker). `\b` boundaries plus the widened
-      // digit-count floor keep realistic phone formats
-      // (`+1 415-555-0199`, `(415) 555-0199`, `+14155550199`) matching
-      // while a UUID -- whose digit runs are broken up by hex letters
-      // outside this charclass -- no longer does.
-      pattern: /\+?\(?\d(?:[\s().-]*\d){9,14}\b/,
+      // Requires a STANDALONE run of 10+ digits (E.164's floor), where "digits"
+      // may be separated by the usual phone punctuation. Both halves of that
+      // sentence are load-bearing, and each was learned from a live failure:
+      //
+      //  - the digit FLOOR: the first version matched "7+ digit-ish
+      //    characters", which hit substrings of most v4 UUIDs. UUIDs
+      //    (workspace_id/contact_id/send_id) are logged constantly.
+      //
+      //  - the BOUNDARIES: raising the floor to 10 only made the UUID
+      //    collision rarer, not impossible -- measured at ~4% of
+      //    `randomUUID()` values, because `-` is one of this pattern's own
+      //    separators, so a UUID's hex groups chain into a single long digit
+      //    run whenever enough of their characters happen to be digits (e.g.
+      //    `b2cd545e-6853-418e-a436-2d4658232825`). A trailing `\b` did not
+      //    help: it let the match START mid-token, in the middle of a hex
+      //    group. That is what kept redacting `owningWorkspaceId` in
+      //    webhook-events-sibling-drop.test.ts's Test 4 at a ~4% duty cycle,
+      //    and it is a production defect too -- SEC-09/WR-01's drop signal
+      //    exists precisely to carry workspace ids.
+      //
+      // Anchoring both ends against `[0-9A-Za-z-]` fixes it BY CONSTRUCTION
+      // rather than by probability: inside a canonical UUID every digit run is
+      // preceded either by a hex letter or by a `-`, so no legal start position
+      // exists anywhere in it. Realistic phone formats are unaffected, because
+      // their separators are INTERNAL to the match rather than at its edges:
+      // `+14155550199`, `+1 415-555-0199`, `(415) 555-0199`, `tel:+1-415-555-0199`.
+      //
+      // The upper bound is open (`{9,}` = 10 or more) rather than the E.164
+      // ceiling of 15. With a start anchor a capped pattern could no longer
+      // slide its start position forward to cover a longer run, so `{9,14}`
+      // would have stopped matching 16+ digit runs (a card number being the
+      // realistic case) that the previous pattern did catch. Open-ended keeps
+      // this rule's effective coverage a superset of what it replaced.
+      pattern: /(?<![0-9A-Za-z-])\+?\(?\d(?:[\s().-]*\d){9,}(?![0-9A-Za-z-])/,
       protects: "phone number in value position under any field name -- the freeform-event-properties backstop",
     },
   ],
