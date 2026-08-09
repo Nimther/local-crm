@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import multipart from "@fastify/multipart";
 import { parse } from "csv-parse";
+import { z } from "zod";
 import { csvDryRunRequestSchema, type CsvDryRunSummary, type DuplicatePolicy } from "@mega-crm/shared-schemas";
 import { applyCsvRowMapping, findContactIdByIdentity } from "@mega-crm/contacts-core";
 import { auth } from "../auth/auth.js";
@@ -280,7 +281,18 @@ export async function registerCsvImportRoutes(fastify: FastifyInstance): Promise
     if (!resolved) return;
     const workspace = resolved.workspace;
 
-    const errorRows = await withTenant(workspace.id, () => getErrorRows(id));
+    // WR-06: id is attacker-controlled and flows into the Content-Disposition
+    // header below -- reject a malformed shape (400) before it reaches either
+    // the query or the header. This runs AFTER resolveWorkspaceMember so an
+    // unauthenticated/non-member caller's response stays byte-identical to
+    // today (SEC-10/SEC-15 anti-enumeration invariant); only a caller already
+    // proven to be a workspace member can observe the 400.
+    const parsedId = z.string().uuid().safeParse(id);
+    if (!parsedId.success) {
+      return reply.code(400).send({ error: "Invalid import id" });
+    }
+
+    const errorRows = await withTenant(workspace.id, () => getErrorRows(parsedId.data));
 
     const headerSet = new Set<string>();
     for (const row of errorRows) {
@@ -294,7 +306,7 @@ export async function registerCsvImportRoutes(fastify: FastifyInstance): Promise
     ];
 
     reply.header("Content-Type", "text/csv");
-    reply.header("Content-Disposition", `attachment; filename="import-${id}-errors.csv"`);
+    reply.header("Content-Disposition", `attachment; filename="import-${parsedId.data}-errors.csv"`);
     return reply.send(lines.join("\n"));
   });
 }
