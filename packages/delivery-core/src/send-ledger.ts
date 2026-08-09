@@ -1,4 +1,5 @@
 import type { PoolClient } from "pg";
+import { deriveCampaignSendId, deriveFlowSendId } from "./send-id.js";
 
 /**
  * Either the send is a genuine no-op (already terminal -- idempotent
@@ -23,19 +24,30 @@ export type DispatchSendGateResult = "skipped" | { sendId: string; interrupted?:
  *     re-calling SendGrid.
  * A fresh insert (no conflict) returns `{ sendId }` (interrupted
  * undefined/false) and the caller proceeds to send.
+ *
+ * Phase 11 (D-09, DLV-05): `id` is now `deriveCampaignSendId(workspaceId,
+ * campaignId, contactId)` -- a pure function of the send intent, computed
+ * here rather than plumbed through from the caller so every campaign insert
+ * site can never drift onto a different id for the same intent. This is what
+ * makes `releaseDispatchClaim`'s `DELETE` below safe: a fresh insert for the
+ * SAME intent, whenever it happens, reproduces the SAME id. `kind='test'` is
+ * the one exempt path (D-11) -- it never reaches this function at all, since
+ * it inserts no ledger row; `send-dispatch.ts`'s `randomUUID()` there is
+ * correct and must not be "fixed" to call this module.
  */
 export async function dispatchSendGate(
   client: PoolClient,
   params: { workspaceId: string; campaignId: string; contactId: string }
 ): Promise<DispatchSendGateResult> {
   const { workspaceId, campaignId, contactId } = params;
+  const derivedId = deriveCampaignSendId(workspaceId, campaignId, contactId);
 
   const { rows } = await client.query<{ id: string }>(
     `INSERT INTO sends (id, workspace_id, campaign_id, contact_id, status, queued_at)
-     VALUES (gen_random_uuid(), $1, $2, $3, 'dispatching', now())
+     VALUES ($4, $1, $2, $3, 'dispatching', now())
      ON CONFLICT (workspace_id, campaign_id, contact_id) DO NOTHING
      RETURNING id`,
-    [workspaceId, campaignId, contactId]
+    [workspaceId, campaignId, contactId, derivedId]
   );
 
   let sendId = rows[0]?.id;
@@ -79,6 +91,20 @@ export async function dispatchSendGate(
  * 429/5xx (SendGrid never accepted the message) or after the per-tenant
  * rate limiter denies a token, so a clean retry re-claims a fresh row
  * instead of finding a stranded claim (T-04-12-03).
+ *
+ * Phase 11 (D-09, RESEARCH.md Pitfall 4): this `DELETE` is now safe in a way
+ * it was NOT before `dispatchSendGate`/`claimFlowSend` started deriving
+ * `id` from the send intent. If SendGrid silently accepted the message
+ * despite the 429/5xx that triggered this release, the deleted row's id is
+ * gone -- but the NEXT claim attempt for the same intent (whenever it
+ * happens) reproduces that EXACT SAME id via `deriveCampaignSendId`/
+ * `deriveFlowSendId`, so a late-arriving webhook event for the phantom
+ * attempt still correlates to whatever row currently occupies that id
+ * (either the new attempt's live row, or the reconciler's later resolution
+ * of it). This is why the `DELETE` was never replaced with a status
+ * transition (unlike `dispatching -> reconciling`, D-08): a deleted-then-
+ * reinserted row and a status-transitioned row are indistinguishable once
+ * the id is stable across the gap.
  */
 export async function releaseDispatchClaim(client: PoolClient, sendId: string): Promise<void> {
   await client.query(`DELETE FROM sends WHERE id = $1 AND status = 'dispatching'`, [sendId]);
@@ -198,20 +224,27 @@ export async function resolveReconcilingSend(
  * IN` list, so leaving the original three-value list unchanged would let a
  * redelivered exclusion re-walk silently stomp an in-flight reconciliation
  * back to 'excluded', erasing the row the reconciler was about to resolve.
+ *
+ * Phase 11 (D-09, DLV-05): `id` is `deriveCampaignSendId(...)`, the SAME
+ * derivation `dispatchSendGate` uses for the identical (workspaceId,
+ * campaignId, contactId) triple -- an intent excluded here and later
+ * dispatched (or vice versa) can never end up represented by two different
+ * ids depending on which path inserted first (RESEARCH.md key_links).
  */
 export async function recordExcluded(
   client: PoolClient,
   params: { workspaceId: string; campaignId: string; contactId: string },
   reason: string
 ): Promise<void> {
+  const derivedId = deriveCampaignSendId(params.workspaceId, params.campaignId, params.contactId);
   await client.query(
     `INSERT INTO sends (id, workspace_id, campaign_id, contact_id, status, exclusion_reason, queued_at)
-     VALUES (gen_random_uuid(), $1, $2, $3, 'excluded', $4, now())
+     VALUES ($5, $1, $2, $3, 'excluded', $4, now())
      ON CONFLICT (workspace_id, campaign_id, contact_id) DO UPDATE SET
        status = 'excluded',
        exclusion_reason = EXCLUDED.exclusion_reason
      WHERE sends.status NOT IN ('sent', 'dispatching', 'failed', 'reconciling', 'unknown')`,
-    [params.workspaceId, params.campaignId, params.contactId, reason]
+    [params.workspaceId, params.campaignId, params.contactId, reason, derivedId]
   );
 }
 
@@ -232,19 +265,27 @@ export async function recordExcluded(
  *     `failed` rather than re-calling SendGrid.
  *   - `{ sendId }` (a fresh insert, no conflict) -- the caller proceeds to
  *     send.
+ *
+ * Phase 11 (D-09, DLV-05): `id` is `deriveFlowSendId(workspaceId, flowRunId,
+ * nodeId)` -- the flow-shaped sibling of `dispatchSendGate`'s campaign
+ * derivation, computed here rather than plumbed through from the caller for
+ * the same drift-prevention reason. `sends.id` is now a pure function of the
+ * send intent for both campaign and flow ledger inserts; `kind='test'`
+ * remains the one exempt path (D-11), never reaching this function.
  */
 export async function claimFlowSend(
   client: PoolClient,
   params: { workspaceId: string; flowRunId: string; nodeId: string; contactId: string }
 ): Promise<DispatchSendGateResult> {
   const { workspaceId, flowRunId, nodeId, contactId } = params;
+  const derivedId = deriveFlowSendId(workspaceId, flowRunId, nodeId);
 
   const { rows } = await client.query<{ id: string }>(
     `INSERT INTO sends (id, workspace_id, flow_run_id, node_id, contact_id, kind, status, queued_at)
-     VALUES (gen_random_uuid(), $1, $2, $3, $4, 'flow', 'dispatching', now())
+     VALUES ($5, $1, $2, $3, $4, 'flow', 'dispatching', now())
      ON CONFLICT (workspace_id, flow_run_id, node_id) WHERE kind = 'flow' DO NOTHING
      RETURNING id`,
-    [workspaceId, flowRunId, nodeId, contactId]
+    [workspaceId, flowRunId, nodeId, contactId, derivedId]
   );
 
   let sendId = rows[0]?.id;
@@ -331,20 +372,26 @@ export async function recordFlowStepResult(
  * `recordExcluded`'s own comment above -- 'reconciling'/'unknown' were added
  * to this guard in the same change that introduced consuming code, not the
  * enum-add migration itself.
+ *
+ * Phase 11 (D-09, DLV-05): `id` is `deriveFlowSendId(...)`, the SAME
+ * derivation `claimFlowSend` uses for the identical (workspaceId,
+ * flowRunId, nodeId) triple -- mirrors `recordExcluded`'s own same-id
+ * guarantee for the campaign path.
  */
 export async function recordFlowExcluded(
   client: PoolClient,
   params: { workspaceId: string; flowRunId: string; nodeId: string; contactId: string },
   reason: string
 ): Promise<void> {
+  const derivedId = deriveFlowSendId(params.workspaceId, params.flowRunId, params.nodeId);
   await client.query(
     `INSERT INTO sends (id, workspace_id, flow_run_id, node_id, contact_id, kind, status, exclusion_reason, queued_at)
-     VALUES (gen_random_uuid(), $1, $2, $3, $4, 'flow', 'excluded', $5, now())
+     VALUES ($6, $1, $2, $3, $4, 'flow', 'excluded', $5, now())
      ON CONFLICT (workspace_id, flow_run_id, node_id) WHERE kind = 'flow' DO UPDATE SET
        status = 'excluded',
        exclusion_reason = EXCLUDED.exclusion_reason
      WHERE sends.status NOT IN ('sent', 'dispatching', 'failed', 'reconciling', 'unknown')`,
-    [params.workspaceId, params.flowRunId, params.nodeId, params.contactId, reason]
+    [params.workspaceId, params.flowRunId, params.nodeId, params.contactId, reason, derivedId]
   );
 }
 
