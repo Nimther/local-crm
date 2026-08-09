@@ -23,6 +23,7 @@ import * as flowSegmentMembershipSnapshotSchema from "./schema/flow-segment-memb
 import * as subscriptionStatusHistorySchema from "./schema/subscription-status-history.js";
 import * as workspaceDailyRollupSchema from "./schema/workspace-daily-rollup.js";
 import * as partitionMaintenanceRunsSchema from "./schema/partition-maintenance-runs.js";
+import * as sendReconcilerRunsSchema from "./schema/send-reconciler-runs.js";
 
 const schema = {
   ...authSchema,
@@ -48,6 +49,7 @@ const schema = {
   ...subscriptionStatusHistorySchema,
   ...workspaceDailyRollupSchema,
   ...partitionMaintenanceRunsSchema,
+  ...sendReconcilerRunsSchema,
 };
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -140,4 +142,5 @@ export * from "./schema/flow-segment-membership-snapshot.js";
 export * from "./schema/subscription-status-history.js";
 export * from "./schema/workspace-daily-rollup.js";
 export * from "./schema/partition-maintenance-runs.js";
+export * from "./schema/send-reconciler-runs.js";
 export { TENANT_GUC_KEY } from "./rls.js";
