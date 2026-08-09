@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import { SEND_LOG_STATUS_VALUES } from "../api";
-import { SEND_STATUS_CLASSES, SEND_STATUS_LABELS, STATUS_OPTIONS } from "../SendLogPage";
+import {
+  AMBIGUOUS_STATUSES,
+  SEND_STATUS_CLASSES,
+  SEND_STATUS_LABELS,
+  STATUS_OPTIONS,
+  STATUS_OPTION_GROUPS,
+} from "../SendLogPage";
 
 /**
  * Phase 11 (11-10, DLV-02/DLV-07): the send log's hand-maintained web
@@ -58,5 +64,46 @@ describe("send-log status vocabulary (11-10)", () => {
       const classes = SEND_STATUS_CLASSES[status];
       expect(classes).not.toMatch(/bg-green|text-green|bg-red|text-destructive/);
     }
+  });
+
+  /**
+   * UAT gap G-11-2: plan 11-10 appended `reconciling`/`unknown` to the end of a
+   * 9-item list, and `CommandList`'s shared `max-h-[300px]` clipped exactly
+   * those two below the fold with no scroll affordance -- the filter rendered
+   * them, but a marketer could not find them. The fix groups the ambiguous
+   * statuses under their own heading (and raises the popover's LOCAL max-h).
+   * These assertions pin the property that actually matters: the grouped view
+   * the popover renders can never lose or duplicate a status.
+   */
+  describe("grouped filter view (UAT gap G-11-2)", () => {
+    it("covers every STATUS_OPTIONS entry exactly once across all groups", () => {
+      const grouped = STATUS_OPTION_GROUPS.flatMap((g) => g.options.map((o) => o.value));
+      expect(grouped.length, "a status was dropped from or duplicated across the groups").toBe(
+        STATUS_OPTIONS.length
+      );
+      expect(new Set(grouped).size, "the same status appears in more than one group").toBe(
+        grouped.length
+      );
+      expect(new Set(grouped)).toEqual(new Set(STATUS_OPTIONS.map((o) => o.value)));
+    });
+
+    it("puts reconciling and unknown together in their own group, apart from the delivery statuses", () => {
+      const ambiguousGroups = STATUS_OPTION_GROUPS.filter((g) =>
+        g.options.some((o) => AMBIGUOUS_STATUSES.includes(o.value))
+      );
+      expect(ambiguousGroups, "the ambiguous statuses must live in exactly one group").toHaveLength(
+        1
+      );
+      expect(new Set(ambiguousGroups[0].options.map((o) => o.value))).toEqual(
+        new Set(AMBIGUOUS_STATUSES)
+      );
+    });
+
+    it("gives every group a non-empty heading -- the heading IS the discoverability affordance", () => {
+      for (const group of STATUS_OPTION_GROUPS) {
+        expect(group.heading.trim(), "a group without a heading reads as an unlabelled run").toBeTruthy();
+        expect(group.options.length, `group "${group.heading}" renders no options`).toBeGreaterThan(0);
+      }
+    });
   });
 });
