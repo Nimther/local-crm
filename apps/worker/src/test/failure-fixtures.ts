@@ -3,6 +3,7 @@ import { scrubbedConsole } from "@mega-crm/redaction";
 import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { encryptTenantSecret } from "@mega-crm/kms";
 import { getAuthTestDatabaseUrl } from "@mega-crm/test-support";
+import { dispatchSendGate } from "@mega-crm/delivery-core";
 import type { SendGridMailSendRequest, SendTenantMailResult } from "@mega-crm/delivery-core";
 
 /**
@@ -220,6 +221,45 @@ export async function sendsTimingFor(
       return rows[0];
     }),
   );
+}
+
+/**
+ * Arranges a committed `dispatching` claim, as if a process had crashed
+ * strictly BETWEEN receiving SendGrid's response and its own unit-3 record
+ * transaction (DLV-08 boundary 3, plan 11-11 Task 2) -- state-based rather
+ * than kill-based. Boundaries 2 and 3 leave an IDENTICAL ledger state: a
+ * committed `dispatching` claim with no terminal row. A second real-kill
+ * harness for boundary 3 would add process machinery (a forked child, an IPC
+ * marker, a SIGKILL) without adding a single new assertion, since the
+ * REDELIVERY behavior under test (reconciling, zero further provider calls)
+ * is identical to boundary 2's. What actually differs between the two
+ * response variants of boundary 3 -- a 202 the process never got to record,
+ * versus a permanent 4xx it never got to record -- is trivially
+ * parameterised here via `providerResponse`, which this function simply
+ * echoes back for the caller's own assertions; it performs no side effect
+ * with it beyond that, since there is genuinely nothing else to arrange: the
+ * whole point of this boundary is that the response arrived and then
+ * vanished with the process.
+ */
+export async function arrangeCrashedBeforeResultWrite(
+  workspaceId: string,
+  campaignId: string,
+  contactId: string,
+  providerResponse: SendTenantMailResult,
+): Promise<{ sendId: string; providerResponse: SendTenantMailResult }> {
+  const sendId = await withTenant(workspaceId, () =>
+    withTenantTransaction(async (client) => {
+      const claim = await dispatchSendGate(client, { workspaceId, campaignId, contactId });
+      if (claim === "skipped" || !claim.sendId) {
+        throw new Error("test setup failure: expected a fresh dispatchSendGate claim");
+      }
+      return claim.sendId;
+    }),
+  );
+  // Deliberately NO unit-3 write here -- the row is left exactly where a
+  // crash strictly between the SendGrid response and the record transaction
+  // would leave it: committed 'dispatching', no terminal status.
+  return { sendId, providerResponse };
 }
 
 export async function sendsRowCountFor(
