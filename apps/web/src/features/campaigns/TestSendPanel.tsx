@@ -16,6 +16,24 @@ const TEST_SEND_FAILURE =
 const INVALID_JSON_ERROR = "Некорректный JSON — исправьте синтаксис перед отправкой.";
 
 /**
+ * Phase 11 (D-11, plan 11-10): deliberately weaker than "отправлено". The
+ * route (`POST .../test-send`) returns `202 { queued: true, to }` BEFORE the
+ * SendGrid call happens — the actual send runs later in a BullMQ job
+ * (`kind='test'`, `apps/worker/src/queues/send-dispatch.ts`). A timeout or
+ * connection reset during that call produces an outcome this UI never
+ * observes: `processSendJob` returns `SendJobResult`'s `{ outcome: "unknown" }`
+ * variant, logged for an operator but never surfaced back to this panel (no
+ * polling/result-callback surface exists, and building one is out of scope
+ * here — see 11-10-PLAN.md's flagged assumption). Since this UI cannot tell
+ * "queued" from "queued and ambiguously never confirmed" apart, the copy
+ * below never claims delivery, and always carries D-11's guidance: check the
+ * inbox before manually re-sending, because an outcome the platform could
+ * not determine is never re-sent automatically.
+ */
+const TEST_SEND_QUEUED_DESCRIPTION =
+  "Если письмо не появится в течение пары минут, проверьте папку «Спам» и повторите отправку вручную — при неопределённом исходе платформа не повторяет отправку автоматически.";
+
+/**
  * CAMP-04/D-18/D-19: editable monospace JSON prefilled from
  * getCampaignTestSample — the server's own buildContactTemplateData sample
  * built from a real segment contact (documented D-18 contact-profile shape),
@@ -51,7 +69,9 @@ export function TestSendPanel({ slug, campaign }: { slug: string; campaign: Camp
       testSendCampaign(slug, campaign.id, body),
     onSuccess: (result) => {
       setServerError(null);
-      toast.success(`Тестовое письмо отправлено на ${result.to}`);
+      toast.success(`Тестовое письмо поставлено в очередь на ${result.to}`, {
+        description: TEST_SEND_QUEUED_DESCRIPTION,
+      });
     },
     onError: () => setServerError(TEST_SEND_FAILURE),
   });
