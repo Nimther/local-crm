@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Redis } from "ioredis";
 import type { PoolClient } from "pg";
+import { scrubbedConsole } from "@mega-crm/redaction";
 import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { CONTACT_COLUMNS, type ContactRow } from "@mega-crm/contacts-core";
 import { decryptTenantSecret } from "@mega-crm/kms";
@@ -70,7 +71,15 @@ export type SendJobResult =
   // it resolves the row from webhook evidence. Shaped as its own variant
   // (not folded into "failed") so Phase 12 can add a `cause` discriminator
   // to THIS variant without reshaping the ones above it.
-  | { outcome: "reconciling"; sendId: string };
+  | { outcome: "reconciling"; sendId: string }
+  // Phase 11 (D-11, plan 11-10): the test-send-only ambiguous disposition.
+  // A `kind='test'` send has no `sends` row (D-12) -- the ledger path
+  // expresses ambiguity as the `reconciling` STATE on a row it owns; the
+  // test path has no row to write a state onto, so the ambiguity has to
+  // live in the returned outcome instead. Never automatically retried
+  // (D-11): the branch that produces this returns rather than throws, so
+  // BullMQ completes the job instead of redelivering it.
+  | { outcome: "unknown"; sendId: string };
 
 export interface ProcessSendJobDeps {
   /**
@@ -532,7 +541,29 @@ export async function processSendJob(
       campaignId,
       isTest: true,
     });
-    const response = await sendMail(prereqs.apiKey, payload);
+    let response: SendTenantMailResult;
+    try {
+      response = await sendMail(prereqs.apiKey, payload);
+    } catch (err) {
+      // Phase 11 (D-10/D-11, plan 11-10): mirrors the campaign/flow branches'
+      // classification via the SAME `classifyTransportError`, but the
+      // disposition differs on the ambiguous path -- there is no ledger row
+      // to write `reconciling` onto (D-12), so the ambiguity surfaces as a
+      // distinct `unknown` OUTCOME instead. `pre_connection_retryable`
+      // rethrows exactly like the campaign/flow paths: no row exists to
+      // release, and the transport layer proved nothing was sent, so a
+      // retry cannot duplicate it.
+      const classification = classifyTransportError(err);
+      if (classification === "pre_connection_retryable") {
+        throw err;
+      }
+      // `ambiguous` -- log via scrubbedConsole, naming the campaign id and
+      // the outcome only, NEVER the recipient address (`testTo`) supplied
+      // by the caller (T-11-10-05). Return, do not throw: throwing here is
+      // what would make BullMQ retry a test send, which D-11 forbids.
+      scrubbedConsole.warn("test-send outcome unknown (ambiguous provider error)", { campaignId, outcome: "unknown" });
+      return { outcome: "unknown", sendId };
+    }
 
     if (response.status === 429 || response.status >= 500) {
       return { outcome: "rate_limited", rateLimitMs: parseRetryAfter(response.headers), cause: "provider_backoff" };

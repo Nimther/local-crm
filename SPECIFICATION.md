@@ -822,6 +822,8 @@ Repeatable-скан `flow-segment-sweep` (15 мин, §5.1/§5.2) — перио
 
 **Ни один из них не имеет rate limit.**
 
+**`POST .../campaigns/:id/test-send` — исходы (Phase 11, D-11, план 11-10):** маршрут отвечает `202 { queued: true, to }` ДО реального вызова SendGrid (сам вызов происходит в BullMQ-джобе, `kind='test'`, `apps/worker/src/queues/send-dispatch.ts`). У этой джобы теперь три возможных исхода: `sent` (2xx от SendGrid), `failed` (окончательный 4xx) и `unknown` (Phase 11, D-11) — таймаут/`ECONNRESET`/нераспознанный throw во время вызова `sendMail`, классифицированный тем же `classifyTransportError`, что и campaign/flow-ветки (§5.10), но БЕЗ записи в `sends` (D-12: тестовые отправки никогда не попадают в леджер/реконсилер/аналитику — строки не существует, поэтому неоднозначность выражается только возвращаемым `outcome`, не статусом строки). `unknown`-исход НЕ выбрасывает исключение — обработчик `handleEmailBroadcastJob`/`handleEmailTriggeredJob` (`apps/worker/src/queues/email-broadcast.worker.ts`/`email-triggered.worker.ts`) просто резолвится, поэтому BullMQ не переотправляет тестовое письмо автоматически (D-11). Провально-довходовые ошибки (`ECONNREFUSED`/`ENOTFOUND`/`EAI_AGAIN`) по-прежнему пробрасываются наружу — их можно ретраить без риска дублирования, транспортный слой доказал, что байты не ушли. UI-копия панели тестовой отправки (`apps/web/src/features/campaigns/TestSendPanel.tsx`) описывает только факт постановки в очередь ("поставлено в очередь"), не факт доставки — сам роут отвечает до вызова провайдера.
+
 ### 6.5 Роуты с ролевым гейтом (`requirePermission`)
 
 Матрица ролей — `modules/auth/access-control.ts:40-79`: **member — пустой массив прав по каждому ресурсу**; **admin** — всё, кроме `organization:delete`; **owner** — всё.
