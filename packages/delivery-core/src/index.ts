@@ -34,14 +34,17 @@ export {
   recordExcluded,
   audienceExclusionBreakdown,
   incrementCampaignSendCounter,
+  backfillCampaignSendCounter,
   tryCompleteCampaign,
   claimFlowSend,
   recordFlowStepResult,
   recordFlowExcluded,
   resolveReconcilingSend,
+  sweepStaleDispatchingSend,
   type DispatchSendGateResult,
   type AudienceExclusionBreakdown,
   type ResolveReconcilingResult,
+  type ResolveReconcilingVerdict,
 } from "./send-ledger.js";
 
 export {
