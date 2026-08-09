@@ -140,7 +140,7 @@ describe("send-reconciler.worker.ts end-to-end tracer (DLV-02/DLV-03/DLV-04)", (
 
     const beforeTick = new Date();
     const firstTick = await runReconcilerTick();
-    expect(firstTick.resolved).toBeGreaterThanOrEqual(1);
+    expect(firstTick.resolvedSent).toBeGreaterThanOrEqual(1);
 
     const afterTick = await sendRowFor(workspaceId, campaignId, contactId);
     expect(afterTick?.status).toBe("sent");
@@ -153,7 +153,7 @@ describe("send-reconciler.worker.ts end-to-end tracer (DLV-02/DLV-03/DLV-04)", (
     expect(counting.callCount(), "the reconciler must never call the provider").toBe(0);
 
     const secondTick = await runReconcilerTick();
-    expect(secondTick.resolved).toBe(0);
+    expect(secondTick.resolvedSent).toBe(0);
 
     const afterSecondTick = await sendRowFor(workspaceId, campaignId, contactId);
     expect(afterSecondTick?.status).toBe("sent");

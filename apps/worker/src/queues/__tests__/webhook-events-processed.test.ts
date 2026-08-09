@@ -316,7 +316,7 @@ describe("webhook-events worker: processed event is evidence-only (D-06, 11-07)"
     expect(afterIngest?.status).toBe("reconciling");
 
     const tick = await runReconcilerTick();
-    expect(tick.resolved).toBeGreaterThanOrEqual(1);
+    expect(tick.resolvedSent).toBeGreaterThanOrEqual(1);
 
     const afterTick = await sendRow(workspaceId, sendId);
     expect(afterTick?.status).toBe("sent");

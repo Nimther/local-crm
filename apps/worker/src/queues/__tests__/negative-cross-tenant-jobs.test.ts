@@ -521,9 +521,22 @@ describe("Negative cross-tenant suite: background-job families (SEC-16)", () => 
       // Cross-check FIRST, while both rows are still 'reconciling': resolving
       // A's send id through B's workspace id must fail -- the per-tenant
       // claim query is RLS-scoped, so a row from a DIFFERENT workspace than
-      // the one in the candidate is never touched, let alone resolved.
-      const mismatched = await resolveOneSend({ id: a.sendId, workspaceId: b.workspaceId });
-      expect(mismatched).toBe(false);
+      // the one in the candidate is never touched, let alone resolved. Only
+      // `id`/`workspaceId` are load-bearing for this mismatch -- the
+      // re-verification SELECT (scoped to B's workspace) matches zero rows
+      // for A's id before classification ever runs, so the remaining
+      // candidate fields are inert placeholders here (Phase 11, plan 11-08:
+      // resolveOneSend's parameter widened to the full candidate shape).
+      const mismatched = await resolveOneSend({
+        id: a.sendId,
+        workspaceId: b.workspaceId,
+        campaignId: null,
+        kind: "campaign",
+        status: "reconciling",
+        queuedAt: new Date(),
+        reconcilingSince: null,
+      });
+      expect(mismatched).toEqual({ kind: "hold" });
 
       const stillReconciling = await withTenant(a.workspaceId, () =>
         withTenantTransaction(async (client) => {
@@ -533,8 +546,8 @@ describe("Negative cross-tenant suite: background-job families (SEC-16)", () => 
       );
       expect(stillReconciling, "the mismatched cross-tenant attempt must make no write to A's row").toBe("reconciling");
 
-      expect(await resolveOneSend(candidateA)).toBe(true);
-      expect(await resolveOneSend(candidateB)).toBe(true);
+      expect(await resolveOneSend(candidateA)).toEqual({ kind: "resolve_sent", resolved: true });
+      expect(await resolveOneSend(candidateB)).toEqual({ kind: "resolve_sent", resolved: true });
     });
   });
 

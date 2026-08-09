@@ -9,7 +9,13 @@ import {
   createTestPool,
 } from "@mega-crm/test-support";
 import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
-import { SENDGRID_TIMEOUT_MS, upsertWorkspaceSendSettings } from "@mega-crm/delivery-core";
+import {
+  SENDGRID_TIMEOUT_MS,
+  upsertWorkspaceSendSettings,
+  STALE_DISPATCHING_AGE_MS,
+  RECONCILE_RESOLUTION_WINDOW_MS,
+  RECONCILE_RESCAN_HORIZON_MS,
+} from "@mega-crm/delivery-core";
 import {
   SEND_LOCK_DURATION_MS,
   CLAIM_TX_MARGIN_MS,
@@ -52,6 +58,33 @@ describe("send lane timing/retry invariants (D-15, D-10)", () => {
       const rawAttemptBudgetMs = SEND_JOB_MAX_ATTEMPTS * SEND_LOCK_DURATION_MS + backoffSumMs;
 
       expect(SEND_MAX_JOB_LIFETIME_MS).toBeGreaterThan(rawAttemptBudgetMs);
+    });
+  });
+
+  /**
+   * Phase 11 (D-08, plan 11-08, Task 1): `STALE_DISPATCHING_AGE_MS`
+   * (`packages/delivery-core/src/reconciler.ts`) must exceed
+   * `SEND_MAX_JOB_LIFETIME_MS` (`apps/worker/src/queues/queue-options.ts`)
+   * with margin -- the sweep can never claim a row whose worker job might
+   * still be alive and about to write its own terminal/ambiguous result.
+   * This assertion lives HERE, not in `packages/delivery-core`'s own test
+   * project, because `packages/delivery-core` does not (and must not)
+   * depend on `apps/worker` -- the workspace dependency points the other
+   * way (`apps/worker` depends on `@mega-crm/delivery-core`). `apps/worker`
+   * already imports both packages, so this is the one place both real
+   * constants can be imported together without inventing a new dependency
+   * direction. See `reconciler.ts`'s own `STALE_DISPATCHING_AGE_MS` comment
+   * for the mirror-image note pointing back here.
+   */
+  describe("STALE_DISPATCHING_AGE_MS > SEND_MAX_JOB_LIFETIME_MS (D-08)", () => {
+    it("holds for the real exported constants from both packages", () => {
+      expect(STALE_DISPATCHING_AGE_MS).toBeGreaterThan(SEND_MAX_JOB_LIFETIME_MS);
+    });
+  });
+
+  describe("RECONCILE_RESCAN_HORIZON_MS > RECONCILE_RESOLUTION_WINDOW_MS (D-04/D-07)", () => {
+    it("holds for the real exported constants (both local to @mega-crm/delivery-core, also asserted in reconciler-classify.test.ts)", () => {
+      expect(RECONCILE_RESCAN_HORIZON_MS).toBeGreaterThan(RECONCILE_RESOLUTION_WINDOW_MS);
     });
   });
 
