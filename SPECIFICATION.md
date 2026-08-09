@@ -726,6 +726,15 @@ Repeatable-скан `flow-segment-sweep` (15 мин, §5.1/§5.2) — перио
 - **Клиент:** без выделенного `Pool` — в отличие от `partition-maintenance.worker.ts`, вся тенант-скоуп-работа этого воркера идёт через `withTenant`/`withTenantTransaction`, тот же общий пул `@mega-crm/tenant-context`, что и у остальных tenant-scoped тиков; собственный `Pool` этому воркеру не нужен.
 - **Изменение в `send-dispatch.ts` (DLV-02):** ветка `dispatchResult.interrupted` в `claimCampaignSend` теперь пишет `recordSendResult(client, sendId, { status: "reconciling" })` вместо `{ status: "failed" }` и **не** вызывает `incrementCampaignSendCounter`/`tryCompleteCampaign` — счётчики кампании реконсилер добьёт ровно один раз при резолюции строки (задел на 11-04+, счётчик-backfill в этой фазе ещё не реализован). `SendJobResult` получил вариант `{ outcome: "reconciling"; sendId }`.
 
+### 5.11 Набор event-типов провизионируемой вебхук-подписки (11-07, D-06)
+
+`apps/api/src/modules/webhooks/sendgrid-webhook-provision.ts`'s `EVENT_FLAGS` — набор SendGrid Event Webhook event-типов, который платформа включает в подписку, создаваемую/обновляемую в SendGrid-аккаунте тенанта своим же BYO-ключом (`provisionEventWebhook`, §6.5 роуты `.../sendgrid-key/recheck` и `.../webhook-reconnect`, плюс connect-путь `sendgrid-key.ts`).
+
+- **Текущий набор:** `processed` (Phase 11, D-06, добавлен этим планом — primary acceptance evidence для реконсилера §5.10), `delivered`, `bounce`, `dropped`, `open`, `click`, `unsubscribe`, `group_unsubscribe`, `spam_report`. `deferred` **намеренно НЕ включён** — фичит многократно на одно сообщение (по разу на каждую повторную попытку доставки SendGrid), что умножило бы объём `send_events` за маргинальное доказательство; `processed` плюс уже включённые delivery/bounce-события реконсилеру достаточны. Ревизия этого решения — только если текущего набора evidence на практике окажется недостаточно (deferred idea, `11-CONTEXT.md`).
+- **`processed` — evidence-only, без побочных эффектов:** `packages/delivery-core/src/event-normalize.ts`'s `normalizeEventType` возвращает `null` для `"processed"` (не изменено этим планом — вне скоупа WBHK-02 by design). Сырой `INSERT ... ON CONFLICT (workspace_id, sg_event_id, occurred_at) DO NOTHING` в `webhook-events.worker.ts`'s `processWebhookEventBatch` выполняется для ВСЕХ событий батча ДО проверки `normalizedType === null` во втором цикле — именно этот порядок делает `processed` сохраняемым evidence-событием, при этом гарантированно не запускающим ни один fact-column write, ни suppression, ни изменение `sends.status`, ни движение счётчика. Реконсилер (§5.10) не ищет `processed` конкретно — `SELECT 1 FROM send_events WHERE send_id = $1 LIMIT 1` принимает ЛЮБУЮ коррелированную строку как evidence, поэтому тенант, чья подписка ещё не переехала на новый набор флагов, не ломается, а лишь резолвится медленнее (на таймскейле `delivered`/`bounce` вместо секунд `processed`).
+- **CREATE и PATCH — идентичный набор флагов:** оба спред-сайта (`postCreate`, `patchWebhook`) распространяют один и тот же `EVENT_FLAGS`-константу — переподключение (reconnect) не может тихо потерять ранее включённый тип события. Проверено `webhook-provision-event-flags.test.ts` сравнением захваченных тел CREATE и PATCH друг с другом, а не с двумя независимыми списками-литералами.
+- **Существующие тенанты обновляются НЕ автоматически:** `provisionEventWebhook` — единственный chokepoint, через который проходят все три пути (connect/recheck/reconnect, §6.5) — изменение `EVENT_FLAGS` доходит до конкретного тенанта только при следующем реальном прохождении одного из этих трёх путей ДЛЯ ЭТОГО тенанта, никогда retroактивно и никогда фоновым процессом. Операторская процедура — `docs/runbooks/reprovision-webhook-event-types.md`.
+
 ---
 
 ## 6. Публичные точки входа
@@ -848,6 +857,7 @@ Repeatable-скан `flow-segment-sweep` (15 мин, §5.1/§5.2) — перио
 
 `POST /webhooks/sendgrid/:pathToken`.
 
+- **Провизионируемый набор event-типов подписки — см. §5.11** (`processed`, `deferred` исключён намеренно). Эта секция описывает только приёмный роут (верификация подписи/тела) — сама подписка настраивается платформой в аккаунте тенанта, не здесь.
 - Библиотека: `@sendgrid/eventwebhook@8.0.0` — `convertPublicKeyToECDSA()` + `verifySignature()`; своей реализации нет.
 - **Сырое тело сохраняется:** модуль переопределяет `application/json`-парсер на `parseAs: "buffer"` и передаёт Buffer как есть → подпись считается по точным байтам. Модуль **не** обёрнут в `fastify-plugin`, поэтому переопределение локально.
 - Заголовки: `x-twilio-email-event-webhook-signature`, `x-twilio-email-event-webhook-timestamp`.
