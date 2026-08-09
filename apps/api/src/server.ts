@@ -18,6 +18,13 @@ import {
   STALE_THRESHOLD_HOURS,
   type OperatorAlertMessage,
 } from "./modules/ops/partition-watchdog.js";
+import {
+  startSendReconcilerWatchdog,
+  RECONCILER_WATCHDOG_INTERVAL_MS,
+  RECONCILER_STALE_THRESHOLD_MINUTES,
+  RECONCILING_AGE_ALERT_HOURS,
+  type ReconcilerAlertMessage,
+} from "./modules/ops/send-reconciler-watchdog.js";
 import { authPlugin } from "./modules/auth/plugin.js";
 import { registerWorkspaceRoutes } from "./modules/tenancy/workspaces.js";
 import { registerProfileRoutes } from "./modules/tenancy/profile.js";
@@ -227,6 +234,21 @@ async function sendOperatorAlert(message: OperatorAlertMessage): Promise<void> {
   });
 }
 
+/**
+ * 11-09 (D-14): the send-reconciler watchdog's own real dispatch -- same
+ * platform-key-only, plain-text discipline as `sendOperatorAlert` above, just
+ * a different subject line so the two alert channels are distinguishable in
+ * an operator's inbox.
+ */
+async function sendReconcilerOperatorAlert(message: ReconcilerAlertMessage): Promise<void> {
+  await sgMail.send({
+    to: message.to,
+    from: env.PLATFORM_MAIL_FROM,
+    subject: "Mega CRM send reconciler alert",
+    text: message.text,
+  });
+}
+
 async function main(): Promise<void> {
   const app = await buildServer();
   await app.listen({ port: env.API_PORT, host: "0.0.0.0" });
@@ -241,11 +263,25 @@ async function main(): Promise<void> {
   // reach the real SendGrid dispatch path from a test run. main() runs
   // only under the isDirectRun guard below, which is exactly the boundary
   // wanted.
+  //
+  // 11-09 (D-14) update: this process now arms TWO independent dead-man's
+  // switches sharing one alert channel (the platform SendGrid key, plain
+  // text, `OPERATOR_ALERT_EMAIL`) -- the pre-existing partition-maintenance
+  // watchdog above, and the send-reconciler watchdog below. They alert on
+  // completely independent conditions (partition buffer/DEFAULT-row health
+  // vs. reconciler tick liveness/ambiguity backlog) and dedup independently
+  // (their own `last_alert_sent_at` columns live on two different tables),
+  // so neither watchdog's dedup window or health state can mask the other's.
   sgMail.setApiKey(env.PLATFORM_SENDGRID_API_KEY);
   startPartitionWatchdog({
     client: pool,
     operatorEmail: env.OPERATOR_ALERT_EMAIL,
     sendMail: sendOperatorAlert,
+  });
+  startSendReconcilerWatchdog({
+    client: pool,
+    operatorEmail: env.OPERATOR_ALERT_EMAIL,
+    sendMail: sendReconcilerOperatorAlert,
   });
 
   // Names only the interval/threshold numbers -- never the operator
@@ -253,6 +289,14 @@ async function main(): Promise<void> {
   logger.info(
     { pollIntervalMs: WATCHDOG_INTERVAL_MS, staleThresholdHours: STALE_THRESHOLD_HOURS },
     "partition watchdog armed -- watching apps/worker's partition-maintenance job from a separate process"
+  );
+  logger.info(
+    {
+      pollIntervalMs: RECONCILER_WATCHDOG_INTERVAL_MS,
+      staleThresholdMinutes: RECONCILER_STALE_THRESHOLD_MINUTES,
+      reconcilingAgeAlertHours: RECONCILING_AGE_ALERT_HOURS,
+    },
+    "send-reconciler watchdog armed -- watching apps/worker's send-reconciler tick from a separate process"
   );
 }
 

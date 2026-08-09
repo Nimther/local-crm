@@ -1,6 +1,7 @@
 import { Queue, Worker, type ConnectionOptions } from "bullmq";
-import { withCrossWorkspaceScan, withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
+import { pool, withCrossWorkspaceScan, withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { scrubbedConsole } from "@mega-crm/redaction";
+import { recordReconcilerRun } from "@mega-crm/db/src/reconciler/reconciler-run.js";
 import {
   SEND_RECONCILER_QUEUE,
   SEND_RECONCILER_TICK_SCHEMA_VERSION,
@@ -45,6 +46,13 @@ import {
  * every other tenant-scoped write in this process. A future reader must NOT
  * "fix" this by copying `partition-maintenance.worker.ts`'s dedicated-pool
  * block -- there is nothing here that needs one.
+ *
+ * 11-09 (D-14) update to the paragraph above: `send_reconciler_runs` IS a
+ * platform-level table (no `workspace_id`, no RLS -- migration 0050's own
+ * header), so its health-row write below uses the SAME shared
+ * `@mega-crm/tenant-context` pool directly, UNSCOPED (no `withTenant`) --
+ * still not a second, dedicated `Pool` construction, just the plain form of
+ * the one this file already imports for every tenant-scoped write.
  */
 
 /**
@@ -114,6 +122,26 @@ export interface ReconcilableCandidateRow {
  * per-tenant step below.
  */
 export async function findReconcilableCandidates(): Promise<ReconcilableCandidateRow[]> {
+  const { candidates } = await discoverReconcilableCandidatesWithOldestReconciling();
+  return candidates;
+}
+
+export interface ReconcilableDiscovery {
+  candidates: ReconcilableCandidateRow[];
+  /** The earliest `reconciling_since` observed, across ALL workspaces, among rows still `reconciling` -- `null` when none exist. Observed at DISCOVERY time (before this tick resolves anything), per D-14's own "oldest outstanding ... it observed" phrasing -- not re-queried after resolution. */
+  oldestReconcilingSince: Date | null;
+}
+
+/**
+ * 11-09 (D-14): the SAME discovery query `findReconcilableCandidates` runs,
+ * plus the `MIN(reconciling_since)` aggregate the health row's own
+ * `oldest_reconciling_since` column needs -- both issued against the SAME
+ * client inside ONE `withCrossWorkspaceScan` call, so writing the health row
+ * adds no second scan-role round trip. `findReconcilableCandidates` (above)
+ * delegates to this for its own unchanged candidates-only contract, so the
+ * discovery SQL exists in exactly one place.
+ */
+async function discoverReconcilableCandidatesWithOldestReconciling(): Promise<ReconcilableDiscovery> {
   return withCrossWorkspaceScan(async (client) => {
     const { rows } = await client.query<ReconcilableCandidateRow>(
       `SELECT id, workspace_id AS "workspaceId", campaign_id AS "campaignId", kind, status,
@@ -125,7 +153,10 @@ export async function findReconcilableCandidates(): Promise<ReconcilableCandidat
        LIMIT ${RECONCILER_BATCH_LIMIT}`,
       [STALE_DISPATCHING_AGE_MS]
     );
-    return rows;
+    const { rows: oldestRows } = await client.query<{ oldestReconcilingSince: Date | null }>(
+      `SELECT MIN(reconciling_since) AS "oldestReconcilingSince" FROM sends WHERE status = 'reconciling'`
+    );
+    return { candidates: rows, oldestReconcilingSince: oldestRows[0]?.oldestReconcilingSince ?? null };
   });
 }
 
@@ -227,13 +258,22 @@ export async function resolveOneSend(row: ReconcilableCandidateRow): Promise<Res
  * discovery/claim functions) so the reconciler test suite can drive a full
  * tick directly, without a live BullMQ `Worker`.
  *
- * Returns per-verdict counts (D-14's future health row is a straightforward
- * consumer of exactly this shape, not built in this plan): `scanned` is the
- * candidate-row count this pass discovered (bounded by
- * `RECONCILER_BATCH_LIMIT`); `resolvedSent`/`markedUnknown`/`swept` count
- * only ACTUAL transitions (`resolved: true`), never attempted-but-lost-the-
- * race claims. Logs the same four counts via `scrubbedConsole` -- counts
- * only, never send ids, contact ids, workspace ids, or addresses.
+ * Returns per-verdict counts: `scanned` is the candidate-row count this pass
+ * discovered (bounded by `RECONCILER_BATCH_LIMIT`); `resolvedSent`/
+ * `markedUnknown`/`swept` count only ACTUAL transitions (`resolved: true`),
+ * never attempted-but-lost-the-race claims. Logs the same four counts via
+ * `scrubbedConsole` -- counts only, never send ids, contact ids, workspace
+ * ids, or addresses.
+ *
+ * 11-09 (D-14): writes the `send_reconciler_runs` health row LAST, after the
+ * candidate loop completes, via the plain (unscoped) shared
+ * `@mega-crm/tenant-context` pool -- this table is platform-level, not
+ * tenant-scoped (see this file's own header comment). Deliberately no
+ * try/catch around the loop or the write: an unhandled throw ANYWHERE above
+ * -- discovery, a single `resolveOneSend` call -- skips the write entirely,
+ * so a run that did not finish never reports itself alive (T-11-09-04). This
+ * matches `processPartitionMaintenance`'s own precedent (no try/catch: an
+ * unhandled throw is what puts the BullMQ job in the failed set).
  */
 export async function runReconcilerTick(): Promise<{
   scanned: number;
@@ -241,7 +281,7 @@ export async function runReconcilerTick(): Promise<{
   markedUnknown: number;
   swept: number;
 }> {
-  const candidates = await findReconcilableCandidates();
+  const { candidates, oldestReconcilingSince } = await discoverReconcilableCandidatesWithOldestReconciling();
   let resolvedSent = 0;
   let markedUnknown = 0;
   let swept = 0;
@@ -259,6 +299,16 @@ export async function runReconcilerTick(): Promise<{
 
   const summary = { scanned: candidates.length, resolvedSent, markedUnknown, swept };
   scrubbedConsole.log("send-reconciler: tick complete", summary);
+
+  await recordReconcilerRun(pool, {
+    lastRunAt: new Date(),
+    candidatesScanned: summary.scanned,
+    rowsResolved: summary.resolvedSent,
+    rowsMarkedUnknown: summary.markedUnknown,
+    staleDispatchingSwept: summary.swept,
+    oldestReconcilingSince,
+  });
+
   return summary;
 }
 
