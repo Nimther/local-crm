@@ -8,6 +8,7 @@ export {
 export {
   buildMailSendRequest,
   sendTenantMailV3,
+  SENDGRID_TIMEOUT_MS,
   type SendGridMailSendRequest,
   type BuildMailSendRequestParams,
   type SendTenantMailResult,

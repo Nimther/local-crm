@@ -92,6 +92,31 @@ export interface SendTenantMailResult {
 }
 
 /**
+ * SendGrid `mail/send` call timeout (Phase 11, D-15, DLV-06) -- versioned
+ * constant, Phase 9 D-12 convention (a change to this number must be
+ * visible in a diff, never silently absorbed into a library default).
+ *
+ * Deliberately, STRICTLY below `SEND_LOCK_DURATION_MS`
+ * (`apps/worker/src/queues/queue-options.ts`), with margin left over for the
+ * claim transaction that runs before this call and the record transaction
+ * that runs after it. `apps/worker/src/queues/__tests__/
+ * send-timing-invariant.test.ts` asserts
+ * `SENDGRID_TIMEOUT_MS + CLAIM_TX_MARGIN_MS + RECORD_TX_MARGIN_MS <
+ * SEND_LOCK_DURATION_MS` against these real exported values -- not just a
+ * comment asserting it.
+ *
+ * Why the ordering matters (ARCHITECTURE.md §9, the send delivery state
+ * machine): BullMQ renews a job's lock on a timer independent of the job
+ * processor's own promise. If this call could hang past `lockDuration`,
+ * BullMQ's stalled-checker could redeliver the job to a SECOND live worker
+ * while the FIRST worker's `sendTenantMailV3` call is still pending -- two
+ * live processors racing to write the same `sends` row. Bounding this call
+ * strictly below the lock duration guarantees the original processor always
+ * reaches its own terminal/ambiguous write first.
+ */
+export const SENDGRID_TIMEOUT_MS = 20_000;
+
+/**
  * Redacts the tenant's decrypted API key from any thrown/logged error
  * message or stack (T-04-03-04) -- the key must never end up in logs even
  * transitively via an error object.
@@ -111,6 +136,14 @@ function redactApiKey(err: unknown, apiKey: string): Error {
  * never `@sendgrid/mail`'s module-level `sgMail` singleton, which would race
  * across concurrently-dispatching tenants). Matches the raw-fetch convention
  * already established by `apps/api/src/modules/tenancy/sendgrid-client.ts`.
+ *
+ * Bounded by `AbortSignal.timeout(SENDGRID_TIMEOUT_MS)` (Phase 11, D-15) --
+ * no call can hang unbounded and pin a worker concurrency slot indefinitely.
+ * Every thrown error -- a normal network failure, an HTTP-level rejection
+ * `fetch` itself never throws for, or the abort firing mid-flight -- still
+ * leaves this function ONLY via `redactApiKey` below: there is exactly one
+ * `try`/`catch` in this function, deliberately, so the timeout path cannot
+ * accidentally open a second, unredacted error route out of this call.
  */
 export async function sendTenantMailV3(
   apiKey: string,
@@ -124,6 +157,7 @@ export async function sendTenantMailV3(
         "Content-Type": "application/json",
       },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(SENDGRID_TIMEOUT_MS),
     });
     return { status: res.status, headers: res.headers, messageId: res.headers.get("x-message-id") };
   } catch (err) {
