@@ -20,6 +20,24 @@
 
 import { Client } from "pg";
 
+import { resolveEnvPath } from "./env-path.mjs";
+
+// GSD 10-15 (gap G-10-1): recurrence of the 08-07 failure class
+// (SPECIFICATION.md:107) -- the TEST_ADMIN_DATABASE_URL-override convention
+// was copied from provision-db.ts without the env-loading half of the
+// pattern, so this script's admin DSN was invisible to the external env
+// file every sibling DSN consumer (check-env.mjs, migrate-dev.mjs) already
+// loads. Mirrors migrate-dev.mjs's exact shape. Kept at module scope, before
+// DEFAULT_ADMIN_DSN/resolveAdminDsn, so resolveAdminDsn() can never run
+// before process.env is populated. The catch branch exists so a machine
+// with no file (e.g. CI, which exports variables directly) keeps working
+// from already-exported variables.
+try {
+  process.loadEnvFile(resolveEnvPath());
+} catch {
+  // .env not present -- rely on already-exported environment variables
+}
+
 const DEFAULT_ADMIN_DSN = "postgres://postgres:postgres@localhost:5432/postgres";
 
 function resolveAdminDsn() {
