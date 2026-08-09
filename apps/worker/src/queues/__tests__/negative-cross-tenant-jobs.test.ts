@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Pool } from "pg";
 import { withCrossWorkspaceScan, withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { getScanTestDatabaseUrl } from "@mega-crm/test-support";
+import { dispatchSendGate } from "@mega-crm/delivery-core";
 import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool, createFixtureFlowRun } from "../../test/db-fixture.js";
 import { insertFixtureOrganization, createFixtureCampaign, createFixtureContact, connectFixtureSendgridKey } from "../../test/failure-fixtures.js";
 
@@ -19,6 +20,7 @@ import { findDueFlowRunCandidates, transitionAndNudge } from "../flows/flow-reco
 import { processFlowTriggerCheck } from "../flows/flow-trigger-evaluator.worker.js";
 import { runFlowSegmentSweepTick } from "../flows/flow-segment-sweep.worker.js";
 import { processFlowEnrollExisting } from "../flows/flow-enroll-existing.worker.js";
+import { findReconcilableCandidates, resolveOneSend } from "../send-reconciler.worker.js";
 
 /**
  * SEC-16 (background-job half), SPEC R2: this is the counterpart to
@@ -470,6 +472,72 @@ describe("Negative cross-tenant suite: background-job families (SEC-16)", () => 
     });
   });
 
+  describe("send-reconciler (findReconcilableCandidates / resolveOneSend, scan consumer)", () => {
+    /**
+     * Claims a fresh campaign send, forces it directly to `reconciling`, and
+     * inserts a correlated `send_events` row -- the discoverable-and-resolvable
+     * shape `findReconcilableCandidates`/`resolveOneSend` (11-03) expect.
+     */
+    async function seedReconcilingSendWithEvidence(
+      nameSeed: string
+    ): Promise<{ workspaceId: string; campaignId: string; sendId: string }> {
+      const workspaceId = await freshWorkspaceId(nameSeed);
+      await connectFixtureSendgridKey(workspaceId);
+      const campaignId = await createFixtureCampaign(workspaceId);
+      const contactId = await createFixtureContact(workspaceId);
+
+      const sendId = await withTenant(workspaceId, () =>
+        withTenantTransaction(async (client) => {
+          const claim = await dispatchSendGate(client, { workspaceId, campaignId, contactId });
+          if (claim === "skipped" || !claim.sendId) {
+            throw new Error("test setup failure: expected a fresh dispatchSendGate claim");
+          }
+          await client.query(`UPDATE sends SET status = 'reconciling' WHERE id = $1`, [claim.sendId]);
+          await client.query(
+            `INSERT INTO send_events (id, workspace_id, sg_event_id, send_id, event_type, payload, occurred_at)
+             VALUES (gen_random_uuid(), $1, $2, $3, 'processed', '{}'::jsonb, now())`,
+            [workspaceId, `sg-evt-${claim.sendId}`, claim.sendId]
+          );
+          return claim.sendId;
+        })
+      );
+      return { workspaceId, campaignId, sendId };
+    }
+
+    it("discovers reconciling sends across two workspaces and each resolves only its own row via the unchanged per-tenant path", async () => {
+      const a = await seedReconcilingSendWithEvidence("jobs-reconciler-a");
+      const b = await seedReconcilingSendWithEvidence("jobs-reconciler-b");
+
+      const candidates = await findReconcilableCandidates();
+      const candidateIds = candidates.map((c) => c.id);
+      expect(candidateIds).toContain(a.sendId);
+      expect(candidateIds).toContain(b.sendId);
+
+      const candidateA = candidates.find((c) => c.id === a.sendId)!;
+      const candidateB = candidates.find((c) => c.id === b.sendId)!;
+      expect(candidateA.workspaceId).toBe(a.workspaceId);
+      expect(candidateB.workspaceId).toBe(b.workspaceId);
+
+      // Cross-check FIRST, while both rows are still 'reconciling': resolving
+      // A's send id through B's workspace id must fail -- the per-tenant
+      // claim query is RLS-scoped, so a row from a DIFFERENT workspace than
+      // the one in the candidate is never touched, let alone resolved.
+      const mismatched = await resolveOneSend({ id: a.sendId, workspaceId: b.workspaceId });
+      expect(mismatched).toBe(false);
+
+      const stillReconciling = await withTenant(a.workspaceId, () =>
+        withTenantTransaction(async (client) => {
+          const { rows } = await client.query<{ status: string }>(`SELECT status FROM sends WHERE id = $1`, [a.sendId]);
+          return rows[0]?.status;
+        })
+      );
+      expect(stillReconciling, "the mismatched cross-tenant attempt must make no write to A's row").toBe("reconciling");
+
+      expect(await resolveOneSend(candidateA)).toBe(true);
+      expect(await resolveOneSend(candidateB)).toBe(true);
+    });
+  });
+
   describe("flow-segment-sweep (runFlowSegmentSweepTick, scan consumer)", () => {
     async function seedLiveSegmentFlowWithMatchingContact(nameSeed: string): Promise<{ workspaceId: string; flowId: string; contactId: string }> {
       const workspaceId = await freshWorkspaceId(nameSeed);
@@ -710,6 +778,7 @@ describe("Negative cross-tenant suite: background-job families (SEC-16)", () => 
       "FlowSegmentSweep",
       "FlowEnrollExisting",
       "AnalyticsReconciliation",
+      "SendReconciler",
     ]);
 
     const EXCLUDED_FAMILIES: Record<string, string> = {
