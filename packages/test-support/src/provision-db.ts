@@ -141,6 +141,28 @@ export function buildRoleDsn(
 }
 
 /**
+ * Role-swap a DSN that already points at an ephemeral TEST database.
+ *
+ * Phase 10 debug (aggregate-coverage-run-fails): lives here, next to
+ * `buildRoleDsn` and `DEFAULT_APP_PASSWORD`, rather than in `db-fixture.ts`,
+ * so `global-setup.ts` can derive the scan/auth DSNs from the DSN it has just
+ * provisioned WITHOUT importing `db-fixture.ts` (which imports back from
+ * `global-setup.ts` for the ambiguity marker — the two would form a cycle).
+ *
+ * Takes the database name from the DSN itself: the caller has, by construction,
+ * already decided which database this is.
+ */
+export function buildTestRoleDsn(testDsn: string, role: string): string {
+  const databaseName = new URL(testDsn).pathname.replace(/^\//, "");
+  return buildRoleDsn(
+    testDsn,
+    databaseName,
+    role,
+    process.env.TEST_APP_DB_PASSWORD ?? DEFAULT_APP_PASSWORD,
+  );
+}
+
+/**
  * Build the app-role DSN for a freshly created database.
  *
  * Returning an app-role DSN rather than the admin one is load-bearing: under a

@@ -4,9 +4,10 @@ import { fileURLToPath } from "node:url";
 
 import { Pool } from "pg";
 
+import { AMBIGUOUS_PROJECT_MARKER } from "./global-setup.js";
 import { assertTestDatabaseUrl } from "./guard.js";
 import { applyMigrationFile, listMigrationFiles } from "./migration-runner.js";
-import { AUTH_ROLE, buildRoleDsn, SCAN_ROLE } from "./provision-db.js";
+import { AUTH_ROLE, buildTestRoleDsn, SCAN_ROLE } from "./provision-db.js";
 
 // Deep specifier, not the package root (09-03 task 2, D-05): `packages/db/src/index.ts`
 // constructs a Drizzle client at import time and throws when DATABASE_URL is
@@ -64,6 +65,26 @@ export const MIGRATION_ADVISORY_LOCK_KEY = 8_472_991;
  * There is deliberately no `??` fallback to DATABASE_URL anywhere in this file.
  */
 export function getTestDatabaseUrl(): string {
+  // D-14 layer c (Phase 10 debug, aggregate-coverage-run-fails): in a run with
+  // more than one vitest project, each project provisions its OWN ephemeral
+  // database and receives its DSN through vitest's per-project `config.env`.
+  // global-setup.ts poisons the SHARED process.env copy of GSD_TEST_PROJECT as
+  // soon as a second project provisions, precisely so this marker can only ever
+  // be observed by a worker the per-project channel failed to reach. Such a
+  // worker holds another project's DSN and would read and write another
+  // project's tenants — the original defect, which announced itself only by
+  // luck (one project's fixture happened to crash another project's code).
+  // Fail closed instead.
+  if (process.env.GSD_TEST_PROJECT === AMBIGUOUS_PROJECT_MARKER) {
+    throw new Error(
+      "FATAL: this test worker did not receive its project's own ephemeral database DSN. " +
+        "Several vitest projects provisioned databases in this run, so the DSN in process.env " +
+        "belongs to whichever project's globalSetup ran last, not to this one. " +
+        "vitest's per-project `config.env` channel (see packages/test-support/src/global-setup.ts) " +
+        "did not reach this worker.",
+    );
+  }
+
   const testUrl = process.env.TEST_DATABASE_URL;
 
   // Compare against the TRUE dev DSN. When globalSetup ran it stashed the
@@ -191,9 +212,10 @@ export function createTestPool(): Pool {
  * password change; the database (already validated) stays identical.
  */
 function swapRole(testUrl: string, role: string): string {
-  const url = new URL(testUrl);
-  const databaseName = url.pathname.replace(/^\//, "");
-  return buildRoleDsn(testUrl, databaseName, role, process.env.TEST_APP_DB_PASSWORD ?? "mega_crm_dev_pw");
+  // One definition of the swap, shared with global-setup.ts (Phase 10 debug):
+  // if this file and that one built role DSNs differently, a project's scan or
+  // auth pool could end up on a different database than its app pool.
+  return buildTestRoleDsn(testUrl, role);
 }
 
 /** The scan-role DSN for the SAME ephemeral database `getTestDatabaseUrl()` returns. */
