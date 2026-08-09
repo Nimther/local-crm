@@ -5,7 +5,7 @@ import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { encryptTenantSecret } from "@mega-crm/kms";
 import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool, createFixtureFlowRun } from "../../test/db-fixture.js";
 import { processSendJob, type SendJobResult } from "../send-dispatch.js";
-import type { SendGridMailSendRequest, SendTenantMailResult } from "@mega-crm/delivery-core";
+import { claimFlowSend, type SendGridMailSendRequest, type SendTenantMailResult } from "@mega-crm/delivery-core";
 import { insertFixtureOrganization } from "../../test/failure-fixtures.js";
 
 /**
@@ -192,5 +192,75 @@ describe("send-dispatch.ts processSendJob kind:'flow' (FLOW-01/FLOW-07, T-06-03-
 
     expect(result.outcome).toBe("rate_limited");
     expect(counting.callCount()).toBe(0);
+  });
+
+  /**
+   * Arranges a committed 'dispatching' claim WITHOUT ever calling SendGrid --
+   * simulates a worker crash strictly between the claim transaction's COMMIT
+   * and the (never-reached) SendGrid call. Mirrors
+   * send-reconciler-tracer.test.ts's `arrangeInterruptedClaim`, flow-shaped.
+   */
+  async function arrangeInterruptedFlowClaim(
+    workspaceId: string,
+    flowRunId: string,
+    nodeId: string,
+    contactId: string
+  ): Promise<void> {
+    await withTenant(workspaceId, () =>
+      withTenantTransaction((client) => claimFlowSend(client, { workspaceId, flowRunId, nodeId, contactId }))
+    );
+  }
+
+  it("Phase 11 DLV-02 (flow-side parity, plan 11-06): an interrupted flow-step claim never re-calls SendGrid and records 'reconciling', not 'failed'", async () => {
+    const workspaceId = await freshWorkspaceId("flow-send-interrupted");
+    await connectFixtureSendgridKey(workspaceId);
+    const contactId = await createFixtureContact(workspaceId);
+    const { flowRunId, nodeId } = await createFixtureFlowRun(workspaceId, contactId);
+
+    await arrangeInterruptedFlowClaim(workspaceId, flowRunId, nodeId, contactId);
+
+    const counting = countingSendMail();
+    const result: SendJobResult = await processSendJob(
+      { workspaceId, kind: "flow", flowRunId, nodeId, contactId },
+      { sendMail: counting.fn, redisClient }
+    );
+
+    expect(
+      counting.callCount(),
+      "the interrupted branch must intercept the redelivery before any SendGrid call — this is the duplicate-email window"
+    ).toBe(0);
+    expect(result.outcome).toBe("reconciling");
+
+    const rows = await flowSendsFor(workspaceId, flowRunId, nodeId);
+    expect(rows.length, "no duplicate sends row for the interrupted claim").toBe(1);
+    expect(rows[0].status).toBe("reconciling");
+  });
+
+  it("T-06-03 (plan 11-06): a redelivered flow-step job onto a 'reconciling' row returns { outcome: \"skipped\" } with zero provider calls", async () => {
+    const workspaceId = await freshWorkspaceId("flow-send-reconciling-skip");
+    await connectFixtureSendgridKey(workspaceId);
+    const contactId = await createFixtureContact(workspaceId);
+    const { flowRunId, nodeId } = await createFixtureFlowRun(workspaceId, contactId);
+
+    await arrangeInterruptedFlowClaim(workspaceId, flowRunId, nodeId, contactId);
+
+    const first = await processSendJob(
+      { workspaceId, kind: "flow", flowRunId, nodeId, contactId },
+      { sendMail: countingSendMail().fn, redisClient }
+    );
+    expect(first.outcome).toBe("reconciling");
+
+    const counting = countingSendMail();
+    const redelivered = await processSendJob(
+      { workspaceId, kind: "flow", flowRunId, nodeId, contactId },
+      { sendMail: counting.fn, redisClient }
+    );
+
+    expect(redelivered.outcome).toBe("skipped");
+    expect(counting.callCount(), "a redelivered job must never call the provider for a reconciling flow row").toBe(0);
+
+    const rows = await flowSendsFor(workspaceId, flowRunId, nodeId);
+    expect(rows.length).toBe(1);
+    expect(rows[0].status).toBe("reconciling");
   });
 });

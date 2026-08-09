@@ -109,7 +109,14 @@ export type FlowClaimResult =
   | { kind: "proceed"; claim: ClaimedFlowSend }
   | { kind: "excluded"; reason: string }
   | { kind: "skipped" }
-  | { kind: "failed"; sendId: string };
+  | { kind: "failed"; sendId: string }
+  // Phase 11 (DLV-02, plan 11-06): flow-side parity with
+  // send-dispatch.ts's `claimCampaignSend` (its `ClaimResult`'s identical
+  // `"reconciling"` member) -- a PRIOR attempt already committed this claim
+  // and never finished. This process cannot prove whether SendGrid was
+  // ever called for it, so it must NOT assert an outcome; it hands the row
+  // to the reconciler instead (send-reconciler.worker.ts).
+  | { kind: "reconciling"; sendId: string };
 
 /**
  * Flow-shaped sibling of send-dispatch.ts's `claimCampaignSend` -- unit 1 of
@@ -156,10 +163,21 @@ export async function claimFlowSend(
   }
 
   if (dispatchResult.interrupted) {
-    // CR-04 sibling: a PRIOR attempt already committed this claim and never
-    // finished -- never re-call SendGrid for it; record it as failed.
-    await recordFlowStepResult(client, dispatchResult.sendId, { status: "failed" });
-    return { kind: "failed", sendId: dispatchResult.sendId };
+    // Phase 11 (DLV-02, plan 11-06 -- was the CR-04 sibling's "record it as
+    // failed", now superseded): a PRIOR attempt already committed this
+    // claim and never finished. This process cannot prove whether SendGrid
+    // was ever called for it, so it must NOT assert an outcome -- 'failed'
+    // would tell an operator/analyst "nothing was sent" when a
+    // phantom-accepted mail may already be in the recipient's inbox. See
+    // `claimCampaignSend`'s identical branch in `../send-dispatch.ts`
+    // (send-dispatch.ts) for the campaign-side twin this brings the flow
+    // path into parity with -- never re-call SendGrid for it; hand it to
+    // the reconciler instead. No counter to backfill on the flow side
+    // (flows have no campaign counters to freeze), but the reconciler
+    // remains the sole path that may ever resolve this row out of
+    // 'reconciling'.
+    await recordFlowStepResult(client, dispatchResult.sendId, { status: "reconciling" });
+    return { kind: "reconciling", sendId: dispatchResult.sendId };
   }
 
   const sendId = dispatchResult.sendId;

@@ -585,6 +585,13 @@ async function processFlowSendJob(
     if (claimResult.kind === "failed") {
       return { outcome: "failed", sendId: claimResult.sendId };
     }
+    if (claimResult.kind === "reconciling") {
+      // Phase 11 (DLV-02, plan 11-06): flow-side parity with the campaign
+      // branch's identical `claimResult.kind === "reconciling"` handling
+      // above -- `claimFlowSend` (flows/flow-send.ts) already wrote
+      // 'reconciling' for this interrupted claim; no provider call here.
+      return { outcome: "reconciling", sendId: claimResult.sendId };
+    }
 
     const { claim } = claimResult;
 
