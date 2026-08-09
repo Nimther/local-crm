@@ -84,8 +84,15 @@ describe("Test 1 (the gap) — admin DSN loaded from the external env file", () 
   });
 });
 
-describe("Test 2 — a directly exported admin DSN still outranks the file", () => {
-  it("resolves the exported DSN's port, not the file's", () => {
+// WR-07: this case's original title ("a directly exported admin DSN still
+// outranks the file") overstated what it proves. It sets the file's
+// TEST_ADMIN_DATABASE_URL and the environment's GSD_ADMIN_DATABASE_URL --
+// two DIFFERENT keys -- so it actually exercises resolveAdminDsn()'s ||
+// precedence between the two env-var NAMES, not env-vs-file loading
+// precedence for the SAME key. The same-key env-file-precedence property is
+// now covered by the "Test 4" case below.
+describe("Test 2 — GSD_ADMIN_DATABASE_URL outranks TEST_ADMIN_DATABASE_URL regardless of which one came from the file", () => {
+  it("resolves GSD_ADMIN_DATABASE_URL's port, not TEST_ADMIN_DATABASE_URL's", () => {
     const envFile = path.join(tmpDir, "test2.env");
     writeFileSync(
       envFile,
@@ -118,5 +125,34 @@ describe("Test 3 — a missing env file is tolerated", () => {
 
     expect(run.exitCode).not.toBe(0);
     expect(run.output).toContain("127.0.0.1:59998");
+  });
+});
+
+// WR-07: the case Test 2's original title claimed to cover -- the SAME key
+// (TEST_ADMIN_DATABASE_URL) set both in the loaded env file AND directly in
+// the child process env. GSD_ADMIN_DATABASE_URL is deliberately left unset
+// here (baseEnv() already deletes both admin-DSN keys) so nothing but
+// process.loadEnvFile()'s own already-exported-wins behavior can decide the
+// outcome.
+describe("Test 4 (WR-07) — an already-exported TEST_ADMIN_DATABASE_URL outranks the SAME key loaded from the env file", () => {
+  it("resolves the exported value's port, not the file's, for an identical key name", () => {
+    const envFile = path.join(tmpDir, "test4.env");
+    writeFileSync(
+      envFile,
+      "TEST_ADMIN_DATABASE_URL=postgres://sentinel_user:sentinel_pw@127.0.0.1:59997/sentinel_db_4_file\n",
+    );
+
+    const env = baseEnv();
+    env.MEGA_CRM_ENV_FILE = envFile;
+    env.TEST_ADMIN_DATABASE_URL =
+      "postgres://sentinel_user:sentinel_pw@127.0.0.1:59996/sentinel_db_4_env";
+
+    const run = runCli(env);
+
+    expect(run.exitCode).not.toBe(0);
+    // Never assert on a full printed DSN -- the script must not log resolved
+    // credentials (Tests 1-3's rule, kept here too).
+    expect(run.output).toContain("127.0.0.1:59996");
+    expect(run.output).not.toContain("59997");
   });
 });
