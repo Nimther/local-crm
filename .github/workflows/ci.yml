@@ -198,6 +198,15 @@ jobs:
       - name: Worker SIGKILL mid-dispatch
         run: npm run failure:sigkill
 
+      - name: Worker SIGKILL after provider acceptance
+        run: npm run failure:crash-post-accept
+
+      - name: Crashed before the result write (202 and 4xx variants)
+        run: npm run failure:crash-pre-result-write
+
+      - name: Reconciler vs retry-worker race
+        run: npm run failure:reconciler-race
+
       - name: Redis restart under a live queue
         run: npm run failure:redis-restart
 
