@@ -180,10 +180,31 @@ describe("cross-workspace scan role (Phase 10 SEC-01/SEC-02)", () => {
     const workspaceId = await seedOrganization(nameSeed);
     const flowId = await withTenant(workspaceId, () =>
       withTenantTransaction(async (client) => {
+        // A REAL SegmentDefinition (`{version, groups[]}`), not a placeholder.
+        // This suite only needs a segments row to hang a flow off, so the shape
+        // used to be arbitrary — but the flow below is `trigger_type = 'segment'`
+        // with a live_version_id, which is exactly the row shape
+        // `flow-segment-sweep.worker.ts`'s cross-tenant discovery scan selects.
+        // Anything that reaches `compileSegmentDefinition` must therefore be
+        // compilable: a placeholder without `groups` crashes the sweep for EVERY
+        // tenant, not just this fixture's (Phase 10 debug,
+        // aggregate-coverage-run-fails).
         const { rows: segmentRows } = await client.query<{ id: string }>(
           `INSERT INTO segments (workspace_id, name, definition, created_by_user_id)
            VALUES ($1, 'Scan fixture segment', $2, 'test-user') RETURNING id`,
-          [workspaceId, { operator: "and", conditions: [] }],
+          [
+            workspaceId,
+            {
+              version: 1,
+              groups: [
+                {
+                  conditions: [
+                    { type: "attribute", source: "standard", field: "country", operator: "eq", value: "RU" },
+                  ],
+                },
+              ],
+            },
+          ],
         );
         const { rows: flowRows } = await client.query<{ id: string }>(
           `INSERT INTO flows (workspace_id, name, status, trigger_type, trigger_segment_id, created_by_user_id)
