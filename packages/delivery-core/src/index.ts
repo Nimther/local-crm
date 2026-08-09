@@ -81,3 +81,5 @@ export {
 export { loadContactTimezone } from "./contact-timezone.js";
 
 export { SEND_ID_NAMESPACE, deriveCampaignSendId, deriveFlowSendId } from "./send-id.js";
+
+export { classifyTransportError, type TransportClassification } from "./transport-classify.js";
