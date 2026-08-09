@@ -73,11 +73,22 @@ export async function releaseDispatchClaim(client: PoolClient, sendId: string): 
   await client.query(`DELETE FROM sends WHERE id = $1 AND status = 'dispatching'`, [sendId]);
 }
 
-/** Advances a `sends` row to its terminal `sent`/`failed` status, recording the provider's message id on success. */
+/**
+ * Advances a `sends` row to a terminal `sent`/`failed` status, or to the
+ * ambiguous `reconciling` status (Phase 11, DLV-02) -- recording the
+ * provider's message id on success. `reconciling` is NOT terminal: it is
+ * the ONLY status this function may write that has an outgoing transition
+ * of its own (`reconciling -> sent`/`unknown`, written exclusively by
+ * `resolveReconcilingSend` below, D-03). `reconciling_since` is set once,
+ * on first entry into `reconciling` -- `COALESCE(reconciling_since, now())`
+ * so a row that is (re-)written with `status = 'reconciling'` more than
+ * once (should that ever happen) never has its original ambiguity
+ * timestamp overwritten; Phase 15's webhook-lag alert reads this column.
+ */
 export async function recordSendResult(
   client: PoolClient,
   sendId: string,
-  result: { status: "sent" | "failed"; providerMessageId?: string | null }
+  result: { status: "sent" | "failed" | "reconciling"; providerMessageId?: string | null }
 ): Promise<void> {
   // $2::send_status is cast explicitly at BOTH usages -- without the cast,
   // Postgres deduces $2's type from its first use (assigned to the
@@ -88,10 +99,69 @@ export async function recordSendResult(
     `UPDATE sends
      SET status = $2::send_status,
          provider_message_id = $3,
-         sent_at = CASE WHEN $2::send_status = 'sent' THEN now() ELSE sent_at END
+         sent_at = CASE WHEN $2::send_status = 'sent' THEN now() ELSE sent_at END,
+         reconciling_since = CASE WHEN $2::send_status = 'reconciling' THEN COALESCE(reconciling_since, now()) ELSE reconciling_since END
      WHERE id = $1`,
     [sendId, result.status, result.providerMessageId ?? null]
   );
+}
+
+/**
+ * The result of `resolveReconcilingSend`'s terminal write attempt --
+ * `resolved: false` means the caller's `WHERE status IN ('reconciling',
+ * 'unknown')` guard matched zero rows (a concurrent writer already resolved
+ * it, or the row somehow left those states between the caller's own lock
+ * acquisition and this call -- should not happen given `resolveOneSend`'s
+ * `FOR UPDATE SKIP LOCKED` discipline, but this function's own guard makes
+ * that a no-op rather than a stomp regardless).
+ */
+export interface ResolveReconcilingResult {
+  resolved: boolean;
+}
+
+/**
+ * The ONLY function in this codebase permitted to write a status onto a
+ * `sends` row currently in `reconciling` or `unknown` (Phase 11, D-03 --
+ * "the reconciler is the sole writer of every `reconciling -> terminal`
+ * transition"). Its `WHERE status IN ('reconciling', 'unknown')` guard is
+ * what makes that rule enforceable in code, not just in convention: no
+ * other call site in the codebase may target either of those two statuses
+ * with an UPDATE, and this is the one place that does.
+ *
+ * This slice (11-03) only ever calls it with `verdict.status === "sent"`
+ * (evidence-found resolution) -- `-> unknown` (resolution-window-elapsed,
+ * no evidence) is 11-07's expansion of this same function, not a new one.
+ *
+ * `sent_at` is BACK-DATED to `COALESCE(sent_at, dispatched_at,
+ * reconciling_since, queued_at)` rather than stamped with `now()`: this is
+ * load-bearing, not cosmetic. `workspace_daily_rollup` is computed from
+ * `sent_at::date` -- if this function stamped resolution time instead, a
+ * send that was actually accepted on day N but not resolved until day N+2
+ * (the reconciler's ~5min cadence makes same-tick resolution the common
+ * case, but a backlogged tick or a re-scanned `unknown` row makes a
+ * multi-day gap possible) would silently move into the wrong calendar
+ * day's rollup.
+ *
+ * The caller MUST already hold the row lock (`resolveOneSend`'s `SELECT
+ * ... FOR UPDATE SKIP LOCKED`, inside the same `withTenantTransaction`) --
+ * this function does not lock anything itself; its `WHERE status IN (...)`
+ * guard is a correctness backstop for the lost-the-race case, not a
+ * substitute for holding the lock in the first place.
+ */
+export async function resolveReconcilingSend(
+  client: PoolClient,
+  sendId: string,
+  verdict: { status: "sent"; providerMessageId?: string | null }
+): Promise<ResolveReconcilingResult> {
+  const { rowCount } = await client.query(
+    `UPDATE sends
+     SET status = $2::send_status,
+         sent_at = COALESCE(sent_at, dispatched_at, reconciling_since, queued_at),
+         reconciling_since = NULL
+     WHERE id = $1 AND status IN ('reconciling', 'unknown')`,
+    [sendId, verdict.status]
+  );
+  return { resolved: (rowCount ?? 0) > 0 };
 }
 
 /**

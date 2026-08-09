@@ -16,6 +16,7 @@ import { createFlowTriggerEvaluatorWorker } from "./queues/flows/flow-trigger-ev
 import { createFlowSegmentSweepWorker } from "./queues/flows/flow-segment-sweep.worker.js";
 import { createFlowEnrollExistingWorker } from "./queues/flows/flow-enroll-existing.worker.js";
 import { createPartitionMaintenanceWorker } from "./queues/partition-maintenance.worker.js";
+import { createSendReconcilerWorker } from "./queues/send-reconciler.worker.js";
 
 /**
  * The worker process's runtime handle: a standalone shared ioredis
@@ -134,6 +135,11 @@ export async function buildWorker(): Promise<WorkerRuntime> {
     // (`apps/api/src/modules/ops/partition-watchdog.ts`, started in a
     // DIFFERENT process by this plan's task 3) reads.
     createPartitionMaintenanceWorker(buildRedisConnectionOptions(redisUrl)),
+    // DLV-03 (11-03): the classification-only reconciler -- discovers
+    // `reconciling` rows across every tenant (cross-workspace scan role),
+    // claims each one exclusively per-tenant, and resolves it to `sent`
+    // from webhook evidence already on disk. Never calls SendGrid (D-01).
+    createSendReconcilerWorker(buildRedisConnectionOptions(redisUrl)),
   ];
 
   const close = async (): Promise<void> => {
@@ -162,7 +168,7 @@ async function main(): Promise<void> {
   process.on("SIGTERM", shutdown);
 
   scrubbedConsole.log(
-    `apps/worker started (${runtime.workers.length} BullMQ worker(s) registered: events:ingest, imports:csv, email-broadcast, email-triggered, campaign-kickoff, campaign-scheduler, webhook-events, analytics-reconciliation, flow-run-advance, flow-reconciliation, flow-trigger-evaluator, flow-segment-sweep, flow-enroll-existing, partition-maintenance)`
+    `apps/worker started (${runtime.workers.length} BullMQ worker(s) registered: events:ingest, imports:csv, email-broadcast, email-triggered, campaign-kickoff, campaign-scheduler, webhook-events, analytics-reconciliation, flow-run-advance, flow-reconciliation, flow-trigger-evaluator, flow-segment-sweep, flow-enroll-existing, partition-maintenance, send-reconciler)`
   );
 }
 

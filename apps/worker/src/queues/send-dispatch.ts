@@ -45,7 +45,18 @@ export type SendJobResult =
   | { outcome: "skipped" }
   | { outcome: "excluded"; reason: string }
   | { outcome: "failed"; sendId: string }
-  | { outcome: "rate_limited"; rateLimitMs: number };
+  | { outcome: "rate_limited"; rateLimitMs: number }
+  // Phase 11 (DLV-02, plan 11-03): a prior attempt already committed the
+  // 'dispatching' claim and never reached a terminal write (worker crash
+  // between the claim commit and the SendGrid call, or between the call and
+  // the record transaction) -- this process cannot prove whether SendGrid
+  // was ever called, so it stops asserting an outcome (it no longer writes
+  // 'failed' here) and hands the row to the reconciler
+  // (send-reconciler.worker.ts), which backfills counters exactly once when
+  // it resolves the row from webhook evidence. Shaped as its own variant
+  // (not folded into "failed") so Phase 12 can add a `cause` discriminator
+  // to THIS variant without reshaping the ones above it.
+  | { outcome: "reconciling"; sendId: string };
 
 export interface ProcessSendJobDeps {
   /**
@@ -173,7 +184,8 @@ type ClaimResult =
   | { kind: "proceed"; claim: ClaimedCampaignSend }
   | { kind: "excluded"; reason: string }
   | { kind: "skipped" }
-  | { kind: "failed"; sendId: string };
+  | { kind: "failed"; sendId: string }
+  | { kind: "reconciling"; sendId: string };
 
 /**
  * CR-04 fix, unit 1 of 3: the ONLY transaction that touches the ledger
@@ -222,14 +234,18 @@ async function claimCampaignSend(
   }
 
   if (dispatchResult.interrupted) {
-    // CR-04: a PRIOR attempt already committed this claim and never
-    // finished (crash between the claim commit and the terminal record).
-    // Never re-call SendGrid for it -- record it as failed instead, closing
-    // the duplicate-send window at-most-once.
-    await recordSendResult(client, dispatchResult.sendId, { status: "failed" });
-    await incrementCampaignSendCounter(client, campaignId, "failed");
-    await tryCompleteCampaign(client, campaignId);
-    return { kind: "failed", sendId: dispatchResult.sendId };
+    // Phase 11 (DLV-02, was CR-04's "record it as failed" -- superseded): a
+    // PRIOR attempt already committed this claim and never finished (crash
+    // between the claim commit and the terminal record). This process
+    // cannot prove whether SendGrid was ever called for it, so it must NOT
+    // assert an outcome -- 'failed' would tell an operator/analyst "nothing
+    // was sent" when a phantom-accepted mail may already be in the
+    // recipient's inbox. Never re-call SendGrid for it; hand it to the
+    // reconciler instead. No incrementCampaignSendCounter/tryCompleteCampaign
+    // call here (D-12): the reconciler backfills counters exactly once when
+    // it resolves the row, so counting it here would double-count.
+    await recordSendResult(client, dispatchResult.sendId, { status: "reconciling" });
+    return { kind: "reconciling", sendId: dispatchResult.sendId };
   }
 
   const sendId = dispatchResult.sendId;
@@ -320,6 +336,9 @@ export async function processSendJob(
       }
       if (claimResult.kind === "failed") {
         return { outcome: "failed", sendId: claimResult.sendId };
+      }
+      if (claimResult.kind === "reconciling") {
+        return { outcome: "reconciling", sendId: claimResult.sendId };
       }
 
       const { claim } = claimResult;

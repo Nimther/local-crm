@@ -59,6 +59,40 @@ export const FLOW_SEGMENT_SWEEP_QUEUE = "flow-segment-sweep";
 export const FLOW_ENROLL_EXISTING_QUEUE = "flow-enroll-existing";
 
 /**
+ * Phase 11 (DLV-03, plan 11-03) reconciler tick queue: its own dedicated
+ * lane, not folded into any existing tick queue. A periodic cross-tenant
+ * classification scan (discovery via `withCrossWorkspaceScan`, then a
+ * per-tenant `FOR UPDATE SKIP LOCKED` claim) is a structurally different
+ * concern from send dispatch (`email-broadcast`/`email-triggered`), webhook
+ * ingestion (`webhook-events`), or flow advancement (`flow-run-advance`/
+ * `flow-reconciliation`) -- it never dispatches mail, it only classifies
+ * already-committed `sends` rows from webhook evidence already on disk.
+ */
+export const SEND_RECONCILER_QUEUE = "send-reconciler";
+
+/**
+ * Phase 11 (R-05, ROADMAP § Sequencing Decisions) deploy-safety contract:
+ * this is the FIRST job payload in the codebase to carry an explicit
+ * `schemaVersion`. A rolling deploy can have an old-code worker process
+ * still draining jobs enqueued by new code (or vice versa) for the seconds/
+ * minutes a rollout takes -- without a version field, a worker has no way to
+ * tell "this payload's shape predates/postdates what I know how to process"
+ * from "this payload's shape is what I expect". `createSendReconcilerWorker`
+ * validates every job against `sendReconcilerTickJobSchema` and DEFERS
+ * (logs, returns, never throws) a `schemaVersion` it does not recognize,
+ * rather than best-effort-processing a payload shape it was not built for.
+ * Phase 12/14 extend this same convention to the pre-existing payloads above
+ * (`emailBroadcastJobSchema`, `webhookEventsJobSchema`, etc.), which do not
+ * carry a `schemaVersion` yet.
+ */
+export const SEND_RECONCILER_TICK_SCHEMA_VERSION = 1;
+
+export const sendReconcilerTickJobSchema = z.object({
+  schemaVersion: z.literal(SEND_RECONCILER_TICK_SCHEMA_VERSION),
+});
+export type SendReconcilerTickJob = z.infer<typeof sendReconcilerTickJobSchema>;
+
+/**
  * events:ingest job payload (EVNT-02/EVNT-03, finalized in 02-06): the
  * SOLE context the worker trusts (Pattern 2) -- `workspaceId` is re-derived
  * from this payload inside the worker (never ambient state), `eventId` is

@@ -29,8 +29,9 @@ import {
  *
  * The chain is the same one timeout.test.ts documents: rejection strands the
  * committed claim at `dispatching`, the BullMQ redelivery is intercepted by
- * claimCampaignSend's interrupted branch, and the send resolves to `failed`
- * with no second SendGrid call.
+ * claimCampaignSend's interrupted branch, and the send resolves to
+ * `reconciling` (Phase 11, DLV-02 -- was `failed` pre-11-03) with no second
+ * SendGrid call.
  */
 describe("failure injection: SendGrid connection reset (QG-06)", () => {
   let pool: Pool;
@@ -55,7 +56,7 @@ describe("failure injection: SendGrid connection reset (QG-06)", () => {
    */
   const resetError = Object.assign(new Error("socket hang up"), { code: "ECONNRESET" });
 
-  it("strands the claim at dispatching, then the redelivery resolves it to failed without a second attempt", async () => {
+  it("strands the claim at dispatching, then the redelivery resolves it to reconciling without a second attempt", async () => {
     const workspaceId = await freshWorkspaceId(pool, "failure-reset");
     await connectFixtureSendgridKey(workspaceId);
     const campaignId = await createFixtureCampaign(workspaceId);
@@ -90,11 +91,12 @@ describe("failure injection: SendGrid connection reset (QG-06)", () => {
       counting.callCount(),
       "the interrupted branch must intercept the redelivery before any second SendGrid call — this is the duplicate-email window",
     ).toBe(0);
-    expect(redelivered.outcome).toBe("failed");
+    expect(redelivered.outcome).toBe("reconciling");
 
-    // Phase 11 will replace this terminal state with a reconciling one; this
-    // assertion is the deliberate pre-change baseline, not an aspiration.
-    expect(await sendsStatusFor(workspaceId, campaignId, contactId)).toBe("failed");
+    // Phase 11 (11-03): the pre-change baseline (`failed`) is now superseded
+    // -- this process cannot prove whether SendGrid was ever called, so it
+    // hands the row to the reconciler instead of asserting an outcome.
+    expect(await sendsStatusFor(workspaceId, campaignId, contactId)).toBe("reconciling");
     expect(
       await sendsRowCountFor(workspaceId, campaignId, contactId),
       "the redelivery must resolve the existing row, not insert a second one",

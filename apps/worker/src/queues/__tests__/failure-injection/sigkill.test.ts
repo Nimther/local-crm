@@ -120,10 +120,13 @@ describe("failure injection: SIGKILL inside the dispatch claim window (QG-06)", 
 
     expect(
       counting.callCount(),
-      "a restart must never re-send for a claim a dead process left behind — this is CR-04",
+      "a restart must never re-send for a claim a dead process left behind — this is CR-04/DLV-02",
     ).toBe(0);
-    expect(restarted.outcome).toBe("failed");
-    expect(await sendsStatusFor(workspaceId, campaignId, contactId)).toBe("failed");
+    // Phase 11 (11-03, DLV-02): this process cannot prove whether SendGrid
+    // was ever called for the claim the killed process left behind, so it
+    // hands the row to the reconciler instead of asserting `failed`.
+    expect(restarted.outcome).toBe("reconciling");
+    expect(await sendsStatusFor(workspaceId, campaignId, contactId)).toBe("reconciling");
     expect(
       await sendsRowCountFor(workspaceId, campaignId, contactId),
       "the restart resolves the existing row rather than inserting a second one",

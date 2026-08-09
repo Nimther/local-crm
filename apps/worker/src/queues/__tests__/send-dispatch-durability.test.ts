@@ -55,7 +55,7 @@ describe("send-dispatch.ts processSendJob durability (SEND-06/SEND-07, CR-03/CR-
     );
   }
 
-  it("CR-04: an interrupted redelivery (committed 'dispatching' claim, no terminal result) never re-calls SendGrid and records 'failed'", async () => {
+  it("Phase 11 DLV-02 (was CR-04, superseded): an interrupted redelivery (committed 'dispatching' claim, no terminal result) never re-calls SendGrid and records 'reconciling', not 'failed'", async () => {
     const workspaceId = await freshWorkspaceId(pool, "dispatch-interrupted");
     await connectFixtureSendgridKey(workspaceId);
     const campaignId = await createFixtureCampaign(workspaceId);
@@ -70,8 +70,12 @@ describe("send-dispatch.ts processSendJob durability (SEND-06/SEND-07, CR-03/CR-
     );
 
     expect(counting.callCount(), "an interrupted claim must never trigger a second SendGrid call").toBe(0);
-    expect(result.outcome).toBe("failed");
-    expect(await sendsStatusFor(workspaceId, campaignId, contactId)).toBe("failed");
+    // Phase 11 (DLV-02): this process cannot prove whether SendGrid was ever
+    // called for the prior attempt, so it must not assert an outcome --
+    // 'reconciling' hands the row to the reconciler (send-reconciler.worker.ts,
+    // 11-03) instead of the old CR-04 behavior of asserting 'failed'.
+    expect(result.outcome).toBe("reconciling");
+    expect(await sendsStatusFor(workspaceId, campaignId, contactId)).toBe("reconciling");
     expect(await sendsRowCountFor(workspaceId, campaignId, contactId), "no duplicate sends row for the interrupted key").toBe(1);
   });
 

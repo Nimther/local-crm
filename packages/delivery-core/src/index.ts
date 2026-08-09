@@ -37,8 +37,10 @@ export {
   claimFlowSend,
   recordFlowStepResult,
   recordFlowExcluded,
+  resolveReconcilingSend,
   type DispatchSendGateResult,
   type AudienceExclusionBreakdown,
+  type ResolveReconcilingResult,
 } from "./send-ledger.js";
 
 export {
