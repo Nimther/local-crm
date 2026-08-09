@@ -1,0 +1,21 @@
+-- Phase 11 (DLV-01/DB-08, D-02) — send_status enum, expand half, value 2 of 2.
+--
+-- STANDALONE by design, same discipline as 0047: no other statement in this
+-- file, and no code in this deploy references the literal 'unknown'. Shipped
+-- as its own separate migration/deploy from 0047 (not merged into one file)
+-- so each `ALTER TYPE ... ADD VALUE` is independently safe regardless of
+-- deploy ordering or a partial rollback between the two.
+--
+-- 'unknown' is the honest no-evidence terminal state (D-02): a send that sat
+-- in 'reconciling' past the resolution window (~24h) with no webhook
+-- evidence ever arriving. It is terminal-but-re-examinable per D-04 -- the
+-- reconciler re-scans 'unknown' rows younger than a bounded horizon (~72h)
+-- and upgrades to 'sent' if late evidence appears; after the horizon passes
+-- it becomes fully immutable. Once added, Postgres cannot drop an enum value
+-- without a full type rebuild, so from this migration forward 'unknown' is
+-- part of the published send-status contract read by the send log, the
+-- daily rollups, and Phase 13.
+--
+-- Zero historical `sends` rows are touched (Pitfall 2, locked) -- same as
+-- 0047, this is vocabulary only.
+ALTER TYPE send_status ADD VALUE 'unknown';
