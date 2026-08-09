@@ -56,6 +56,22 @@ function isMissing(name) {
   return !values[name] || values[name].length === 0;
 }
 
+// GSD 10-15 (gap G-10-1): the admin DSN variables GSD_ADMIN_DATABASE_URL /
+// TEST_ADMIN_DATABASE_URL (consumed by scripts/ensure-db-roles.mjs's
+// resolveAdminDsn) are deliberately ABSENT from baseRequired below. Their
+// compose-default fallback DSN is valid in compose and CI environments, so
+// hard-requiring either variable here would fail an environment that is
+// correctly configured -- unlike DATABASE_URL etc., "unset" is not itself a
+// misconfiguration for these two.
+//
+// The consequence that made G-10-1 confusing to diagnose: this check (predev
+// step 1) passed while ensure-db-roles.mjs's DSN dependency (predev step 2)
+// was unmet, so the `&&` chain aborted one step later with no signal from
+// here. scripts/__tests__/predev-env-loading.test.mjs (Task 2, 10-15) is the
+// guard that now covers that seam -- it fails if any predev-chain script
+// that reads a DATABASE_URL-suffixed variable stops routing through
+// resolveEnvPath(), independent of whether check-env.mjs's required list
+// covers that variable.
 const baseRequired = [
   "DATABASE_URL",
   "BETTER_AUTH_SECRET",
