@@ -19,6 +19,7 @@ import {
   signUnsubscribeToken,
   buildListUnsubscribeUrl,
   getWorkspaceSendSettings,
+  classifyTransportError,
   type SendGridMailSendRequest,
   type SendTenantMailResult,
 } from "@mega-crm/delivery-core";
@@ -277,6 +278,51 @@ async function claimCampaignSend(
 }
 
 /**
+ * The ONE place a throw from `sendMail` becomes a ledger write (Phase 11,
+ * D-10, plan 11-06) -- shared by the campaign branch (`processSendJob`) and
+ * the flow branch (`processFlowSendJob`) below so "what counts as
+ * ambiguous" can never drift between the two send paths (this file's own
+ * CR-04 doc comment already makes "the two send paths must not drift" an
+ * explicit invariant; this is that invariant enforced in code for the
+ * classification decision specifically).
+ *
+ * `classifyTransportError`'s verdict decides everything:
+ * - `pre_connection_retryable` (a provable DNS failure or refused
+ *   connection, per `transport-classify.ts`'s narrow allowlist) releases
+ *   the claim committed by unit 1 and RETHROWS the original error, so
+ *   BullMQ's bounded `attempts`/backoff apply -- the transport layer proved
+ *   the request never left this process, so a retry cannot duplicate it.
+ * - `ambiguous` (the fail-closed default -- everything else, including an
+ *   unrecognized throw) writes `reconciling` via the caller-supplied
+ *   `writeReconciling` (`recordSendResult` for campaign,
+ *   `recordFlowStepResult` for flow) and returns `{ outcome: "reconciling" }`
+ *   WITHOUT touching any campaign counter or completion check -- the
+ *   process stopped knowing the outcome, so it stops asserting one.
+ *
+ * Never called for a resolved `SendTenantMailResult` (2xx/4xx/429/5xx) --
+ * only for a REJECTED `sendMail` call. Those known-status branches keep
+ * their own per-path handling in `processSendJob`/`processFlowSendJob`
+ * because a resolved response is never ambiguous.
+ */
+async function handleAmbiguousSendMailError(
+  err: unknown,
+  sendId: string,
+  dispatchedAt: Date,
+  writeReconciling: (client: PoolClient, dispatchDurationMs: number) => Promise<void>
+): Promise<SendJobResult> {
+  const dispatchDurationMs = Date.now() - dispatchedAt.getTime();
+  const classification = classifyTransportError(err);
+
+  if (classification === "pre_connection_retryable") {
+    await withTenantTransaction((client) => releaseDispatchClaim(client, sendId));
+    throw err;
+  }
+
+  await withTenantTransaction((client) => writeReconciling(client, dispatchDurationMs));
+  return { outcome: "reconciling", sendId };
+}
+
+/**
  * The shared send-dispatch processor (SEND-01/02/05/06/07, SUBS-03/04) --
  * called by BOTH `email-broadcast.worker.ts` and `email-triggered.worker.ts`
  * so pre-send gating, throttling, and dispatch logic can never drift
@@ -378,7 +424,20 @@ export async function processSendJob(
         campaignId,
         isTest: false,
       });
-      const response = await sendMail(claim.apiKey, payload);
+      const dispatchedAt = new Date();
+      let response: SendTenantMailResult;
+      try {
+        response = await sendMail(claim.apiKey, payload);
+      } catch (err) {
+        // Phase 11 (D-10, plan 11-06): a rejected sendMail call -- timeout,
+        // reset, DNS failure, or anything unrecognized -- is classified and
+        // resolved by the shared helper above, never here, so this branch
+        // can never drift from processFlowSendJob's identical catch below.
+        return handleAmbiguousSendMailError(err, claim.sendId, dispatchedAt, (client, dispatchDurationMs) =>
+          recordSendResult(client, claim.sendId, { status: "reconciling", dispatchedAt, dispatchDurationMs })
+        );
+      }
+      const dispatchDurationMs = Date.now() - dispatchedAt.getTime();
 
       // Unit 3: record the terminal result in a SEPARATE transaction, only
       // ever entered after SendGrid has responded.
@@ -394,7 +453,7 @@ export async function processSendJob(
         // recorded as failed, never as sent. CR-05: the counter/completion
         // pair is called in the SAME transaction as the terminal record.
         await withTenantTransaction(async (client) => {
-          await recordSendResult(client, claim.sendId, { status: "failed" });
+          await recordSendResult(client, claim.sendId, { status: "failed", dispatchedAt, dispatchDurationMs });
           await incrementCampaignSendCounter(client, campaignId, "failed");
           await tryCompleteCampaign(client, campaignId);
         });
@@ -402,7 +461,12 @@ export async function processSendJob(
       }
 
       await withTenantTransaction(async (client) => {
-        await recordSendResult(client, claim.sendId, { status: "sent", providerMessageId: response.messageId });
+        await recordSendResult(client, claim.sendId, {
+          status: "sent",
+          providerMessageId: response.messageId,
+          dispatchedAt,
+          dispatchDurationMs,
+        });
         await incrementCampaignSendCounter(client, campaignId, "sent");
         await tryCompleteCampaign(client, campaignId);
       });
@@ -544,7 +608,20 @@ async function processFlowSendJob(
       workspaceId,
       isTest: false,
     });
-    const response = await sendMail(claim.apiKey, payload);
+    const dispatchedAt = new Date();
+    let response: SendTenantMailResult;
+    try {
+      response = await sendMail(claim.apiKey, payload);
+    } catch (err) {
+      // Phase 11 (D-10, plan 11-06): identical classification/disposition
+      // as the campaign branch above, via the SAME shared helper -- the
+      // only per-path difference is which ledger function writes the
+      // ambiguous status.
+      return handleAmbiguousSendMailError(err, claim.sendId, dispatchedAt, (client, dispatchDurationMs) =>
+        recordFlowStepResult(client, claim.sendId, { status: "reconciling", dispatchedAt, dispatchDurationMs })
+      );
+    }
+    const dispatchDurationMs = Date.now() - dispatchedAt.getTime();
 
     // Unit 3: record the terminal result in a SEPARATE transaction, only
     // ever entered after SendGrid has responded.
@@ -554,12 +631,19 @@ async function processFlowSendJob(
     }
 
     if (response.status >= 400) {
-      await withTenantTransaction((client) => recordFlowStepResult(client, claim.sendId, { status: "failed" }));
+      await withTenantTransaction((client) =>
+        recordFlowStepResult(client, claim.sendId, { status: "failed", dispatchedAt, dispatchDurationMs })
+      );
       return { outcome: "failed", sendId: claim.sendId };
     }
 
     await withTenantTransaction((client) =>
-      recordFlowStepResult(client, claim.sendId, { status: "sent", providerMessageId: response.messageId })
+      recordFlowStepResult(client, claim.sendId, {
+        status: "sent",
+        providerMessageId: response.messageId,
+        dispatchedAt,
+        dispatchDurationMs,
+      })
     );
     return { outcome: "sent", sendId: claim.sendId, providerMessageId: response.messageId };
   });

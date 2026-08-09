@@ -11,6 +11,7 @@ import {
   freshWorkspaceId,
   sendsRowCountFor,
   sendsStatusFor,
+  sendsTimingFor,
   throwingSendMail,
 } from "../../../test/failure-fixtures.js";
 
@@ -19,19 +20,20 @@ import {
  *
  * Reproduce with `npm run failure:reset` from the repo root.
  *
- * Deliberately a separate file from timeout.test.ts even though send-dispatch.ts
- * cannot currently tell the two apart — both arrive as a rejected promise, and
- * there is no AbortController in packages/delivery-core/src/send-mail.ts to
- * distinguish a timeout from a socket error. Two files, two error identities,
- * two commands: when Phase 11 gives these different handling, the file that
- * fails will name which mode regressed instead of one shared test failing
- * ambiguously.
+ * Deliberately a separate file from timeout.test.ts even though
+ * `classifyTransportError` (11-06, D-10) resolves BOTH to the SAME
+ * `ambiguous` classification -- `ECONNRESET` has no `code` in the
+ * pre-connection allowlist any more than `AbortError` does, so both fall
+ * through to the fail-closed default. Two files, two error identities, two
+ * commands: if a future change ever narrows `ECONNRESET` into the
+ * pre-connection allowlist (it must not -- a reset proves a connection WAS
+ * established, the opposite of "never left this process"), this file is the
+ * one that would catch it.
  *
- * The chain is the same one timeout.test.ts documents: rejection strands the
- * committed claim at `dispatching`, the BullMQ redelivery is intercepted by
- * claimCampaignSend's interrupted branch, and the send resolves to
- * `reconciling` (Phase 11, DLV-02 -- was `failed` pre-11-03) with no second
- * SendGrid call.
+ * Phase 11 (11-06): `processSendJob` now classifies this throw INLINE and
+ * writes `reconciling` directly on the FIRST call -- no redelivery required
+ * to observe the disposition (see timeout.test.ts's file comment for the
+ * full before/after).
  */
 describe("failure injection: SendGrid connection reset (QG-06)", () => {
   let pool: Pool;
@@ -56,31 +58,37 @@ describe("failure injection: SendGrid connection reset (QG-06)", () => {
    */
   const resetError = Object.assign(new Error("socket hang up"), { code: "ECONNRESET" });
 
-  it("strands the claim at dispatching, then the redelivery resolves it to reconciling without a second attempt", async () => {
+  it("classifies the reset as ambiguous inline and resolves to reconciling with exactly one send attempt", async () => {
     const workspaceId = await freshWorkspaceId(pool, "failure-reset");
     await connectFixtureSendgridKey(workspaceId);
     const campaignId = await createFixtureCampaign(workspaceId);
     const contactId = await createFixtureContact(workspaceId);
 
-    // --- the reset itself ---------------------------------------------------
     const throwing = throwingSendMail(resetError);
-    await expect(
-      processSendJob(
-        { workspaceId, campaignId, kind: "campaign", contactId },
-        { sendMail: throwing.fn, redisClient },
-      ),
-      "the ECONNRESET must propagate out of processSendJob with its identity intact",
-    ).rejects.toBe(resetError);
+    const result = await processSendJob(
+      { workspaceId, campaignId, kind: "campaign", contactId },
+      { sendMail: throwing.fn, redisClient },
+    );
 
     expect(throwing.callCount(), "the send was attempted exactly once before the reset").toBe(1);
+    expect(result.outcome).toBe("reconciling");
+    if (result.outcome !== "reconciling") {
+      throw new Error("test assertion failure: expected outcome 'reconciling'");
+    }
 
-    // --- the claim is stranded ---------------------------------------------
     expect(
       await sendsStatusFor(workspaceId, campaignId, contactId),
-      "a rejection after the claim commit must leave the row at 'dispatching'",
-    ).toBe("dispatching");
+      "an ambiguous throw must write 'reconciling' directly, never leave the row stranded at 'dispatching'",
+    ).toBe("reconciling");
 
-    // --- BullMQ redelivers --------------------------------------------------
+    const timing = await sendsTimingFor(result.sendId, workspaceId);
+    expect(timing?.dispatchedAt, "dispatch timing must be recorded even on the ambiguous branch").not.toBeNull();
+    expect(timing?.dispatchDurationMs).not.toBeNull();
+    expect(timing?.reconcilingSince).not.toBeNull();
+
+    // --- BullMQ redelivers (e.g. a crash strictly between this write and
+    // job completion) -- the claim-gate's "skipped" branch, not a second
+    // SendGrid call, must intercept it.
     const counting = countingSendMail(202);
     const redelivered = await processSendJob(
       { workspaceId, campaignId, kind: "campaign", contactId },
@@ -89,13 +97,10 @@ describe("failure injection: SendGrid connection reset (QG-06)", () => {
 
     expect(
       counting.callCount(),
-      "the interrupted branch must intercept the redelivery before any second SendGrid call — this is the duplicate-email window",
+      "a redelivered job for a 'reconciling' row must never call SendGrid again — this is the duplicate-email window",
     ).toBe(0);
-    expect(redelivered.outcome).toBe("reconciling");
+    expect(redelivered.outcome).toBe("skipped");
 
-    // Phase 11 (11-03): the pre-change baseline (`failed`) is now superseded
-    // -- this process cannot prove whether SendGrid was ever called, so it
-    // hands the row to the reconciler instead of asserting an outcome.
     expect(await sendsStatusFor(workspaceId, campaignId, contactId)).toBe("reconciling");
     expect(
       await sendsRowCountFor(workspaceId, campaignId, contactId),
