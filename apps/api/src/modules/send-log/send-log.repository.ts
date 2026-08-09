@@ -8,6 +8,15 @@ import { SEND_LOG_PAGE_SIZE } from "@mega-crm/shared-schemas";
  * 07-01's SUMMARY notes it never participates in the D-06 derivation (it's a
  * subscription-status concern, not a per-message delivery fact), so it can
  * never actually be produced by `COMPUTED_STATUS_SQL` below.
+ *
+ * Phase 11 (11-10, DLV-02/DLV-07): `reconciling` and `unknown` are ledger
+ * states, not delivery facts -- they reach the computed status through
+ * `COMPUTED_STATUS_SQL`'s fall-through arms, not the D-06 fact chain.
+ * `unknown` means the platform never learned this send's outcome (a
+ * transport-layer ambiguity the reconciler could not resolve within its
+ * resolution window) and it will NOT be automatically re-sent -- see
+ * ARCHITECTURE.md ##9's DLV-07 delivery model before changing any UI copy
+ * that surfaces this value.
  */
 export const SEND_LOG_STATUSES = [
   "sent",
@@ -19,6 +28,8 @@ export const SEND_LOG_STATUSES = [
   "spam",
   "failed",
   "excluded",
+  "reconciling",
+  "unknown",
 ] as const;
 
 export type SendLogStatus = (typeof SEND_LOG_STATUSES)[number];
@@ -74,17 +85,32 @@ export interface SendEventRow {
  * pure-JS equivalent) -- `excluded`/`failed` are checked ahead of the D-06
  * delivery-fact chain since an excluded/failed send never has any delivery
  * fact set, so ordering here never changes the result, only readability.
+ *
+ * Phase 11 (11-10): `reconciling` and `unknown` are placed on OPPOSITE sides
+ * of the delivery-fact chain, deliberately:
+ * - `reconciling` is checked BEFORE the fact chain. A row can be
+ *   `reconciling` while the webhook worker has already written a fact for
+ *   it (facts are recorded independently of `status`, ARCHITECTURE.md ##9)
+ *   -- but the reconciler has not yet adjudicated that evidence, so the row
+ *   is still "being determined" and must say so, not jump ahead of the sole
+ *   writer that is allowed to resolve it.
+ * - `unknown` is checked AFTER the fact chain. This is precisely the
+ *   late-evidence case the reconciler's bounded re-scan (D-04) exists for:
+ *   an `unknown` row that has since gained a fact should surface as that
+ *   fact immediately, not continue to claim ignorance.
  */
 const COMPUTED_STATUS_SQL = `
     CASE
       WHEN s.status = 'excluded' THEN 'excluded'
       WHEN s.status = 'failed' THEN 'failed'
+      WHEN s.status = 'reconciling' THEN 'reconciling'
       WHEN s.bounced_at IS NOT NULL THEN 'bounced'
       WHEN s.dropped_at IS NOT NULL THEN 'dropped'
       WHEN s.spam_reported_at IS NOT NULL THEN 'spam'
       WHEN s.first_clicked_at IS NOT NULL THEN 'clicked'
       WHEN s.first_opened_at IS NOT NULL THEN 'opened'
       WHEN s.delivered_at IS NOT NULL THEN 'delivered'
+      WHEN s.status = 'unknown' THEN 'unknown'
       ELSE s.status::text
     END
 `;

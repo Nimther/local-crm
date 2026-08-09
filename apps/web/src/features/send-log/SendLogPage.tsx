@@ -38,8 +38,20 @@ function relativeTime(iso: string): string {
   return RELATIVE_TIME_FORMAT.format(diffDay, "day");
 }
 
-/** 07-UI-SPEC.md § Color: the send-log status column's 3-hue badge vocabulary (D-06 chain + failed/excluded, D-15). */
-const SEND_STATUS_LABELS: Record<string, string> = {
+/**
+ * 07-UI-SPEC.md § Color: the send-log status column's 3-hue badge vocabulary
+ * (D-06 chain + failed/excluded, D-15).
+ *
+ * Phase 11 (11-10, DLV-02/DLV-07): `reconciling`/`unknown` added, deliberately
+ * NOT green (success) and NOT red (failure) -- neither is true. Copy is
+ * honest to ARCHITECTURE.md ##9's delivery model: `reconciling` means the
+ * outcome is still being determined (the reconciler hasn't adjudicated the
+ * evidence yet); `unknown` means the platform could not determine the
+ * outcome within its resolution window and, per DLV-07, the message MAY
+ * have reached the recipient and will NOT be automatically re-sent -- never
+ * label it "failed", "not sent", or "delivered".
+ */
+export const SEND_STATUS_LABELS: Record<string, string> = {
   sent: "Отправлено",
   delivered: "Доставлено",
   opened: "Открыто",
@@ -49,9 +61,11 @@ const SEND_STATUS_LABELS: Record<string, string> = {
   spam: "Не доставлено",
   failed: "Ошибка отправки",
   excluded: "Пропущено",
+  reconciling: "Уточняется",
+  unknown: "Исход неизвестен",
 };
 
-const SEND_STATUS_CLASSES: Record<string, string> = {
+export const SEND_STATUS_CLASSES: Record<string, string> = {
   sent: "border-transparent bg-neutral-100 text-neutral-500",
   delivered: "border-transparent bg-green-50 text-green-600",
   opened: "border-transparent bg-green-50 text-green-600",
@@ -61,9 +75,11 @@ const SEND_STATUS_CLASSES: Record<string, string> = {
   spam: "border-transparent bg-red-50 text-destructive",
   failed: "border-transparent bg-red-50 text-destructive",
   excluded: "border-transparent bg-neutral-100 text-neutral-500",
+  reconciling: "border-transparent bg-amber-50 text-amber-700",
+  unknown: "border-transparent bg-amber-50 text-amber-700",
 };
 
-const STATUS_OPTIONS: { value: SendLogStatus; label: string }[] = [
+export const STATUS_OPTIONS: { value: SendLogStatus; label: string }[] = [
   { value: "sent", label: "Отправлено" },
   { value: "delivered", label: "Доставлено" },
   { value: "opened", label: "Открыто" },
@@ -73,6 +89,8 @@ const STATUS_OPTIONS: { value: SendLogStatus; label: string }[] = [
   { value: "spam", label: "Жалоба (спам)" },
   { value: "failed", label: "Ошибка отправки" },
   { value: "excluded", label: "Пропущено" },
+  { value: "reconciling", label: "Уточняется" },
+  { value: "unknown", label: "Исход неизвестен" },
 ];
 
 const PERIOD_OPTIONS: { value: 7 | 30 | 90; label: string }[] = [
