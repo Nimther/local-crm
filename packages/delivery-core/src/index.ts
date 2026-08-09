@@ -79,3 +79,5 @@ export {
 } from "./quiet-hours.js";
 
 export { loadContactTimezone } from "./contact-timezone.js";
+
+export { SEND_ID_NAMESPACE, deriveCampaignSendId, deriveFlowSendId } from "./send-id.js";
