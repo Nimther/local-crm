@@ -121,11 +121,27 @@ export async function releaseDispatchClaim(client: PoolClient, sendId: string): 
  * so a row that is (re-)written with `status = 'reconciling'` more than
  * once (should that ever happen) never has its original ambiguity
  * timestamp overwritten; Phase 15's webhook-lag alert reads this column.
+ *
+ * Phase 11 (DLV-09, plan 11-06): `dispatchedAt`/`dispatchDurationMs` are
+ * optional so an omitted measurement never erases a recorded one --
+ * `COALESCE($4, dispatched_at)`/`COALESCE($5, dispatch_duration_ms)`, never a
+ * blind overwrite with `null`. `dispatched_at` is the moment the outbound
+ * SendGrid `mail/send` call started; `dispatch_duration_ms` is that call's
+ * wall-clock duration. Both are written on EVERY outcome branch this
+ * function is called for -- `sent`, `failed`, AND `reconciling` -- so a
+ * stuck send's own latency (how long the ambiguous call ran before this
+ * process gave up on it) is available for forensics, not just the outcomes
+ * that resolved cleanly.
  */
 export async function recordSendResult(
   client: PoolClient,
   sendId: string,
-  result: { status: "sent" | "failed" | "reconciling"; providerMessageId?: string | null }
+  result: {
+    status: "sent" | "failed" | "reconciling";
+    providerMessageId?: string | null;
+    dispatchedAt?: Date;
+    dispatchDurationMs?: number;
+  }
 ): Promise<void> {
   // $2::send_status is cast explicitly at BOTH usages -- without the cast,
   // Postgres deduces $2's type from its first use (assigned to the
@@ -137,9 +153,11 @@ export async function recordSendResult(
      SET status = $2::send_status,
          provider_message_id = $3,
          sent_at = CASE WHEN $2::send_status = 'sent' THEN now() ELSE sent_at END,
-         reconciling_since = CASE WHEN $2::send_status = 'reconciling' THEN COALESCE(reconciling_since, now()) ELSE reconciling_since END
+         reconciling_since = CASE WHEN $2::send_status = 'reconciling' THEN COALESCE(reconciling_since, now()) ELSE reconciling_since END,
+         dispatched_at = COALESCE($4, dispatched_at),
+         dispatch_duration_ms = COALESCE($5, dispatch_duration_ms)
      WHERE id = $1`,
-    [sendId, result.status, result.providerMessageId ?? null]
+    [sendId, result.status, result.providerMessageId ?? null, result.dispatchedAt ?? null, result.dispatchDurationMs ?? null]
   );
 }
 
@@ -326,16 +344,28 @@ export async function claimFlowSend(
 
 /**
  * Advances a flow-step `sends` row (`kind='flow'`) to its terminal
- * `sent`/`failed` status -- the flow-shaped sibling of `recordSendResult`.
- * Callers use this instead of `recordSendResult` for flow sends so the
- * function name at each call site documents which ledger shape it is
- * updating; the underlying `sends` row (looked up by `id`, not by kind) is
- * identical either way.
+ * `sent`/`failed` status, or to the ambiguous `reconciling` status (Phase
+ * 11, DLV-02) -- the flow-shaped sibling of `recordSendResult`. Callers use
+ * this instead of `recordSendResult` for flow sends so the function name at
+ * each call site documents which ledger shape it is updating; the
+ * underlying `sends` row (looked up by `id`, not by kind) is identical
+ * either way, including the `reconciling_since`/timing-column behavior
+ * documented on `recordSendResult` above -- both functions must stay
+ * identical in that respect, not just similar.
+ *
+ * Phase 11 (DLV-09, plan 11-06): `dispatchedAt`/`dispatchDurationMs` mirror
+ * `recordSendResult`'s own optional, `COALESCE`-guarded timing fields --
+ * see that function's doc comment for the full rationale.
  */
 export async function recordFlowStepResult(
   client: PoolClient,
   sendId: string,
-  result: { status: "sent" | "failed"; providerMessageId?: string | null }
+  result: {
+    status: "sent" | "failed" | "reconciling";
+    providerMessageId?: string | null;
+    dispatchedAt?: Date;
+    dispatchDurationMs?: number;
+  }
 ): Promise<void> {
   // $2::send_status is cast explicitly at BOTH usages -- without the cast,
   // Postgres deduces $2's type from its first use (assigned to the
@@ -347,9 +377,12 @@ export async function recordFlowStepResult(
     `UPDATE sends
      SET status = $2::send_status,
          provider_message_id = $3,
-         sent_at = CASE WHEN $2::send_status = 'sent' THEN now() ELSE sent_at END
+         sent_at = CASE WHEN $2::send_status = 'sent' THEN now() ELSE sent_at END,
+         reconciling_since = CASE WHEN $2::send_status = 'reconciling' THEN COALESCE(reconciling_since, now()) ELSE reconciling_since END,
+         dispatched_at = COALESCE($4, dispatched_at),
+         dispatch_duration_ms = COALESCE($5, dispatch_duration_ms)
      WHERE id = $1`,
-    [sendId, result.status, result.providerMessageId ?? null]
+    [sendId, result.status, result.providerMessageId ?? null, result.dispatchedAt ?? null, result.dispatchDurationMs ?? null]
   );
 }
 

@@ -190,6 +190,38 @@ export async function sendsStatusFor(
   );
 }
 
+/**
+ * Reads back the timing/reconciliation columns `recordSendResult`/
+ * `recordFlowStepResult` write (Phase 11, DLV-09, plan 11-06) -- mirrors
+ * `sendsStatusFor`'s own shape and tenant scoping so `send-duration.test.ts`
+ * never inlines raw SQL for this.
+ */
+export async function sendsTimingFor(
+  sendId: string,
+  workspaceId: string,
+): Promise<
+  | { status: string; dispatchedAt: Date | null; dispatchDurationMs: number | null; reconcilingSince: Date | null; sentAt: Date | null }
+  | undefined
+> {
+  return withTenant(workspaceId, () =>
+    withTenantTransaction(async (client) => {
+      const { rows } = await client.query<{
+        status: string;
+        dispatchedAt: Date | null;
+        dispatchDurationMs: number | null;
+        reconcilingSince: Date | null;
+        sentAt: Date | null;
+      }>(
+        `SELECT status, dispatched_at as "dispatchedAt", dispatch_duration_ms as "dispatchDurationMs",
+                reconciling_since as "reconcilingSince", sent_at as "sentAt"
+         FROM sends WHERE id = $1`,
+        [sendId],
+      );
+      return rows[0];
+    }),
+  );
+}
+
 export async function sendsRowCountFor(
   workspaceId: string,
   campaignId: string,
