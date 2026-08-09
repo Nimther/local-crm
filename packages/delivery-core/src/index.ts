@@ -59,6 +59,16 @@ export {
 export { deriveCurrentStatus, type DeliveryFacts, type CurrentStatus } from "./send-status.js";
 
 export {
+  SEND_STATUSES,
+  SEND_STATUS_TRANSITIONS,
+  isAllowedTransition,
+  writersFor,
+  type SendStatus,
+  type SendStatusWriter,
+  type SendTransition,
+} from "./send-state-machine.js";
+
+export {
   isValidIanaTimezone,
   resolveTimezone,
   isInsideQuietHours,
