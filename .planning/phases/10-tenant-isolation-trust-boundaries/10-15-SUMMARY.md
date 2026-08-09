@@ -142,6 +142,14 @@ None - no external service configuration required. (The phase-level human cold-s
 - Gap G-10-1 is closed at the code level: `npm run predev` no longer aborts at step 2 when the admin DSN lives only in the external env file
 - Remaining: the end-of-phase human cold-start check (UAT Test 1) on the Homebrew-Postgres machine that originally reported the gap, plus `npm run dev` confirming a live authenticated call — both explicitly deferred by the plan's own `<verification>` section, not a blocker introduced by this plan
 
+## Self-Check: PASSED
+
+All 6 modified/created files confirmed present (`scripts/ensure-db-roles.mjs`,
+`scripts/__tests__/ensure-db-roles-env.test.mjs`,
+`scripts/__tests__/predev-env-loading.test.mjs`, `scripts/check-env.mjs`,
+`SPECIFICATION.md`, this SUMMARY.md). All 5 commits confirmed in `git log`
+(`feb0621`, `bdb67d1`, `a050cab`, `3bdf145`, `180ea67`).
+
 ---
 *Phase: 10-tenant-isolation-trust-boundaries*
 *Completed: 2026-08-09*
