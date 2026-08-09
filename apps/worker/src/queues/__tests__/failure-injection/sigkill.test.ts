@@ -13,6 +13,7 @@ import {
   type SpawnedChild,
 } from "@mega-crm/test-support";
 
+import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { processSendJob } from "../../send-dispatch.js";
 import { SIGKILL_HARNESS_READY } from "../../../test/harness/sigkill-entrypoint.js";
 import {
@@ -23,18 +24,26 @@ import {
   freshWorkspaceId,
   sendsRowCountFor,
   sendsStatusFor,
+  sendsTimingFor,
 } from "../../../test/failure-fixtures.js";
 
 /**
  * 08-12 (QG-06) — failure mode 4 of 5: the process dies mid-send.
+ * 11-11 (DLV-02/DLV-08 boundary 1): the process is killed BEFORE it ever
+ * attempts to reach the provider -- the claim is committed, and nothing
+ * about whether SendGrid was ever contacted can be known, so the honest
+ * disposition is `reconciling`, never `failed` (a false `failed` here would
+ * tell an operator "nothing was sent" with no basis for that claim).
  *
  * Reproduce with `npm run failure:sigkill` from the repo root.
  *
- * The only scenario in this phase that needs a real process to die. The other
- * four inject a fake and stay in-process; this one forks a child, lets it run
- * the real `processSendJob` against the same live Postgres and Redis, and
- * SIGKILLs it — a signal that cannot be caught, blocked or ignored, so the
- * child runs no shutdown path on the way out.
+ * One of three real-process-kill scenarios in this phase (alongside
+ * `crash-post-accept.test.ts` for boundary 2; boundary 3 is covered
+ * state-based in `crash-pre-result-write.test.ts`, see that file's own doc
+ * comment for why). This one forks a child, lets it run the real
+ * `processSendJob` against the same live Postgres and Redis, and SIGKILLs
+ * it — a signal that cannot be caught, blocked or ignored, so the child runs
+ * no shutdown path on the way out.
  *
  * WHEN the kill lands is the entire point. SPEC R6 says an arbitrary kill
  * moment proves nothing, so nothing here is on a timer or a poll: the child's
@@ -72,11 +81,28 @@ describe("failure injection: SIGKILL inside the dispatch claim window (QG-06)", 
     await redisClient.quit();
   });
 
+  async function campaignCountersFor(
+    workspaceId: string,
+    campaignId: string,
+  ): Promise<{ sentCount: number; failedCount: number }> {
+    return withTenant(workspaceId, () =>
+      withTenantTransaction(async (client) => {
+        const { rows } = await client.query<{ sentCount: number; failedCount: number }>(
+          `SELECT sent_count as "sentCount", failed_count as "failedCount" FROM campaigns WHERE id = $1`,
+          [campaignId],
+        );
+        if (!rows[0]) throw new Error("test setup failure: no campaign row found");
+        return rows[0];
+      }),
+    );
+  }
+
   it("kills a real process in the window, strands the claim, and does not re-send on restart", async () => {
     const workspaceId = await freshWorkspaceId(pool, "failure-sigkill");
     await connectFixtureSendgridKey(workspaceId);
     const campaignId = await createFixtureCampaign(workspaceId);
     const contactId = await createFixtureContact(workspaceId);
+    const countersBefore = await campaignCountersFor(workspaceId, campaignId);
 
     const jobData = { workspaceId, campaignId, kind: "campaign" as const, contactId };
 
@@ -118,6 +144,11 @@ describe("failure injection: SIGKILL inside the dispatch claim window (QG-06)", 
     const counting = countingSendMail(202);
     const restarted = await processSendJob(jobData, { sendMail: counting.fn, redisClient });
 
+    // 11-11: the child froze before ever attempting to reach the provider
+    // (the `in_claim_window` freeze point signals before doing anything that
+    // could resemble a network call), and this restart's own counting fake
+    // records zero further calls -- the duplicate-send window is closed at
+    // both ends of this boundary.
     expect(
       counting.callCount(),
       "a restart must never re-send for a claim a dead process left behind — this is CR-04/DLV-02",
@@ -131,5 +162,20 @@ describe("failure injection: SIGKILL inside the dispatch claim window (QG-06)", 
       await sendsRowCountFor(workspaceId, campaignId, contactId),
       "the restart resolves the existing row rather than inserting a second one",
     ).toBe(1);
+
+    if (restarted.outcome !== "reconciling") throw new Error("unreachable");
+    const timing = await sendsTimingFor(restarted.sendId, workspaceId);
+    expect(timing?.reconcilingSince, "ambiguity is recorded, not silently dropped").not.toBeNull();
+
+    // 11-11: an unresolved ambiguous send must never be counted as a
+    // failure -- only the reconciler's own backfill (which never fires for
+    // 'failed') is permitted to touch these counters for this row.
+    const countersAfter = await campaignCountersFor(workspaceId, campaignId);
+    expect(countersAfter.failedCount, "failed_count must not move for an unresolved ambiguous send").toBe(
+      countersBefore.failedCount,
+    );
+    expect(countersAfter.sentCount, "sent_count must not move for an unresolved ambiguous send").toBe(
+      countersBefore.sentCount,
+    );
   });
 });
