@@ -25,6 +25,7 @@ import * as subscriptionStatusHistorySchema from "./schema/subscription-status-h
 import * as workspaceDailyRollupSchema from "./schema/workspace-daily-rollup.js";
 import * as partitionMaintenanceRunsSchema from "./schema/partition-maintenance-runs.js";
 import * as sendReconcilerRunsSchema from "./schema/send-reconciler-runs.js";
+import * as deadLetterJobsSchema from "./schema/dead-letter-jobs.js";
 
 const schema = {
   ...authSchema,
@@ -52,6 +53,7 @@ const schema = {
   ...workspaceDailyRollupSchema,
   ...partitionMaintenanceRunsSchema,
   ...sendReconcilerRunsSchema,
+  ...deadLetterJobsSchema,
 };
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -146,4 +148,5 @@ export * from "./schema/subscription-status-history.js";
 export * from "./schema/workspace-daily-rollup.js";
 export * from "./schema/partition-maintenance-runs.js";
 export * from "./schema/send-reconciler-runs.js";
+export * from "./schema/dead-letter-jobs.js";
 export { TENANT_GUC_KEY } from "./rls.js";
