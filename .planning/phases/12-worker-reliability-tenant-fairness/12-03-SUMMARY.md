@@ -112,3 +112,12 @@ None - no external service configuration required. (`TENANT_LANE_CONCURRENCY_BRO
 ---
 *Phase: 12-worker-reliability-tenant-fairness*
 *Completed: 2026-08-10*
+
+## Self-Check: PASSED
+
+- FOUND: `apps/worker/src/queues/tenant-lane-semaphore.ts`
+- FOUND: `apps/worker/src/queues/__tests__/tenant-lane-semaphore.test.ts`
+- FOUND: `.planning/phases/12-worker-reliability-tenant-fairness/12-03-SUMMARY.md`
+- FOUND commit `066f58d` (test(12-03))
+- FOUND commit `905f11f` (feat(12-03))
+- FOUND commit `f4a95d2` (docs(12-03) SUMMARY)
