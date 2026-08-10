@@ -38,15 +38,21 @@ import {
 const REPO_ROOT = path.resolve(import.meta.dirname, "../../../../..");
 
 /**
- * The eleven guarded modules across both applications (12-02's duplication
- * inventory + this plan's application-side half): every module in either
- * process that constructs a BullMQ `Queue` and therefore needs connection
- * options and/or job options. Modules that only import a send-lane TIMING
- * constant (`SEND_LOCK_DURATION_MS`, `CLAIM_TX_MARGIN_MS`,
+ * The twelve guarded modules across both applications (12-02's duplication
+ * inventory + this plan's application-side half + 12-09's straggler): every
+ * module in either process that constructs a BullMQ `Queue` and therefore
+ * needs connection options and/or job options. Modules that only import a
+ * send-lane TIMING constant (`SEND_LOCK_DURATION_MS`, `CLAIM_TX_MARGIN_MS`,
  * `RECORD_TX_MARGIN_MS`) -- e.g. `email-broadcast.worker.ts`,
  * `email-triggered.worker.ts`, `tenant-lane-semaphore.ts` -- never declared a
  * connection builder or a job-option literal of their own and are therefore
  * not part of THIS guarded set (they have nothing to duplicate).
+ *
+ * `flows/flow-segment-sweep.worker.ts` (12-09, WRK-09 deviation Rule 2): the
+ * 12-02 consolidation missed this discovery-tick queue -- it kept a
+ * hand-rolled job-options literal with `removeOnFail: false` until 12-09
+ * migrated it onto `buildJobOptions(STANDARD_JOB_RETENTION)` so the plan's
+ * "every queue retains failed jobs for a bounded age" truth actually holds.
  */
 const GUARDED_MODULES = [
   // Worker-side (six) -- 12-02.
@@ -56,12 +62,14 @@ const GUARDED_MODULES = [
   "apps/worker/src/queues/send-reconciler.worker.ts",
   "apps/worker/src/queues/campaign-scheduler.worker.ts",
   "apps/worker/src/queues/partition-maintenance.worker.ts",
-  // Application-side (five) -- 12-11 (this plan).
+  // Application-side (five) -- 12-11.
   "apps/api/src/modules/campaigns/campaign-queues.ts",
   "apps/api/src/modules/contacts/imports-csv-queue.ts",
   "apps/api/src/modules/events/events-queue.ts",
   "apps/api/src/modules/webhooks/enqueue.ts",
   "apps/api/src/modules/flows/flow-queues.ts",
+  // Worker-side straggler (one) -- 12-09, this plan.
+  "apps/worker/src/queues/flows/flow-segment-sweep.worker.ts",
 ] as const;
 
 /**

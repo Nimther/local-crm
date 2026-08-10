@@ -1,6 +1,7 @@
 import { Queue, Worker, type ConnectionOptions } from "bullmq";
 import { withCrossWorkspaceScan } from "@mega-crm/tenant-context";
 import { scrubbedConsole } from "@mega-crm/redaction";
+import { buildJobOptions, STANDARD_JOB_RETENTION } from "@mega-crm/queue-core";
 import {
   FLOW_SEGMENT_SWEEP_FLOW_SCHEMA_VERSION,
   FLOW_SEGMENT_SWEEP_QUEUE,
@@ -41,13 +42,18 @@ export const FLOW_SEGMENT_SWEEP_SCHEDULER_ID = "flow-segment-sweep-tick";
 
 const JOB_NAME = "run-flow-segment-sweep-tick";
 
-/** Same shape as every other job-options site in this codebase (SPECIFICATION.md §5.3) -- `removeOnFail: false` matters here too: a tick that throws must remain inspectable in Redis, not vanish. */
-const DEFAULT_JOB_OPTIONS = {
-  attempts: 5,
-  backoff: { type: "exponential" as const, delay: 2000 },
-  removeOnComplete: { age: 86400 },
-  removeOnFail: false,
-};
+/**
+ * Built through the shared `@mega-crm/queue-core` factory (Phase 12,
+ * WRK-09/WRK-11, D-10) -- this discovery-tick queue was the one guarded
+ * module the 12-02 consolidation missed (it kept a hand-rolled literal with
+ * `removeOnFail: false` until this plan). `STANDARD_JOB_RETENTION`'s
+ * bounded failed-job retention (`FAILED_JOB_RETENTION_SECONDS`, 7 days)
+ * matters here too: a tick that throws remains inspectable in Redis for a
+ * full working week, not forever, and this worker is already covered by
+ * `attachSharedErrorListeners`' dead-letter hook (`apps/worker/src/server.ts`),
+ * which is what makes bounding this retention safe.
+ */
+const DEFAULT_JOB_OPTIONS = buildJobOptions(STANDARD_JOB_RETENTION);
 
 /**
  * WRK-13: the OLD `tickQueue.add({repeat})` registration this migrates

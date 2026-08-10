@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { SENDGRID_TIMEOUT_MS } from "@mega-crm/delivery-core";
+import { RECONCILE_RESCAN_HORIZON_MS } from "@mega-crm/delivery-core";
 import { buildRedisConnectionOptions } from "../connection.js";
 import {
   buildJobOptions,
   CLAIM_TX_MARGIN_MS,
+  FAILED_JOB_RETENTION_SECONDS,
   FLOW_RUN_ADVANCE_RETENTION,
   RECORD_TX_MARGIN_MS,
   SEND_JOB_BACKOFF_DELAY_MS,
@@ -45,7 +47,7 @@ describe("buildJobOptions", () => {
     expect(opts.attempts).toBe(SEND_JOB_MAX_ATTEMPTS);
     expect(opts.backoff).toEqual({ type: "exponential", delay: SEND_JOB_BACKOFF_DELAY_MS });
     expect(opts.removeOnComplete).toEqual({ age: 86_400 });
-    expect(opts.removeOnFail).toBe(false);
+    expect(opts.removeOnFail).toEqual({ age: FAILED_JOB_RETENTION_SECONDS });
   });
 
   it("buildJobOptions(FLOW_RUN_ADVANCE_RETENTION) returns the same attempts and backoff with flow-run-advance's own retention fields", () => {
@@ -77,5 +79,45 @@ describe("timing invariants (D-15/D-08)", () => {
 
   it("the provider timeout plus both transaction margins is strictly less than the lock duration", () => {
     expect(SENDGRID_TIMEOUT_MS + CLAIM_TX_MARGIN_MS + RECORD_TX_MARGIN_MS).toBeLessThan(SEND_LOCK_DURATION_MS);
+  });
+});
+
+/**
+ * Phase 12 (WRK-09, D-10, Pitfall 6/7): the standard failed-job retention
+ * bound and the differentiated flow-run-advance policy it must never erase.
+ * See `packages/queue-core/src/queue-options.ts`'s own doc comment on
+ * `FAILED_JOB_RETENTION_SECONDS` for the full ordering rationale (the bound
+ * is only safe because 12-07/12-08 already wired the dead-letter writer and
+ * the shared error listener onto every queue).
+ */
+describe("failed-job retention (WRK-09)", () => {
+  it("the standard retention constant's failed-job retention is an age-bounded value, not an unbounded one", () => {
+    expect(STANDARD_JOB_RETENTION.removeOnFail).not.toBe(false);
+    expect(STANDARD_JOB_RETENTION.removeOnFail).toEqual({ age: FAILED_JOB_RETENTION_SECONDS });
+  });
+
+  it("FAILED_JOB_RETENTION_SECONDS is strictly greater than the delivery reconciliation window, with a documented margin", () => {
+    const reconciliationWindowSeconds = RECONCILE_RESCAN_HORIZON_MS / 1000;
+
+    expect(FAILED_JOB_RETENTION_SECONDS).toBeGreaterThan(reconciliationWindowSeconds);
+  });
+
+  it("the flow-run-advance retention constant is byte-for-byte unchanged by this plan", () => {
+    expect(FLOW_RUN_ADVANCE_RETENTION).toEqual({
+      removeOnComplete: true,
+      removeOnFail: { age: 86_400 },
+    });
+  });
+
+  it("the two retention constants' failed-job retention fields genuinely differ, so the per-queue parameterisation is observable", () => {
+    expect(STANDARD_JOB_RETENTION.removeOnFail).not.toEqual(FLOW_RUN_ADVANCE_RETENTION.removeOnFail);
+  });
+
+  it("buildJobOptions still requires retention as a parameter and still rejects an ad-hoc shape", () => {
+    // @ts-expect-error -- retention is a required parameter with no default; a missing argument must not typecheck.
+    buildJobOptions();
+    // @ts-expect-error -- retention must be exactly STANDARD_JOB_RETENTION or FLOW_RUN_ADVANCE_RETENTION, not an arbitrary third shape.
+    buildJobOptions({ removeOnComplete: true, removeOnFail: true });
+    expect(true).toBe(true);
   });
 });

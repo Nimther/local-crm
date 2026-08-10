@@ -73,8 +73,38 @@ export const SEND_MAX_JOB_LIFETIME_MS =
   SEND_LOCK_DURATION_MS;
 
 /**
+ * Bounded failed-job retention (Phase 12, WRK-09, D-10, Pitfall 7): the age,
+ * in seconds, that a queue built with `STANDARD_JOB_RETENTION` keeps a
+ * failed job in Redis before BullMQ removes it. Three points fix this at
+ * seven days rather than any shorter number:
+ *
+ * 1. Anything feeding the reconciliation or dead-letter path must outlive
+ *    the delivery reconciliation window with REAL margin, so the unit here
+ *    is days, not minutes -- `RECONCILE_RESCAN_HORIZON_MS`
+ *    (`@mega-crm/delivery-core`, 72h) is the widest of the reconciler's two
+ *    windows, and seven days (168h) clears it with a ~2.33x margin, which
+ *    also clears the narrower 24h `RECONCILE_RESOLUTION_WINDOW_MS`.
+ * 2. Seven days gives an operator a full working week to inspect or replay
+ *    a failed job directly in Redis, while the durable `dead_letter_jobs`
+ *    row (`packages/queue-core/src/dead-letter-writer.ts`) remains the
+ *    authoritative, permanent record regardless of when Redis ages this
+ *    copy out.
+ * 3. Bounding this value is ONLY safe because terminal failures are
+ *    recorded in Postgres first: `attachSharedErrorListeners`
+ *    (`packages/queue-core/src/error-listeners.ts`, WRK-08, wired to every
+ *    worker in `apps/worker/src/server.ts`) invokes the dead-letter writer
+ *    on every `worker.on("failed", ...)` terminal failure BEFORE this
+ *    retention age can ever elapse. If that listener or the writer is ever
+ *    removed from a queue, this bound must be reverted to `false` first,
+ *    not after -- see `apps/worker/src/queues/__tests__/failed-job-retention.test.ts`'s
+ *    header comment for the same ordering rule, enforced there.
+ */
+export const FAILED_JOB_RETENTION_SECONDS = 7 * 24 * 60 * 60;
+
+/**
  * Retention shapes (Phase 12, WRK-09/WRK-11, D-10, Pitfall 6): `STANDARD_JOB_RETENTION`
- * is the shape most queues use today; `FLOW_RUN_ADVANCE_RETENTION` is
+ * is the shape most queues use today, now with the bounded
+ * `FAILED_JOB_RETENTION_SECONDS` age above; `FLOW_RUN_ADVANCE_RETENTION` is
  * `flow-run-advance`'s own deliberately DIFFERENT shape (CR-01 fix, 06-12) --
  * see that queue's own comment at its call site
  * (`apps/worker/src/queues/flows/flow-queues.ts`) for why its retention
@@ -91,7 +121,7 @@ export const SEND_MAX_JOB_LIFETIME_MS =
  */
 export const STANDARD_JOB_RETENTION = {
   removeOnComplete: { age: 86_400 },
-  removeOnFail: false,
+  removeOnFail: { age: FAILED_JOB_RETENTION_SECONDS },
 } as const;
 
 export const FLOW_RUN_ADVANCE_RETENTION = {
