@@ -32,6 +32,13 @@ import {
 } from "@mega-crm/shared-schemas";
 import { consumeTenantToken, DEFAULT_TENANT_RPS } from "./rate-limiter.js";
 import { claimFlowSend } from "./flows/flow-send.js";
+import {
+  acquireTenantLaneSlot,
+  releaseTenantLaneSlot,
+  resolveTenantLaneCap,
+  SEND_SLOT_LEASE_TTL_MS,
+  type TenantLane,
+} from "./tenant-lane-semaphore.js";
 
 /**
  * Effectively long-lived per RESEARCH.md Assumption A3 -- an old marketing
@@ -138,6 +145,19 @@ function parseRetryAfter(headers: Headers): number {
   }
 
   return 2000;
+}
+
+/**
+ * WRK-02 (D-01/D-02, T-12-04-03): derives the tenant-lane-semaphore lane
+ * from the job's validated `kind`, never from a separate caller-supplied
+ * argument -- a job payload can never select a different lane's slot pool.
+ * `campaign` and `test` jobs ride `EMAIL_BROADCAST_QUEUE`, `flow` jobs ride
+ * `EMAIL_TRIGGERED_QUEUE` (packages/shared-schemas/src/queues.ts), so the
+ * lane is a property of the kind: the broadcast lane for the former two,
+ * the triggered lane for the latter.
+ */
+function laneForSendJobKind(kind: "campaign" | "test" | "flow"): TenantLane {
+  return kind === "flow" ? "triggered" : "broadcast";
 }
 
 interface CampaignRow {
@@ -411,75 +431,102 @@ export async function processSendJob(
 
       const { claim } = claimResult;
 
-      // SEND-02/SEND-03: the per-tenant token bucket is consumed before
-      // EVERY SendGrid call, regardless of which queue the job came from.
-      const rateResult = await consumeTenantToken(redisClient, workspaceId, claim.rps);
-      if (!rateResult.allowed) {
-        // The claim was already committed (unit 1) -- release it so it
-        // isn't left stranded blocking a legitimate retry (T-04-12-03).
-        await withTenantTransaction((client) => releaseDispatchClaim(client, claim.sendId));
-        return { outcome: "rate_limited", rateLimitMs: rateResult.msBeforeNext, cause: "tenant_bucket" };
-      }
-
-      // Unit 2: the external SendGrid call -- NOT inside any transaction.
-      const payload = buildMailSendRequest({
-        to: claim.to,
-        templateId: claim.templateId,
-        fromEmail: claim.fromEmail,
-        dynamicTemplateData: claim.dynamicTemplateData,
-        listUnsubscribeUrl: claim.unsubscribeUrl,
-        sendId: claim.sendId,
-        workspaceId,
-        campaignId,
-        isTest: false,
+      // WRK-02 (D-01/D-02): the per-tenant-per-lane concurrency slot is
+      // acquired BEFORE the per-tenant RPS check, immediately after the
+      // claim is destructured -- an over-cap send defers through the SAME
+      // tenant_bucket path an over-RPS send does (D-01's "one deferral
+      // flow, two triggers"), so the worker wrapper's existing deferral
+      // branch handles both with no change. The claim was already
+      // committed (unit 1) -- an over-cap send releases it exactly like
+      // the over-RPS path just below, so it is never left stranded
+      // (T-12-04-01).
+      const lane = laneForSendJobKind("campaign");
+      const laneSlot = await acquireTenantLaneSlot(redisClient, workspaceId, lane, {
+        cap: resolveTenantLaneCap(lane),
+        leaseTtlMs: SEND_SLOT_LEASE_TTL_MS,
       });
-      const dispatchedAt = new Date();
-      let response: SendTenantMailResult;
-      try {
-        response = await sendMail(claim.apiKey, payload);
-      } catch (err) {
-        // Phase 11 (D-10, plan 11-06): a rejected sendMail call -- timeout,
-        // reset, DNS failure, or anything unrecognized -- is classified and
-        // resolved by the shared helper above, never here, so this branch
-        // can never drift from processFlowSendJob's identical catch below.
-        return handleAmbiguousSendMailError(err, claim.sendId, dispatchedAt, (client, dispatchDurationMs) =>
-          recordSendResult(client, claim.sendId, { status: "reconciling", dispatchedAt, dispatchDurationMs })
-        );
-      }
-      const dispatchDurationMs = Date.now() - dispatchedAt.getTime();
-
-      // Unit 3: record the terminal result in a SEPARATE transaction, only
-      // ever entered after SendGrid has responded.
-      if (response.status === 429 || response.status >= 500) {
-        // SEND-07: SendGrid did not accept the message -- release the
-        // claim so a clean backoff retry re-claims and re-attempts.
+      if (!laneSlot.acquired) {
         await withTenantTransaction((client) => releaseDispatchClaim(client, claim.sendId));
-        return { outcome: "rate_limited", rateLimitMs: parseRetryAfter(response.headers), cause: "provider_backoff" };
+        return { outcome: "rate_limited", rateLimitMs: laneSlot.retryAfterMs ?? 0, cause: "tenant_bucket" };
       }
 
-      if (response.status >= 400) {
-        // CR-03: a non-retryable 4xx rejection (400/401/403/413/...) is
-        // recorded as failed, never as sent. CR-05: the counter/completion
-        // pair is called in the SAME transaction as the terminal record.
+      try {
+        // SEND-02/SEND-03: the per-tenant token bucket is consumed before
+        // EVERY SendGrid call, regardless of which queue the job came from.
+        const rateResult = await consumeTenantToken(redisClient, workspaceId, claim.rps);
+        if (!rateResult.allowed) {
+          // The claim was already committed (unit 1) -- release it so it
+          // isn't left stranded blocking a legitimate retry (T-04-12-03).
+          await withTenantTransaction((client) => releaseDispatchClaim(client, claim.sendId));
+          return { outcome: "rate_limited", rateLimitMs: rateResult.msBeforeNext, cause: "tenant_bucket" };
+        }
+
+        // Unit 2: the external SendGrid call -- NOT inside any transaction.
+        const payload = buildMailSendRequest({
+          to: claim.to,
+          templateId: claim.templateId,
+          fromEmail: claim.fromEmail,
+          dynamicTemplateData: claim.dynamicTemplateData,
+          listUnsubscribeUrl: claim.unsubscribeUrl,
+          sendId: claim.sendId,
+          workspaceId,
+          campaignId,
+          isTest: false,
+        });
+        const dispatchedAt = new Date();
+        let response: SendTenantMailResult;
+        try {
+          response = await sendMail(claim.apiKey, payload);
+        } catch (err) {
+          // Phase 11 (D-10, plan 11-06): a rejected sendMail call -- timeout,
+          // reset, DNS failure, or anything unrecognized -- is classified and
+          // resolved by the shared helper above, never here, so this branch
+          // can never drift from processFlowSendJob's identical catch below.
+          return handleAmbiguousSendMailError(err, claim.sendId, dispatchedAt, (client, dispatchDurationMs) =>
+            recordSendResult(client, claim.sendId, { status: "reconciling", dispatchedAt, dispatchDurationMs })
+          );
+        }
+        const dispatchDurationMs = Date.now() - dispatchedAt.getTime();
+
+        // Unit 3: record the terminal result in a SEPARATE transaction, only
+        // ever entered after SendGrid has responded.
+        if (response.status === 429 || response.status >= 500) {
+          // SEND-07: SendGrid did not accept the message -- release the
+          // claim so a clean backoff retry re-claims and re-attempts.
+          await withTenantTransaction((client) => releaseDispatchClaim(client, claim.sendId));
+          return { outcome: "rate_limited", rateLimitMs: parseRetryAfter(response.headers), cause: "provider_backoff" };
+        }
+
+        if (response.status >= 400) {
+          // CR-03: a non-retryable 4xx rejection (400/401/403/413/...) is
+          // recorded as failed, never as sent. CR-05: the counter/completion
+          // pair is called in the SAME transaction as the terminal record.
+          await withTenantTransaction(async (client) => {
+            await recordSendResult(client, claim.sendId, { status: "failed", dispatchedAt, dispatchDurationMs });
+            await incrementCampaignSendCounter(client, campaignId, "failed");
+            await tryCompleteCampaign(client, campaignId);
+          });
+          return { outcome: "failed", sendId: claim.sendId };
+        }
+
         await withTenantTransaction(async (client) => {
-          await recordSendResult(client, claim.sendId, { status: "failed", dispatchedAt, dispatchDurationMs });
-          await incrementCampaignSendCounter(client, campaignId, "failed");
+          await recordSendResult(client, claim.sendId, {
+            status: "sent",
+            providerMessageId: response.messageId,
+            dispatchedAt,
+            dispatchDurationMs,
+          });
+          await incrementCampaignSendCounter(client, campaignId, "sent");
           await tryCompleteCampaign(client, campaignId);
         });
-        return { outcome: "failed", sendId: claim.sendId };
+        return { outcome: "sent", sendId: claim.sendId, providerMessageId: response.messageId };
+      } finally {
+        // WRK-02 (T-12-04-02): released on every exit above -- success,
+        // provider rejection, 4xx failure, ambiguous throw, and RPS
+        // deferral alike. Sits in `finally`, never a `catch`, so it can
+        // never alter what the branch above returns or throws.
+        await releaseTenantLaneSlot(redisClient, workspaceId, lane, laneSlot.token);
       }
-
-      await withTenantTransaction(async (client) => {
-        await recordSendResult(client, claim.sendId, {
-          status: "sent",
-          providerMessageId: response.messageId,
-          dispatchedAt,
-          dispatchDurationMs,
-        });
-        await incrementCampaignSendCounter(client, campaignId, "sent");
-        await tryCompleteCampaign(client, campaignId);
-      });
-      return { outcome: "sent", sendId: claim.sendId, providerMessageId: response.messageId };
     }
 
     // kind === "test" (Pitfall 1, D-12): rides the SAME queue (SEND-01),
@@ -525,60 +572,79 @@ export async function processSendJob(
 
     const prereqs = await withTenantTransaction((client) => readSendPrereqs(client, workspaceId, campaignId));
 
-    const rateResult = await consumeTenantToken(redisClient, workspaceId, prereqs.rps);
-    if (!rateResult.allowed) {
-      return { outcome: "rate_limited", rateLimitMs: rateResult.msBeforeNext, cause: "tenant_bucket" };
-    }
-
-    const payload = buildMailSendRequest({
-      to: testTo,
-      templateId: prereqs.templateId,
-      fromEmail: prereqs.fromEmail,
-      dynamicTemplateData,
-      listUnsubscribeUrl: unsubscribeUrl,
-      sendId,
-      workspaceId,
-      campaignId,
-      isTest: true,
+    // WRK-02: the SAME lane-slot gate as the campaign/flow branches above,
+    // acquired before the per-tenant RPS check -- but this path has no
+    // dispatch claim to release (D-12: a test send has no `sends` row), so
+    // an over-cap test send returns the rate-limited result directly.
+    const testLane = laneForSendJobKind("test");
+    const testLaneSlot = await acquireTenantLaneSlot(redisClient, workspaceId, testLane, {
+      cap: resolveTenantLaneCap(testLane),
+      leaseTtlMs: SEND_SLOT_LEASE_TTL_MS,
     });
-    let response: SendTenantMailResult;
+    if (!testLaneSlot.acquired) {
+      return { outcome: "rate_limited", rateLimitMs: testLaneSlot.retryAfterMs ?? 0, cause: "tenant_bucket" };
+    }
+
     try {
-      response = await sendMail(prereqs.apiKey, payload);
-    } catch (err) {
-      // Phase 11 (D-10/D-11, plan 11-10): mirrors the campaign/flow branches'
-      // classification via the SAME `classifyTransportError`, but the
-      // disposition differs on the ambiguous path -- there is no ledger row
-      // to write `reconciling` onto (D-12), so the ambiguity surfaces as a
-      // distinct `unknown` OUTCOME instead. `pre_connection_retryable`
-      // rethrows exactly like the campaign/flow paths: no row exists to
-      // release, and the transport layer proved nothing was sent, so a
-      // retry cannot duplicate it.
-      const classification = classifyTransportError(err);
-      if (classification === "pre_connection_retryable") {
-        throw err;
+      const rateResult = await consumeTenantToken(redisClient, workspaceId, prereqs.rps);
+      if (!rateResult.allowed) {
+        return { outcome: "rate_limited", rateLimitMs: rateResult.msBeforeNext, cause: "tenant_bucket" };
       }
-      // `ambiguous` -- log via scrubbedConsole, naming the campaign id and
-      // the outcome only, NEVER the recipient address (`testTo`) supplied
-      // by the caller (T-11-10-05). Return, do not throw: throwing here is
-      // what would make BullMQ retry a test send, which D-11 forbids.
-      scrubbedConsole.warn("test-send outcome unknown (ambiguous provider error)", { campaignId, outcome: "unknown" });
-      return { outcome: "unknown", sendId };
-    }
 
-    if (response.status === 429 || response.status >= 500) {
-      return { outcome: "rate_limited", rateLimitMs: parseRetryAfter(response.headers), cause: "provider_backoff" };
-    }
+      const payload = buildMailSendRequest({
+        to: testTo,
+        templateId: prereqs.templateId,
+        fromEmail: prereqs.fromEmail,
+        dynamicTemplateData,
+        listUnsubscribeUrl: unsubscribeUrl,
+        sendId,
+        workspaceId,
+        campaignId,
+        isTest: true,
+      });
+      let response: SendTenantMailResult;
+      try {
+        response = await sendMail(prereqs.apiKey, payload);
+      } catch (err) {
+        // Phase 11 (D-10/D-11, plan 11-10): mirrors the campaign/flow branches'
+        // classification via the SAME `classifyTransportError`, but the
+        // disposition differs on the ambiguous path -- there is no ledger row
+        // to write `reconciling` onto (D-12), so the ambiguity surfaces as a
+        // distinct `unknown` OUTCOME instead. `pre_connection_retryable`
+        // rethrows exactly like the campaign/flow paths: no row exists to
+        // release, and the transport layer proved nothing was sent, so a
+        // retry cannot duplicate it.
+        const classification = classifyTransportError(err);
+        if (classification === "pre_connection_retryable") {
+          throw err;
+        }
+        // `ambiguous` -- log via scrubbedConsole, naming the campaign id and
+        // the outcome only, NEVER the recipient address (`testTo`) supplied
+        // by the caller (T-11-10-05). Return, do not throw: throwing here is
+        // what would make BullMQ retry a test send, which D-11 forbids.
+        scrubbedConsole.warn("test-send outcome unknown (ambiguous provider error)", { campaignId, outcome: "unknown" });
+        return { outcome: "unknown", sendId };
+      }
 
-    // SEND-07: mirrors the kind='campaign' branch's >=400 -> failed
-    // disposition (line ~333) -- a non-retryable 4xx rejection (bad
-    // template, unverified sender, etc.) must be reported as failed, never
-    // as a false 'sent'. The test path has no ledger row to update (D-12) --
-    // only the returned outcome changes.
-    if (response.status >= 400) {
-      return { outcome: "failed", sendId };
-    }
+      if (response.status === 429 || response.status >= 500) {
+        return { outcome: "rate_limited", rateLimitMs: parseRetryAfter(response.headers), cause: "provider_backoff" };
+      }
 
-    return { outcome: "sent", sendId, providerMessageId: response.messageId };
+      // SEND-07: mirrors the kind='campaign' branch's >=400 -> failed
+      // disposition (line ~333) -- a non-retryable 4xx rejection (bad
+      // template, unverified sender, etc.) must be reported as failed, never
+      // as a false 'sent'. The test path has no ledger row to update (D-12) --
+      // only the returned outcome changes.
+      if (response.status >= 400) {
+        return { outcome: "failed", sendId };
+      }
+
+      return { outcome: "sent", sendId, providerMessageId: response.messageId };
+    } finally {
+      // WRK-02 (T-12-04-02): released on every exit above, mirroring the
+      // campaign/flow branches' `finally` -- never a `catch`.
+      await releaseTenantLaneSlot(redisClient, workspaceId, testLane, testLaneSlot.token);
+    }
   });
 }
 
@@ -626,63 +692,84 @@ async function processFlowSendJob(
 
     const { claim } = claimResult;
 
-    // SEND-02/SEND-03 sibling: the SAME per-tenant token bucket is consumed
-    // before EVERY SendGrid call, regardless of kind.
-    const rateResult = await consumeTenantToken(redisClient, workspaceId, claim.rps);
-    if (!rateResult.allowed) {
-      await withTenantTransaction((client) => releaseDispatchClaim(client, claim.sendId));
-      return { outcome: "rate_limited", rateLimitMs: rateResult.msBeforeNext, cause: "tenant_bucket" };
-    }
-
-    // Unit 2: the external SendGrid call -- NOT inside any transaction.
-    // campaignId is omitted (06-03: a flow send has no campaigns row).
-    const payload = buildMailSendRequest({
-      to: claim.to,
-      templateId: claim.templateId,
-      fromEmail: claim.fromEmail,
-      dynamicTemplateData: claim.dynamicTemplateData,
-      listUnsubscribeUrl: claim.unsubscribeUrl,
-      sendId: claim.sendId,
-      workspaceId,
-      isTest: false,
+    // WRK-02 (D-01/D-02): same lane-slot gate as the campaign branch,
+    // acquired before the per-tenant RPS check -- an over-cap flow send
+    // defers through the SAME tenant_bucket path an over-RPS send does,
+    // and releases the already-committed claim so it is never left
+    // stranded (T-12-04-01), mirroring the over-RPS release just below.
+    const lane = laneForSendJobKind("flow");
+    const laneSlot = await acquireTenantLaneSlot(redisClient, workspaceId, lane, {
+      cap: resolveTenantLaneCap(lane),
+      leaseTtlMs: SEND_SLOT_LEASE_TTL_MS,
     });
-    const dispatchedAt = new Date();
-    let response: SendTenantMailResult;
-    try {
-      response = await sendMail(claim.apiKey, payload);
-    } catch (err) {
-      // Phase 11 (D-10, plan 11-06): identical classification/disposition
-      // as the campaign branch above, via the SAME shared helper -- the
-      // only per-path difference is which ledger function writes the
-      // ambiguous status.
-      return handleAmbiguousSendMailError(err, claim.sendId, dispatchedAt, (client, dispatchDurationMs) =>
-        recordFlowStepResult(client, claim.sendId, { status: "reconciling", dispatchedAt, dispatchDurationMs })
-      );
-    }
-    const dispatchDurationMs = Date.now() - dispatchedAt.getTime();
-
-    // Unit 3: record the terminal result in a SEPARATE transaction, only
-    // ever entered after SendGrid has responded.
-    if (response.status === 429 || response.status >= 500) {
+    if (!laneSlot.acquired) {
       await withTenantTransaction((client) => releaseDispatchClaim(client, claim.sendId));
-      return { outcome: "rate_limited", rateLimitMs: parseRetryAfter(response.headers), cause: "provider_backoff" };
+      return { outcome: "rate_limited", rateLimitMs: laneSlot.retryAfterMs ?? 0, cause: "tenant_bucket" };
     }
 
-    if (response.status >= 400) {
+    try {
+      // SEND-02/SEND-03 sibling: the SAME per-tenant token bucket is consumed
+      // before EVERY SendGrid call, regardless of kind.
+      const rateResult = await consumeTenantToken(redisClient, workspaceId, claim.rps);
+      if (!rateResult.allowed) {
+        await withTenantTransaction((client) => releaseDispatchClaim(client, claim.sendId));
+        return { outcome: "rate_limited", rateLimitMs: rateResult.msBeforeNext, cause: "tenant_bucket" };
+      }
+
+      // Unit 2: the external SendGrid call -- NOT inside any transaction.
+      // campaignId is omitted (06-03: a flow send has no campaigns row).
+      const payload = buildMailSendRequest({
+        to: claim.to,
+        templateId: claim.templateId,
+        fromEmail: claim.fromEmail,
+        dynamicTemplateData: claim.dynamicTemplateData,
+        listUnsubscribeUrl: claim.unsubscribeUrl,
+        sendId: claim.sendId,
+        workspaceId,
+        isTest: false,
+      });
+      const dispatchedAt = new Date();
+      let response: SendTenantMailResult;
+      try {
+        response = await sendMail(claim.apiKey, payload);
+      } catch (err) {
+        // Phase 11 (D-10, plan 11-06): identical classification/disposition
+        // as the campaign branch above, via the SAME shared helper -- the
+        // only per-path difference is which ledger function writes the
+        // ambiguous status.
+        return handleAmbiguousSendMailError(err, claim.sendId, dispatchedAt, (client, dispatchDurationMs) =>
+          recordFlowStepResult(client, claim.sendId, { status: "reconciling", dispatchedAt, dispatchDurationMs })
+        );
+      }
+      const dispatchDurationMs = Date.now() - dispatchedAt.getTime();
+
+      // Unit 3: record the terminal result in a SEPARATE transaction, only
+      // ever entered after SendGrid has responded.
+      if (response.status === 429 || response.status >= 500) {
+        await withTenantTransaction((client) => releaseDispatchClaim(client, claim.sendId));
+        return { outcome: "rate_limited", rateLimitMs: parseRetryAfter(response.headers), cause: "provider_backoff" };
+      }
+
+      if (response.status >= 400) {
+        await withTenantTransaction((client) =>
+          recordFlowStepResult(client, claim.sendId, { status: "failed", dispatchedAt, dispatchDurationMs })
+        );
+        return { outcome: "failed", sendId: claim.sendId };
+      }
+
       await withTenantTransaction((client) =>
-        recordFlowStepResult(client, claim.sendId, { status: "failed", dispatchedAt, dispatchDurationMs })
+        recordFlowStepResult(client, claim.sendId, {
+          status: "sent",
+          providerMessageId: response.messageId,
+          dispatchedAt,
+          dispatchDurationMs,
+        })
       );
-      return { outcome: "failed", sendId: claim.sendId };
+      return { outcome: "sent", sendId: claim.sendId, providerMessageId: response.messageId };
+    } finally {
+      // WRK-02 (T-12-04-02): released on every exit above, mirroring the
+      // campaign branch's `finally` -- never a `catch`.
+      await releaseTenantLaneSlot(redisClient, workspaceId, lane, laneSlot.token);
     }
-
-    await withTenantTransaction((client) =>
-      recordFlowStepResult(client, claim.sendId, {
-        status: "sent",
-        providerMessageId: response.messageId,
-        dispatchedAt,
-        dispatchDurationMs,
-      })
-    );
-    return { outcome: "sent", sendId: claim.sendId, providerMessageId: response.messageId };
   });
 }
