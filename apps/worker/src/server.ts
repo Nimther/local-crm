@@ -1,9 +1,10 @@
 import "./load-env.js";
 import type { Redis } from "ioredis";
-import type { Worker } from "bullmq";
+import type { Job, Worker } from "bullmq";
 import { scrubbedConsole } from "@mega-crm/redaction";
-import { buildRedisConnectionOptions, createRedisConnection } from "@mega-crm/queue-core";
+import { attachSharedErrorListeners, buildRedisConnectionOptions, createRedisConnection } from "@mega-crm/queue-core";
 import { closeTrackedQueues } from "./queues/queue-registry.js";
+import { isTerminalJobFailure, writeDeadLetterOnTerminalFailure } from "./queues/dead-letter/dead-letter-writer.js";
 import { createEventsIngestWorker } from "./queues/events-ingest.worker.js";
 import { createImportsCsvWorker } from "./queues/imports-csv.worker.js";
 import { createEmailBroadcastWorker } from "./queues/email-broadcast.worker.js";
@@ -67,6 +68,40 @@ export async function closeWorkerRuntime(workers: Worker[], connection: Redis): 
   await Promise.all(workers.map((worker) => worker.close()));
   await closeTrackedQueues();
   connection.disconnect();
+}
+
+/**
+ * Phase 12 (WRK-08/WRK-10): attaches the shared error/failed listener over
+ * the FULL worker array handed to it, rather than at each factory's own
+ * construction site. Factored out of `buildWorker()` so
+ * `shared-error-listener.test.ts` can drive it directly against a handful
+ * of real, test-scoped `Worker`s without constructing all sixteen
+ * production workers (the same testability reasoning as
+ * `closeWorkerRuntime` above).
+ *
+ * `onTerminalFailure` composes the terminal-vs-mid-retry gate
+ * (`isTerminalJobFailure`) with the dead-letter writer explicitly, even
+ * though the writer re-checks the same gate internally -- a mid-retry
+ * failure must never reach the writer at all, not merely be filtered inside
+ * it, so the composition is visible at the call site that wires the two
+ * together.
+ *
+ * Attaching over the array (not per-factory) is deliberate: the array is
+ * the exhaustive registry of every worker this process runs, so a worker
+ * added to it later can never be forgotten the way a per-factory call site
+ * could be if a future author simply forgot to add it to a new factory.
+ */
+export function attachSharedListeners(workers: Worker[]): void {
+  const onTerminalFailure = (job: Job | undefined, err: Error, queueName: string): Promise<void> | undefined => {
+    if (!job || !isTerminalJobFailure(job)) {
+      return undefined;
+    }
+    return writeDeadLetterOnTerminalFailure(job, err, queueName);
+  };
+
+  for (const worker of workers) {
+    attachSharedErrorListeners(worker, worker.name, { onTerminalFailure });
+  }
 }
 
 /**
@@ -173,6 +208,12 @@ export async function buildWorker(): Promise<WorkerRuntime> {
     // from webhook evidence already on disk. Never calls SendGrid (D-01).
     createSendReconcilerWorker(buildRedisConnectionOptions(redisUrl)),
   ];
+
+  // Phase 12 (WRK-08/WRK-10): attach the shared error/failed listener,
+  // wired to the dead-letter writer, over the FULL worker array immediately
+  // after it is built -- see attachSharedListeners's own doc comment above
+  // for why this happens over the array rather than per-factory.
+  attachSharedListeners(workers);
 
   const close = (): Promise<void> => closeWorkerRuntime(workers, connection);
 
