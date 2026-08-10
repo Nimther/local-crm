@@ -130,3 +130,13 @@ None - no external service configuration required. The two new environment overr
 ---
 *Phase: 12-worker-reliability-tenant-fairness*
 *Completed: 2026-08-10*
+
+## Self-Check: PASSED
+
+- `apps/worker/src/queues/send-dispatch.ts` - FOUND
+- `apps/worker/src/queues/__tests__/tenant-concurrency-cap.test.ts` - FOUND
+- `SPECIFICATION.md` - FOUND
+- `.planning/phases/12-worker-reliability-tenant-fairness/12-04-SUMMARY.md` - FOUND
+- Commit `818b857` (Task 1) - FOUND in git log
+- Commit `106833d` (Task 2) - FOUND in git log
+- Commit `a222965` (plan metadata) - FOUND in git log
