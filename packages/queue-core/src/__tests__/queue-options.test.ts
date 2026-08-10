@@ -44,6 +44,16 @@ describe("buildRedisConnectionOptions", () => {
 
     expect(options.password).toBe("p@ss");
   });
+
+  it("IN-02: throws a REDIS_URL-specific error (not a bare URIError) for a password containing a raw % that is not a valid two-hex-digit escape", () => {
+    // The WHATWG `URL` parser accepts this userinfo without complaint --
+    // `decodeURIComponent` is the first point where malformed percent-encoding
+    // surfaces, and it throws a generic `URIError: URI malformed` with no
+    // hint that `REDIS_URL`'s password encoding is the culprit.
+    expect(() => buildRedisConnectionOptions("redis://user:p%zzss@host:6379")).toThrow(
+      /REDIS_URL password contains an invalid percent-encoding/,
+    );
+  });
 });
 
 describe("buildJobOptions", () => {
