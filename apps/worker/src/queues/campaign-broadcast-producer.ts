@@ -1,6 +1,6 @@
 import { Queue } from "bullmq";
 import { EMAIL_BROADCAST_QUEUE, type EmailBroadcastJob } from "@mega-crm/shared-schemas";
-import { buildRedisConnectionOptions } from "./connection.js";
+import { buildRedisConnectionOptions } from "@mega-crm/queue-core";
 
 /**
  * Mirrors apps/api/src/modules/campaigns/campaign-queues.ts's

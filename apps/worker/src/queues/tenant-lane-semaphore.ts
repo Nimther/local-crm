@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Redis } from "ioredis";
 import { scrubbedConsole } from "@mega-crm/redaction";
 import { SENDGRID_TIMEOUT_MS } from "@mega-crm/delivery-core";
-import { CLAIM_TX_MARGIN_MS, RECORD_TX_MARGIN_MS } from "./queue-options.js";
+import { CLAIM_TX_MARGIN_MS, RECORD_TX_MARGIN_MS } from "@mega-crm/queue-core";
 
 /**
  * WRK-02 (D-01/D-02/D-03): the per-tenant-per-lane concurrency semaphore.

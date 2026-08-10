@@ -9,7 +9,7 @@ import {
   type FlowSegmentSweepFlowJob,
   type FlowTriggerCheckJob,
 } from "@mega-crm/shared-schemas";
-import { buildRedisConnectionOptions } from "../connection.js";
+import { buildRedisConnectionOptions } from "@mega-crm/queue-core";
 
 /** Mirrors campaign-broadcast-producer.ts's DEFAULT_JOB_OPTIONS (02-10 convention). */
 const DEFAULT_JOB_OPTIONS = {

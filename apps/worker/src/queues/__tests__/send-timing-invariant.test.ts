@@ -23,10 +23,10 @@ import {
   SEND_JOB_MAX_ATTEMPTS,
   SEND_JOB_BACKOFF_DELAY_MS,
   SEND_MAX_JOB_LIFETIME_MS,
-} from "../queue-options.js";
+  buildRedisConnectionOptions,
+} from "@mega-crm/queue-core";
 import { createEmailBroadcastWorker } from "../email-broadcast.worker.js";
 import { createEmailTriggeredWorker } from "../email-triggered.worker.js";
-import { buildRedisConnectionOptions } from "../connection.js";
 import { processSendJob } from "../send-dispatch.js";
 import {
   connectFixtureSendgridKey,

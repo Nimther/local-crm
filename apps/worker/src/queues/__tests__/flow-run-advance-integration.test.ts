@@ -7,7 +7,7 @@ import type { FlowRunAdvanceJob } from "@mega-crm/shared-schemas";
 import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool } from "../../test/db-fixture.js";
 import { createFlowRunAdvanceWorker } from "../flows/flow-run-advance.worker.js";
 import { emailTriggeredQueue, enqueueFlowRunAdvance, flowRunAdvanceQueue } from "../flows/flow-queues.js";
-import { buildRedisConnectionOptions } from "../connection.js";
+import { buildRedisConnectionOptions } from "@mega-crm/queue-core";
 import { insertFixtureOrganization } from "../../test/failure-fixtures.js";
 
 /**
