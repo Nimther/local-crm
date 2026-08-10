@@ -25,6 +25,12 @@ import {
   RECONCILING_AGE_ALERT_HOURS,
   type ReconcilerAlertMessage,
 } from "./modules/ops/send-reconciler-watchdog.js";
+import {
+  startDeadLetterWatchdog,
+  DEAD_LETTER_WATCHDOG_INTERVAL_MS,
+  DEAD_LETTER_ALERT_DEDUP_HOURS,
+  type DeadLetterAlertMessage,
+} from "./modules/ops/dead-letter-watchdog.js";
 import { authPlugin } from "./modules/auth/plugin.js";
 import { registerWorkspaceRoutes } from "./modules/tenancy/workspaces.js";
 import { registerProfileRoutes } from "./modules/tenancy/profile.js";
@@ -249,6 +255,21 @@ async function sendReconcilerOperatorAlert(message: ReconcilerAlertMessage): Pro
   });
 }
 
+/**
+ * 12-10 (D-08): the dead-letter watchdog's own real dispatch -- same
+ * platform-key-only, plain-text discipline as `sendOperatorAlert` and
+ * `sendReconcilerOperatorAlert` above, a third distinct subject line so all
+ * three alert channels stay distinguishable in an operator's inbox.
+ */
+async function sendDeadLetterOperatorAlert(message: DeadLetterAlertMessage): Promise<void> {
+  await sgMail.send({
+    to: message.to,
+    from: env.PLATFORM_MAIL_FROM,
+    subject: "Mega CRM dead-letter alert",
+    text: message.text,
+  });
+}
+
 async function main(): Promise<void> {
   const app = await buildServer();
   await app.listen({ port: env.API_PORT, host: "0.0.0.0" });
@@ -283,6 +304,17 @@ async function main(): Promise<void> {
     operatorEmail: env.OPERATOR_ALERT_EMAIL,
     sendMail: sendReconcilerOperatorAlert,
   });
+  // 12-10 (D-08): a THIRD independent dead-man's switch, over
+  // dead_letter_jobs rather than a per-tick health row -- it alerts on an
+  // entirely different condition (unacknowledged terminal job failures) and
+  // dedups independently (its own last_alert_sent_at column on
+  // dead_letter_alert_state), so it cannot mask or be masked by either
+  // watchdog above.
+  startDeadLetterWatchdog({
+    client: pool,
+    operatorEmail: env.OPERATOR_ALERT_EMAIL,
+    sendMail: sendDeadLetterOperatorAlert,
+  });
 
   // Names only the interval/threshold numbers -- never the operator
   // address or anything derived from the SendGrid key (T-09-11).
@@ -297,6 +329,10 @@ async function main(): Promise<void> {
       reconcilingAgeAlertHours: RECONCILING_AGE_ALERT_HOURS,
     },
     "send-reconciler watchdog armed -- watching apps/worker's send-reconciler tick from a separate process"
+  );
+  logger.info(
+    { pollIntervalMs: DEAD_LETTER_WATCHDOG_INTERVAL_MS, alertDedupHours: DEAD_LETTER_ALERT_DEDUP_HOURS },
+    "dead-letter watchdog armed -- watching dead_letter_jobs for unacknowledged terminal failures"
   );
 }
 
