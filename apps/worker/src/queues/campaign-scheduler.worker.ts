@@ -3,6 +3,7 @@ import { withCrossWorkspaceScan, withTenant, withTenantTransaction } from "@mega
 import { scrubbedConsole } from "@mega-crm/redaction";
 import { CAMPAIGN_KICKOFF_QUEUE, type CampaignKickoffJob } from "@mega-crm/shared-schemas";
 import { buildJobOptions, STANDARD_JOB_RETENTION } from "@mega-crm/queue-core";
+import { registerTrackedQueue } from "./queue-registry.js";
 
 /** The scheduler's own repeatable-tick queue -- self-produced and self-consumed within this file/process only. */
 const CAMPAIGN_SCHEDULER_QUEUE = "campaign-scheduler";
@@ -178,13 +179,16 @@ export function createCampaignSchedulerWorker(
   // Phase 12 (WRK-07): this queue is a genuinely long-lived PRODUCER, used on
   // EVERY tick to fan out kickoff jobs -- not a one-shot registration queue,
   // so it structurally cannot use the close-after-registration shape below.
-  // It is deliberately left open here; `server.ts` (task 2, WRK-07) tracks it
-  // through the shared queue registry so shutdown closes it. Do NOT "fix"
-  // this by closing it after registration.
-  const kickoffQueue = new Queue<CampaignKickoffJob>(CAMPAIGN_KICKOFF_QUEUE, {
-    connection,
-    defaultJobOptions: DEFAULT_JOB_OPTIONS,
-  });
+  // It is deliberately left open here and instead registered with the
+  // process-wide tracked-queue registry (`queue-registry.ts`) so
+  // `server.ts`'s shutdown closes it. Do NOT "fix" this by closing it after
+  // registration.
+  const kickoffQueue = registerTrackedQueue(
+    new Queue<CampaignKickoffJob>(CAMPAIGN_KICKOFF_QUEUE, {
+      connection,
+      defaultJobOptions: DEFAULT_JOB_OPTIONS,
+    })
+  );
 
   const worker = new Worker(
     CAMPAIGN_SCHEDULER_QUEUE,

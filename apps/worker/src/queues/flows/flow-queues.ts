@@ -10,6 +10,7 @@ import {
   type FlowTriggerCheckJob,
 } from "@mega-crm/shared-schemas";
 import { buildJobOptions, buildRedisConnectionOptions, FLOW_RUN_ADVANCE_RETENTION, STANDARD_JOB_RETENTION } from "@mega-crm/queue-core";
+import { registerTrackedQueue } from "../queue-registry.js";
 
 /** Mirrors campaign-broadcast-producer.ts's DEFAULT_JOB_OPTIONS -- both build from the shared `@mega-crm/queue-core` factory (Phase 12, WRK-11, D-10). */
 const DEFAULT_JOB_OPTIONS = buildJobOptions(STANDARD_JOB_RETENTION);
@@ -47,10 +48,12 @@ function requireRedisUrl(): string {
  * deterministic (`${flowRunId}-${nodeId}`, set at the call site) so a
  * redelivered advance can never double-enqueue the same step's send.
  */
-export const emailTriggeredQueue = new Queue<EmailTriggeredJob>(EMAIL_TRIGGERED_QUEUE, {
-  connection: buildRedisConnectionOptions(requireRedisUrl()),
-  defaultJobOptions: DEFAULT_JOB_OPTIONS,
-});
+export const emailTriggeredQueue = registerTrackedQueue(
+  new Queue<EmailTriggeredJob>(EMAIL_TRIGGERED_QUEUE, {
+    connection: buildRedisConnectionOptions(requireRedisUrl()),
+    defaultJobOptions: DEFAULT_JOB_OPTIONS,
+  })
+);
 
 /**
  * Worker-side producer Queue for `FLOW_RUN_ADVANCE_QUEUE` -- the engine's
@@ -60,10 +63,12 @@ export const emailTriggeredQueue = new Queue<EmailTriggeredJob>(EMAIL_TRIGGERED_
  * via `enqueueFlowRunAdvance` below, never `flowRunAdvanceQueue.add(...)`
  * directly, so every wake gets a unique-per-wake jobId.
  */
-export const flowRunAdvanceQueue = new Queue<FlowRunAdvanceJob>(FLOW_RUN_ADVANCE_QUEUE, {
-  connection: buildRedisConnectionOptions(requireRedisUrl()),
-  defaultJobOptions: FLOW_RUN_ADVANCE_JOB_OPTIONS,
-});
+export const flowRunAdvanceQueue = registerTrackedQueue(
+  new Queue<FlowRunAdvanceJob>(FLOW_RUN_ADVANCE_QUEUE, {
+    connection: buildRedisConnectionOptions(requireRedisUrl()),
+    defaultJobOptions: FLOW_RUN_ADVANCE_JOB_OPTIONS,
+  })
+);
 
 /**
  * The SOLE way to enqueue a `flowRunAdvanceQueue` job (CR-01 fix, 06-12).
@@ -93,10 +98,12 @@ export async function enqueueFlowRunAdvance(
  * can match the event's name against live event-triggered flows. Same
  * singleton-Queue-module convention as the other producers in this file.
  */
-export const flowTriggerEvaluatorQueue = new Queue<FlowTriggerCheckJob>(FLOW_TRIGGER_EVALUATOR_QUEUE, {
-  connection: buildRedisConnectionOptions(requireRedisUrl()),
-  defaultJobOptions: DEFAULT_JOB_OPTIONS,
-});
+export const flowTriggerEvaluatorQueue = registerTrackedQueue(
+  new Queue<FlowTriggerCheckJob>(FLOW_TRIGGER_EVALUATOR_QUEUE, {
+    connection: buildRedisConnectionOptions(requireRedisUrl()),
+    defaultJobOptions: DEFAULT_JOB_OPTIONS,
+  })
+);
 
 /**
  * flowSegmentSweepFlowQueue's OWN job options (Phase 12, WRK-05/WRK-06,
@@ -126,7 +133,9 @@ const FLOW_SEGMENT_SWEEP_FLOW_JOB_OPTIONS = buildJobOptions(FLOW_RUN_ADVANCE_RET
  * suites can enqueue onto (or inspect) it directly without a live queue
  * round trip through a separate module.
  */
-export const flowSegmentSweepFlowQueue = new Queue<FlowSegmentSweepFlowJob>(FLOW_SEGMENT_SWEEP_FLOW_QUEUE, {
-  connection: buildRedisConnectionOptions(requireRedisUrl()),
-  defaultJobOptions: FLOW_SEGMENT_SWEEP_FLOW_JOB_OPTIONS,
-});
+export const flowSegmentSweepFlowQueue = registerTrackedQueue(
+  new Queue<FlowSegmentSweepFlowJob>(FLOW_SEGMENT_SWEEP_FLOW_QUEUE, {
+    connection: buildRedisConnectionOptions(requireRedisUrl()),
+    defaultJobOptions: FLOW_SEGMENT_SWEEP_FLOW_JOB_OPTIONS,
+  })
+);

@@ -1,7 +1,9 @@
 import "./load-env.js";
+import type { Redis } from "ioredis";
 import type { Worker } from "bullmq";
 import { scrubbedConsole } from "@mega-crm/redaction";
 import { buildRedisConnectionOptions, createRedisConnection } from "@mega-crm/queue-core";
+import { closeTrackedQueues } from "./queues/queue-registry.js";
 import { createEventsIngestWorker } from "./queues/events-ingest.worker.js";
 import { createImportsCsvWorker } from "./queues/imports-csv.worker.js";
 import { createEmailBroadcastWorker } from "./queues/email-broadcast.worker.js";
@@ -42,6 +44,29 @@ export interface WorkerRuntime {
   connection: ReturnType<typeof createRedisConnection>;
   workers: Worker[];
   close: () => Promise<void>;
+}
+
+/**
+ * Phase 12 (WRK-07): the shutdown ordering, factored out of `buildWorker()`
+ * so it is testable without constructing all sixteen production workers
+ * (`graceful-shutdown.test.ts` drives this directly against a handful of
+ * real, test-scoped `Worker`s/`Queue`s).
+ *
+ * Order matters: every registered `Worker` closes FIRST (draining any
+ * in-flight job to completion, BullMQ's own default), THEN every tracked
+ * long-lived `Queue` handle (`queue-registry.ts`) closes, and ONLY THEN does
+ * the shared connection disconnect. A producer `Queue` close racing a
+ * still-draining `Worker` could drop an enqueue the worker was mid-making;
+ * closing workers first removes that race entirely. Idempotent: calling
+ * this twice is safe -- `closeTrackedQueues()` drains its own registry
+ * before closing, so a second call has nothing left to close, and BullMQ's
+ * own `Worker.close()` and `Redis.disconnect()` both tolerate being called
+ * more than once.
+ */
+export async function closeWorkerRuntime(workers: Worker[], connection: Redis): Promise<void> {
+  await Promise.all(workers.map((worker) => worker.close()));
+  await closeTrackedQueues();
+  connection.disconnect();
 }
 
 /**
@@ -149,10 +174,7 @@ export async function buildWorker(): Promise<WorkerRuntime> {
     createSendReconcilerWorker(buildRedisConnectionOptions(redisUrl)),
   ];
 
-  const close = async (): Promise<void> => {
-    await Promise.all(workers.map((worker) => worker.close()));
-    connection.disconnect();
-  };
+  const close = (): Promise<void> => closeWorkerRuntime(workers, connection);
 
   return { connection, workers, close };
 }
