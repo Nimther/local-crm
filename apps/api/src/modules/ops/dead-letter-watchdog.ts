@@ -54,28 +54,39 @@ export interface DeadLetterHealthSnapshot {
   unacknowledgedCount: number;
   queueNames: string[];
   oldestFailedAt: Date | null;
+  newestFailedAt: Date | null;
 }
 
 interface RawDeadLetterHealthRow {
   unacknowledged_count: number | string;
   queue_names: string[] | null;
   oldest_failed_at: Date | null;
+  newest_failed_at: Date | null;
 }
 
 /**
- * Reads the unacknowledged rows -- count, distinct queue names and oldest
- * failure timestamp -- in a single query. Rows whose `acknowledged_at`
+ * Reads the unacknowledged rows -- count, distinct queue names, oldest and
+ * newest failure timestamp -- in a single query. Rows whose `acknowledged_at`
  * column is set are excluded by the `WHERE` clause, never counted and never
  * considered for the alert decision. `count(*)` always returns exactly one
  * row even over zero matching rows (`unacknowledgedCount` is `0`, not an
  * absent row), so this never needs a "row missing" branch the way the
  * siblings' singleton health-row readers do.
+ *
+ * WR-01: `newestFailedAt` is distinct from `oldestFailedAt` and exists
+ * specifically to feed `claimDeadLetterAlertSlot`'s `newestFailedAt`
+ * parameter -- see that function's own doc comment and migration
+ * 0054_dead_letter_jobs.sql's table comment on `last_seen_failed_at` ("what
+ * was the newest failure it had seen at that time"). `oldestFailedAt` is
+ * used only for the alert BODY (`renderDeadLetterAlertText`), a different
+ * and intentionally distinct purpose.
  */
 export async function readDeadLetterHealth(client: DeadLetterJobsClient): Promise<DeadLetterHealthSnapshot> {
   const { rows } = await client.query<RawDeadLetterHealthRow>(
     `SELECT count(*)::int AS unacknowledged_count,
             array_remove(array_agg(DISTINCT queue_name), NULL) AS queue_names,
-            min(failed_at) AS oldest_failed_at
+            min(failed_at) AS oldest_failed_at,
+            max(failed_at) AS newest_failed_at
        FROM dead_letter_jobs
       WHERE acknowledged_at IS NULL`,
   );
@@ -84,6 +95,7 @@ export async function readDeadLetterHealth(client: DeadLetterJobsClient): Promis
     unacknowledgedCount: row ? Number(row.unacknowledged_count) : 0,
     queueNames: row?.queue_names ?? [],
     oldestFailedAt: row?.oldest_failed_at ?? null,
+    newestFailedAt: row?.newest_failed_at ?? null,
   };
 }
 
@@ -200,7 +212,7 @@ export async function checkDeadLetterHealthAndAlert(deps: DeadLetterWatchdogDeps
     deps.client,
     deps.now,
     DEAD_LETTER_ALERT_DEDUP_HOURS,
-    snapshot.oldestFailedAt,
+    snapshot.newestFailedAt,
   );
   if (!claimed) return;
 

@@ -80,8 +80,9 @@ describe("renderDeadLetterAlertText (pure, no DB)", () => {
   it("test 1: carries the unacknowledged count, the queue names and the oldest failure timestamp, and never a payload field", () => {
     const now = new Date("2027-03-01T00:00:00Z");
     const oldestFailedAt = new Date("2027-02-28T12:00:00Z");
+    const newestFailedAt = new Date("2027-03-01T00:00:00Z");
     const body = renderDeadLetterAlertText(
-      { unacknowledgedCount: 3, queueNames: ["ingest-events", "webhook-events"], oldestFailedAt },
+      { unacknowledgedCount: 3, queueNames: ["ingest-events", "webhook-events"], oldestFailedAt, newestFailedAt },
       now,
     );
 
@@ -96,7 +97,10 @@ describe("renderDeadLetterAlertText (pure, no DB)", () => {
 
   it("test 2: with a null oldestFailedAt the body still renders without dereferencing it", () => {
     const now = new Date("2027-03-01T00:00:00Z");
-    const body = renderDeadLetterAlertText({ unacknowledgedCount: 0, queueNames: [], oldestFailedAt: null }, now);
+    const body = renderDeadLetterAlertText(
+      { unacknowledgedCount: 0, queueNames: [], oldestFailedAt: null, newestFailedAt: null },
+      now,
+    );
     expect(body).toContain("0");
     expect(body).not.toContain("Invalid Date");
   });
@@ -181,6 +185,30 @@ describe("readDeadLetterHealth / claimDeadLetterAlertSlot / checkDeadLetterHealt
     expect(sent[0]?.text).toContain("webhook-events");
     expect(sent[0]?.text).toContain(oldest.toISOString());
     expect(sent[0]?.text).not.toContain("marker-value");
+  });
+
+  it("test 5b (WR-01): claimDeadLetterAlertSlot persists the NEWEST unacknowledged failure's timestamp to last_seen_failed_at, not the oldest", async () => {
+    const oldest = new Date("2027-04-02T00:00:00Z");
+    const newest = new Date("2027-04-02T06:00:00Z");
+    await seedDeadLetterRow({ queueName: "ingest-events", jobId: "seen-oldest", failedAt: oldest });
+    await seedDeadLetterRow({ queueName: "webhook-events", jobId: "seen-newest", failedAt: newest });
+
+    const snapshot = await readDeadLetterHealth(pool);
+    expect(snapshot.oldestFailedAt).toEqual(oldest);
+    expect(snapshot.newestFailedAt).toEqual(newest);
+
+    const sent: Array<{ to: string; text: string }> = [];
+    // eslint-disable-next-line @typescript-eslint/require-await -- test spy: intentionally synchronous
+    const sendMail = async (message: { to: string; text: string }) => {
+      sent.push(message);
+    };
+    await checkDeadLetterHealthAndAlert({ client: pool, now: newest, operatorEmail: "ops@example.com", sendMail });
+    expect(sent).toHaveLength(1);
+
+    const { rows } = await pool.query<{ last_seen_failed_at: Date | null }>(
+      "SELECT last_seen_failed_at FROM dead_letter_alert_state WHERE id = 1",
+    );
+    expect(rows[0]?.last_seen_failed_at).toEqual(newest);
   });
 
   it("test 6: at most one send per DEAD_LETTER_ALERT_DEDUP_HOURS window, even across repeated unhealthy checks", async () => {
