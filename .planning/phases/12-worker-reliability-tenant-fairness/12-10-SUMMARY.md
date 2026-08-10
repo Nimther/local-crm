@@ -180,3 +180,14 @@ None - no external service configuration required. `OPERATOR_ALERT_EMAIL` and th
 ---
 *Phase: 12-worker-reliability-tenant-fairness*
 *Completed: 2026-08-10*
+
+## Self-Check: PASSED
+
+- FOUND: apps/api/src/modules/ops/dead-letter-watchdog.ts
+- FOUND: apps/api/src/modules/ops/__tests__/dead-letter-watchdog.test.ts
+- FOUND: packages/queue-core/src/dead-letter-writer.ts
+- FOUND: .planning/phases/12-worker-reliability-tenant-fairness/12-10-SUMMARY.md
+- FOUND commit f9140f2 (test RED)
+- FOUND commit b691a94 (feat GREEN)
+- FOUND commit e0dfcb7 (refactor deviation)
+- FOUND commit 4e5ddc3 (feat Task 2)
