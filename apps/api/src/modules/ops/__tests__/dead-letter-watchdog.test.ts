@@ -1,7 +1,9 @@
+import type { Job } from "bullmq";
 import { Pool } from "pg";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { pool } from "@mega-crm/tenant-context";
+import { writeDeadLetterOnTerminalFailure } from "@mega-crm/queue-core";
 
 import { ensureTestDbMigrated, getTestDatabaseUrl } from "../../../test/db-fixture.js";
 import {
@@ -56,6 +58,22 @@ async function resetDeadLetterAlertState(): Promise<void> {
         SET last_alert_sent_at = NULL, last_seen_failed_at = NULL, updated_at = now()
       WHERE id = 1`,
   );
+}
+
+/**
+ * Minimal fake of the BullMQ `Job` surface `writeDeadLetterOnTerminalFailure`
+ * actually reads -- mirrors apps/worker/src/queues/__tests__/dead-letter-writer.test.ts's
+ * own `fakeJob` helper (same shared writer, @mega-crm/queue-core, plan 12-10's
+ * relocation).
+ */
+function fakeJob(overrides: { id?: string; name?: string; data?: unknown; attemptsMade?: number; attempts?: number }): Job {
+  return {
+    id: overrides.id ?? "e2e-job-1",
+    name: overrides.name ?? "fixture-job",
+    data: overrides.data ?? {},
+    attemptsMade: overrides.attemptsMade ?? 1,
+    opts: overrides.attempts === undefined ? {} : { attempts: overrides.attempts },
+  } as unknown as Job;
 }
 
 describe("renderDeadLetterAlertText (pure, no DB)", () => {
@@ -256,6 +274,29 @@ describe("readDeadLetterHealth / claimDeadLetterAlertSlot / checkDeadLetterHealt
       },
     });
     expect(sent).toHaveLength(1);
+  });
+
+  it("test 10 (12-10 task 2, T-12-10-03): drives a terminal job failure through the shared writer end to end and asserts the alert names that row's queue", async () => {
+    // This is the case that fails if either half of the dead-letter path is
+    // disconnected -- a durable record nobody reads, or a reader with
+    // nothing to read. It produces its dead-letter row through the real
+    // writer (writeDeadLetterOnTerminalFailure, @mega-crm/queue-core --
+    // shared with apps/worker's own dead-letter-writer.ts as of this plan's
+    // relocation) rather than by inserting a row directly.
+    const queueName = "e2e-ingest-events";
+    const job = fakeJob({ id: "e2e-terminal-1", name: "fixture-terminal-job", attemptsMade: 5, attempts: 5 });
+    await writeDeadLetterOnTerminalFailure(job, new Error("exhausted all attempts"), queueName, pool);
+
+    const sent: Array<{ to: string; text: string }> = [];
+    // eslint-disable-next-line @typescript-eslint/require-await -- test spy: intentionally synchronous
+    const sendMail = async (message: { to: string; text: string }) => {
+      sent.push(message);
+    };
+
+    await checkDeadLetterHealthAndAlert({ client: pool, now: new Date(), operatorEmail: "ops@example.com", sendMail });
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.text).toContain(queueName);
   });
 });
 
