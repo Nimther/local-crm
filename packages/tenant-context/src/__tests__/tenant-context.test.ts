@@ -311,16 +311,19 @@ describe("the fail-closed RLS contract (SEC-03/SEC-04)", () => {
     }
   });
 
-  it("uses one identical predicate across exactly 22 workspace_isolation policies", async () => {
+  it("uses one identical predicate across exactly 23 workspace_isolation policies", async () => {
     const { rows } = await fresh.query<{ qual: string }>(
       `SELECT qual FROM pg_policies WHERE policyname = 'workspace_isolation'`,
     );
-    expect(rows, "expected exactly 22 workspace_isolation policies in the catalog").toHaveLength(22);
+    // Phase 12 (WRK-05/WRK-06, D-09, migration 0053) adds the 23rd:
+    // flow_segment_sweep_checkpoint, fail-closed from birth (never carried
+    // the pre-0044 NULLIF-guarded form this file's other tests guard against).
+    expect(rows, "expected exactly 23 workspace_isolation policies in the catalog").toHaveLength(23);
 
     const distinctQuals = new Set(rows.map((r) => r.qual));
     expect(
       distinctQuals.size,
-      `expected one shared predicate across all 22 policies, found ${distinctQuals.size} distinct forms: ${[...distinctQuals].join(" | ")}`,
+      `expected one shared predicate across all 23 policies, found ${distinctQuals.size} distinct forms: ${[...distinctQuals].join(" | ")}`,
     ).toBe(1);
   });
 
