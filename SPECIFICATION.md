@@ -166,7 +166,7 @@ CI — **единственное** место, где проверяется к
 | `@mega-crm/redaction` | `0.1.0` — внутренний workspace-пакет, **без runtime-зависимостей** (10-13, SEC-13). `apps/worker/src`'s `scrubbedConsole` (см. §7) — единственный путь для прямых `console.*`-вызовов вне `__tests__` |
 | dev: `@types/node`, `@types/pg`, `tsx`, `typescript`, `vitest` `4.1.9`, `@vitest/coverage-v8` `^4.1.9` (08-11), `@mega-crm/api` `0.1.0` (план 11-09 — test-only: `send-reconciler-health.test.ts` импортирует `evaluateReconcilerHealth` из `@mega-crm/api/src/modules/ops/send-reconciler-watchdog.js` напрямую, чтобы доказать end-to-end сигнал "воркер пишет → API читает"; никакой рантайм-код `apps/worker/src` не импортирует `@mega-crm/api`) |
 
-Внутренние: `@mega-crm/{contacts-core,db,delivery-core,flows-core,kms,redaction,segments-core,shared-schemas,tenant-context}`.
+Внутренние: `@mega-crm/{contacts-core,db,delivery-core,flows-core,kms,queue-core,redaction,segments-core,shared-schemas,tenant-context}`.
 
 ### 2.4 `apps/web`
 
@@ -196,6 +196,7 @@ CI — **единственное** место, где проверяется к
 | `packages/kms` | `@aws-sdk/client-kms` `3.1079.0` |
 | `packages/redaction` | **нет runtime-зависимостей** (10-13, SEC-13). dev: `pino` `10.3.1` (использован только в `rules-parity.test.ts`, чтобы прогнать реальный Pino-инстанс через `PINO_REDACT_OPTIONS` и сравнить с `scrub()` — devDependency, не runtime), `typescript` `^5.9.3`, `vitest` `4.1.9`. Потребители: `apps/api`, `apps/worker` — оба объявляют `@mega-crm/redaction` `0.1.0` в `dependencies` (§2.2/§2.3) |
 | `packages/delivery-core` | `@mega-crm/tenant-context`, `pg` |
+| `packages/queue-core` | `bullmq` `5.79.1`, `ioredis` `5.11.0`; dev: `@mega-crm/delivery-core` `0.1.0` (test-only — `queue-options.test.ts`'s timing-invariant assertion imports `SENDGRID_TIMEOUT_MS` from it, не runtime-зависимость пакета), `typescript` `^5.9.3`, `vitest` `4.1.9`. Введён в 12-02 (WRK-11, D-10): единственный источник connection-options builder'а (`buildRedisConnectionOptions`/`createRedisConnection`) и send-lane timing/retry констант + retention-параметризованной фабрики job-опций (`buildJobOptions`, `STANDARD_JOB_RETENTION`, `FLOW_RUN_ADVANCE_RETENTION`), поглотивший `apps/worker/src/queues/connection.ts` и `queue-options.ts`. Потребитель на 12-02: `apps/worker` (§2.3). Плановое поглощение `apps/api`'s копий — план 12-11 |
 | `packages/contacts-core` | `@mega-crm/delivery-core`, `pg`, `pino` `10.3.1` |
 | `packages/segments-core` | нет runtime-зависимостей |
 | `packages/flows-core` | `zod` `4.4.3` |

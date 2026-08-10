@@ -1,17 +1,14 @@
 import { Queue, Worker, type ConnectionOptions } from "bullmq";
 import { withCrossWorkspaceScan, withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { CAMPAIGN_KICKOFF_QUEUE, type CampaignKickoffJob } from "@mega-crm/shared-schemas";
+import { buildJobOptions, STANDARD_JOB_RETENTION } from "@mega-crm/queue-core";
 
 /** The scheduler's own repeatable-tick queue -- self-produced and self-consumed within this file/process only. */
 const CAMPAIGN_SCHEDULER_QUEUE = "campaign-scheduler";
 const SCAN_INTERVAL_MS = 60_000;
 
-const DEFAULT_JOB_OPTIONS = {
-  attempts: 5,
-  backoff: { type: "exponential" as const, delay: 2000 },
-  removeOnComplete: { age: 86400 },
-  removeOnFail: false,
-};
+/** Built through the shared `@mega-crm/queue-core` factory (Phase 12, WRK-11, D-10). */
+const DEFAULT_JOB_OPTIONS = buildJobOptions(STANDARD_JOB_RETENTION);
 
 export interface DueCampaignRow {
   id: string;
