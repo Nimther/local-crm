@@ -2,6 +2,7 @@ import { Worker, type Job, type ConnectionOptions } from "bullmq";
 import { EMAIL_BROADCAST_QUEUE, type EmailBroadcastJob } from "@mega-crm/shared-schemas";
 import { processSendJob, type ProcessSendJobDeps } from "./send-dispatch.js";
 import { SEND_LOCK_DURATION_MS } from "./queue-options.js";
+import { deferForTenantBucket } from "./tenant-deferral.js";
 
 /**
  * The broadcast Worker's per-job handler, factored out of the `Worker`
@@ -16,7 +17,8 @@ import { SEND_LOCK_DURATION_MS } from "./queue-options.js";
 export async function handleEmailBroadcastJob(
   job: Job<EmailBroadcastJob>,
   worker: Worker<EmailBroadcastJob>,
-  deps: ProcessSendJobDeps = {}
+  deps: ProcessSendJobDeps = {},
+  token?: string
 ): Promise<void> {
   const result = await processSendJob(job.data, deps);
   // Phase 11 (D-11, plan 11-10): a test-send's `{ outcome: "unknown" }`
@@ -27,12 +29,14 @@ export async function handleEmailBroadcastJob(
   // reintroduce test-send retries.
   if (result.outcome === "rate_limited") {
     if (result.cause === "tenant_bucket") {
-      // SEND-07: a tenant's own RPS ceiling is not a failure -- does NOT
-      // consume one of the job's `attempts`. BullMQ moves the job back
-      // to `waiting` and pauses THIS worker's draining for `rateLimitMs`
-      // (Pattern 3).
-      await worker.rateLimit(result.rateLimitMs);
-      throw Worker.RateLimitError();
+      // Phase 12 (WRK-01): a tenant's own RPS ceiling is not a failure --
+      // does NOT consume one of the job's `attempts`. Deferred through the
+      // shared `deferForTenantBucket` helper (job.moveToDelayed), NOT
+      // `worker.rateLimit()` -- that mechanism is global-per-worker and
+      // would pause draining for every OTHER tenant's jobs too, not just
+      // this one's. Both send lanes reach this through the same helper so
+      // they cannot drift.
+      await deferForTenantBucket(job, result.rateLimitMs, token);
     }
     // Phase 11 (D-10, plan 11-05): `cause === "provider_backoff"` --
     // SendGrid itself returned 429/5xx. This now consumes ONE of the
@@ -65,7 +69,7 @@ export async function handleEmailBroadcastJob(
 export function createEmailBroadcastWorker(connection: ConnectionOptions): Worker<EmailBroadcastJob> {
   const worker: Worker<EmailBroadcastJob> = new Worker<EmailBroadcastJob>(
     EMAIL_BROADCAST_QUEUE,
-    (job: Job<EmailBroadcastJob>) => handleEmailBroadcastJob(job, worker),
+    (job: Job<EmailBroadcastJob>, token) => handleEmailBroadcastJob(job, worker, {}, token),
     // Bounded, not always-on -- broadcast fan-out must never monopolise the
     // process while the triggered lane (Phase 6) needs to keep draining.
     { connection, concurrency: 5, lockDuration: SEND_LOCK_DURATION_MS }
