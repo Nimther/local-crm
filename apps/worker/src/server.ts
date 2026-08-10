@@ -14,6 +14,7 @@ import { createFlowRunAdvanceWorker } from "./queues/flows/flow-run-advance.work
 import { createFlowReconciliationWorker } from "./queues/flows/flow-reconciliation.worker.js";
 import { createFlowTriggerEvaluatorWorker } from "./queues/flows/flow-trigger-evaluator.worker.js";
 import { createFlowSegmentSweepWorker } from "./queues/flows/flow-segment-sweep.worker.js";
+import { createFlowSegmentSweepFlowWorker } from "./queues/flows/flow-segment-sweep-flow.worker.js";
 import { createFlowEnrollExistingWorker } from "./queues/flows/flow-enroll-existing.worker.js";
 import { createPartitionMaintenanceWorker } from "./queues/partition-maintenance.worker.js";
 import { createSendReconcilerWorker } from "./queues/send-reconciler.worker.js";
@@ -122,8 +123,14 @@ export async function buildWorker(): Promise<WorkerRuntime> {
     // control + the one-active-run guard, and creates version-pinned runs.
     createFlowTriggerEvaluatorWorker(buildRedisConnectionOptions(redisUrl)),
     // FLOW-02 (06-08): the segment-entry periodic bulk-diff sweep (D-02b
-    // safety net).
+    // safety net) -- discovery half, enqueues one bounded walk job per flow.
     createFlowSegmentSweepWorker(buildRedisConnectionOptions(redisUrl)),
+    // WRK-05/WRK-06 (12-06): the sweep's bounded, checkpointed, resumable
+    // per-flow walk -- pages on contacts.id under a per-page statement
+    // timeout, committing its resume cursor in the same transaction as
+    // that page's enrollment work, so a kill between pages is exactly
+    // resumable by construction.
+    createFlowSegmentSweepFlowWorker(buildRedisConnectionOptions(redisUrl)),
     // FLOW-02/D-04 (06-08): the publish route's enroll-existing resumable
     // batch, fired once per publish when the marketer chooses to back-fill
     // current segment members.
@@ -168,7 +175,7 @@ async function main(): Promise<void> {
   process.on("SIGTERM", shutdown);
 
   scrubbedConsole.log(
-    `apps/worker started (${runtime.workers.length} BullMQ worker(s) registered: events:ingest, imports:csv, email-broadcast, email-triggered, campaign-kickoff, campaign-scheduler, webhook-events, analytics-reconciliation, flow-run-advance, flow-reconciliation, flow-trigger-evaluator, flow-segment-sweep, flow-enroll-existing, partition-maintenance, send-reconciler)`
+    `apps/worker started (${runtime.workers.length} BullMQ worker(s) registered: events:ingest, imports:csv, email-broadcast, email-triggered, campaign-kickoff, campaign-scheduler, webhook-events, analytics-reconciliation, flow-run-advance, flow-reconciliation, flow-trigger-evaluator, flow-segment-sweep, flow-segment-sweep-flow, flow-enroll-existing, partition-maintenance, send-reconciler)`
   );
 }
 

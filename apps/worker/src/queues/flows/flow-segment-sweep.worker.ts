@@ -1,13 +1,27 @@
 import { Queue, Worker, type ConnectionOptions } from "bullmq";
-import type { PoolClient } from "pg";
-import { withCrossWorkspaceScan, withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
-import { compileSegmentDefinition, type SegmentDefinition } from "@mega-crm/segments-core";
-import { FLOW_SEGMENT_SWEEP_QUEUE } from "@mega-crm/shared-schemas";
-import { enterSegmentTriggeredFlow, type LiveSegmentFlowRow } from "./flow-trigger-evaluator.worker.js";
+import { withCrossWorkspaceScan } from "@mega-crm/tenant-context";
+import { scrubbedConsole } from "@mega-crm/redaction";
+import {
+  FLOW_SEGMENT_SWEEP_FLOW_SCHEMA_VERSION,
+  FLOW_SEGMENT_SWEEP_QUEUE,
+  FLOW_SEGMENT_SWEEP_TICK_SCHEMA_VERSION,
+  flowSegmentSweepTickJobSchema,
+} from "@mega-crm/shared-schemas";
+import { flowSegmentSweepFlowQueue } from "./flow-queues.js";
 
 /**
- * D-02b/RESEARCH.md Assumption A1/Pitfall 1: this is an INSURANCE path, not a
- * low-latency one -- the event-driven re-check
+ * Phase 12 (WRK-05/WRK-06, D-09): discovery-only half of the segment sweep,
+ * split from the bounded per-flow walk (`flow-segment-sweep-flow.worker.ts`)
+ * -- mirrors `campaign-scheduler.worker.ts` -> `campaign-kickoff.worker.ts`'s
+ * own discover-then-enqueue split. This file used to ALSO run the whole
+ * per-flow walk inline, in one unbounded transaction per flow, with no
+ * cursor and no page bound -- the largest known unbounded-memory path in
+ * the worker. It now does exactly one thing: find every live
+ * segment-triggered flow across every tenant, and enqueue one bounded walk
+ * job per flow.
+ *
+ * D-02b/RESEARCH.md Assumption A1/Pitfall 1: this is an INSURANCE path, not
+ * a low-latency one -- the event-driven re-check
  * (`flow-trigger-evaluator.worker.ts`'s `checkSegmentEntryForContact`)
  * already covers latency for any contact change that arrives via an
  * ingested event. 15 minutes bounds worst-case staleness for a contact whose
@@ -18,20 +32,40 @@ import { enterSegmentTriggeredFlow, type LiveSegmentFlowRow } from "./flow-trigg
 export const SWEEP_INTERVAL_MS = 15 * 60_000;
 
 /**
- * A background job has more time budget than the segments engine's own
- * interactive save-eval timeout (15s), but must still be bounded -- mirrors
- * `recipient-snapshot.ts`'s `SNAPSHOT_STATEMENT_TIMEOUT_MS` discipline,
- * applied here to the per-flow bulk membership query.
+ * The stable id `upsertJobScheduler` dedupes by (WRK-13) -- constant across
+ * every boot, mirrors `partition-maintenance.worker.ts`'s/
+ * `send-reconciler.worker.ts`'s own scheduler ids, so registering it on
+ * every worker boot never creates a second competing schedule.
  */
-const BULK_QUERY_STATEMENT_TIMEOUT_MS = 60_000;
+export const FLOW_SEGMENT_SWEEP_SCHEDULER_ID = "flow-segment-sweep-tick";
 
-interface DueSegmentFlowRow {
+const JOB_NAME = "run-flow-segment-sweep-tick";
+
+/** Same shape as every other job-options site in this codebase (SPECIFICATION.md §5.3) -- `removeOnFail: false` matters here too: a tick that throws must remain inspectable in Redis, not vanish. */
+const DEFAULT_JOB_OPTIONS = {
+  attempts: 5,
+  backoff: { type: "exponential" as const, delay: 2000 },
+  removeOnComplete: { age: 86400 },
+  removeOnFail: false,
+};
+
+/**
+ * WRK-13: the OLD `tickQueue.add({repeat})` registration this migrates
+ * away from, named here purely so the one-time cleanup below can be
+ * deleted once every environment has booted past this migration (every
+ * live environment's Redis has, by then, had its legacy repeatable entry
+ * removed). Redis persists across deploys -- leaving this entry in place
+ * would run BOTH schedules after this change ships, and its empty `{}`
+ * payload now fails `flowSegmentSweepTickJobSchema`'s validation on every
+ * one of its ticks (it carries no `schemaVersion` at all).
+ */
+const LEGACY_JOB_NAME = "scan-segment-triggered-flows";
+const LEGACY_REPEAT_EVERY_MS = SWEEP_INTERVAL_MS;
+const LEGACY_JOB_ID = "scan-segment-triggered-flows";
+
+export interface DueSegmentFlowRow {
   id: string;
   workspaceId: string;
-  triggerSegmentId: string;
-  liveVersionId: string;
-  reentryMode: string;
-  reentryWindowDays: number | null;
 }
 
 /**
@@ -47,13 +81,18 @@ interface DueSegmentFlowRow {
  * trigger_segment_id IS NOT NULL AND live_version_id IS NOT NULL`), not a
  * session GUC -- this connection is never granted any write visibility
  * across tenants (`flows_scan` is SELECT-only).
+ *
+ * Selects only `id`/`workspace_id` -- unlike the old discovery half, the
+ * walk job re-derives the flow's trigger segment/reentry config itself
+ * (`flow-segment-sweep-flow.worker.ts`'s `loadFlowForSweep`), so this scan
+ * carries the same T-12-06-01 mitigation the threat register requires:
+ * every subsequent read/write re-enters tenant-scoped context, and the
+ * scan role's own visibility never extends past this one query.
  */
-async function findLiveSegmentTriggeredFlows(): Promise<DueSegmentFlowRow[]> {
+export async function findLiveSegmentTriggeredFlows(): Promise<DueSegmentFlowRow[]> {
   return withCrossWorkspaceScan(async (client) => {
     const { rows } = await client.query<DueSegmentFlowRow>(
-      `SELECT id, workspace_id as "workspaceId", trigger_segment_id as "triggerSegmentId",
-              live_version_id as "liveVersionId", reentry_mode as "reentryMode",
-              reentry_window_days as "reentryWindowDays"
+      `SELECT id, workspace_id as "workspaceId"
        FROM flows
        WHERE status = 'live' AND trigger_type = 'segment'
          AND trigger_segment_id IS NOT NULL AND live_version_id IS NOT NULL`
@@ -62,121 +101,93 @@ async function findLiveSegmentTriggeredFlows(): Promise<DueSegmentFlowRow[]> {
   });
 }
 
-async function loadSegmentDefinition(
-  client: PoolClient,
-  workspaceId: string,
-  segmentId: string
-): Promise<SegmentDefinition | null> {
-  const { rows } = await client.query<{ definition: SegmentDefinition }>(
-    `SELECT definition FROM segments WHERE id = $1 AND workspace_id = $2`,
-    [segmentId, workspaceId]
-  );
-  return rows[0]?.definition ?? null;
-}
-
 /**
- * RESEARCH.md Pitfall 1 (the prohibition this plan's threat register
- * explicitly guards, T-06-08-01): ONE compiled bulk query per
- * segment-triggered flow (`SELECT id FROM contacts WHERE <compiled where>`),
- * diffed in-process against `flow_segment_membership_snapshot` -- O(flows)
- * bulk queries total, NEVER a per-contact `isContactInSegment` point-check
- * loop across the whole workspace (which would be O(flows x contacts)).
- * Every subsequent read/write (segment lookup, contacts query, flow_runs
- * insert, snapshot upsert) re-enters `withTenant(row.workspaceId)` and is
- * fully RLS-scoped as normal -- the admin-scan exception above grants
- * nothing beyond the initial cross-tenant flow discovery.
- */
-async function sweepOneFlow(row: DueSegmentFlowRow): Promise<void> {
-  await withTenant(row.workspaceId, () =>
-    withTenantTransaction(async (client) => {
-      const definition = await loadSegmentDefinition(client, row.workspaceId, row.triggerSegmentId);
-      if (!definition) return; // D-24 restrict-delete should prevent this; defensive no-op
-
-      await client.query(`SELECT set_config('statement_timeout', $1, true)`, [
-        String(BULK_QUERY_STATEMENT_TIMEOUT_MS),
-      ]);
-      const { whereSql, params } = compileSegmentDefinition(definition, row.workspaceId);
-
-      // 06-19/WR-04/FLOW-04: clear this flow's snapshot row for any contact
-      // who no longer matches the trigger segment -- "seen" must mean
-      // "currently inside this membership episode", not "ever considered".
-      // Bounded anti-join DELETE (not a per-contact loop), covered by the
-      // statement_timeout set above. Runs BEFORE the empty-membership early
-      // return below so a fully-emptied segment still clears its stale rows.
-      const deleteParams = [...params, row.workspaceId, row.id];
-      const workspaceParamIdx = params.length + 1;
-      const flowParamIdx = params.length + 2;
-      await client.query(
-        `DELETE FROM flow_segment_membership_snapshot s
-         WHERE s.workspace_id = $${workspaceParamIdx} AND s.flow_id = $${flowParamIdx}
-           AND NOT EXISTS (SELECT 1 FROM contacts c WHERE ${whereSql} AND c.id = s.contact_id)`,
-        deleteParams
-      );
-
-      const { rows: matchingContacts } = await client.query<{ id: string }>(
-        `SELECT c.id FROM contacts c WHERE ${whereSql}`,
-        params
-      );
-      if (matchingContacts.length === 0) return;
-
-      const { rows: seenRows } = await client.query<{ contactId: string }>(
-        `SELECT contact_id as "contactId" FROM flow_segment_membership_snapshot WHERE workspace_id = $1 AND flow_id = $2`,
-        [row.workspaceId, row.id]
-      );
-      const seenIds = new Set(seenRows.map((seenRow) => seenRow.contactId));
-      const newContactIds = matchingContacts.map((contactRow) => contactRow.id).filter((id) => !seenIds.has(id));
-      if (newContactIds.length === 0) return;
-
-      const flowForEntry: LiveSegmentFlowRow = {
-        id: row.id,
-        liveVersionId: row.liveVersionId,
-        triggerSegmentId: row.triggerSegmentId,
-        reentryMode: row.reentryMode,
-        reentryWindowDays: row.reentryWindowDays,
-      };
-
-      // Same entry primitive the event-driven re-check uses (key_link:
-      // "same entry path as event triggers") -- canEnterFlow + version-pinned
-      // run creation + advance enqueue + snapshot upsert, per contact.
-      for (const contactId of newContactIds) {
-        await enterSegmentTriggeredFlow(client, row.workspaceId, flowForEntry, contactId);
-      }
-    })
-  );
-}
-
-/**
- * The sweep's per-tick body -- discovers every live segment-triggered flow
- * across every tenant and sweeps each one. Exported standalone (not only as
- * a Worker's inline processor), mirroring every other worker's exported-
- * processor convention in this codebase, so
- * `flow-segment-trigger.test.ts` (Task 3) can invoke a single tick directly
+ * The sweep's per-tick body (WRK-05/WRK-06): discovers every live
+ * segment-triggered flow across every tenant and enqueues ONE bounded walk
+ * job per flow, under a job id derived from the flow id (`sweep-${flowId}`)
+ * -- BullMQ's `Queue.add()` no-ops while a job with that id exists in ANY
+ * state, so a still-running (or still-retained-completed, hence
+ * `FLOW_SEGMENT_SWEEP_FLOW_JOB_OPTIONS`'s `removeOnComplete: true`) sweep
+ * for that flow is never double-enqueued by the next tick. Exported
+ * standalone (mirrors every other worker's exported-processor convention)
+ * so `flow-segment-trigger.test.ts` can invoke a single tick directly
  * without waiting on `SWEEP_INTERVAL_MS`'s real 15-minute repeat interval.
  */
 export async function runFlowSegmentSweepTick(): Promise<void> {
   const dueFlows = await findLiveSegmentTriggeredFlows();
   for (const row of dueFlows) {
-    await sweepOneFlow(row);
+    await flowSegmentSweepFlowQueue.add(
+      "sweep",
+      { schemaVersion: FLOW_SEGMENT_SWEEP_FLOW_SCHEMA_VERSION, workspaceId: row.workspaceId, flowId: row.id },
+      { jobId: `sweep-${row.id}` }
+    );
   }
 }
 
 /**
- * Constructs the repeatable flow-segment-sweep Worker (D-02b): scans every
- * live segment-triggered flow across every tenant every `SWEEP_INTERVAL_MS`
- * (15 min) and enrolls any contact newly matching that flow's trigger
- * segment. Registered in `apps/worker/src/server.ts`'s `buildWorker()`
- * (Task 2).
+ * Constructs the discovery Worker (WRK-05/WRK-06/WRK-13): registers the
+ * 15-minute job-scheduler tick (idempotent by `FLOW_SEGMENT_SWEEP_SCHEDULER_ID`)
+ * via the SAME `upsertJobScheduler` + try/catch/finally + registration-queue
+ * close shape `partition-maintenance.worker.ts`/`send-reconciler.worker.ts`
+ * established, migrating away from this file's own former
+ * `tickQueue.add({repeat})` form -- the old form had neither a try/finally
+ * nor a `queue.close()` call at all, leaking that registration queue's
+ * Redis connection for the life of the process. In the same guarded block,
+ * removes the legacy repeatable entry (see the three `LEGACY_*` constants
+ * above) -- tolerates a not-found result (a fresh environment has none).
+ * The processor validates every job's payload against
+ * `flowSegmentSweepTickJobSchema` (R-05) before calling `runFlowSegmentSweepTick`
+ * -- an unrecognized `schemaVersion` is DEFERRED (logged, never processed)
+ * rather than thrown.
  */
 export function createFlowSegmentSweepWorker(connection: ConnectionOptions): Worker {
-  const tickQueue = new Queue(FLOW_SEGMENT_SWEEP_QUEUE, { connection });
-  // Idempotent registration: BullMQ dedupes a repeatable job by its own
-  // repeat config + jobId, so calling this on every worker boot never
-  // creates a second competing repeatable schedule.
-  void tickQueue.add(
-    "scan-segment-triggered-flows",
-    {},
-    { repeat: { every: SWEEP_INTERVAL_MS }, jobId: "scan-segment-triggered-flows" }
+  const queue = new Queue(FLOW_SEGMENT_SWEEP_QUEUE, { connection });
+
+  const worker = new Worker(
+    FLOW_SEGMENT_SWEEP_QUEUE,
+    async (job) => {
+      const parsed = flowSegmentSweepTickJobSchema.safeParse(job.data);
+      if (!parsed.success) {
+        scrubbedConsole.error("flow-segment-sweep: deferring job with an unrecognized payload shape", {
+          jobId: job.id,
+        });
+        return;
+      }
+      await runFlowSegmentSweepTick();
+    },
+    { connection }
   );
 
-  return new Worker(FLOW_SEGMENT_SWEEP_QUEUE, runFlowSegmentSweepTick, { connection });
+  // Fire-and-forget registration -- copied in shape from
+  // partition-maintenance.worker.ts's/send-reconciler.worker.ts's
+  // try/catch/finally exactly: a Redis hiccup at boot must log, not crash
+  // every other registered worker via an unhandled promise rejection; the
+  // `finally` always closes this short-lived internal Queue handle so a
+  // failure here never leaks a standalone Redis connection past
+  // construction.
+  void (async () => {
+    try {
+      await queue.upsertJobScheduler(
+        FLOW_SEGMENT_SWEEP_SCHEDULER_ID,
+        { every: SWEEP_INTERVAL_MS },
+        {
+          name: JOB_NAME,
+          data: { schemaVersion: FLOW_SEGMENT_SWEEP_TICK_SCHEMA_VERSION },
+          opts: DEFAULT_JOB_OPTIONS,
+        }
+      );
+
+      // WRK-13 one-time cleanup: remove the legacy repeatable entry this
+      // file's OLD registration form created. Tolerated not-found (a fresh
+      // environment never had it) -- remove this block once every
+      // environment has booted past this migration.
+      await queue.removeRepeatable(LEGACY_JOB_NAME, { every: LEGACY_REPEAT_EVERY_MS }, LEGACY_JOB_ID);
+    } catch (err) {
+      scrubbedConsole.error("flow-segment-sweep: scheduler registration failed", err);
+    } finally {
+      await queue.close().catch(() => undefined);
+    }
+  })();
+
+  return worker;
 }

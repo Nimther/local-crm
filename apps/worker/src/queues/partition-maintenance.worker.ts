@@ -23,14 +23,17 @@ import {
  * by this plan's task 3) is the separate-process READER of that row.
  *
  * Registered with BullMQ's job-scheduler API (`upsertJobScheduler`), NOT the
- * interval-measured-from-boot form the four existing tick workers
+ * interval-measured-from-boot form three of the (then four) existing tick
+ * workers still use as of this file's own writing
  * (`analytics-reconciliation.worker.ts`, `campaign-scheduler.worker.ts`,
- * `flows/flow-reconciliation.worker.ts`, `flows/flow-segment-sweep.worker.ts`)
- * use -- D-13 asks for a fixed UTC hour, not a cadence measured from boot
- * time, so the operator knows when the job runs and the watchdog's
- * staleness threshold has a meaningful reference point. Those four workers
- * deliberately keep their older registration shape; retrofitting them is
- * outside this phase's boundary.
+ * `flows/flow-reconciliation.worker.ts`) -- D-13 asks for a fixed UTC hour,
+ * not a cadence measured from boot time, so the operator knows when the job
+ * runs and the watchdog's staleness threshold has a meaningful reference
+ * point. Those three workers deliberately keep their older registration
+ * shape; retrofitting them is outside this phase's boundary. (Phase 12,
+ * WRK-13, plan 12-06 migrated `flows/flow-segment-sweep.worker.ts` off the
+ * interval form onto this SAME `upsertJobScheduler` API -- it is no longer
+ * one of the "four", see that file's own header comment.)
  */
 
 /** This worker's own dedicated queue -- not shared with any other tick. */
