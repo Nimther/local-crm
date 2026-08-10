@@ -24,6 +24,8 @@
  * `apps/api/src/server.ts`'s job (task 2 of this plan).
  */
 
+import { scrubbedConsole } from "@mega-crm/redaction";
+
 /**
  * D-08: how often the watchdog polls Postgres for unacknowledged dead-letter
  * rows. A terminal failure can land at any moment (unlike the daily
@@ -236,7 +238,7 @@ export interface StartDeadLetterWatchdogDeps {
 export function startDeadLetterWatchdog(deps: StartDeadLetterWatchdogDeps): NodeJS.Timeout {
   return setInterval(() => {
     void checkDeadLetterHealthAndAlert({ ...deps, now: new Date() }).catch((err: unknown) => {
-      console.error("dead-letter-watchdog: health check failed", err);
+      scrubbedConsole.error("dead-letter-watchdog: health check failed", err);
     });
   }, DEAD_LETTER_WATCHDOG_INTERVAL_MS);
 }
