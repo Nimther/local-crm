@@ -35,7 +35,8 @@
     "failure:crash-pre-result-write": "vitest run --root apps/worker src/queues/__tests__/failure-injection/crash-pre-result-write.test.ts",
     "failure:reconciler-race": "vitest run --root apps/worker src/queues/__tests__/failure-injection/reconciler-retry-race.test.ts",
     "failure:redis-restart": "vitest run --root apps/worker src/queues/__tests__/failure-injection/redis-restart.test.ts",
-    "failure:all": "npm run failure:429 && npm run failure:timeout && npm run failure:reset && npm run failure:sigkill && npm run failure:crash-post-accept && npm run failure:crash-pre-result-write && npm run failure:reconciler-race && npm run failure:redis-restart",
+    "failure:segment-sweep-resume": "vitest run --root apps/worker src/queues/__tests__/failure-injection/segment-sweep-kill-resume.test.ts",
+    "failure:all": "npm run failure:429 && npm run failure:timeout && npm run failure:reset && npm run failure:sigkill && npm run failure:crash-post-accept && npm run failure:crash-pre-result-write && npm run failure:reconciler-race && npm run failure:redis-restart && npm run failure:segment-sweep-resume",
     "coverage:gate": "node scripts/coverage-gate.mjs",
     "coverage:ratchet": "node scripts/coverage-ratchet.mjs",
     "check:root-hygiene": "node scripts/check-root-hygiene.mjs"
