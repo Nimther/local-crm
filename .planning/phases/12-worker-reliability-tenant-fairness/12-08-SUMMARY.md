@@ -165,6 +165,11 @@ None - no external service configuration required.
 - Multi-instance worker deployment remains explicitly out of scope and is now documented as such in `ARCHITECTURE.md` §10 — any future move to multi-instance deployment must add its own execution-exclusivity mechanism before that move is safe.
 - No blockers identified for downstream plans.
 
+## Self-Check: PASSED
+
+- All 5 created files verified present on disk (queue-registry.ts, shutdown-budget.ts, graceful-shutdown.test.ts, shared-error-listener.test.ts, scheduler-registration.test.ts).
+- All 3 task commits (`15632a7`, `ead5987`, `8222b03`) verified present in `git log`.
+
 ---
 *Phase: 12-worker-reliability-tenant-fairness*
 *Completed: 2026-08-10*
