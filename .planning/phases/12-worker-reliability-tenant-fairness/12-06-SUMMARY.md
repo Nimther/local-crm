@@ -220,3 +220,7 @@ None - no external service configuration required.
 ---
 *Phase: 12-worker-reliability-tenant-fairness*
 *Completed: 2026-08-10*
+
+## Self-Check: PASSED
+
+All 14 claimed files verified present on disk; all 3 task commits (`471c86b`, `4e9f857`, `ee11589`) plus the docs commit (`bfd74dc`) verified present in `git log`.
