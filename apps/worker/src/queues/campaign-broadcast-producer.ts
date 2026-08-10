@@ -1,6 +1,7 @@
 import { Queue } from "bullmq";
 import { EMAIL_BROADCAST_QUEUE, type EmailBroadcastJob } from "@mega-crm/shared-schemas";
 import { buildJobOptions, buildRedisConnectionOptions, STANDARD_JOB_RETENTION } from "@mega-crm/queue-core";
+import { registerTrackedQueue } from "./queue-registry.js";
 
 /**
  * Built through the shared `@mega-crm/queue-core` factory (Phase 12,
@@ -32,7 +33,9 @@ function requireRedisUrl(): string {
  * one-Queue-instance-per-process convention (never share a `Queue`/`Worker`
  * instance across process boundaries).
  */
-export const emailBroadcastQueue = new Queue<EmailBroadcastJob>(EMAIL_BROADCAST_QUEUE, {
-  connection: buildRedisConnectionOptions(requireRedisUrl()),
-  defaultJobOptions: DEFAULT_JOB_OPTIONS,
-});
+export const emailBroadcastQueue = registerTrackedQueue(
+  new Queue<EmailBroadcastJob>(EMAIL_BROADCAST_QUEUE, {
+    connection: buildRedisConnectionOptions(requireRedisUrl()),
+    defaultJobOptions: DEFAULT_JOB_OPTIONS,
+  })
+);
