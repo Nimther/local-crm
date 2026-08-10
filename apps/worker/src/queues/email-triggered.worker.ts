@@ -2,6 +2,7 @@ import { Worker, type Job, type ConnectionOptions } from "bullmq";
 import { EMAIL_TRIGGERED_QUEUE, type EmailTriggeredJob } from "@mega-crm/shared-schemas";
 import { processSendJob, type ProcessSendJobDeps } from "./send-dispatch.js";
 import { SEND_LOCK_DURATION_MS } from "./queue-options.js";
+import { deferForTenantBucket } from "./tenant-deferral.js";
 
 /**
  * The triggered Worker's per-job handler, factored out of the `Worker`
@@ -13,7 +14,8 @@ import { SEND_LOCK_DURATION_MS } from "./queue-options.js";
 export async function handleEmailTriggeredJob(
   job: Job<EmailTriggeredJob>,
   worker: Worker<EmailTriggeredJob>,
-  deps: ProcessSendJobDeps = {}
+  deps: ProcessSendJobDeps = {},
+  token?: string
 ): Promise<void> {
   const result = await processSendJob(job.data, deps);
   // Phase 11 (D-11, plan 11-10): a test-send's `{ outcome: "unknown" }`
@@ -24,10 +26,11 @@ export async function handleEmailTriggeredJob(
   // reintroduce test-send retries.
   if (result.outcome === "rate_limited") {
     if (result.cause === "tenant_bucket") {
-      // SEND-07: same non-attempt-consuming backoff signal as the
-      // broadcast worker's tenant_bucket branch (Pattern 3).
-      await worker.rateLimit(result.rateLimitMs);
-      throw Worker.RateLimitError();
+      // Phase 12 (WRK-01): same shared-helper deferral as the broadcast
+      // worker's tenant_bucket branch -- see that file's doc comment for
+      // the full rationale. Both lanes reach `deferForTenantBucket` so they
+      // cannot drift.
+      await deferForTenantBucket(job, result.rateLimitMs, token);
     }
     // Phase 11 (D-10, plan 11-05): same bounded-retry change as the
     // broadcast worker's provider_backoff branch -- see that file's
@@ -54,7 +57,7 @@ export async function handleEmailTriggeredJob(
 export function createEmailTriggeredWorker(connection: ConnectionOptions): Worker<EmailTriggeredJob> {
   const worker: Worker<EmailTriggeredJob> = new Worker<EmailTriggeredJob>(
     EMAIL_TRIGGERED_QUEUE,
-    (job: Job<EmailTriggeredJob>) => handleEmailTriggeredJob(job, worker),
+    (job: Job<EmailTriggeredJob>, token) => handleEmailTriggeredJob(job, worker, {}, token),
     // Higher, always-on concurrency (SEND-03) -- this lane must keep
     // draining even while a large broadcast is in flight on the other queue.
     { connection, concurrency: 20, lockDuration: SEND_LOCK_DURATION_MS }
