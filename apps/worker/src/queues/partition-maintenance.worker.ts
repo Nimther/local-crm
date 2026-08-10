@@ -53,12 +53,15 @@ const JOB_NAME = "run-partition-maintenance";
 /**
  * Built through the shared `@mega-crm/queue-core` factory (Phase 12,
  * WRK-11, D-10), same shape as `campaign-scheduler.worker.ts`'s own.
- * `removeOnFail: false` (`STANDARD_JOB_RETENTION`) is load-bearing here: a
- * failed maintenance job must persist in Redis to be inspectable. Honest
- * state of that signal: Bull Board is not installed in this repository
- * (OPS-14 is Phase 15 scope; only mentioned in a comment in `server.ts`),
- * so a retained failed job is inspectable but nobody is watching a UI --
- * the operator email (this plan's tasks 2/3) is the actual loud signal.
+ * `STANDARD_JOB_RETENTION`'s bounded failed-job retention (WRK-09,
+ * `FAILED_JOB_RETENTION_SECONDS`, 7 days) is load-bearing here: a failed
+ * maintenance job persists in Redis, inspectable, for a full working week
+ * before it ages out -- the durable `dead_letter_jobs` row remains the
+ * record after that. Honest state of that signal: Bull Board is not
+ * installed in this repository (OPS-14 is Phase 15 scope; only mentioned in
+ * a comment in `server.ts`), so a retained failed job is inspectable but
+ * nobody is watching a UI -- the operator email (this plan's tasks 2/3) is
+ * the actual loud signal.
  */
 const DEFAULT_JOB_OPTIONS = buildJobOptions(STANDARD_JOB_RETENTION);
 

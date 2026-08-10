@@ -84,9 +84,11 @@ const JOB_NAME = "run-send-reconciler-tick";
 
 /**
  * Built through the shared `@mega-crm/queue-core` factory (Phase 12,
- * WRK-11, D-10) -- `removeOnFail: false` (`STANDARD_JOB_RETENTION`) matters
- * here too: a reconciler tick that throws must remain inspectable in
- * Redis, not vanish.
+ * WRK-11, D-10) -- `STANDARD_JOB_RETENTION`'s bounded failed-job retention
+ * (WRK-09, `FAILED_JOB_RETENTION_SECONDS`, 7 days) matters here too: a
+ * reconciler tick that throws remains inspectable in Redis for a full
+ * working week, not forever, and the durable `dead_letter_jobs` row is the
+ * terminal record beyond that.
  */
 const DEFAULT_JOB_OPTIONS = buildJobOptions(STANDARD_JOB_RETENTION);
 
