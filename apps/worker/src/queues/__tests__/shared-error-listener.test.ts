@@ -55,9 +55,9 @@ describe("attachSharedListeners exhaustiveness (Phase 12, WRK-08/WRK-10)", () =>
   it("attaches both listener kinds to every worker in the registry, iterating rather than checking a fixed subset", async () => {
     const connection = buildRedisConnectionOptions(redis.url);
     const workers = [
-      new Worker("shared-listener-test-a", async () => undefined, { connection }),
-      new Worker("shared-listener-test-b", async () => undefined, { connection }),
-      new Worker("shared-listener-test-c", async () => undefined, { connection }),
+      new Worker("shared-listener-test-a", () => Promise.resolve(undefined), { connection }),
+      new Worker("shared-listener-test-b", () => Promise.resolve(undefined), { connection }),
+      new Worker("shared-listener-test-c", () => Promise.resolve(undefined), { connection }),
     ];
 
     try {
@@ -74,7 +74,7 @@ describe("attachSharedListeners exhaustiveness (Phase 12, WRK-08/WRK-10)", () =>
 
   it("attaching does not double-register listeners when called more than once over the same array (WeakSet guard)", async () => {
     const connection = buildRedisConnectionOptions(redis.url);
-    const workers = [new Worker("shared-listener-test-idempotent", async () => undefined, { connection })];
+    const workers = [new Worker("shared-listener-test-idempotent", () => Promise.resolve(undefined), { connection })];
 
     try {
       attachSharedListeners(workers);
@@ -90,7 +90,7 @@ describe("attachSharedListeners exhaustiveness (Phase 12, WRK-08/WRK-10)", () =>
   it("a terminal failure on any registered worker reaches the dead-letter writer", async () => {
     writeDeadLetterOnTerminalFailure.mockClear();
     const connection = buildRedisConnectionOptions(redis.url);
-    const workers = [new Worker("shared-listener-test-terminal", async () => undefined, { connection })];
+    const workers = [new Worker("shared-listener-test-terminal", () => Promise.resolve(undefined), { connection })];
 
     try {
       attachSharedListeners(workers);
@@ -112,7 +112,7 @@ describe("attachSharedListeners exhaustiveness (Phase 12, WRK-08/WRK-10)", () =>
   it("a mid-retry failure on any registered worker never reaches the dead-letter writer", async () => {
     writeDeadLetterOnTerminalFailure.mockClear();
     const connection = buildRedisConnectionOptions(redis.url);
-    const workers = [new Worker("shared-listener-test-mid-retry", async () => undefined, { connection })];
+    const workers = [new Worker("shared-listener-test-mid-retry", () => Promise.resolve(undefined), { connection })];
 
     try {
       attachSharedListeners(workers);
@@ -134,7 +134,7 @@ describe("attachSharedListeners exhaustiveness (Phase 12, WRK-08/WRK-10)", () =>
   it("a failure event carrying no job never reaches the dead-letter writer", async () => {
     writeDeadLetterOnTerminalFailure.mockClear();
     const connection = buildRedisConnectionOptions(redis.url);
-    const workers = [new Worker("shared-listener-test-no-job", async () => undefined, { connection })];
+    const workers = [new Worker("shared-listener-test-no-job", () => Promise.resolve(undefined), { connection })];
 
     try {
       attachSharedListeners(workers);

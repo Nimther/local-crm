@@ -68,16 +68,18 @@ describe("graceful shutdown (Phase 12, WRK-07)", () => {
     const connectionOptions = buildRedisConnectionOptions(redis.url);
     const order: string[] = [];
 
-    const worker = new Worker("shutdown-order-worker-queue", async () => undefined, {
+    const worker = new Worker("shutdown-order-worker-queue", () => Promise.resolve(undefined), {
       connection: connectionOptions,
     });
-    vi.spyOn(worker, "close").mockImplementation(async () => {
+    vi.spyOn(worker, "close").mockImplementation(() => {
       order.push("worker-close");
+      return Promise.resolve();
     });
 
     const trackedQueue = registerTrackedQueue(new Queue("shutdown-order-tracked-queue", { connection: connectionOptions }));
-    vi.spyOn(trackedQueue, "close").mockImplementation(async () => {
+    vi.spyOn(trackedQueue, "close").mockImplementation(() => {
       order.push("tracked-queue-close");
+      return Promise.resolve();
     });
 
     const connection = createRedisConnection(redis.url);
@@ -94,7 +96,7 @@ describe("graceful shutdown (Phase 12, WRK-07)", () => {
 
   it("a second closeWorkerRuntime call resolves without rejecting (idempotency)", async () => {
     const connectionOptions = buildRedisConnectionOptions(redis.url);
-    const worker = new Worker("shutdown-idempotency-queue", async () => undefined, {
+    const worker = new Worker("shutdown-idempotency-queue", () => Promise.resolve(undefined), {
       connection: connectionOptions,
     });
     const connection = createRedisConnection(redis.url);
