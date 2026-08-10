@@ -147,6 +147,10 @@ None - no external service configuration required.
 - `dead_letter_jobs`/`dead_letter_alert_state` and both new helpers exist and are independently tested, but are NOT yet wired into any of the 15 workers in `apps/worker/src/server.ts` -- this plan built the mechanism (WRK-08/WRK-10's writer and listener), not the wiring across every `new Worker(...)` call site. That wiring, plus shortening per-queue `removeOnFail` retention now that a durable record exists (WRK-09/WRK-11, Pitfall 7's causal ordering), is later-plan scope within this phase (12-09 per the roadmap's own dependency note in this plan's objective).
 - The `db:migrate` CLI/Node-version incompatibility (first surfaced in 12-06, reconfirmed here) remains worth a follow-up investigation but has not blocked any plan in this phase so far -- two independent programmatic proofs (packages/db's own migration tests, apps/worker's ephemeral-database tests) cover every migration through `0054`.
 
+## Self-Check: PASSED
+
+All 7 files created by this plan verified present on disk; all 5 task-level commits (`184f098`, `46add7a`, `0d21987`, `a331239`, `6c2d463`) verified present in `git log`.
+
 ---
 *Phase: 12-worker-reliability-tenant-fairness*
 *Completed: 2026-08-10*
