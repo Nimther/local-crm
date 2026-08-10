@@ -15,8 +15,15 @@ export function buildRedisConnectionOptions(redisUrl: string): RedisOptions {
   return {
     host: url.hostname,
     port: url.port ? Number(url.port) : 6379,
-    username: url.username || undefined,
-    password: url.password || undefined,
+    // The WHATWG `URL` object's `.username`/`.password` getters return the
+    // PERCENT-ENCODED form of the credential, not the decoded original. A
+    // Redis password containing a character that must be percent-encoded in
+    // a URL (`@`, `:`, `/`, `%`, space, etc.) would otherwise be passed to
+    // ioredis's AUTH command still encoded -- ioredis uses `options.password`
+    // verbatim, it does not decode it. Decode both here so this is the one
+    // place that ever needs to know about URL percent-encoding at all.
+    username: url.username ? decodeURIComponent(url.username) : undefined,
+    password: url.password ? decodeURIComponent(url.password) : undefined,
     db,
     maxRetriesPerRequest: null,
   };

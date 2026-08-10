@@ -38,6 +38,12 @@ describe("buildRedisConnectionOptions", () => {
     expect(options.password).toBe("pass");
     expect(options.db).toBeUndefined();
   });
+
+  it("WR-03: percent-decodes a password containing a reserved character, so ioredis's AUTH command receives the original secret rather than its URL-encoded form", () => {
+    const options = buildRedisConnectionOptions("redis://user:p%40ss@host:6379/1");
+
+    expect(options.password).toBe("p@ss");
+  });
 });
 
 describe("buildJobOptions", () => {
