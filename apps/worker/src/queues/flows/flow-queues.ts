@@ -2,9 +2,11 @@ import { Queue } from "bullmq";
 import {
   EMAIL_TRIGGERED_QUEUE,
   FLOW_RUN_ADVANCE_QUEUE,
+  FLOW_SEGMENT_SWEEP_FLOW_QUEUE,
   FLOW_TRIGGER_EVALUATOR_QUEUE,
   type EmailTriggeredJob,
   type FlowRunAdvanceJob,
+  type FlowSegmentSweepFlowJob,
   type FlowTriggerCheckJob,
 } from "@mega-crm/shared-schemas";
 import { buildRedisConnectionOptions } from "../connection.js";
@@ -102,4 +104,39 @@ export async function enqueueFlowRunAdvance(
 export const flowTriggerEvaluatorQueue = new Queue<FlowTriggerCheckJob>(FLOW_TRIGGER_EVALUATOR_QUEUE, {
   connection: buildRedisConnectionOptions(requireRedisUrl()),
   defaultJobOptions: DEFAULT_JOB_OPTIONS,
+});
+
+/**
+ * flowSegmentSweepFlowQueue's OWN job options (Phase 12, WRK-05/WRK-06,
+ * D-09) -- deliberately NOT the shared `DEFAULT_JOB_OPTIONS` above, for the
+ * SAME reason `FLOW_RUN_ADVANCE_JOB_OPTIONS` isn't either (CR-01, 06-12):
+ * `removeOnComplete: true` so a retained completed job under a reused
+ * jobId (deterministic per flow, `sweep-${flowId}`, set by the discovery
+ * tick in `flow-segment-sweep.worker.ts`) can never shadow the NEXT
+ * discovery tick's enqueue for that same flow -- BullMQ's `Queue.add()`
+ * no-ops while a job with the given id exists in ANY state, and a
+ * still-running (or still-retained-completed) sweep for a flow must never
+ * be double-enqueued. `removeOnFail` is retained for a bounded window (not
+ * `false`/forever) so a failed walk is inspectable without growing Redis
+ * unboundedly.
+ */
+const FLOW_SEGMENT_SWEEP_FLOW_JOB_OPTIONS = {
+  attempts: 5,
+  backoff: { type: "exponential" as const, delay: 2000 },
+  removeOnComplete: true,
+  removeOnFail: { age: 86400 },
+};
+
+/**
+ * Worker-side producer Queue for `FLOW_SEGMENT_SWEEP_FLOW_QUEUE` (WRK-05/
+ * WRK-06, D-09) -- `flow-segment-sweep.worker.ts`'s discovery tick enqueues
+ * one bounded-walk job per live segment-triggered flow here. Same
+ * singleton-Queue-module convention as the other producers in this file;
+ * exported so both the discovery worker and the failure-injection/test
+ * suites can enqueue onto (or inspect) it directly without a live queue
+ * round trip through a separate module.
+ */
+export const flowSegmentSweepFlowQueue = new Queue<FlowSegmentSweepFlowJob>(FLOW_SEGMENT_SWEEP_FLOW_QUEUE, {
+  connection: buildRedisConnectionOptions(requireRedisUrl()),
+  defaultJobOptions: FLOW_SEGMENT_SWEEP_FLOW_JOB_OPTIONS,
 });

@@ -210,6 +210,9 @@ jobs:
       - name: Redis restart under a live queue
         run: npm run failure:redis-restart
 
+      - name: Segment sweep kill-resume
+        run: npm run failure:segment-sweep-resume
+
   # ---------------------------------------------------------------------------
   # Reports, never blocks. What CI needs from this job is not the browser
   # assertions — it is the evidence of WHICH database the run touched.

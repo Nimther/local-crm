@@ -3,12 +3,14 @@ import type { Pool } from "pg";
 import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import type { FlowDefinition } from "@mega-crm/flows-core";
 import type { SegmentDefinition } from "@mega-crm/segments-core";
+import { FLOW_SEGMENT_SWEEP_FLOW_SCHEMA_VERSION } from "@mega-crm/shared-schemas";
 import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool } from "../../test/db-fixture.js";
 import { processFlowRunAdvance } from "../flows/flow-run-advance.worker.js";
 import { processFlowTriggerCheck } from "../flows/flow-trigger-evaluator.worker.js";
-import { runFlowSegmentSweepTick } from "../flows/flow-segment-sweep.worker.js";
+import { findLiveSegmentTriggeredFlows, runFlowSegmentSweepTick } from "../flows/flow-segment-sweep.worker.js";
+import { runFlowSegmentSweepFlowJob } from "../flows/flow-segment-sweep-flow.worker.js";
 import { processFlowEnrollExisting } from "../flows/flow-enroll-existing.worker.js";
-import { flowRunAdvanceQueue } from "../flows/flow-queues.js";
+import { flowRunAdvanceQueue, flowSegmentSweepFlowQueue } from "../flows/flow-queues.js";
 import { insertFixtureOrganization } from "../../test/failure-fixtures.js";
 
 /**
@@ -36,6 +38,31 @@ describe("06-08: branch node + segment-entry trigger (sweep + enroll-existing)",
   afterAll(async () => {
     await pool.end();
   });
+
+  /**
+   * Phase 12 (WRK-05/WRK-06, D-09, plan 12-06): the sweep's discovery tick
+   * (`runFlowSegmentSweepTick`) now only ENQUEUES one bounded walk job per
+   * live segment-triggered flow -- it no longer sweeps inline. Every
+   * existing assertion below that previously called `runFlowSegmentSweepTick()`
+   * and immediately checked for a created run needs the walk to actually
+   * run too, without waiting on a live BullMQ worker to drain the queue --
+   * mirrors `campaign-scheduler-scan.test.ts` driving `findDueCampaignCandidates`/
+   * `transitionToSending` directly rather than through a live Worker. This
+   * runs discovery AND every discovered flow's walk synchronously, exactly
+   * like the split's real runtime behavior once a worker drains the walk
+   * queue, so it exercises the SAME two functions production wires
+   * together, just without the queue round-trip.
+   */
+  async function runFullSweep(): Promise<void> {
+    const dueFlows = await findLiveSegmentTriggeredFlows();
+    for (const row of dueFlows) {
+      await runFlowSegmentSweepFlowJob({
+        schemaVersion: FLOW_SEGMENT_SWEEP_FLOW_SCHEMA_VERSION,
+        workspaceId: row.workspaceId,
+        flowId: row.id,
+      });
+    }
+  }
 
   // 10-09 (SEC-05): delegates to the mega_crm_auth-backed INSERT in
   // failure-fixtures.ts instead of duplicating it -- mega_crm_app holds
@@ -262,7 +289,7 @@ describe("06-08: branch node + segment-entry trigger (sweep + enroll-existing)",
     const { flowId } = await seedLiveSegmentFlow(workspaceId, segmentId);
     const contactId = await createFixtureContact(workspaceId, { tier: "vip" });
 
-    await runFlowSegmentSweepTick();
+    await runFullSweep();
 
     const runs = await getRunsForContact(workspaceId, flowId, contactId);
     expect(runs).toHaveLength(1);
@@ -282,16 +309,37 @@ describe("06-08: branch node + segment-entry trigger (sweep + enroll-existing)",
     const { flowId } = await seedLiveSegmentFlow(workspaceId, segmentId);
     const contactId = await createFixtureContact(workspaceId, { tier: "vip" });
 
-    await runFlowSegmentSweepTick();
+    await runFullSweep();
     const firstPassRuns = await getRunsForContact(workspaceId, flowId, contactId);
     expect(firstPassRuns).toHaveLength(1);
 
     // A second sweep tick with the SAME still-matching contact must not
     // create a second run -- the snapshot row from the first pass excludes
     // it from the bulk diff.
-    await runFlowSegmentSweepTick();
+    await runFullSweep();
     const secondPassRuns = await getRunsForContact(workspaceId, flowId, contactId);
     expect(secondPassRuns).toHaveLength(1);
+  });
+
+  it("12-06: discovery enqueues exactly one walk job per live flow, under a deterministic id -- a second tick for a still-pending flow does not double-enqueue", async () => {
+    const workspaceId = await freshWorkspaceId("flow-sweep-discovery-dedup");
+    const segmentId = await createFixtureSegment(workspaceId, VIP_SEGMENT_DEFINITION);
+    const { flowId } = await seedLiveSegmentFlow(workspaceId, segmentId);
+
+    await runFlowSegmentSweepTick();
+
+    const jobId = `sweep-${flowId}`;
+    const firstJob = await flowSegmentSweepFlowQueue.getJob(jobId);
+    expect(firstJob, "discovery must enqueue a walk job under the deterministic sweep-${flowId} id").toBeDefined();
+
+    // A second discovery tick while the first job is still pending (never
+    // run/removed here) must NOT double-enqueue -- BullMQ's own dedup by
+    // jobId, which is exactly why the id is deterministic per flow rather
+    // than per tick.
+    await runFlowSegmentSweepTick();
+    const jobsAfterSecondTick = await flowSegmentSweepFlowQueue.getJobs(["waiting", "delayed", "active", "completed"]);
+    const matchingJobs = jobsAfterSecondTick.filter((job) => job.id === jobId);
+    expect(matchingJobs, "a still-pending walk for this flow must never be double-enqueued").toHaveLength(1);
   });
 
   it("D-02a: the event-driven flow-trigger-check job also enrolls a contact newly matching a segment-triggered flow", async () => {
@@ -366,7 +414,7 @@ describe("06-08: branch node + segment-entry trigger (sweep + enroll-existing)",
 
     // A future sweep tick must not enroll this contact either -- the seed
     // already marked it "seen".
-    await runFlowSegmentSweepTick();
+    await runFullSweep();
     expect(await getRunsForContact(workspaceId, flowId, memberA)).toHaveLength(0);
   });
 
@@ -410,7 +458,7 @@ describe("06-08: branch node + segment-entry trigger (sweep + enroll-existing)",
     });
     const everyTimeContactId = await createFixtureContact(everyTimeWorkspaceId, { tier: "vip" });
 
-    await runFlowSegmentSweepTick();
+    await runFullSweep();
     expect(await getRunsForContact(everyTimeWorkspaceId, everyTimeFlowId, everyTimeContactId)).toHaveLength(1);
     expect(await getSnapshotSeen(everyTimeWorkspaceId, everyTimeFlowId, everyTimeContactId)).toBe(true);
 
@@ -420,14 +468,14 @@ describe("06-08: branch node + segment-entry trigger (sweep + enroll-existing)",
 
     // Leave the trigger segment.
     await setContactTier(everyTimeWorkspaceId, everyTimeContactId, "regular");
-    await runFlowSegmentSweepTick();
+    await runFullSweep();
     // RED under current code: the snapshot row is never cleared on segment
     // exit, so this stays true instead of false.
     expect(await getSnapshotSeen(everyTimeWorkspaceId, everyTimeFlowId, everyTimeContactId)).toBe(false);
 
     // Rejoin the trigger segment.
     await setContactTier(everyTimeWorkspaceId, everyTimeContactId, "vip");
-    await runFlowSegmentSweepTick();
+    await runFullSweep();
     // RED under current code: the rejoin never re-enters, so this stays at
     // length 1 instead of 2.
     expect(await getRunsForContact(everyTimeWorkspaceId, everyTimeFlowId, everyTimeContactId)).toHaveLength(2);
@@ -441,16 +489,16 @@ describe("06-08: branch node + segment-entry trigger (sweep + enroll-existing)",
     });
     const onceEverContactId = await createFixtureContact(onceEverWorkspaceId, { tier: "vip" });
 
-    await runFlowSegmentSweepTick();
+    await runFullSweep();
     expect(await getRunsForContact(onceEverWorkspaceId, onceEverFlowId, onceEverContactId)).toHaveLength(1);
 
     await markRunTerminal(onceEverWorkspaceId, onceEverFlowId, onceEverContactId);
 
     await setContactTier(onceEverWorkspaceId, onceEverContactId, "regular");
-    await runFlowSegmentSweepTick();
+    await runFullSweep();
 
     await setContactTier(onceEverWorkspaceId, onceEverContactId, "vip");
-    await runFlowSegmentSweepTick();
+    await runFullSweep();
 
     // once_ever stays blocked -- canEnterFlow denies because a prior run
     // exists for this contact x flow, proving the fix restores

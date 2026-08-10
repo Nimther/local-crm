@@ -7,6 +7,7 @@ import type { Pool } from "pg";
 import { withCrossWorkspaceScan, withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { getScanTestDatabaseUrl } from "@mega-crm/test-support";
 import { dispatchSendGate } from "@mega-crm/delivery-core";
+import { FLOW_SEGMENT_SWEEP_FLOW_SCHEMA_VERSION } from "@mega-crm/shared-schemas";
 import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool, createFixtureFlowRun } from "../../test/db-fixture.js";
 import { insertFixtureOrganization, createFixtureCampaign, createFixtureContact, connectFixtureSendgridKey } from "../../test/failure-fixtures.js";
 
@@ -18,7 +19,8 @@ import { reconcileWorkspaceDay } from "../analytics-reconciliation.worker.js";
 import { processFlowRunAdvance } from "../flows/flow-run-advance.worker.js";
 import { findDueFlowRunCandidates, transitionAndNudge } from "../flows/flow-reconciliation.worker.js";
 import { processFlowTriggerCheck } from "../flows/flow-trigger-evaluator.worker.js";
-import { runFlowSegmentSweepTick } from "../flows/flow-segment-sweep.worker.js";
+import { findLiveSegmentTriggeredFlows } from "../flows/flow-segment-sweep.worker.js";
+import { runFlowSegmentSweepFlowJob } from "../flows/flow-segment-sweep-flow.worker.js";
 import { processFlowEnrollExisting } from "../flows/flow-enroll-existing.worker.js";
 import { findReconcilableCandidates, resolveOneSend } from "../send-reconciler.worker.js";
 
@@ -551,7 +553,23 @@ describe("Negative cross-tenant suite: background-job families (SEC-16)", () => 
     });
   });
 
-  describe("flow-segment-sweep (runFlowSegmentSweepTick, scan consumer)", () => {
+  describe("flow-segment-sweep (findLiveSegmentTriggeredFlows + runFlowSegmentSweepFlowJob, scan consumer)", () => {
+    // Phase 12 (WRK-05/WRK-06, D-09, plan 12-06): the sweep's discovery
+    // scan (findLiveSegmentTriggeredFlows) now only enqueues one bounded
+    // walk job per flow; this drives discovery AND the walk directly,
+    // mirroring findDueFlowRunCandidates/transitionAndNudge and
+    // findReconcilableCandidates/resolveOneSend elsewhere in this file.
+    async function runFullSweep(): Promise<void> {
+      const dueFlows = await findLiveSegmentTriggeredFlows();
+      for (const row of dueFlows) {
+        await runFlowSegmentSweepFlowJob({
+          schemaVersion: FLOW_SEGMENT_SWEEP_FLOW_SCHEMA_VERSION,
+          workspaceId: row.workspaceId,
+          flowId: row.id,
+        });
+      }
+    }
+
     async function seedLiveSegmentFlowWithMatchingContact(nameSeed: string): Promise<{ workspaceId: string; flowId: string; contactId: string }> {
       const workspaceId = await freshWorkspaceId(nameSeed);
       const contactId = await insertContact(workspaceId, { country: "RU" });
@@ -587,7 +605,7 @@ describe("Negative cross-tenant suite: background-job families (SEC-16)", () => 
       const a = await seedLiveSegmentFlowWithMatchingContact("jobs-sweep-a");
       const b = await seedLiveSegmentFlowWithMatchingContact("jobs-sweep-b");
 
-      await runFlowSegmentSweepTick();
+      await runFullSweep();
 
       const aRun = await withTenant(a.workspaceId, () =>
         withTenantTransaction(async (client) => {
@@ -789,6 +807,12 @@ describe("Negative cross-tenant suite: background-job families (SEC-16)", () => 
       "FlowReconciliation",
       "FlowTriggerEvaluator",
       "FlowSegmentSweep",
+      // 12-06: the bounded per-flow walk, split from FlowSegmentSweep's
+      // discovery half -- covered by the SAME describe block above
+      // (findLiveSegmentTriggeredFlows + runFlowSegmentSweepFlowJob), since
+      // the discovery scan alone proves nothing about cross-tenant
+      // enrollment without the walk actually running.
+      "FlowSegmentSweepFlow",
       "FlowEnrollExisting",
       "AnalyticsReconciliation",
       "SendReconciler",

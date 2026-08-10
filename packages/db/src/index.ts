@@ -20,6 +20,7 @@ import * as flowVersionsSchema from "./schema/flow-versions.js";
 import * as flowRunsSchema from "./schema/flow-runs.js";
 import * as flowRunStepsSchema from "./schema/flow-run-steps.js";
 import * as flowSegmentMembershipSnapshotSchema from "./schema/flow-segment-membership-snapshot.js";
+import * as flowSegmentSweepCheckpointSchema from "./schema/flow-segment-sweep-checkpoint.js";
 import * as subscriptionStatusHistorySchema from "./schema/subscription-status-history.js";
 import * as workspaceDailyRollupSchema from "./schema/workspace-daily-rollup.js";
 import * as partitionMaintenanceRunsSchema from "./schema/partition-maintenance-runs.js";
@@ -46,6 +47,7 @@ const schema = {
   ...flowRunsSchema,
   ...flowRunStepsSchema,
   ...flowSegmentMembershipSnapshotSchema,
+  ...flowSegmentSweepCheckpointSchema,
   ...subscriptionStatusHistorySchema,
   ...workspaceDailyRollupSchema,
   ...partitionMaintenanceRunsSchema,
@@ -139,6 +141,7 @@ export * from "./schema/flow-versions.js";
 export * from "./schema/flow-runs.js";
 export * from "./schema/flow-run-steps.js";
 export * from "./schema/flow-segment-membership-snapshot.js";
+export * from "./schema/flow-segment-sweep-checkpoint.js";
 export * from "./schema/subscription-status-history.js";
 export * from "./schema/workspace-daily-rollup.js";
 export * from "./schema/partition-maintenance-runs.js";
