@@ -189,6 +189,9 @@ jobs:
       - name: SendGrid rate limit (429)
         run: npm run failure:429
 
+      - name: Two-tenant fairness under one tenant's saturation
+        run: npm run failure:tenant-fairness
+
       - name: SendGrid timeout
         run: npm run failure:timeout
 
