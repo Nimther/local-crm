@@ -11,7 +11,7 @@ import {
   type AcquireSlotResult,
   type TenantLane,
 } from "../tenant-lane-semaphore.js";
-import { SEND_LOCK_DURATION_MS } from "../queue-options.js";
+import { SEND_LOCK_DURATION_MS } from "@mega-crm/queue-core";
 
 /**
  * WRK-02 (D-01/D-02/D-03): the per-tenant-per-lane concurrency semaphore.

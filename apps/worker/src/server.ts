@@ -1,7 +1,7 @@
 import "./load-env.js";
 import type { Worker } from "bullmq";
 import { scrubbedConsole } from "@mega-crm/redaction";
-import { buildRedisConnectionOptions, createRedisConnection } from "./queues/connection.js";
+import { buildRedisConnectionOptions, createRedisConnection } from "@mega-crm/queue-core";
 import { createEventsIngestWorker } from "./queues/events-ingest.worker.js";
 import { createImportsCsvWorker } from "./queues/imports-csv.worker.js";
 import { createEmailBroadcastWorker } from "./queues/email-broadcast.worker.js";

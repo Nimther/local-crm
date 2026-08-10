@@ -1,7 +1,7 @@
 import { Worker, type Job, type ConnectionOptions } from "bullmq";
 import { EMAIL_TRIGGERED_QUEUE, type EmailTriggeredJob } from "@mega-crm/shared-schemas";
 import { processSendJob, type ProcessSendJobDeps } from "./send-dispatch.js";
-import { SEND_LOCK_DURATION_MS } from "./queue-options.js";
+import { SEND_LOCK_DURATION_MS } from "@mega-crm/queue-core";
 import { deferForTenantBucket } from "./tenant-deferral.js";
 
 /**

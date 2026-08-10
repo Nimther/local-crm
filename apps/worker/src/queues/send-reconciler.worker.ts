@@ -2,6 +2,7 @@ import { Queue, Worker, type ConnectionOptions } from "bullmq";
 import { pool, withCrossWorkspaceScan, withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { scrubbedConsole } from "@mega-crm/redaction";
 import { recordReconcilerRun } from "@mega-crm/db/src/reconciler/reconciler-run.js";
+import { buildJobOptions, STANDARD_JOB_RETENTION } from "@mega-crm/queue-core";
 import {
   SEND_RECONCILER_QUEUE,
   SEND_RECONCILER_TICK_SCHEMA_VERSION,
@@ -82,16 +83,12 @@ export const SEND_RECONCILER_SCHEDULER_ID = "send-reconciler-tick";
 const JOB_NAME = "run-send-reconciler-tick";
 
 /**
- * Same block as the other 9 job-options sites in this codebase (see
- * SPECIFICATION.md §5.3) -- `removeOnFail: false` matters here too: a
- * reconciler tick that throws must remain inspectable in Redis, not vanish.
+ * Built through the shared `@mega-crm/queue-core` factory (Phase 12,
+ * WRK-11, D-10) -- `removeOnFail: false` (`STANDARD_JOB_RETENTION`) matters
+ * here too: a reconciler tick that throws must remain inspectable in
+ * Redis, not vanish.
  */
-const DEFAULT_JOB_OPTIONS = {
-  attempts: 5,
-  backoff: { type: "exponential" as const, delay: 2000 },
-  removeOnComplete: { age: 86400 },
-  removeOnFail: false,
-};
+const DEFAULT_JOB_OPTIONS = buildJobOptions(STANDARD_JOB_RETENTION);
 
 export interface ReconcilableCandidateRow {
   id: string;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildRedisConnectionOptions } from "../connection.js";
+import { buildRedisConnectionOptions } from "@mega-crm/queue-core";
 
 describe("buildRedisConnectionOptions", () => {
   it("builds connection options from a REDIS_URL with maxRetriesPerRequest null (required by BullMQ)", () => {

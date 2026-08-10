@@ -1,6 +1,7 @@
 import { Queue, Worker, type ConnectionOptions } from "bullmq";
 import { Pool } from "pg";
 import { scrubbedConsole } from "@mega-crm/redaction";
+import { buildJobOptions, STANDARD_JOB_RETENTION } from "@mega-crm/queue-core";
 import {
   BUFFER_ALERT_THRESHOLD_MONTHS,
   LOOKAHEAD_MONTHS,
@@ -50,20 +51,16 @@ const JOB_SCHEDULER_ID = "partition-maintenance-daily";
 const JOB_NAME = "run-partition-maintenance";
 
 /**
- * Copied verbatim from `campaign-scheduler.worker.ts`. `removeOnFail: false`
- * is load-bearing here: a failed maintenance job must persist in Redis to
- * be inspectable. Honest state of that signal: Bull Board is not installed
- * in this repository (OPS-14 is Phase 15 scope; only mentioned in a comment
- * in `server.ts`), so a retained failed job is inspectable but nobody is
- * watching a UI -- the operator email (this plan's tasks 2/3) is the actual
- * loud signal.
+ * Built through the shared `@mega-crm/queue-core` factory (Phase 12,
+ * WRK-11, D-10), same shape as `campaign-scheduler.worker.ts`'s own.
+ * `removeOnFail: false` (`STANDARD_JOB_RETENTION`) is load-bearing here: a
+ * failed maintenance job must persist in Redis to be inspectable. Honest
+ * state of that signal: Bull Board is not installed in this repository
+ * (OPS-14 is Phase 15 scope; only mentioned in a comment in `server.ts`),
+ * so a retained failed job is inspectable but nobody is watching a UI --
+ * the operator email (this plan's tasks 2/3) is the actual loud signal.
  */
-const DEFAULT_JOB_OPTIONS = {
-  attempts: 5,
-  backoff: { type: "exponential" as const, delay: 2000 },
-  removeOnComplete: { age: 86400 },
-  removeOnFail: false,
-};
+const DEFAULT_JOB_OPTIONS = buildJobOptions(STANDARD_JOB_RETENTION);
 
 /**
  * 09-REVIEW CR-03: a dedicated Postgres pool for this worker's DB path,

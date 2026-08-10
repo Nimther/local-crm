@@ -1,19 +1,15 @@
 import { Queue } from "bullmq";
 import { EMAIL_BROADCAST_QUEUE, type EmailBroadcastJob } from "@mega-crm/shared-schemas";
-import { buildRedisConnectionOptions } from "./connection.js";
+import { buildJobOptions, buildRedisConnectionOptions, STANDARD_JOB_RETENTION } from "@mega-crm/queue-core";
 
 /**
- * Mirrors apps/api/src/modules/campaigns/campaign-queues.ts's
- * `DEFAULT_JOB_OPTIONS` (02-10 convention): 5 attempts w/ exponential
- * backoff, completed jobs pruned after 24h, failed jobs kept for
- * inspection/manual retry.
+ * Built through the shared `@mega-crm/queue-core` factory (Phase 12,
+ * WRK-11, D-10) -- 5 attempts w/ exponential backoff, completed jobs pruned
+ * after 24h, failed jobs kept for inspection/manual retry. Previously its
+ * own literal (02-10 convention), mirroring apps/api's own
+ * `campaign-queues.ts`; both now build from the same shared constants.
  */
-const DEFAULT_JOB_OPTIONS = {
-  attempts: 5,
-  backoff: { type: "exponential" as const, delay: 2000 },
-  removeOnComplete: { age: 86400 },
-  removeOnFail: false,
-};
+const DEFAULT_JOB_OPTIONS = buildJobOptions(STANDARD_JOB_RETENTION);
 
 function requireRedisUrl(): string {
   const redisUrl = process.env.REDIS_URL;

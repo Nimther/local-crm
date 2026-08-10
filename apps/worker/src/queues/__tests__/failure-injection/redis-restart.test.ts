@@ -5,7 +5,7 @@ import { Queue, Worker } from "bullmq";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startTempRedis, type TempRedis } from "@mega-crm/test-support";
 
-import { buildRedisConnectionOptions } from "../../connection.js";
+import { buildRedisConnectionOptions } from "@mega-crm/queue-core";
 
 /**
  * 08-13 (QG-06 scenario 5, WRK-12) — jobs survive a Redis restart.

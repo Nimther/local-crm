@@ -5,7 +5,7 @@ import { startTempRedis, type TempRedis } from "@mega-crm/test-support";
 import type { PartitionClient } from "@mega-crm/db/src/partitions/ensure-partitions.js";
 import type { MaintenanceRunSnapshot } from "@mega-crm/db/src/partitions/maintenance-run.js";
 
-import { buildRedisConnectionOptions } from "../connection.js";
+import { buildRedisConnectionOptions } from "@mega-crm/queue-core";
 import {
   createPartitionMaintenanceWorker,
   processPartitionMaintenance,

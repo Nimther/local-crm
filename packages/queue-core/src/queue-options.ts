@@ -1,11 +1,13 @@
 /**
  * Single source for the send lane's BullMQ timing/retry numbers (Phase 11,
- * D-15, DLV-06/DLV-09). Deliberately its own file so Phase 12's WRK-11
- * queue-options consolidation absorbs THIS file rather than duplicating it
- * -- see `SEND_JOB_MAX_ATTEMPTS`/`SEND_JOB_BACKOFF_DELAY_MS` below for the
- * three existing literal copies WRK-11 is expected to collapse into an
- * import of these constants (not done here -- this plan only introduces the
- * shared destination).
+ * D-15, DLV-06/DLV-09) and the retention-parameterised job-options factory
+ * (Phase 12, WRK-11, D-10). Previously `apps/worker/src/queues/queue-options.ts`
+ * was written expressly to be absorbed here -- its own doc comments named
+ * three literal copies of `{attempts: 5, backoff: {type: "exponential",
+ * delay: 2000}}` (`campaign-broadcast-producer.ts`, `campaign-queues.ts`,
+ * `flows/flow-queues.ts`); this consolidation collapsed the worker-side
+ * copies into imports of `buildJobOptions` and these constants (the
+ * application-side copies close in plan 12-11).
  */
 
 /**
@@ -33,15 +35,9 @@ export const CLAIM_TX_MARGIN_MS = 5_000;
 export const RECORD_TX_MARGIN_MS = 5_000;
 
 /**
- * Bounded provider-backoff retry budget (D-10) -- mirrors the THREE existing
- * literal copies of `{ attempts: 5, backoff: { type: "exponential", delay:
- * 2000 } }`:
- *   - `apps/worker/src/queues/campaign-broadcast-producer.ts`
- *   - `apps/api/src/modules/campaigns/campaign-queues.ts`
- *   - `apps/worker/src/queues/flows/flow-queues.ts`
- * Phase 12's WRK-11 is where those three collapse into an import of THESE
- * constants -- do not move them now; this plan only introduces the shared
- * destination they will eventually point at.
+ * Bounded provider-backoff retry budget (D-10) -- the shared attempts/backoff
+ * shape every worker-side and application-side queue's job options are built
+ * from via `buildJobOptions` below.
  */
 export const SEND_JOB_MAX_ATTEMPTS = 5;
 export const SEND_JOB_BACKOFF_DELAY_MS = 2_000;
@@ -75,3 +71,53 @@ export const SEND_MAX_JOB_LIFETIME_MS =
   SEND_JOB_MAX_ATTEMPTS * SEND_LOCK_DURATION_MS +
   computeExponentialBackoffSumMs(SEND_JOB_MAX_ATTEMPTS, SEND_JOB_BACKOFF_DELAY_MS) +
   SEND_LOCK_DURATION_MS;
+
+/**
+ * Retention shapes (Phase 12, WRK-09/WRK-11, D-10, Pitfall 6): `STANDARD_JOB_RETENTION`
+ * is the shape most queues use today; `FLOW_RUN_ADVANCE_RETENTION` is
+ * `flow-run-advance`'s own deliberately DIFFERENT shape (CR-01 fix, 06-12) --
+ * see that queue's own comment at its call site
+ * (`apps/worker/src/queues/flows/flow-queues.ts`) for why its retention
+ * differs. `removeOnComplete: true` there means a completed advance job is
+ * removed immediately so a future wake for the SAME run can never be
+ * shadowed by a still-retained completed job under a reused id (BullMQ's
+ * `Queue.add()` no-ops while a job with the given id exists in ANY state).
+ *
+ * `buildJobOptions` takes retention as a REQUIRED parameter, with no
+ * default, typed as the union of EXACTLY these two shapes -- a factory that
+ * baked in one retention shape, or accepted an arbitrary third one, would
+ * let the differentiated policy be lost silently and reintroduce the
+ * shadowed-wake bug this repository already fixed once.
+ */
+export const STANDARD_JOB_RETENTION = {
+  removeOnComplete: { age: 86_400 },
+  removeOnFail: false,
+} as const;
+
+export const FLOW_RUN_ADVANCE_RETENTION = {
+  removeOnComplete: true,
+  removeOnFail: { age: 86_400 },
+} as const;
+
+type JobRetention = typeof STANDARD_JOB_RETENTION | typeof FLOW_RUN_ADVANCE_RETENTION;
+
+export interface BuiltJobOptions {
+  attempts: number;
+  backoff: { type: "exponential"; delay: number };
+  removeOnComplete: JobRetention["removeOnComplete"];
+  removeOnFail: JobRetention["removeOnFail"];
+}
+
+/**
+ * Builds a queue's `defaultJobOptions` (or a per-job options object) from
+ * the shared attempts/backoff shape plus a per-queue retention choice.
+ * Behavior (attempts/backoff) is identical for every caller -- only
+ * retention varies, and only between the two shapes named above.
+ */
+export function buildJobOptions(retention: JobRetention): BuiltJobOptions {
+  return {
+    attempts: SEND_JOB_MAX_ATTEMPTS,
+    backoff: { type: "exponential", delay: SEND_JOB_BACKOFF_DELAY_MS },
+    ...retention,
+  };
+}
