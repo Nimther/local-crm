@@ -4,6 +4,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 import { pool } from "@mega-crm/tenant-context";
 import { writeDeadLetterOnTerminalFailure } from "@mega-crm/queue-core";
+import { scrubbedConsole } from "@mega-crm/redaction";
 
 import { ensureTestDbMigrated, getTestDatabaseUrl } from "../../../test/db-fixture.js";
 import {
@@ -336,7 +337,14 @@ describe("startDeadLetterWatchdog", () => {
 
   it("test 10: returns an interval handle and a rejected check is caught and logged rather than escaping", async () => {
     vi.useFakeTimers();
-    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    // Spy on `scrubbedConsole.error` itself (not `console.error`) so this
+    // assertion actually pins the fact that the interval-catch handler
+    // routes through the redaction wrapper. Spying on `console.error`
+    // would pass identically whether the code called `console.error(...)`
+    // directly or `scrubbedConsole.error(...)` (which internally forwards
+    // to `console.error`), since `expect.anything()` doesn't distinguish
+    // scrubbed from unscrubbed arguments (IN-01, 12-REVIEW.md iteration 2).
+    const scrubbedErrorSpy = vi.spyOn(scrubbedConsole, "error").mockImplementation(() => undefined);
 
     const client = {
       query: () => Promise.reject(new Error("db down")),
@@ -353,7 +361,7 @@ describe("startDeadLetterWatchdog", () => {
     // Let the rejected microtask's .catch() handler run.
     await Promise.resolve();
 
-    expect(consoleErrorSpy).toHaveBeenCalledWith(
+    expect(scrubbedErrorSpy).toHaveBeenCalledWith(
       "dead-letter-watchdog: health check failed",
       expect.anything(),
     );
