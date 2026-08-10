@@ -59,7 +59,7 @@ key-decisions:
 patterns-established:
   - "buildJobOptions(retention) is the sole way any worker-side queue builds its defaultJobOptions -- no module under apps/worker declares its own attempts/backoff/retention literal"
 
-requirements-completed: [WRK-11]
+requirements-completed: []  # WRK-11 is WORKER-HALF ONLY here -- do NOT check it off in REQUIREMENTS.md yet. Plan 12-11 closes the apps/api-side rows (per this plan's own objective); WRK-11 is fully satisfied only once 12-11 lands. REQUIREMENTS.md left untouched by this plan on purpose.
 
 coverage:
   - id: D1
