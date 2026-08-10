@@ -188,6 +188,10 @@ None - no external service configuration required.
 - `apps/worker` has zero remaining local duplicates of the connection builder or job-option retention -- every queue/worker construction site resolves both exclusively from `@mega-crm/queue-core`.
 - Known gap for a future quick task or plan 12-11: the pre-existing `npm run lint` failure (16 `@typescript-eslint/unbound-method` errors in two 12-01 test files) remains open; this plan's own files are lint-clean in isolation.
 
+## Self-Check: PASSED
+
+All created files verified present (`packages/queue-core/{package.json,tsconfig.json,vitest.config.ts,src/index.ts,src/connection.ts,src/queue-options.ts,src/__tests__/queue-options.test.ts}`, this SUMMARY.md); deletions confirmed (`apps/worker/src/queues/{connection.ts,queue-options.ts}` no longer exist); all four commit hashes (`9712a7c`, `17d3e85`, `868a312`, `f3a6147`) found in `git log --oneline --all`.
+
 ---
 *Phase: 12-worker-reliability-tenant-fairness*
 *Completed: 2026-08-10*
