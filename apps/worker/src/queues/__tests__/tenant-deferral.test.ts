@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/unbound-method -- asserting that mocked Job/Worker methods were (not) called requires referencing them unbound; there is no `this` to lose because every one is a vi.fn spy on a fake, not a real BullMQ method */
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { DelayedError, type Job, type Worker } from "bullmq";
 import type { Pool } from "pg";
