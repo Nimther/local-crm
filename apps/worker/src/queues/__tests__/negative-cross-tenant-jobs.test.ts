@@ -4,8 +4,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Pool } from "pg";
+import { Queue } from "bullmq";
 import { withCrossWorkspaceScan, withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
-import { getScanTestDatabaseUrl } from "@mega-crm/test-support";
+import { getScanTestDatabaseUrl, startTempRedis } from "@mega-crm/test-support";
+import { buildRedisConnectionOptions } from "@mega-crm/queue-core";
 import { dispatchSendGate } from "@mega-crm/delivery-core";
 import { FLOW_SEGMENT_SWEEP_FLOW_SCHEMA_VERSION } from "@mega-crm/shared-schemas";
 import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool, createFixtureFlowRun } from "../../test/db-fixture.js";
@@ -23,6 +25,7 @@ import { findLiveSegmentTriggeredFlows } from "../flows/flow-segment-sweep.worke
 import { runFlowSegmentSweepFlowJob } from "../flows/flow-segment-sweep-flow.worker.js";
 import { processFlowEnrollExisting } from "../flows/flow-enroll-existing.worker.js";
 import { findReconcilableCandidates, resolveOneSend } from "../send-reconciler.worker.js";
+import { runWebhookReplaySweep } from "../webhook-replay-sweep.worker.js";
 
 /**
  * SEC-16 (background-job half), SPEC R2: this is the counterpart to
@@ -725,6 +728,87 @@ describe("Negative cross-tenant suite: background-job families (SEC-16)", () => 
     });
   });
 
+  describe("webhook-replay-sweep (runWebhookReplaySweep, scan consumer, plan 13-06)", () => {
+    it("discovers workspaces across two tenants via the scan role, and each workspace's own stuck row is replayed independently -- never the sibling's", async () => {
+      const redis = await startTempRedis({});
+      const priorRedisUrl = process.env.REDIS_URL;
+      process.env.REDIS_URL = redis.url;
+      try {
+        const workspaceA = await freshWorkspaceId("jobs-replay-sweep-a");
+        const workspaceB = await freshWorkspaceId("jobs-replay-sweep-b");
+
+        // Same discovery query the worker's own tick runs via
+        // withCrossWorkspaceScan -- mirrors the analytics-reconciliation
+        // proof above for the identical query.
+        const discovered = await withCrossWorkspaceScan((client) =>
+          client
+            .query<{ id: string }>(`SELECT id FROM organization WHERE id = ANY($1::uuid[])`, [[workspaceA, workspaceB]])
+            .then((r) => r.rows.map((row) => row.id))
+        );
+        expect(discovered.sort()).toEqual([workspaceA, workspaceB].sort());
+
+        const eventA = { sg_event_id: `sg-${randomUUID()}`, event: "delivered", timestamp: 1_700_000_000 };
+        const eventB = { sg_event_id: `sg-${randomUUID()}`, event: "delivered", timestamp: 1_700_000_000 };
+
+        async function seedStuckRow(workspaceId: string, events: unknown[]): Promise<string> {
+          return withTenant(workspaceId, () =>
+            withTenantTransaction(async (client) => {
+              const { rows } = await client.query<{ id: string }>(
+                `INSERT INTO ingress_journal (workspace_id, raw_batch, received_at)
+                 VALUES ($1, $2, now() - interval '30 minutes') RETURNING id`,
+                [workspaceId, JSON.stringify(events)]
+              );
+              return rows[0].id;
+            })
+          );
+        }
+
+        const journalIdA = await seedStuckRow(workspaceA, [eventA]);
+        const journalIdB = await seedStuckRow(workspaceB, [eventB]);
+
+        const summary = await runWebhookReplaySweep({ workspaceIds: [workspaceA, workspaceB] });
+        expect(summary.rowsEnqueued).toBe(2);
+
+        async function readRow(
+          workspaceId: string,
+          journalId: string
+        ): Promise<{ replayCount: number } | undefined> {
+          return withTenant(workspaceId, () =>
+            withTenantTransaction(async (client) => {
+              const { rows } = await client.query<{ replayCount: number }>(
+                `SELECT replay_count as "replayCount" FROM ingress_journal WHERE id = $1`,
+                [journalId]
+              );
+              return rows[0];
+            })
+          );
+        }
+
+        // Each workspace's own row is incremented exactly once -- never
+        // the sibling's, and never twice from one tick's discovery loop.
+        expect((await readRow(workspaceA, journalIdA))?.replayCount).toBe(1);
+        expect((await readRow(workspaceB, journalIdB))?.replayCount).toBe(1);
+
+        // The enqueued jobs carry each workspace's OWN workspaceId/journalId
+        // -- no cross-contamination in the payload the producer built.
+        const queue = new Queue("webhook-events", { connection: buildRedisConnectionOptions(redis.url) });
+        try {
+          const jobs = await queue.getJobs(["waiting", "delayed"]);
+          const jobA = jobs.find((job) => (job.data as { journalId?: string }).journalId === journalIdA);
+          const jobB = jobs.find((job) => (job.data as { journalId?: string }).journalId === journalIdB);
+          expect((jobA?.data as { workspaceId?: string } | undefined)?.workspaceId).toBe(workspaceA);
+          expect((jobB?.data as { workspaceId?: string } | undefined)?.workspaceId).toBe(workspaceB);
+        } finally {
+          await queue.obliterate({ force: true }).catch(() => undefined);
+          await queue.close();
+        }
+      } finally {
+        process.env.REDIS_URL = priorRedisUrl;
+        await redis.stop();
+      }
+    });
+  });
+
   // -------------------------------------------------------------------
   // Test 3: an outright hostile foreign resource id is denied by the
   // tenant-scoped query rather than silently operating on it -- this is
@@ -816,6 +900,13 @@ describe("Negative cross-tenant suite: background-job families (SEC-16)", () => 
       "FlowEnrollExisting",
       "AnalyticsReconciliation",
       "SendReconciler",
+      // Phase 13 (CMP-08, D-06, plan 13-06): covered by the SAME describe
+      // block shape as AnalyticsReconciliation above -- discovery via
+      // withCrossWorkspaceScan proven to see both seeded workspaces, then
+      // each workspace's own stuck row is replayed exactly once, never the
+      // sibling's, and the enqueued job's payload carries only that
+      // workspace's own workspaceId/journalId.
+      "WebhookReplaySweep",
     ]);
 
     const EXCLUDED_FAMILIES: Record<string, string> = {

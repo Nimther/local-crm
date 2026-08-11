@@ -349,3 +349,21 @@ export const flowSegmentSweepFlowJobSchema = z.object({
   flowId: z.string().uuid(),
 });
 export type FlowSegmentSweepFlowJob = z.infer<typeof flowSegmentSweepFlowJobSchema>;
+
+/**
+ * Phase 13 (CMP-08, D-05, D-06, R-05, plan 13-06): the webhook-replay-sweep
+ * tick's own `schemaVersion` payload -- mirrors `sendReconcilerTickJobSchema`'s
+ * shape and doc comment exactly (Phase 11): a rolling deploy can have an
+ * old-code worker still draining jobs enqueued by new code (or vice versa),
+ * so this tick's payload carries an explicit version a worker validates
+ * before acting on it. `createWebhookReplaySweepWorker`'s processor DEFERS
+ * (logs via `scrubbedConsole`, returns without processing) a `schemaVersion`
+ * it does not recognize, rather than throwing it into BullMQ retries -- a
+ * deferred tick never consumes one of the job's `attempts`, and the next
+ * scheduled tick (or the next boot) simply tries again.
+ */
+export const WEBHOOK_REPLAY_SWEEP_TICK_SCHEMA_VERSION = 1;
+export const webhookReplaySweepTickJobSchema = z.object({
+  schemaVersion: z.literal(WEBHOOK_REPLAY_SWEEP_TICK_SCHEMA_VERSION),
+});
+export type WebhookReplaySweepTickJob = z.infer<typeof webhookReplaySweepTickJobSchema>;

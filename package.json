@@ -24,6 +24,7 @@
     "db:roles": "node scripts/ensure-db-roles.mjs",
     "relocate:default-partition-rows": "npm run relocate:default-partition-rows -w packages/db",
     "db:audit-sends-history": "npm run db:audit-sends-history -w packages/db",
+    "replay:webhook-journal": "npm run replay:webhook-journal -w packages/db",
     "failure:429": "vitest run --root apps/worker src/queues/__tests__/failure-injection/rate-limit-429.test.ts",
     "failure:timeout": "vitest run --root apps/worker src/queues/__tests__/failure-injection/timeout.test.ts",
     "failure:reset": "vitest run --root apps/worker src/queues/__tests__/failure-injection/connection-reset.test.ts",

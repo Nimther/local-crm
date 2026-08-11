@@ -15,12 +15,16 @@
     "db:migrate": "drizzle-kit migrate",
     "relocate:default-partition-rows": "tsx scripts/relocate-default-partition-rows.ts",
     "db:audit-sends-history": "tsx scripts/audit-sends-history.ts",
+    "replay:webhook-journal": "tsx scripts/replay-webhook-journal.ts",
     "test": "vitest run"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",
     "pg": "8.22.0",
-    "@mega-crm/redaction": "0.1.0"
+    "bullmq": "5.79.1",
+    "@mega-crm/redaction": "0.1.0",
+    "@mega-crm/shared-schemas": "0.1.0",
+    "@mega-crm/queue-core": "0.1.0"
   },
   "devDependencies": {
     "@mega-crm/delivery-core": "0.1.0",
