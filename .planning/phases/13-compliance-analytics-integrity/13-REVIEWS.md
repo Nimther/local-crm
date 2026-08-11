@@ -130,3 +130,59 @@ Plus MEDIUM: the apps/api ↔ apps/worker import boundary is hit un-anticipated 
 **Threat-model update:** amends 13-10's `T-13-10-04` ("Mail continuing to an erased address", high/mitigate) — its mitigation text ("Suppression and status are resolved synchronously in the delete request") is false for the previously-subscribed case as the plan is currently written, since step 2's insert is conditional on prior unsubscribed-or-suppressed status. Also amends `T-13-10-05` ("Resurrecting an erased contact via re-import or update", medium/mitigate) — the re-import protection via the identity-lookup filter (Task 3) prevents PII repopulation but does not by itself guarantee the address stays unmailable, since a newly-created contact from re-import has no suppression row unless one was written unconditionally at erasure time. Corrected mitigation: the suppression insert in Task 2 step 2 must be unconditional on erasure, independent of the contact's subscription status at the time of deletion.
 
 **Suggested fix:** In 13-10-PLAN.md Task 2 step 2, make the `workspace_suppressions` insert unconditional whenever a contact is erased (drop the unsubscribed-or-suppressed status gate for the erasure path specifically, while leaving the genuine-unsubscribe insert path elsewhere unchanged), give it an erasure-specific reason, delete the acceptance criterion at line 208 that asserts no suppression row for a subscribed contact's erasure, and add the re-import assertions from the Required acceptance tests above to the behavior list and acceptance criteria.
+
+### Finding 2 — BLOCKER: UPDATE ... RETURNING cannot capture the pre-update email (13-10)
+
+**Finding (verbatim):**
+
+> 2. BLOCKER — 13-10 cannot capture the old email using a normal UPDATE ... RETURNING after setting email = NULL; PostgreSQL returns the updated row. Read and lock the contact first with SELECT ... FOR UPDATE, or use a CTE that explicitly preserves pre-update values.
+
+**Affected plan(s):** 13-10-PLAN.md Task 2, step 1 (line 191). The step directs an anonymizing UPDATE that sets `email = NULL` (among other columns) in the same statement and states it is "returning the pre-update `email` and `subscription_status`" via "the UPDATE's own returning clause." A single `UPDATE ... RETURNING` in PostgreSQL yields the row's post-update values, so as written the RETURNING clause yields `email = NULL`, not the address step 2's suppression insert needs. This interacts with Finding 1: once the suppression insert becomes unconditional (Finding 1's fix), a correct capture mechanism becomes mandatory on every erasure, not only the previously-unsubscribed path the plan currently exercises.
+
+**Required acceptance tests:**
+
+- Erasing a contact writes a `workspace_suppressions` row whose stored value corresponds to the address the contact actually had before erasure (asserting the captured value itself, not merely that a row was inserted).
+- The capture mechanism is exercised by a test that would fail under a naive `UPDATE ... RETURNING email` after setting `email = NULL` in the same statement — the test must assert against the real pre-update address, not null or empty.
+- The erasure record's insert (step 3) and the suppression insert (step 2) both use the same correctly-captured pre-update email, so neither one silently drifts from the other.
+
+**Threat-model update:** amends `T-13-10-01` ("Incomplete PII scrub on the contacts row", high/mitigate) and `T-13-10-04` ("Mail continuing to an erased address", high/mitigate) — both currently assert the capture is "resolved synchronously in the delete request," which is unachievable if the RETURNING clause yields null. Corrected mitigation for T-13-10-04: capture the pre-update email via `SELECT ... FOR UPDATE` (lock and read before the anonymizing UPDATE) or a CTE that explicitly preserves pre-update column values across the UPDATE, then use that captured value for both the suppression insert and any erasure-record fields that reference the address.
+
+**Suggested fix:** rewrite 13-10-PLAN.md Task 2 step 1 to either (a) `SELECT email, subscription_status FROM contacts WHERE ... FOR UPDATE` first, holding the row lock, then run the anonymizing UPDATE using the already-captured values for steps 2/3, or (b) use a single statement built as a CTE (e.g. a `WITH old AS (SELECT email, subscription_status FROM contacts WHERE ... FOR UPDATE) UPDATE contacts SET ... FROM old WHERE contacts.id = old.id RETURNING old.email, old.subscription_status`) that explicitly selects the pre-update values into a separate CTE before the UPDATE touches them. Remove the plan's current claim that "the UPDATE's own returning clause" yields the pre-update email.
+
+### Finding 3 — BLOCKER: erasure_records needs a durable outbox with a reclaimer (13-10)
+
+**Finding (verbatim):**
+
+> 3. BLOCKER — Make erasure_records a durable outbox. Commit anonymization, suppression and the pending erasure record atomically; enqueue only after commit. Add a scheduled or boot-time reclaimer for pending and lease-expired records using deterministic job IDs. Test a crash after database commit but before BullMQ enqueue.
+
+**Affected plan(s):** 13-10-PLAN.md Task 2, step 3 (line 195: the `erasure_records` insert in the same transaction as anonymization) and step 4 (line 196: the enqueue, "Enqueue after the transaction commits, or inside it if the existing codebase convention for API-side enqueues does so ... State which you did and why in the SUMMARY"). The atomicity half — steps 1-3 in one transaction — is already correct; what is missing is that step 4 leaves the commit/enqueue ordering to executor discretion, with no reclaimer defined anywhere in the plan set for a `pending` `erasure_records` row whose enqueue never happened after a crash.
+
+**Required acceptance tests:**
+
+- A crash injected after the erasure transaction (anonymization + suppression + `erasure_records` insert) commits, but before the BullMQ enqueue call completes, leaves an `erasure_records` row in `pending` state.
+- A subsequent reclaimer pass (scheduled tick or boot-time sweep) finds that pending row and enqueues the scrub job for it.
+- The reclaimer's job id is deterministically derived from the erasure record (matching Task 2 step 4's existing deterministic-jobId requirement), so a duplicate reclaim of the same row is a no-op rather than a second scrub.
+- A `pending` `erasure_records` row that is not yet lease-expired (recently created, enqueue may simply be in flight) is not reclaimed prematurely.
+
+**Threat-model update:** `T-13-10-02` ("Erasure with no auditable proof it occurred", high/mitigate) stays valid as written — the transactional write of `erasure_records` is the correct fix for that threat. But `T-13-10-06` ("Duplicate scrub jobs from a retried request", medium/mitigate) needs the reclaimer's job-id derivation folded into its mitigation text, and a new row is needed for the un-enqueued-pending-record class of failure — a committed erasure whose scrub was never queued and nothing currently notices. Note that 13-11's ingestion-health watchdog covers the webhook ingress journal, not `erasure_records`; nothing in the current plan set surfaces a stuck erasure record.
+
+**Suggested fix:** pin the commit/enqueue ordering explicitly in 13-10-PLAN.md Task 2 step 4 (commit first, enqueue after — the plan's own text already leans this way but currently offers it as one of two options), and add, either to 13-10 or 13-13, a scheduled or boot-time reclaimer that scans `erasure_records` for `pending` rows past a lease/age threshold and re-enqueues their scrub job using the same deterministic-jobId convention Task 2 step 4 already establishes. Add the crash-after-commit-before-enqueue test to the acceptance criteria of whichever plan owns the reclaimer.
+
+### Finding 4 — BLOCKER: REDACTION_RULES denylist cannot bound arbitrary tenant-defined PII (13-13)
+
+**Finding (verbatim):**
+
+> 4. BLOCKER — 13-13 must not rely on REDACTION_RULES or a denylist to remove arbitrary PII. Reconstruct send_events.payload from a strict evidence allowlist. Clear events.properties to {} unless an explicit evidence allowlist is defined. Add tests for PII stored under unknown tenant-defined keys.
+
+**Affected plan(s):** 13-13-PLAN.md Task 1 (line 106: "implemented over `@mega-crm/redaction`'s `REDACTION_RULES` rather than any new pattern. Do not write a new ... heuristic") and its key_link at line 37 ("`@mega-crm/redaction`'s `REDACTION_RULES` -> the JSONB field-matching: reusing the tuned vocabulary avoids reintroducing the false positives ..."), both of which mandate reuse of the denylist-style redaction vocabulary for scrubbing `send_events.payload` and `events.properties`. This finding contradicts the plan's current direction rather than refining it: a key/value denylist tuned for log-scrubbing cannot bound PII in tenant-defined `events.properties`, where key names are arbitrary and unenumerable in advance — the plan's own `flagged_assumptions` section (line 264) already concedes "a tenant storing PII under an unusual key name would survive the scrub," but treats that as an accepted residual risk rather than the BLOCKER-level defect this finding identifies it as.
+
+**Required acceptance tests:**
+
+- PII stored under an unknown tenant-defined key (a key name matching no rule in `REDACTION_RULES`) does not survive the scrub for `events.properties`.
+- `send_events.payload` after a scrub contains only fields present on a defined evidence allowlist (e.g. `event`, `type`, `timestamp`, `sg_event_id`, and other non-PII correlation ids) — no field outside that allowlist survives, regardless of whether the redaction vocabulary flags it.
+- `events.properties` is rewritten to `{}` after a scrub unless an explicit evidence allowlist is defined for that table, in which case only the allowlisted fields survive.
+- A payload field containing PII under a key name never seen before by `REDACTION_RULES` is removed exactly as reliably as a known PII key.
+
+**Threat-model update:** amends `T-13-13-01` ("PII surviving in `send_events.payload` after erasure", high/mitigate) — satisfiable only under an allowlist reconstruction, not a denylist scrub, since a denylist's completeness claim depends on an enumerable set of PII key names that tenant-defined `properties` does not have. Amends `T-13-13-06` ("A new PII heuristic reintroducing known false positives", medium/mitigate) — its stated mitigation ("the existing `REDACTION_RULES` vocabulary is reused rather than re-derived") is itself the defect this finding identifies, not a valid mitigation; the false-positive concern that mitigation protects against becomes moot once payloads are reconstructed from an allowlist rather than filtered by a denylist. The surviving obligation from `T-13-13-03` ("Rows are rewritten, never deleted", high/mitigate) still applies: `event_type`, `occurred_at`, and `received_at` (or their `send_events`/`events`-specific equivalents) must be named on whatever allowlist is chosen, or the evidence guarantee this plan exists to preserve breaks.
+
+**Suggested fix:** rewrite 13-13-PLAN.md Task 1 to define an explicit evidence-field allowlist per table (`send_events.payload`: event type, timestamp(s), `sg_event_id`, and any other fields the plan's own behavior list already requires to survive; `events.properties`: none, unless a specific tenant-defined field is later proven necessary as evidence) and reconstruct each scrubbed JSONB value by copying only allowlisted fields forward, rather than walking the existing value and removing keys `REDACTION_RULES` flags. Delete the `REDACTION_RULES`-reuse instruction at line 106 and the corresponding key_link at line 37, and add the unknown-tenant-key test to Task 1's acceptance criteria.
