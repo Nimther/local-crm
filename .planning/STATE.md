@@ -5,8 +5,8 @@ milestone_name: Production Hardening
 current_phase: 13
 current_phase_name: Compliance & Analytics Integrity
 status: planning
-stopped_at: Phase 12 context gathered
-last_updated: "2026-08-11T07:27:19.412Z"
+stopped_at: Phase 12 complete, ready to plan Phase 13
+last_updated: "2026-08-11T08:38:01.360Z"
 last_activity: 2026-08-11
 last_activity_desc: Phase 12 complete, transitioned to Phase 13
 progress:
@@ -21,10 +21,10 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-08-07)
+See: .planning/PROJECT.md (updated 2026-08-11)
 
 **Core value:** Маркетолог настраивает триггерную цепочку или кампанию — и письма надёжно и вовремя доходят до нужных контактов, со сквозным отслеживанием статусов (delivered/opened/clicked/bounced).
-**Current focus:** Phase 12 — worker-reliability-tenant-fairness
+**Current focus:** Phase 13 — Compliance & Analytics Integrity
 
 ## Current Position
 
@@ -33,7 +33,7 @@ Phase: 13 — Compliance & Analytics Integrity
 Plan: Not started
 Status: Ready to plan
 Last activity: 2026-08-11 — Phase 12 complete, transitioned to Phase 13
-Progress: [██████████] 100% (3/9 v1.1 phases, 32/95 requirements)
+Progress: [████████████████████] 63/63 plans (100%) — 5/9 v1.1 phases complete (8–12), 44/95 requirements
 
 ✓ **Deadline closed (2026-08-07):** Phase 9 (DB-01/DB-02 partition automation) completed ahead of the hard **2026-09-01** deadline — 20 attached monthly partitions (2026-09…2027-06) confirmed by catalog query against a migrated database.
 
@@ -186,6 +186,14 @@ Progress: [██████████] 100% (3/9 v1.1 phases, 32/95 requirem
 
 Full decision log for v1.0 lives in PROJECT.md (Key Decisions) and the archived phase summaries in .planning/milestones/v1.0-phases/.
 
+**Phase 12 decisions (2026-08-11, full log in PROJECT.md and phase summaries):**
+
+- Tenant-scoped rate_limited deferral (`job.moveToDelayed` + `DelayedError` через общий helper обоих send-лейнов) вместо worker-wide `worker.rateLimit()`; per-tenant-per-lane concurrency — TTL-leased Redis-семафор, release в `finally` на всех трёх dispatch-путях
+- Все 11 queue-модулей обоих приложений строят connection options и job options только через `@mega-crm/queue-core`; cross-application single-definition тест падает при появлении локальной копии
+- BullMQ Worker options передавать только при явном значении: `autorun: undefined` клоббepит default `true` (G-12-1 — пять tick-воркеров регистрировались, но не консюмили); фикс — conditional spread + regression-тест против реального Redis
+- Retention failed jobs: 7 дней (строго больше 72h-горизонта reconciler'а, ~2.33x margin); `FLOW_RUN_ADVANCE_RETENTION` осознанно отдельный
+- Kickoff-count assertions в burst-тестах — сумма по пяти состояниям очереди, не `completed` (ничто не консюмит CAMPAIGN_KICKOFF_QUEUE в harness'е; G-12-3)
+
 **Phase 10 decisions (2026-08-09):** see .planning/phases/10-tenant-isolation-trust-boundaries/10-CONTEXT.md and the phase plan summaries.
 
 **Phase 9 decisions (2026-08-07, full log in PROJECT.md):**
@@ -256,14 +264,13 @@ Open decisions to resolve at `/gsd-discuss-phase` (recorded in ROADMAP.md § Ope
 - **Phase 11 (Pitfall 5):** the SendGrid `AbortController` timeout must be strictly below BullMQ's `lockDuration`, or a hung request gets stall-detected and double-scheduled.
 - **Phase 11 (Pitfall 2):** the `send_status` enum change must not backfill historical rows in the same migration; verify `workspace_daily_rollup` totals are unchanged afterwards.
 - **Phase 10 / SEC-05 (Pitfall 12):** adding RLS to Better Auth tables as a checklist item breaks login/signup/session validation platform-wide, with no SQL error.
-- **Phase 12 (Pitfall 6):** retention must be a per-queue parameter of the shared queue factory — `flow-run-advance`'s differentiated policy is a deliberate precedent, not an inconsistency.
 - **Phase 14 (Pitfall 17):** `CREATE UNIQUE INDEX CONCURRENTLY` over existing duplicates leaves an `INVALID`, non-enforcing index with no migration-time error — pre-check duplicates, assert `pg_index.indisvalid`.
 - **Phase 15 (Pitfall 18):** Sentry has no retroactive redaction — `beforeSend` scrub rules must be tested against representative leak payloads *before* Sentry receives live traffic.
 
 Research flags carried from v1.0:
 
 - [Phase 3 → 4] Segments ship as on-the-fly evaluation bounded by statement_timeout (2s preview / 15s save-eval, 57014 → degraded/4xx) — the 100k–1M-contact benchmark is still outstanding; revisit materialized membership if Phase 4 broadcast audience selects hit the timeout at scale.
-- Phase 4: load-test triggered-vs-broadcast priority under a large broadcast (target: triggered sends within minutes).
+- ~~Phase 4: load-test triggered-vs-broadcast priority under a large broadcast~~ — closed by Phase 12 (12-05 D2: a tenant saturating its own broadcast lane does not cost its triggered-lane throughput; two-tenant fairness scenario in CI on every PR).
 - Phase 5 (carried past completion): integration test that replays a real signed SendGrid payload through the full HTTP stack (raw-body verification) — worker-layer attribution test exists (05-13), HTTP-signature-layer replay does not.
 - Phase 5 → hardening follow-up (05-REVIEW WR-01, now in PROJECT.md Active): worker ignores flattened workspace_id — with one BYO SendGrid key backing multiple workspaces, sibling workspaces' raw event payloads are persisted into each other's send_events (attribution unaffected; data-isolation concern).
 - Operational prerequisite (any fresh environment): PLATFORM_SENDGRID_API_KEY / PLATFORM_MAIL_FROM must be a real SendGrid key + verified sender before verification/reset/invite emails work — placeholders cause a 500 on resend (hit and resolved during Phase 1 UAT). **Since Phase 8 (08-15) the env file lives OUTSIDE the working root** — location resolved via `MEGA_CRM_ENV_FILE` (default outside the repo); `.env` in the repo root is blacklisted by the hygiene check.
@@ -287,12 +294,13 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-10T09:13:59.519Z
-Stopped at: Phase 12 context gathered
-Resume file: .planning/phases/12-worker-reliability-tenant-fairness/12-CONTEXT.md
+Last session: 2026-08-11
+Stopped at: Phase 12 complete, ready to plan Phase 13
+Resume file: None
 
 ## Operator Next Steps
 
-- Phase 10 complete (2026-08-09): 15/15 plans, review findings WR-06 (CSV error-report Content-Disposition UUID guard) and WR-07 (ensure-db-roles-env same-key precedence test) closed by quick task 260809-eqr
-- Next: `/gsd-discuss-phase 11` → `/gsd-plan-phase 11` — Delivery Correctness
-- Phase 11 pitfalls to cover in discuss (full detail in Blockers/Concerns below): DLV-03 exclusive row claim (`SELECT ... FOR UPDATE SKIP LOCKED` inside `withTenantTransaction`, never call SendGrid for a `reconciling` row), the SendGrid `AbortController` timeout must stay strictly below BullMQ's `lockDuration`, and the `send_status` enum change must not backfill historical rows in the same migration
+- Phase 12 complete (2026-08-11): 14/14 plans (11 scoped + 3 gap-closure), UAT 43/43 passed, verification 16/16, security review verified (0 open threats)
+- Known operational item carried from Phase 12: `npm run db:migrate` (drizzle-kit CLI) hangs in the dev sandbox under Node v26 — migrations 0053/0054 proven via test:migrations but not applied to the dev DB
+- Next: `/gsd-discuss-phase 13` → `/gsd-plan-phase 13` — Compliance & Analytics Integrity (no CONTEXT.md yet)
+- Branch note: `gsd/phase-12-worker-reliability-tenant-fairness` is stacked on phase-11; per convention Phase 13 starts a new `gsd/phase-13-{slug}` branch
