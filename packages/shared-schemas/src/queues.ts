@@ -367,3 +367,21 @@ export const webhookReplaySweepTickJobSchema = z.object({
   schemaVersion: z.literal(WEBHOOK_REPLAY_SWEEP_TICK_SCHEMA_VERSION),
 });
 export type WebhookReplaySweepTickJob = z.infer<typeof webhookReplaySweepTickJobSchema>;
+
+/**
+ * Phase 13 (CMP-09, D-09 through D-12, R-05, plan 13-09): the reputation
+ * tick's own `schemaVersion` payload -- mirrors `sendReconcilerTickJobSchema`'s
+ * shape and doc comment exactly (Phase 11): a rolling deploy can have an
+ * old-code worker still draining jobs enqueued by new code (or vice versa),
+ * so this tick's payload carries an explicit version a worker validates
+ * before acting on it. `createReputationTickWorker`'s processor DEFERS
+ * (logs via `scrubbedConsole`, returns without processing) a `schemaVersion`
+ * it does not recognize, rather than throwing it into BullMQ retries -- a
+ * deferred tick never consumes one of the job's `attempts`, and the next
+ * scheduled tick (or the next boot) simply tries again.
+ */
+export const REPUTATION_TICK_SCHEMA_VERSION = 1;
+export const reputationTickJobSchema = z.object({
+  schemaVersion: z.literal(REPUTATION_TICK_SCHEMA_VERSION),
+});
+export type ReputationTickJob = z.infer<typeof reputationTickJobSchema>;

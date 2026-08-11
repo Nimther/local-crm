@@ -906,6 +906,12 @@ describe("Negative cross-tenant suite: background-job families (SEC-16)", () => 
       // sibling's, and the enqueued job's payload carries only that
       // workspace's own workspaceId/journalId.
       "WebhookReplaySweep",
+      // Phase 13 (CMP-09, plan 13-09): covered by reputation-tick.test.ts --
+      // discovery via withCrossWorkspaceScan proven to see every seeded
+      // workspace, then each workspace's own sends are counted from inside
+      // its own fresh withTenant/withTenantTransaction scope, never mixing
+      // a sibling workspace's sends into its ratio.
+      "ReputationTick",
     ]);
 
     const EXCLUDED_FAMILIES: Record<string, string> = {
