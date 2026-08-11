@@ -141,15 +141,38 @@ export function buildScrubbedEventProperties(properties: unknown): Record<string
 /** Rows-per-page bound for both scrub walks (T-13-13-05). Sized to match `flow-segment-sweep-flow.worker.ts`'s `SWEEP_PAGE_SIZE` precedent: large enough that a typical contact's history scrubs in a handful of pages, small enough that each page's transaction (a bounded SELECT plus up to this many single-row UPDATEs) stays short. */
 export const ERASURE_SCRUB_PAGE_LIMIT = 500;
 
+/**
+ * `occurredAt` is read as TEXT (`se.occurred_at::text`), never as a parsed
+ * JS `Date` -- `pg`'s default timestamptz type parser truncates to
+ * MILLISECOND precision (it builds the `Date` via `Date.UTC(...)` with a
+ * 3-digit millisecond field, discarding anything finer), while Postgres's
+ * own `now()` (and therefore every row this scrub's own test fixtures seed
+ * with server-computed timestamps) carries MICROSECOND precision. Round-
+ * tripping a `Date`-truncated value back into a `WHERE occurred_at = $n` or
+ * `WHERE (occurred_at, id) > ($n, $m)` comparison against the ORIGINAL,
+ * untruncated column value made that row compare strictly GREATER than its
+ * own truncated cursor forever -- the per-row UPDATE silently matched zero
+ * rows (T-13-13 failure-injection test 1), and the keyset WHERE clause kept
+ * re-including that same row on every subsequent page, an unbounded loop
+ * (test 2). Text round-trips a Postgres value through Postgres LOSSLESSLY;
+ * casting it straight back to `timestamptz` in SQL (`$n::timestamptz`)
+ * reconstructs the identical value bit-for-bit. Production `send_events`
+ * rows never carry sub-second precision in the first place (the webhook
+ * worker derives `occurred_at` from SendGrid's integer-seconds `timestamp`
+ * field), which is why Task 2's own fixtures -- built from JS `Date`s with
+ * only millisecond precision to begin with -- never exposed this; it took a
+ * server-computed `now()`-based fixture (Task 3's failure-injection
+ * scenario) to surface it.
+ */
 interface SendEventKeysetRow {
   id: string;
-  occurredAt: Date;
+  occurredAt: string;
   payload: unknown;
 }
 
 interface EventsKeysetRow {
   id: string;
-  occurredAt: Date;
+  occurredAt: string;
 }
 
 export interface ScrubPageResult {
@@ -193,14 +216,14 @@ export async function scrubSendEventsPage(
   cursor: ScrubCursor | null
 ): Promise<ScrubPageResult> {
   const table: ScrubTable = "sends";
-  const afterClause = isCursorInProgress(cursor) ? `AND (se.occurred_at, se.id) > ($3, $4)` : "";
+  const afterClause = isCursorInProgress(cursor) ? `AND (se.occurred_at, se.id) > ($3::timestamptz, $4::uuid)` : "";
   const params: unknown[] = isCursorInProgress(cursor)
     ? [workspaceId, contactId, cursor.occurredAt, cursor.id, ERASURE_SCRUB_PAGE_LIMIT]
     : [workspaceId, contactId, ERASURE_SCRUB_PAGE_LIMIT];
   const limitIdx = params.length;
 
   const { rows } = await client.query<SendEventKeysetRow>(
-    `SELECT se.id, se.occurred_at as "occurredAt", se.payload
+    `SELECT se.id, se.occurred_at::text as "occurredAt", se.payload
      FROM send_events se
      JOIN sends s ON s.id = se.send_id
      WHERE se.workspace_id = $1 AND s.contact_id = $2 ${afterClause}
@@ -218,13 +241,13 @@ export async function scrubSendEventsPage(
   for (const row of rows) {
     const scrubbed = buildScrubbedSendEventPayload(row.payload);
     await client.query(
-      `UPDATE send_events SET payload = $1::jsonb WHERE workspace_id = $2 AND id = $3 AND occurred_at = $4`,
+      `UPDATE send_events SET payload = $1::jsonb WHERE workspace_id = $2 AND id = $3 AND occurred_at = $4::timestamptz`,
       [JSON.stringify(scrubbed), workspaceId, row.id, row.occurredAt]
     );
   }
 
   const last = rows[rows.length - 1];
-  const nextCursor: ScrubCursor = { done: false, occurredAt: last.occurredAt.toISOString(), id: last.id };
+  const nextCursor: ScrubCursor = { done: false, occurredAt: last.occurredAt, id: last.id };
   await advanceErasureScrubCheckpoint(client, workspaceId, erasureRecordId, table, nextCursor, rows.length);
 
   return { processed: rows.length, cursor: nextCursor };
@@ -252,14 +275,14 @@ export async function scrubEventsPage(
   cursor: ScrubCursor | null
 ): Promise<ScrubPageResult> {
   const table: ScrubTable = "events";
-  const afterClause = isCursorInProgress(cursor) ? `AND (occurred_at, id) > ($3, $4)` : "";
+  const afterClause = isCursorInProgress(cursor) ? `AND (occurred_at, id) > ($3::timestamptz, $4::uuid)` : "";
   const params: unknown[] = isCursorInProgress(cursor)
     ? [workspaceId, contactId, cursor.occurredAt, cursor.id, ERASURE_SCRUB_PAGE_LIMIT]
     : [workspaceId, contactId, ERASURE_SCRUB_PAGE_LIMIT];
   const limitIdx = params.length;
 
   const { rows } = await client.query<EventsKeysetRow>(
-    `SELECT id, occurred_at as "occurredAt" FROM events
+    `SELECT id, occurred_at::text as "occurredAt" FROM events
      WHERE workspace_id = $1 AND contact_id = $2 ${afterClause}
      ORDER BY occurred_at ASC, id ASC
      LIMIT $${limitIdx}`,
@@ -281,7 +304,7 @@ export async function scrubEventsPage(
   ]);
 
   const last = rows[rows.length - 1];
-  const nextCursor: ScrubCursor = { done: false, occurredAt: last.occurredAt.toISOString(), id: last.id };
+  const nextCursor: ScrubCursor = { done: false, occurredAt: last.occurredAt, id: last.id };
   await advanceErasureScrubCheckpoint(client, workspaceId, erasureRecordId, table, nextCursor, rows.length);
 
   return { processed: rows.length, cursor: nextCursor };
