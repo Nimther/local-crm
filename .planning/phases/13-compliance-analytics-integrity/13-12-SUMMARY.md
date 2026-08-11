@@ -210,3 +210,7 @@ None. `source` (text, nullable) on `workspace_suppressions` is a schema column w
 ---
 *Phase: 13-compliance-analytics-integrity*
 *Completed: 2026-08-12*
+
+## Self-Check: PASSED
+
+All 8 created-file claims verified present on disk (suppression-hash.ts, suppression-hash.test.ts, workspace-suppression-keys.ts, 0060/0061 migrations, rehash-suppressions.ts, suppression-hash-migration.test.ts, this SUMMARY). All 3 task commit hashes (`f2061f2`, `2de06a1`, `86bcf31`) confirmed present in `git log`.
