@@ -1,47 +1,47 @@
 ---
 phase: 12-worker-reliability-tenant-fairness
-fixed_at: 2026-08-10T23:40:00Z
+fixed_at: 2026-08-11T08:25:00Z
 review_path: .planning/phases/12-worker-reliability-tenant-fairness/12-REVIEW.md
 iteration: 2
-findings_in_scope: 2
-fixed: 2
+findings_in_scope: 1
+fixed: 1
 skipped: 0
 status: all_fixed
 ---
 
 # Phase 12: Code Review Fix Report
 
-**Fixed at:** 2026-08-10T23:40:00Z
+**Fixed at:** 2026-08-11T08:25:00Z
 **Source review:** .planning/phases/12-worker-reliability-tenant-fairness/12-REVIEW.md
 **Iteration:** 2
 
 **Summary:**
-- Findings in scope: 2 (both INFO-tier; REVIEW.md iteration 2 reported 0 critical/blocker and 0 warning findings -- all three iteration-1 warnings were confirmed fixed with no regressions)
-- Fixed: 2
+- Findings in scope: 1 (0 critical, 0 warning, 1 info; `fix_scope: all` so the Info finding was included)
+- Fixed: 1
 - Skipped: 0
 
-**Note on commit tooling:** `gsd-tools commit` returns `{"committed": false, "skipped": true, "reason": "skipped_gitignored"}` in this repo for any invocation, because `commands.cjs`'s `cmdCommit` unconditionally checks `isGitIgnored(cwd, '.planning')` before staging -- true here since `.planning/` is in `.gitignore` (only specific files under it are force-tracked). This is a known pre-existing tool limitation (iteration 1's fix commits `e8cd936`/`bb299a4`/`66f8130` hit the same wall and used plain `git`). Both fixes below were committed with plain `git add` + `git commit` instead, matching iteration 1's message format and commit granularity.
+**Isolation note:** The edit was made in an isolated git worktree (`gsd-reviewfix/12-*` branch created from `gsd/phase-12-worker-reliability-tenant-fairness`), verified and committed there, then fast-forward-merged back into `gsd/phase-12-worker-reliability-tenant-fairness` before the worktree and temp branch were removed. This avoided racing the foreground session on the shared working tree.
 
 ## Fixed Issues
 
-### IN-01: WR-02's regression coverage doesn't actually pin the redaction behavior it fixes
+### IN-02: `send-dispatch.ts`'s new error-listener wiring has no direct regression test
 
-**Files modified:** `apps/api/src/modules/ops/__tests__/dead-letter-watchdog.test.ts`
-**Commit:** `d3e8720`
-**Applied fix:** Imported `scrubbedConsole` from `@mega-crm/redaction` and changed `startDeadLetterWatchdog`'s "test 10" to spy on `scrubbedConsole.error` directly instead of `console.error`, per the review's suggested fix. Verified this actually discriminates the two implementations by temporarily reverting the WR-02 fix in `dead-letter-watchdog.ts` (routing the interval-catch handler back through raw `console.error`) and re-running the test: it failed as expected (`Number of calls: 0` against the `scrubbedConsole.error` spy), confirming the strengthened assertion would catch a regression that the old `console.error`-spy version could not. Restored the source file and re-ran: full suite passes, 12/12.
+**Files modified:** `apps/worker/src/queues/send-dispatch.ts`, `apps/worker/src/queues/__tests__/send-dispatch-error-listener.test.ts` (new)
+**Commit:** `5f6e0b3`
+**Applied fix:** Exported `getDefaultRedisClient` (previously module-private) and added a test-only `__resetDefaultRedisClientForTests()` hook that clears the lazily-created singleton reference between test cases. Added a new regression test file, `send-dispatch-error-listener.test.ts`, mirroring `packages/queue-core/src/__tests__/connection-error-listener.test.ts`'s emit-based proof pattern: it mocks `@mega-crm/redaction`'s `scrubbedConsole` and asserts (a) exactly one `'error'` listener is registered on the singleton, (b) repeated calls return the same singleton instance until reset, and (c) an emitted connection error reaches `scrubbedConsole.error` with the exact identifying message used in production code — closing the coverage gap the review noted (the two existing `send-dispatch` test files both inject their own `deps.redisClient` and never exercise `getDefaultRedisClient()`'s own construction/wiring path).
 
-### IN-02: `decodeURIComponent` in the WR-03 fix throws `URIError` for a password containing a literal, non-escape `%`
+Chose the "export + reset hook" option from the finding's Fix section over the "integration-style `processSendJob` with `deps = {}`" alternative, since it produces a direct, fast, unit-level proof of the wiring itself (matching the sibling `connection.ts` test's scope and style) rather than an indirect assertion routed through the full send pipeline.
 
-**Files modified:** `packages/queue-core/src/connection.ts`, `packages/queue-core/src/__tests__/queue-options.test.ts`
-**Commit:** `8138c98`
-**Applied fix:** Added a `decodeCredential(value, field)` helper in `connection.ts` that wraps `decodeURIComponent` in a try/catch and re-throws `Error("REDIS_URL {field} contains an invalid percent-encoding; ensure it was built with encodeURIComponent")` on `URIError`, exactly as the review's suggested fix specified. `buildRedisConnectionOptions` now calls `decodeCredential(url.username, "username")` / `decodeCredential(url.password, "password")` in place of the bare `decodeURIComponent` calls introduced by WR-03. Added a new regression test in `queue-options.test.ts` (next to the existing WR-03 `p%40ss` case) asserting that `buildRedisConnectionOptions("redis://user:p%zzss@host:6379")` throws with a message matching `/REDIS_URL password contains an invalid percent-encoding/`, so a future regression back to the bare `decodeURIComponent` call would be caught rather than only surfacing as a generic `URIError` at process boot. Verified with `vitest run` in `packages/queue-core`: 15/15 tests pass (14 pre-existing + 1 new). `tsc --noEmit` clean on the package.
+**Verification performed inside the isolated worktree:**
+- Tier 1: re-read the modified `send-dispatch.ts` section and the new test file in full — fix text present, surrounding code intact.
+- Tier 2: `npx vitest run src/queues/__tests__/send-dispatch-error-listener.test.ts` from `apps/worker` — 1 file, 3 tests, all passing. `npx tsc --noEmit -p tsconfig.json` — clean. `npx eslint` on both modified/created files — clean (no naming-convention complaint about the leading-underscore export).
 
 ## Skipped Issues
 
-None -- both in-scope findings were fixed and verified.
+None — the single in-scope finding was fixed.
 
 ---
 
-_Fixed: 2026-08-10T23:40:00Z_
+_Fixed: 2026-08-11T08:25:00Z_
 _Fixer: Claude (gsd-code-fixer)_
 _Iteration: 2_
