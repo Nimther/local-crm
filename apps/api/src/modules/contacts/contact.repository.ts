@@ -3,8 +3,11 @@ import { getWorkspaceId, withTenantTransaction } from "../../middleware/tenant-c
 import { isValidIanaTimezone } from "@mega-crm/delivery-core";
 import {
   CONTACT_COLUMNS,
+  ensureWorkspaceSuppressionKey,
+  hashSuppressionEmail,
   isEmailSuppressed,
   isEmailTaken,
+  normalizeSuppressionEmail,
   recordSubscriptionStatusChange,
   registerObservedProperties,
   upsertContactByIdentity,
@@ -519,8 +522,10 @@ interface DeleteContactTxResult {
  *     BLOCKER finding 1: the old gate left a currently-subscribed contact's
  *     address freely re-importable and immediately mailable after erasure,
  *     the exact outcome CMP-04 exists to prevent). The ONE surviving guard
- *     is a null captured email, because `workspace_suppressions.email` is
- *     `NOT NULL` and a contact with no address has nothing to suppress.
+ *     is a null captured email -- a contact with no address has nothing to
+ *     hash and nothing to suppress (CMP-04, D-02, plan 13-12: this insert
+ *     writes only `email_hash`, computed from the captured address under
+ *     this workspace's own key; see step 3's own code comment).
  *  4. The `beforeErasureRecordWrite` test seam, then the `erasure_records`
  *     INSERT (`status = 'pending'`) -- in the SAME transaction as steps 2-3,
  *     so a crash cannot leave an anonymized row with no auditable record of
@@ -581,13 +586,22 @@ export async function deleteContact(id: string, deps: DeleteContactDeps = {}): P
     );
 
     // Step 3: unconditional suppression write, from the value captured in
-    // step 1 -- the ONE surviving guard is a null captured email.
+    // step 1 -- the ONE surviving guard is a null captured email. CMP-04
+    // (D-02, plan 13-12): hashes the captured address under this workspace's
+    // own key and writes ONLY the hash -- never the plaintext `email`
+    // column, which this write site no longer populates at all.
+    // `ensureWorkspaceSuppressionKey` is safe to call unconditionally here
+    // (unlike the read-only `isEmailSuppressed`): this write site is the
+    // first-ever suppression for a workspace exactly once, and creating the
+    // key on that occasion is the intended, one-time cost.
     if (existing.email) {
+      const key = await ensureWorkspaceSuppressionKey(client, workspaceId);
+      const hash = hashSuppressionEmail(normalizeSuppressionEmail(existing.email), key);
       await client.query(
-        `INSERT INTO workspace_suppressions (workspace_id, email, reason)
+        `INSERT INTO workspace_suppressions (workspace_id, email_hash, reason)
          VALUES ($1, $2, $3)
-         ON CONFLICT (workspace_id, email) DO NOTHING`,
-        [workspaceId, existing.email, SUPPRESSION_REASON_CONTACT_DELETED]
+         ON CONFLICT (workspace_id, email_hash) DO NOTHING`,
+        [workspaceId, hash, SUPPRESSION_REASON_CONTACT_DELETED]
       );
     }
 

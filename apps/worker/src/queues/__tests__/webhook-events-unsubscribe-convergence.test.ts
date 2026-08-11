@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import Fastify, { type FastifyInstance } from "fastify";
 import type { Pool } from "pg";
 import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
+import { hashSuppressionEmail, loadWorkspaceSuppressionKey, normalizeSuppressionEmail } from "@mega-crm/contacts-core";
 import { signUnsubscribeToken } from "@mega-crm/delivery-core";
 import { registerUnsubscribeRoutes } from "@mega-crm/api/src/modules/delivery/unsubscribe.routes.js";
 import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool } from "../../test/db-fixture.js";
@@ -157,14 +158,30 @@ describe("Route + webhook unsubscribe convergence (CMP-01, plan 13-08)", () => {
     );
   }
 
+  // CMP-04 (D-02, plan 13-12): workspace_suppressions no longer stores
+  // plaintext, so this can no longer join on `ws.email = c.email` -- that
+  // join would silently always evaluate to zero matches once every write
+  // site stops populating `email`, which would make this assertion pass
+  // vacuously regardless of what actually happened. Reads the contact's
+  // current email, hashes it under the workspace's own key (a workspace
+  // with no key row has suppressed nothing, hence zero), and compares by hash.
   async function suppressionRows(workspaceId: string, contactId: string): Promise<number> {
     return withTenant(workspaceId, () =>
       withTenantTransaction(async (client) => {
+        const { rows: contactRows } = await client.query<{ email: string | null }>(
+          `SELECT email FROM contacts WHERE id = $1`,
+          [contactId]
+        );
+        const email = contactRows[0]?.email;
+        if (!email) return 0;
+
+        const key = await loadWorkspaceSuppressionKey(client, workspaceId);
+        if (!key) return 0;
+        const hash = hashSuppressionEmail(normalizeSuppressionEmail(email), key);
+
         const { rows } = await client.query<{ count: string }>(
-          `SELECT count(*)::text as count FROM workspace_suppressions ws
-           JOIN contacts c ON c.email = ws.email AND c.workspace_id = ws.workspace_id
-           WHERE ws.workspace_id = $1 AND c.id = $2`,
-          [workspaceId, contactId]
+          `SELECT count(*)::text as count FROM workspace_suppressions WHERE workspace_id = $1 AND email_hash = $2`,
+          [workspaceId, hash]
         );
         return Number(rows[0]?.count ?? "0");
       })

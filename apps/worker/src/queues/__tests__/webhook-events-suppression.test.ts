@@ -2,6 +2,12 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Pool } from "pg";
 import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
+import {
+  hashSuppressionEmail,
+  isEmailSuppressed,
+  loadWorkspaceSuppressionKey,
+  normalizeSuppressionEmail,
+} from "@mega-crm/contacts-core";
 import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool } from "../../test/db-fixture.js";
 import { processWebhookEventBatch } from "../webhook-events.worker.js";
 import { insertFixtureOrganization } from "../../test/failure-fixtures.js";
@@ -98,15 +104,22 @@ describe("webhook-events worker: suppression state machine (SUBS-02, D-10/D-11/D
     );
   }
 
+  // CMP-04 (D-02, plan 13-12): workspace_suppressions no longer stores
+  // plaintext -- compare by hash under the workspace's own key, exactly as
+  // isEmailSuppressed does. A workspace with no key row (nothing suppressed
+  // yet) has zero rows by construction, so this returns [] without querying.
   async function suppressionRows(
     workspaceId: string,
     email: string
   ): Promise<Array<{ reason: string }>> {
     return withTenant(workspaceId, () =>
       withTenantTransaction(async (client) => {
+        const key = await loadWorkspaceSuppressionKey(client, workspaceId);
+        if (!key) return [];
+        const hash = hashSuppressionEmail(normalizeSuppressionEmail(email), key);
         const { rows } = await client.query<{ reason: string }>(
-          `SELECT reason FROM workspace_suppressions WHERE workspace_id = $1 AND email = $2`,
-          [workspaceId, email]
+          `SELECT reason FROM workspace_suppressions WHERE workspace_id = $1 AND email_hash = $2`,
+          [workspaceId, hash]
         );
         return rows;
       })
@@ -198,6 +211,26 @@ describe("webhook-events worker: suppression state machine (SUBS-02, D-10/D-11/D
       newStatus: "suppressed",
       source: "webhook_suppression",
     });
+  });
+
+  it("CMP-04 (D-02, plan 13-12): a hard bounce's suppression is found by isEmailSuppressed for the same address in a different letter case", async () => {
+    const workspaceId = await freshWorkspaceId("supp-hard-bounce-case");
+    const campaignId = await createFixtureCampaign(workspaceId);
+    const contact = await createFixtureContact(workspaceId);
+    const sendId = await createFixtureSend(workspaceId, campaignId, contact.id);
+
+    const events = [
+      sendgridEvent(workspaceId, campaignId, sendId, { event: "bounce", type: "bounce", reason: "550 hard fail" }),
+    ];
+    await processWebhookEventBatch({ workspaceId, events });
+
+    const shouted = contact.email.toUpperCase();
+    expect(shouted).not.toBe(contact.email);
+
+    const suppressed = await withTenant(workspaceId, () =>
+      withTenantTransaction((client) => isEmailSuppressed(client, workspaceId, shouted))
+    );
+    expect(suppressed).toBe(true);
   });
 
   it("D-11: a spam report suppresses the contact with reason spam_report", async () => {

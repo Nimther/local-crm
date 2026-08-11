@@ -2,6 +2,7 @@ import type { PoolClient } from "pg";
 import { logger } from "./logger.js";
 import { registerObservedProperties } from "./property-registry.js";
 import { recordSubscriptionStatusChange } from "./subscription-status-history.js";
+import { hashSuppressionEmail, loadWorkspaceSuppressionKey, normalizeSuppressionEmail } from "./suppression-hash.js";
 
 export type SubscriptionStatus = "subscribed" | "unsubscribed" | "suppressed";
 
@@ -43,10 +44,30 @@ export const CONTACT_COLUMNS = `
   updated_at as "updatedAt"
 `;
 
+/**
+ * CMP-04 (D-02, plan 13-12): compares by HMAC hash, never plaintext -- the
+ * three write sites (`deleteContact`, `applySuppression`, and this plan's
+ * backfill) now write only `email_hash`, so a plaintext comparison would
+ * silently miss every address suppressed after this conversion.
+ *
+ * `loadWorkspaceSuppressionKey` returning `null` means this workspace has no
+ * `workspace_suppression_keys` row, i.e. it has never suppressed anything --
+ * that absence IS the answer, so this short-circuits to `false` without
+ * performing any further query or any KMS work. This function NEVER calls
+ * `ensureWorkspaceSuppressionKey`: creating a key just to hash a candidate
+ * against zero rows would put key-management work on the pre-send/pre-create
+ * path of every tenant with a clean suppression list, which is exactly the
+ * hot-path cost the cache exists to avoid for the tenants that need it
+ * least (T-13-12-05).
+ */
 export async function isEmailSuppressed(client: PoolClient, workspaceId: string, email: string): Promise<boolean> {
+  const key = await loadWorkspaceSuppressionKey(client, workspaceId);
+  if (!key) return false;
+
+  const hash = hashSuppressionEmail(normalizeSuppressionEmail(email), key);
   const { rows } = await client.query(
-    `SELECT 1 FROM workspace_suppressions WHERE workspace_id = $1 AND email = $2`,
-    [workspaceId, email]
+    `SELECT 1 FROM workspace_suppressions WHERE workspace_id = $1 AND email_hash = $2`,
+    [workspaceId, hash]
   );
   return rows.length > 0;
 }
