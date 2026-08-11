@@ -84,8 +84,8 @@ describe("erasure-scrub-reclaim.worker.ts (CMP-04, D-04, plan 13-15)", () => {
           `INSERT INTO erasure_records (workspace_id, contact_id, anonymized_at, status, requested_at, scrub_started_at, scrub_error)
            VALUES (
              $1, $2, now(), $3,
-             now() - make_interval(mins => $4),
-             CASE WHEN $5::float8 IS NULL THEN NULL ELSE now() - make_interval(mins => $5) END,
+             now() - make_interval(mins => $4::int),
+             CASE WHEN $5::int IS NULL THEN NULL ELSE now() - make_interval(mins => $5::int) END,
              $6
            )
            RETURNING id`,
