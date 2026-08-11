@@ -279,6 +279,59 @@ describe("CSV contact import (CONT-02, D-15..D-20)", () => {
     expect(summary.willCreate).toBe(1);
   });
 
+  it("CMP-04 (plan 13-10, Task 3): dry-run counts a row carrying an erased contact's former email/external_id as willCreate, never willUpdate, and raises no unique violation", async () => {
+    const { cookie, workspace } = await owner("csv-erased-reimport");
+    const email = `erased-reimport-${Date.now()}@example.com`;
+    const externalId = `erased-reimport-ext-${Date.now()}`;
+
+    const created = (
+      await app.inject({
+        method: "POST",
+        url: `/api/workspaces/${workspace.slug}/contacts`,
+        headers: { cookie },
+        payload: { externalId, email },
+      })
+    ).json();
+
+    const deleteRes = await app.inject({
+      method: "DELETE",
+      url: `/api/workspaces/${workspace.slug}/contacts/${created.id}`,
+      headers: { cookie },
+    });
+    expect(deleteRes.statusCode, `delete failed: ${deleteRes.body}`).toBe(200);
+
+    const csvContent = ["external_id,email", `${externalId},${email}`].join("\n");
+    const { body, headers } = buildMultipartCsvBody("erased-reimport.csv", csvContent);
+    const uploadRes = await app.inject({
+      method: "POST",
+      url: `/api/workspaces/${workspace.slug}/imports`,
+      headers: { cookie, ...headers },
+      payload: body,
+    });
+    expect(uploadRes.statusCode, `upload failed: ${uploadRes.body}`).toBe(200);
+    const upload = uploadRes.json<{ importId: string }>();
+
+    const dryRunRes = await app.inject({
+      method: "POST",
+      url: `/api/workspaces/${workspace.slug}/imports/${upload.importId}/dry-run`,
+      headers: { cookie },
+      payload: { mapping: { external_id: "externalId", email: "email" }, duplicatePolicy: "update" },
+    });
+    expect(dryRunRes.statusCode, `dry-run failed: ${dryRunRes.body}`).toBe(200);
+    const summary = dryRunRes.json<{ willCreate: number; willUpdate: number; errorCount: number }>();
+    // The anonymized row's external_id/email are both NULL (deleteContact's
+    // own anonymizing UPDATE), so the import path's create-versus-update
+    // lookup (findContactIdByIdentity, @mega-crm/contacts-core) finds
+    // nothing and this row counts as a fresh create, not an update of the
+    // erased row -- and creating a new row alongside the anonymized one
+    // raises no unique violation, since Postgres treats the anonymized
+    // row's NULL email/external_id as distinct from this row's non-null
+    // values.
+    expect(summary.willCreate).toBe(1);
+    expect(summary.willUpdate).toBe(0);
+    expect(summary.errorCount).toBe(0);
+  });
+
   it("WR-05b: dry-run reports an invalid subscriptionStatus value as an error, not a create/update (no drift with apply)", async () => {
     const { cookie, workspace } = await owner("csv-status-drift");
     const csvContent = ["external_id,email,status", "wr05b-1,wr05b@example.com,yes"].join("\n");

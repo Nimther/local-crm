@@ -30,6 +30,7 @@ import * as ingressJournalSchema from "./schema/ingress-journal.js";
 import * as sendEventQuarantineSchema from "./schema/send-event-quarantine.js";
 import * as reputationAlertStateSchema from "./schema/reputation-alert-state.js";
 import * as ingestionAlertStateSchema from "./schema/ingestion-alert-state.js";
+import * as erasureRecordsSchema from "./schema/erasure-records.js";
 
 const schema = {
   ...authSchema,
@@ -62,6 +63,7 @@ const schema = {
   ...sendEventQuarantineSchema,
   ...reputationAlertStateSchema,
   ...ingestionAlertStateSchema,
+  ...erasureRecordsSchema,
 };
 
 const databaseUrl = process.env.DATABASE_URL;

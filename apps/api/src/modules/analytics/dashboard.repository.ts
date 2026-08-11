@@ -137,10 +137,15 @@ export async function getWorkspaceDashboard(period: DashboardPeriod): Promise<Wo
 
     // Growth: contacts.created_at grouped by day (RESEARCH A2), plus a
     // cumulative-all-contacts running total (Open Question 1 default).
+    // `anonymized_at IS NULL` (CMP-04, plan 13-10, Task 3 audit find --
+    // NOT in that plan's files_modified list): without it, an erased
+    // contact would count toward this workspace's growth/total forever,
+    // permanently over-reporting the tenant-visible contact count for a
+    // person who exercised their right to erasure.
     const { rows: growthRows } = await client.query<{ day: string; newContacts: string }>(
       `SELECT created_at::date::text as day, count(*)::text as "newContacts"
        FROM contacts
-       WHERE workspace_id = $1 AND created_at >= $2::date
+       WHERE workspace_id = $1 AND created_at >= $2::date AND anonymized_at IS NULL
        GROUP BY created_at::date
        ORDER BY day`,
       [workspaceId, startDay]
@@ -148,7 +153,7 @@ export async function getWorkspaceDashboard(period: DashboardPeriod): Promise<Wo
     const newContactsByDay = new Map(growthRows.map((row) => [row.day, Number(row.newContacts)]));
 
     const { rows: baselineRows } = await client.query<{ count: string }>(
-      `SELECT count(*)::text as count FROM contacts WHERE workspace_id = $1 AND created_at < $2::date`,
+      `SELECT count(*)::text as count FROM contacts WHERE workspace_id = $1 AND created_at < $2::date AND anonymized_at IS NULL`,
       [workspaceId, startDay]
     );
     let cumulativeContacts = Number(baselineRows[0]?.count ?? 0);

@@ -414,6 +414,13 @@
       "when": 1783685963500,
       "tag": "0058_reputation_and_ingestion_alert_state",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1783685963501,
+      "tag": "0059_contact_erasure",
+      "breakpoints": true
     }
   ]
 }

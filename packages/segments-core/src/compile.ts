@@ -13,6 +13,17 @@ import type {
  * guarantee). D-01: conditions within a group are OR'd, groups are AND'd,
  * every group is always parenthesized (Pitfall 7) so SQL's tighter-binding
  * AND can never silently invert the intended precedence.
+ *
+ * CMP-04 (plan 13-10, Task 3): `c.anonymized_at IS NULL` is baked into the
+ * base predicate here rather than patched into every call site -- every
+ * count/list/point-check caller across BOTH apps compiles through THIS one
+ * function (segment count/list/point-check, campaign audience
+ * materialization via `recipient-snapshot.ts`, flow event/segment-trigger
+ * evaluation, branch-node/exit-condition point-checks, enroll-existing,
+ * segment-sweep), so fixing it here is what makes "an erased person is
+ * never counted as a live contact or targeted for a send" hold everywhere
+ * this engine is used, not just in the one or two paths a manual audit
+ * happened to visit.
  */
 export function compileSegmentDefinition(def: SegmentDefinition, workspaceId: string): CompiledSegment {
   const params: unknown[] = [workspaceId];
@@ -22,7 +33,7 @@ export function compileSegmentDefinition(def: SegmentDefinition, workspaceId: st
     return `(${conditionClauses.join(" OR ")})`;
   });
   // AND across groups.
-  const whereSql = ["c.workspace_id = $1", ...groupClauses].join(" AND ");
+  const whereSql = ["c.workspace_id = $1", "c.anonymized_at IS NULL", ...groupClauses].join(" AND ");
   return { whereSql, params };
 }
 

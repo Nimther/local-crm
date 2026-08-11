@@ -385,3 +385,85 @@ export const reputationTickJobSchema = z.object({
   schemaVersion: z.literal(REPUTATION_TICK_SCHEMA_VERSION),
 });
 export type ReputationTickJob = z.infer<typeof reputationTickJobSchema>;
+
+/**
+ * Phase 13 (CMP-04, D-01/D-04, plan 13-10): the erasure-scrub job's queue
+ * contract. Its own dedicated lane, not folded into any existing queue --
+ * this is a background PII-scrub walk over `sends`/`send_events`/`events`
+ * (plan 13-13), a structurally different concern from send dispatch,
+ * webhook ingestion, or flow advancement. Defined here rather than in
+ * plan 13-13 because THIS plan is the producer (`deleteContact`,
+ * `apps/api`) and this wave owns the schema file; 13-13 implements the
+ * consumer, and plan 13-15's reclaimer is the SECOND producer.
+ *
+ * `erasureRecordId` is the sole pointer this job needs -- the worker
+ * re-reads the `erasure_records` row for its current status/cursors
+ * (re-derive-everything-from-the-row, the same convention
+ * `campaignKickoffJobSchema`/`flowRunAdvanceJobSchema` use).
+ * `workspaceId`/`contactId` are carried too so the worker never has to
+ * open an admin-scan connection just to discover which tenant this job
+ * belongs to (Pattern 2: never trust ambient state).
+ */
+export const ERASURE_SCRUB_QUEUE = "erasure-scrub";
+export const ERASURE_SCRUB_SCHEMA_VERSION = 1;
+
+export const erasureScrubJobSchema = z.object({
+  schemaVersion: z.literal(ERASURE_SCRUB_SCHEMA_VERSION),
+  workspaceId: z.string().uuid(),
+  contactId: z.string().uuid(),
+  erasureRecordId: z.string().uuid(),
+});
+export type ErasureScrubJob = z.infer<typeof erasureScrubJobSchema>;
+
+/**
+ * Pure payload constructor -- mirrors `buildWebhookEventsJobPayload`'s own
+ * precedent (plan 13-01) for the identical two-producers-one-consumer
+ * shape: this plan's `deleteContact` and plan 13-15's reclaimer BOTH build
+ * this payload, so a single exported constructor is what keeps them from
+ * drifting on job shape while neither imports the other's app.
+ */
+export function buildErasureScrubJobPayload(
+  workspaceId: string,
+  contactId: string,
+  erasureRecordId: string
+): ErasureScrubJob {
+  return {
+    schemaVersion: ERASURE_SCRUB_SCHEMA_VERSION,
+    workspaceId,
+    contactId,
+    erasureRecordId,
+  };
+}
+
+/**
+ * Deterministic BullMQ `jobId`, derived from the erasure record's own id
+ * (mirrors `eventsIngestJobSchema`'s `eventId`-as-`jobId` convention: the
+ * work's own durable identifier, not a caller-invented string). There are
+ * TWO producers of this job -- this plan's `deleteContact` request path,
+ * and plan 13-15's reclaimer re-enqueueing a stranded `pending` record --
+ * and BOTH must derive the SAME id from the SAME erasure-record id, or a
+ * reclaim of an already-queued record would queue a second scrub. Exported
+ * from here (not computed inline at either call site) so that can never
+ * happen. NOTE for readers: BullMQ's own `jobId` deduplication is a
+ * best-effort layer, not the authoritative one -- once a completed job
+ * ages out of Redis (`STANDARD_JOB_RETENTION`), the same id can be
+ * enqueued again. The authoritative idempotency is plan 13-13's own
+ * already-complete check on the `erasure_records` row, which holds
+ * regardless of Redis state.
+ */
+export function buildErasureScrubJobId(erasureRecordId: string): string {
+  return erasureRecordId;
+}
+
+/**
+ * Phase 13 (CMP-04, D-04, plan 13-10): the `workspace_suppressions.reason`
+ * value written by an erasure. Exported as a shared constant, not an
+ * inline string literal, because THREE plans depend on this exact value --
+ * this one writes it, plan 13-12 rewrites the row it lives on when the
+ * suppression column becomes a hash, and the erasure re-import tests
+ * assert on it -- and a string literal repeated across three plans is how
+ * they silently drift. Distinct from the reasons a genuine unsubscribe or
+ * a provider suppression writes, which is what keeps "asked to leave" from
+ * being conflated with "asked to be forgotten" in consent history.
+ */
+export const SUPPRESSION_REASON_CONTACT_DELETED = "contact_deleted";

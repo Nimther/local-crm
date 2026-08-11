@@ -51,6 +51,13 @@ export const contacts = pgTable(
     timezone: text("timezone"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    // CMP-04/D-01 (Phase 13, plan 13-10, migration 0059): non-null means
+    // this contact was erased on request and its PII columns were scrubbed
+    // by deleteContact's anonymizing UPDATE -- the row and its foreign keys
+    // (sends, subscription_status_history, events) are retained so a send
+    // or a suppression can still be proven lawful. See migration 0059's own
+    // column comment for the full reasoning.
+    anonymizedAt: timestamp("anonymized_at", { withTimezone: true }),
   },
   (t) => [unique("contacts_workspace_external_id_unique").on(t.workspaceId, t.externalId), unique("contacts_workspace_email_unique").on(t.workspaceId, t.email)]
 );
