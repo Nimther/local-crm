@@ -429,7 +429,7 @@ Plans:
   4. A provider event carrying an out-of-range or manipulated timestamp cannot bypass deduplication or land outside its partition, and a redelivered event is counted once even when `sg_event_id` is not stable across retries.
   5. Metric drift is corrected by a scheduled reconciliation job rather than a one-off fix, events missed while the webhook endpoint was unreachable are recovered by backfill, and a tenant approaching the spam-complaint threshold raises an alert.
 
-**Plans**: 3/15 plans executed
+**Plans**: 6/15 plans executed
 
 Plans:
 **Wave 1**
@@ -440,9 +440,9 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 13-04-PLAN.md — Bound provider `occurred_at` before partition routing and dedup; quarantine out-of-range events per event (CMP-05)
-- [ ] 13-05-PLAN.md — Dirty-day marking and sweep so a late event is re-verified against a fresh scan (CMP-03)
-- [ ] 13-06-PLAN.md — Journal replay sweep, operator range-replay CLI, and split retention: completed rows pruned, incomplete ones tombstoned (CMP-08)
+- [x] 13-04-PLAN.md — Bound provider `occurred_at` before partition routing and dedup; quarantine out-of-range events per event (CMP-05)
+- [x] 13-05-PLAN.md — Dirty-day marking and sweep so a late event is re-verified against a fresh scan (CMP-03)
+- [x] 13-06-PLAN.md — Journal replay sweep, operator range-replay CLI, and split retention: completed rows pruned, incomplete ones tombstoned (CMP-08)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -625,7 +625,7 @@ Phase 9 has no dependents and may be scheduled in parallel at any point after Ph
 | 10. Tenant Isolation & Trust Boundaries | v1.1 | 15/15 | Complete    | 2026-08-09 |
 | 11. Delivery Correctness | v1.1 | 11/11 | Complete    | 2026-08-09 |
 | 12. Worker Reliability & Tenant Fairness | v1.1 | 14/14 | Complete    | 2026-08-11 |
-| 13. Compliance & Analytics Integrity | v1.1 | 3/15 | In Progress|  |
+| 13. Compliance & Analytics Integrity | v1.1 | 6/15 | In Progress|  |
 | 14. Deployment & Database Durability | v1.1 | 0/TBD | Not started | - |
 | 15. Observability, Alerting & Frontend Resilience | v1.1 | 0/TBD | Not started | - |
 | 16. Live SendGrid Verification | v1.1 | 0/TBD | Not started | - |
