@@ -393,13 +393,17 @@ describe("packages/db webhook modules: ingress_journal + send_event_quarantine (
       .spyOn(ingressJournalModule, "writeIngressJournal")
       .mockRejectedValueOnce(new Error("simulated journal write failure"));
 
-    const before = await webhookEventsQueue.getJobCounts("waiting");
     const res = await postSigned(pathToken);
     expect(res.statusCode).toBe(500);
     expect(writeSpy).toHaveBeenCalledTimes(1);
 
-    const after = await webhookEventsQueue.getJobCounts("waiting");
-    expect(after.waiting).toBe(before.waiting ?? 0);
+    // Scope the queue assertion to this test's workspace: the suite shares one
+    // Redis queue with concurrently-running test files, so a global count is racy.
+    const waitingJobs = await webhookEventsQueue.getJobs(["waiting"]);
+    const jobForThisWorkspace = waitingJobs.find(
+      (job) => (job.data as { workspaceId?: string }).workspaceId === workspace.id
+    );
+    expect(jobForThisWorkspace, "no job may be enqueued when the journal write fails").toBeUndefined();
     expect(await countIngressJournalRows(workspace.id)).toBe(0);
   });
 });
