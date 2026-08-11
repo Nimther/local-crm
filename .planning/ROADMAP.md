@@ -429,7 +429,7 @@ Plans:
   4. A provider event carrying an out-of-range or manipulated timestamp cannot bypass deduplication or land outside its partition, and a redelivered event is counted once even when `sg_event_id` is not stable across retries.
   5. Metric drift is corrected by a scheduled reconciliation job rather than a one-off fix, events missed while the webhook endpoint was unreachable are recovered by backfill, and a tenant approaching the spam-complaint threshold raises an alert.
 
-**Plans**: 12/15 plans executed
+**Plans**: 13/15 plans executed
 
 Plans:
 **Wave 1**
@@ -464,7 +464,7 @@ Plans:
 
 **Wave 7** *(blocked on Wave 6 completion)*
 
-- [ ] 13-13-PLAN.md — Bounded resumable JSONB scrub over linked event rows, rebuilt from an evidence allowlist, with completion tracking (CMP-04)
+- [x] 13-13-PLAN.md — Bounded resumable JSONB scrub over linked event rows, rebuilt from an evidence allowlist, with completion tracking (CMP-04)
 
 **Wave 8** *(blocked on Wave 7 completion)*
 
@@ -625,7 +625,7 @@ Phase 9 has no dependents and may be scheduled in parallel at any point after Ph
 | 10. Tenant Isolation & Trust Boundaries | v1.1 | 15/15 | Complete    | 2026-08-09 |
 | 11. Delivery Correctness | v1.1 | 11/11 | Complete    | 2026-08-09 |
 | 12. Worker Reliability & Tenant Fairness | v1.1 | 14/14 | Complete    | 2026-08-11 |
-| 13. Compliance & Analytics Integrity | v1.1 | 12/15 | In Progress|  |
+| 13. Compliance & Analytics Integrity | v1.1 | 13/15 | In Progress|  |
 | 14. Deployment & Database Durability | v1.1 | 0/TBD | Not started | - |
 | 15. Observability, Alerting & Frontend Resilience | v1.1 | 0/TBD | Not started | - |
 | 16. Live SendGrid Verification | v1.1 | 0/TBD | Not started | - |
