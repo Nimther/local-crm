@@ -69,7 +69,10 @@ describe("webhook-replay-sweep.worker.ts (CMP-08, D-06, plan 13-06)", () => {
       ingestionCompletedAt = null,
       replayCount = 0,
       payloadPurgedAt = null,
-      rawBatch = [{ sg_event_id: `sg-${randomUUID()}`, event: "delivered", timestamp: 1_700_000_000 }],
+      // Phase 13 (CMP-05, plan 13-04): classifyOccurredAt quarantines events
+      // outside [now-7d, now+5min]; a fixed 2023-era timestamp would make the
+      // replayed batch quarantine instead of insert. Keep fixtures in-window.
+      rawBatch = [{ sg_event_id: `sg-${randomUUID()}`, event: "delivered", timestamp: Math.floor(Date.now() / 1000) - 3600 }],
     } = overrides;
 
     return withTenant(workspaceId, () =>
@@ -218,7 +221,8 @@ describe("webhook-replay-sweep.worker.ts (CMP-08, D-06, plan 13-06)", () => {
 
   it("processing the same journal row's batch twice leaves exactly one send_events row and the same campaign/rollup counts", async () => {
     const workspaceId = await freshWorkspaceId("replay-double");
-    const event = { sg_event_id: `sg-${randomUUID()}`, event: "delivered", timestamp: 1_700_000_000 };
+    // In-window timestamp (see seedJournalRow's rawBatch note re plan 13-04).
+    const event = { sg_event_id: `sg-${randomUUID()}`, event: "delivered", timestamp: Math.floor(Date.now() / 1000) - 3600 };
     const journalId = await seedJournalRow(workspaceId, { receivedAtMinutesAgo: 30, rawBatch: [event] });
 
     await runWebhookReplaySweep({ workspaceIds: [workspaceId] });

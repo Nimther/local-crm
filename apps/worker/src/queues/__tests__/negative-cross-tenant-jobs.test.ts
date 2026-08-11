@@ -664,15 +664,14 @@ describe("Negative cross-tenant suite: background-job families (SEC-16)", () => 
 
       const contactA = await insertContact(workspaceA);
       const contactB = await insertContact(workspaceB);
-      // Derived from the DB session's own `now()::date` (not a JS UTC
-      // computation) -- this environment's test database session TimeZone
-      // is not UTC, and `sent_at::date` below casts using THAT session
-      // setting. Unified UTC day semantics for daily metrics is an explicit
-      // Phase 11+ concern (PROJECT.md Active); this test only needs "today"
-      // as `reconcileWorkspaceDay`'s own `sent_at::date` comparison will
-      // resolve it, so workspace-scoping (this test's actual claim) is
-      // proven without depending on that separate, later-phase fix.
-      const { rows: todayRows } = await pool.query<{ today: string }>(`SELECT now()::date::text as today`);
+      // Phase 13 (CMP-02, plan 13-02): `reconcileWorkspaceDay` now casts
+      // `sent_at` with AT TIME ZONE 'UTC', so a send stamped `now()` belongs
+      // to the UTC day -- "today" must be derived the same way, or this test
+      // fails whenever the session-local date differs from the UTC date
+      // (the pre-13-02 `now()::date` derivation was flaky at day boundaries).
+      const { rows: todayRows } = await pool.query<{ today: string }>(
+        `SELECT (now() AT TIME ZONE 'UTC')::date::text as today`,
+      );
       const today = todayRows[0].today;
 
       // One 'sent' send per workspace, dated today.
