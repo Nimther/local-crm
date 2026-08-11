@@ -42,7 +42,8 @@ import {
  *    than inherited confidence from a sibling's test suite.
  *
  * Unlike `ingestion-health-watchdog.ts` (this same plan's OTHER new module),
- * this watchdog's health read does NOT go through `withCrossWorkspaceScan`.
+ * this watchdog's health read does NOT go through the cross-workspace scan
+ * helper (`@mega-crm/tenant-context`'s scan-role connection).
  * `reputation_alert_state` carries no RLS at all (migration 0058's own
  * header: "role identity is the boundary", same precedent as `organization`/
  * `dead_letter_jobs`) and `mega_crm_scan` was never granted access to it --

@@ -31,6 +31,18 @@ import {
   DEAD_LETTER_ALERT_DEDUP_HOURS,
   type DeadLetterAlertMessage,
 } from "./modules/ops/dead-letter-watchdog.js";
+import {
+  startIngestionHealthWatchdog,
+  INGESTION_WATCHDOG_INTERVAL_MS,
+  INGESTION_ALERT_DEDUP_HOURS,
+  type IngestionAlertMessage,
+} from "./modules/ops/ingestion-health-watchdog.js";
+import {
+  startReputationWatchdog,
+  REPUTATION_WATCHDOG_INTERVAL_MS,
+  REPUTATION_ALERT_DEDUP_HOURS,
+  type ReputationAlertMessage,
+} from "./modules/ops/reputation-watchdog.js";
 import { authPlugin } from "./modules/auth/plugin.js";
 import { registerWorkspaceRoutes } from "./modules/tenancy/workspaces.js";
 import { registerProfileRoutes } from "./modules/tenancy/profile.js";
@@ -270,6 +282,37 @@ async function sendDeadLetterOperatorAlert(message: DeadLetterAlertMessage): Pro
   });
 }
 
+/**
+ * Phase 13 (CMP-08, plan 13-11): the ingestion-health watchdog's own real
+ * dispatch -- same platform-key-only, plain-text discipline as every
+ * sibling above, a fourth distinct subject line so all four alert channels
+ * stay distinguishable in an operator's inbox.
+ */
+async function sendIngestionHealthOperatorAlert(message: IngestionAlertMessage): Promise<void> {
+  await sgMail.send({
+    to: message.to,
+    from: env.PLATFORM_MAIL_FROM,
+    subject: "Mega CRM ingestion health alert",
+    text: message.text,
+  });
+}
+
+/**
+ * Phase 13 (CMP-09, plan 13-11): the reputation watchdog's own real dispatch
+ * -- same platform-key-only discipline as every sibling above, used for
+ * BOTH the operator alert and every workspace member's tenant alert (D-09:
+ * a tenant's own SendGrid key must never carry this message -- see
+ * reputation-watchdog.ts's own header for why).
+ */
+async function sendReputationAlert(message: ReputationAlertMessage): Promise<void> {
+  await sgMail.send({
+    to: message.to,
+    from: env.PLATFORM_MAIL_FROM,
+    subject: "Mega CRM reputation alert",
+    text: message.text,
+  });
+}
+
 async function main(): Promise<void> {
   const app = await buildServer();
   await app.listen({ port: env.API_PORT, host: "0.0.0.0" });
@@ -315,6 +358,28 @@ async function main(): Promise<void> {
     operatorEmail: env.OPERATOR_ALERT_EMAIL,
     sendMail: sendDeadLetterOperatorAlert,
   });
+  // Phase 13 (CMP-08, plan 13-11): a FOURTH independent dead-man's switch,
+  // over ingress_journal's stuck/attempt-capped/tombstoned rows -- its own
+  // read goes through the dedicated mega_crm_scan role (the cross-workspace
+  // scan helper, wrapped inside checkIngestionHealthAndAlert itself), its
+  // claim/dedup state
+  // (ingestion_alert_state) lives on its own table, so it cannot mask or be
+  // masked by any watchdog above.
+  startIngestionHealthWatchdog({
+    client: pool,
+    operatorEmail: env.OPERATOR_ALERT_EMAIL,
+    sendMail: sendIngestionHealthOperatorAlert,
+  });
+  // Phase 13 (CMP-09, plan 13-11): a FIFTH independent dead-man's switch,
+  // over reputation_alert_state -- the first of these five to also alert a
+  // TENANT audience (every workspace member), never only the operator. Keyed
+  // by (workspace_id, metric) rather than singleton, and dedups per
+  // (workspace_id, metric) pair -- see reputation-watchdog.ts's own header.
+  startReputationWatchdog({
+    client: pool,
+    operatorEmail: env.OPERATOR_ALERT_EMAIL,
+    sendMail: sendReputationAlert,
+  });
 
   // Names only the interval/threshold numbers -- never the operator
   // address or anything derived from the SendGrid key (T-09-11).
@@ -333,6 +398,14 @@ async function main(): Promise<void> {
   logger.info(
     { pollIntervalMs: DEAD_LETTER_WATCHDOG_INTERVAL_MS, alertDedupHours: DEAD_LETTER_ALERT_DEDUP_HOURS },
     "dead-letter watchdog armed -- watching dead_letter_jobs for unacknowledged terminal failures"
+  );
+  logger.info(
+    { pollIntervalMs: INGESTION_WATCHDOG_INTERVAL_MS, alertDedupHours: INGESTION_ALERT_DEDUP_HOURS },
+    "ingestion-health watchdog armed -- watching ingress_journal for stuck/attempt-capped/unrecoverable webhook batches"
+  );
+  logger.info(
+    { pollIntervalMs: REPUTATION_WATCHDOG_INTERVAL_MS, alertDedupHours: REPUTATION_ALERT_DEDUP_HOURS },
+    "reputation watchdog armed -- watching reputation_alert_state for warn/critical tier crossings"
   );
 }
 
