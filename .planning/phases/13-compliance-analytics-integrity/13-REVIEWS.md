@@ -100,3 +100,33 @@ Plus MEDIUM: the apps/api ↔ apps/worker import boundary is hit un-anticipated 
 (n/a — single reviewer.)
 
 **Overall risk: MEDIUM** — architecturally sound and exceptionally well-sourced, but three HIGH integration gaps would ship real broken behavior if executed verbatim. All are cheap plan-level fixes (one migration grant, one completion-mark restructure, one extra column in the anonymizing UPDATE + upsert semantics, two cursor columns, one cross-app placement decision); with them, the phase drops to LOW risk.
+
+---
+
+## Codex follow-up review
+
+**Reviewer:** codex — follow-up pass, 2026-08-11, run against the Phase 13 plan set after the Claude review above had already been incorporated.
+
+**Status of the Claude review above:** incorporated and closed. Its 3 HIGH / 5 MEDIUM / 5 LOW findings were addressed by the replan at commits `f20ea79` and `967d978`; treat them as history, not as work.
+
+**Status of this section:** the six findings below postdate that replan and are the **open, current, actionable** review set for Phase 13. Each one must be closed in the relevant PLAN.md — or explicitly deferred/rejected there with a written rationale — by the next `/gsd-plan-phase 13 --reviews` run. None of them is addressed by the plan set as it stands.
+
+**Severity legend:** BLOCKER — must be closed in the plan text before Phase 13 executes. WARNING — must be decided in the plan text before execution, never left to executor discretion.
+
+### Finding 1 — BLOCKER: Suppression evidence missing for previously subscribed contacts (13-10)
+
+**Finding (verbatim):**
+
+> 1. BLOCKER — 13-10 must create suppression evidence for every contact erasure, including previously subscribed contacts. 13-CONTEXT.md says erasure must not weaken suppression and every erased address must remain unmailable after re-import.
+
+**Affected plan(s):** 13-10-PLAN.md Task 2, step 2 (line 194: "Keep the existing conditional suppression insert exactly as it is, including ... its unsubscribed-or-suppressed status gate") and the acceptance criterion at line 208 ("After deleting a seeded subscribed contact, `workspace_suppressions` contains no row for that address"), which currently asserts the opposite of what this finding requires — that a previously subscribed contact's erasure writes no suppression row at all. Plan 13-12 later converts `workspace_suppressions.email` to a hash across all four call sites (13-10's insert among them), so the fix must be expressed in terms that survive that conversion — an unconditional insert keyed by email, not gated on pre-erasure subscription status.
+
+**Required acceptance tests:**
+
+- Erasing a previously *subscribed* contact writes a `workspace_suppressions` row for that address (replacing, not supplementing, the current line-208 criterion that asserts no row is written).
+- The suppression reason distinguishes erasure (`contact_deleted` or an erasure-specific reason) from a genuine unsubscribe, so consent history is not falsified by conflating "asked to leave" with "asked to be forgotten."
+- Re-importing the erased address after erasure — through both the CSV import path and the shared `contacts-core` upsert — produces a contact that the pre-send suppression gate still refuses to mail.
+
+**Threat-model update:** amends 13-10's `T-13-10-04` ("Mail continuing to an erased address", high/mitigate) — its mitigation text ("Suppression and status are resolved synchronously in the delete request") is false for the previously-subscribed case as the plan is currently written, since step 2's insert is conditional on prior unsubscribed-or-suppressed status. Also amends `T-13-10-05` ("Resurrecting an erased contact via re-import or update", medium/mitigate) — the re-import protection via the identity-lookup filter (Task 3) prevents PII repopulation but does not by itself guarantee the address stays unmailable, since a newly-created contact from re-import has no suppression row unless one was written unconditionally at erasure time. Corrected mitigation: the suppression insert in Task 2 step 2 must be unconditional on erasure, independent of the contact's subscription status at the time of deletion.
+
+**Suggested fix:** In 13-10-PLAN.md Task 2 step 2, make the `workspace_suppressions` insert unconditional whenever a contact is erased (drop the unsubscribed-or-suppressed status gate for the erasure path specifically, while leaving the genuine-unsubscribe insert path elsewhere unchanged), give it an erasure-specific reason, delete the acceptance criterion at line 208 that asserts no suppression row for a subscribed contact's erasure, and add the re-import assertions from the Required acceptance tests above to the behavior list and acceptance criteria.
