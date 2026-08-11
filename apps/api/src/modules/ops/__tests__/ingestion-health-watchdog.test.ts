@@ -414,7 +414,7 @@ describe("readIngestionHealth / claimIngestionAlertSlot / checkIngestionHealthAn
 });
 
 describe("startIngestionHealthWatchdog", () => {
-  afterEach(async () => {
+  afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
