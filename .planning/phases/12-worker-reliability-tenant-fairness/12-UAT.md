@@ -1,9 +1,9 @@
 ---
-status: resolved
+status: complete
 phase: 12-worker-reliability-tenant-fairness
-source: 12-01-SUMMARY.md, 12-02-SUMMARY.md, 12-03-SUMMARY.md, 12-04-SUMMARY.md, 12-05-SUMMARY.md, 12-06-SUMMARY.md, 12-07-SUMMARY.md, 12-08-SUMMARY.md, 12-09-SUMMARY.md, 12-10-SUMMARY.md, 12-11-SUMMARY.md, 12-12-SUMMARY.md, 12-13-SUMMARY.md, 12-VERIFICATION.md
+source: 12-01-SUMMARY.md, 12-02-SUMMARY.md, 12-03-SUMMARY.md, 12-04-SUMMARY.md, 12-05-SUMMARY.md, 12-06-SUMMARY.md, 12-07-SUMMARY.md, 12-08-SUMMARY.md, 12-09-SUMMARY.md, 12-10-SUMMARY.md, 12-11-SUMMARY.md, 12-12-SUMMARY.md, 12-13-SUMMARY.md, 12-14-SUMMARY.md, 12-VERIFICATION.md
 started: 2026-08-11T02:49:33Z
-updated: 2026-08-11T07:15:00Z
+updated: 2026-08-11T10:40:00Z
 ---
 
 ## Current Test
@@ -276,16 +276,16 @@ expected: |
   (deterministic BullMQ jobId collision + FOR UPDATE SKIP LOCKED re-check, both
   independently established elsewhere in this codebase) as sufficient without a dedicated
   test. The "drains to zero without failures" half of D4 IS genuinely proven.
-result: issue
-reported: "Test-design gap: seed exactly one past-due scheduled campaign before the 20-job burst, then assert that exactly one kickoff job is produced/processed and the campaign transitions only once. Also assert no duplicate kickoff remains in waiting/active/completed state. The current empty-database result is vacuous; separate jobId and row-lock tests do not replace this end-to-end burst assertion."
-severity: major
+result: pass
+reported: "User passed retest 2026-08-11 after G-12-3 fix (plan 12-14). Live re-run: 9/9 cases pass in worker-autorun-default.test.ts, including the reworked burst case ('kicks off one seeded due campaign exactly once, never twice') and the empty-scan control case ('no due campaigns produces zero kickoff jobs'). Exactly one kickoff across all five queue states, correct payload via getJob(campaignId), single campaign transition (status 'sending', sending_started_at unchanged after re-check tick). RED evidence ('expected +0 to be 1') in 12-14-SUMMARY.md proves non-vacuity. Original issue: empty-database all-zeros assertion was vacuous."
 coverage_id: D4 (12-12)
+retest_of: G-12-3 (plan 12-14)
 
 ## Summary
 
 total: 43
-passed: 42
-issues: 1
+passed: 43
+issues: 0
 pending: 0
 skipped: 0
 blocked: 0
