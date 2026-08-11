@@ -30,6 +30,12 @@ import {
   REPUTATION_TICK_QUEUE,
 } from "../reputation-tick.worker.js";
 import { createErasureScrubWorker } from "../erasure-scrub.worker.js";
+import {
+  createErasureScrubReclaimWorker,
+  waitForErasureScrubReclaimRegistration,
+  ERASURE_SCRUB_RECLAIM_QUEUE,
+  ERASURE_SCRUB_RECLAIM_INTERVAL_MS,
+} from "../erasure-scrub-reclaim.worker.js";
 import { ERASURE_SCRUB_QUEUE } from "@mega-crm/shared-schemas";
 
 /**
@@ -716,5 +722,158 @@ describe("erasure-scrub worker registers no job scheduler (CMP-04, plan 13-13)",
       await queue.obliterate({ force: true }).catch(() => undefined);
       await queue.close();
     }
+  });
+});
+
+/**
+ * Phase 13 (CMP-04, D-04, plan 13-15): `erasure-scrub-reclaim.worker.ts` is a
+ * BRAND NEW queue -- unlike the FIXTURES loop above (which each migrated
+ * away from an older `tickQueue.add({repeat})` registration form and
+ * therefore needs the "starting from a Redis holding the legacy repeatable
+ * entry" coexistence/cleanup case), this worker was built directly on
+ * `upsertJobScheduler` from day one and has no legacy entry to migrate away
+ * from -- the SAME shape `webhook-replay-sweep.worker.ts`/
+ * `reputation-tick.worker.ts` use, so it gets its own describe block rather
+ * than joining the FIXTURES loop for the identical reason those two do.
+ *
+ * Unlike `erasure-scrub.worker.ts` immediately above (a job-per-erasure
+ * queue that registers NO scheduler), THIS queue is the periodic reclaim
+ * tick and MUST register exactly one -- the two describe blocks assert
+ * deliberately opposite properties for two different queues, so a future
+ * reader must not "fix" one to match the other.
+ */
+describe("erasure-scrub-reclaim scheduler (CMP-04, plan 13-15)", () => {
+  let redis: TempRedis;
+
+  beforeAll(async () => {
+    redis = await startTempRedis({});
+  });
+
+  afterAll(async () => {
+    await redis?.stop();
+  });
+
+  it("registers exactly one job scheduler with the stable id and the correct every interval", async () => {
+    const connection = buildRedisConnectionOptions(redis.url);
+    const worker = createErasureScrubReclaimWorker(connection, { autorun: false });
+    const queue = new Queue(ERASURE_SCRUB_RECLAIM_QUEUE, { connection });
+
+    try {
+      await vi.waitFor(async () => {
+        expect(await queue.getJobSchedulersCount()).toBe(1);
+      });
+
+      const schedulers = await queue.getJobSchedulers();
+      expect(schedulers).toHaveLength(1);
+      expect(schedulers[0].key).toBe("erasure-scrub-reclaim-tick");
+      expect(schedulers[0].every).toBe(ERASURE_SCRUB_RECLAIM_INTERVAL_MS);
+
+      await waitForErasureScrubReclaimRegistration(worker);
+    } finally {
+      await worker.close();
+      await queue.obliterate({ force: true });
+      await queue.close();
+    }
+  });
+
+  it("constructing the worker twice still leaves exactly one scheduler with that id", async () => {
+    const connection = buildRedisConnectionOptions(redis.url);
+    const queue = new Queue(ERASURE_SCRUB_RECLAIM_QUEUE, { connection });
+    const workerA = createErasureScrubReclaimWorker(connection, { autorun: false });
+
+    try {
+      await vi.waitFor(async () => {
+        expect(await queue.getJobSchedulersCount()).toBe(1);
+      });
+
+      const workerB = createErasureScrubReclaimWorker(connection, { autorun: false });
+      try {
+        await vi.waitFor(async () => {
+          expect(await queue.getJobSchedulersCount()).toBe(1);
+        });
+
+        const schedulers = await queue.getJobSchedulers();
+        expect(schedulers).toHaveLength(1);
+        expect(schedulers[0].key).toBe("erasure-scrub-reclaim-tick");
+
+        await waitForErasureScrubReclaimRegistration(workerB);
+      } finally {
+        await workerB.close();
+      }
+
+      await waitForErasureScrubReclaimRegistration(workerA);
+    } finally {
+      await workerA.close();
+      await queue.obliterate({ force: true });
+      await queue.close();
+    }
+  });
+
+  it("boot enqueues one immediate job with a per-boot jobId carrying the current schemaVersion, not owned by the scheduler", async () => {
+    const connection = buildRedisConnectionOptions(redis.url);
+    const worker = createErasureScrubReclaimWorker(connection, { autorun: false });
+    const queue = new Queue(ERASURE_SCRUB_RECLAIM_QUEUE, { connection });
+
+    try {
+      await vi.waitFor(async () => {
+        const jobs = await queue.getJobs(["waiting", "delayed"]);
+        expect(jobs.some((job) => job.id?.startsWith("boot-"))).toBe(true);
+      });
+
+      const jobs = await queue.getJobs(["waiting", "delayed"]);
+      const bootJobs = jobs.filter((job) => job.id?.startsWith("boot-"));
+      expect(bootJobs).toHaveLength(1);
+      expect((bootJobs[0].data as { schemaVersion?: number }).schemaVersion).toBe(1);
+
+      await waitForErasureScrubReclaimRegistration(worker);
+    } finally {
+      await worker.close();
+      await queue.obliterate({ force: true });
+      await queue.close();
+    }
+  });
+
+  it("a rejecting registration is logged and swallowed -- the factory call resolves and never surfaces as an unhandled rejection", async () => {
+    const connection = buildRedisConnectionOptions(redis.url);
+    const err = new Error("simulated redis hiccup at boot");
+    const upsertSpy = vi.spyOn(Queue.prototype, "upsertJobScheduler").mockRejectedValueOnce(err);
+    const closeSpy = vi.spyOn(Queue.prototype, "close");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const unhandledRejections: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => {
+      unhandledRejections.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+
+    const worker = createErasureScrubReclaimWorker(connection, { autorun: false });
+
+    try {
+      await expect(waitForErasureScrubReclaimRegistration(worker)).resolves.toBeUndefined();
+
+      expect(closeSpy).toHaveBeenCalled();
+      expect(errorSpy).toHaveBeenCalled();
+      expect(upsertSpy).toHaveBeenCalledTimes(1);
+      expect(unhandledRejections).toHaveLength(0);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+      upsertSpy.mockRestore();
+      closeSpy.mockRestore();
+      errorSpy.mockRestore();
+      await worker.close();
+      const queue = new Queue(ERASURE_SCRUB_RECLAIM_QUEUE, { connection });
+      await queue.obliterate({ force: true }).catch(() => undefined);
+      await queue.close();
+    }
+  });
+
+  it("the worker file registers through upsertJobScheduler behind a guard that logs (never rethrows) and always closes the registration queue", () => {
+    const source = readFileSync(
+      path.join(REPO_ROOT, "apps/worker/src/queues/erasure-scrub-reclaim.worker.ts"),
+      "utf8"
+    );
+
+    expect(source).toContain("upsertJobScheduler");
+    expect(source).toMatch(/finally\s*\{[\s\S]*?queue\.close\(\)/);
+    expect(source).toMatch(/catch\s*\(err\)\s*\{\s*scrubbedConsole\.error/);
   });
 });

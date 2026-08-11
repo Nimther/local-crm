@@ -456,6 +456,24 @@ export function buildErasureScrubJobId(erasureRecordId: string): string {
 }
 
 /**
+ * Phase 13 (CMP-04, D-04, R-05, plan 13-15): the reclaim tick's own
+ * `schemaVersion` payload -- mirrors `sendReconcilerTickJobSchema`'s shape
+ * and doc comment exactly (Phase 11): a rolling deploy can have an old-code
+ * worker still draining jobs enqueued by new code (or vice versa), so this
+ * tick's payload carries an explicit version a worker validates before
+ * acting on it. `createErasureScrubReclaimWorker`'s processor DEFERS (logs
+ * via `scrubbedConsole`, returns without processing) a `schemaVersion` it
+ * does not recognize, rather than throwing it into BullMQ retries -- a
+ * deferred tick never consumes one of the job's `attempts`, and the next
+ * scheduled tick (or the next boot) simply tries again.
+ */
+export const ERASURE_SCRUB_RECLAIM_TICK_SCHEMA_VERSION = 1;
+export const erasureScrubReclaimTickJobSchema = z.object({
+  schemaVersion: z.literal(ERASURE_SCRUB_RECLAIM_TICK_SCHEMA_VERSION),
+});
+export type ErasureScrubReclaimTickJob = z.infer<typeof erasureScrubReclaimTickJobSchema>;
+
+/**
  * Phase 13 (CMP-04, D-04, plan 13-10): the `workspace_suppressions.reason`
  * value written by an erasure. Exported as a shared constant, not an
  * inline string literal, because THREE plans depend on this exact value --
