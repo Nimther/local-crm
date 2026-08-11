@@ -90,11 +90,18 @@ export async function rehashSuppressionsForWorkspace(
   let hashed = 0;
   let skippedCollisions = 0;
   let batches = 0;
+  // Rows identified as an un-resolvable case/whitespace collision are
+  // excluded from every subsequent SELECT in this call (not just this
+  // batch) -- without this, a colliding row's email_hash stays null
+  // forever, so it would be re-selected and re-counted as "skipped" on
+  // every following batch, double-(triple-, ...-)counting the same row and
+  // preventing the loop from ever reaching a genuinely empty page.
+  const permanentlySkippedIds: string[] = [];
 
   for (;;) {
     const client = await pool.connect();
     let batchHashed = 0;
-    let batchSkipped = 0;
+    let batchNewSkips = 0;
     let batchRowCount = 0;
     try {
       await client.query("BEGIN");
@@ -103,8 +110,9 @@ export async function rehashSuppressionsForWorkspace(
       const { rows } = await client.query<{ id: string; email: string }>(
         `SELECT id, email FROM workspace_suppressions
          WHERE workspace_id = $1 AND email_hash IS NULL AND email IS NOT NULL
+           AND NOT (id = ANY($3::uuid[]))
          LIMIT $2`,
-        [workspaceId, pageSize],
+        [workspaceId, pageSize, permanentlySkippedIds],
       );
       batchRowCount = rows.length;
 
@@ -118,7 +126,8 @@ export async function rehashSuppressionsForWorkspace(
             [workspaceId, hash, row.id],
           );
           if (conflictRows.length > 0) {
-            batchSkipped += 1;
+            permanentlySkippedIds.push(row.id);
+            batchNewSkips += 1;
             continue;
           }
 
@@ -136,14 +145,10 @@ export async function rehashSuppressionsForWorkspace(
     }
 
     hashed += batchHashed;
-    skippedCollisions += batchSkipped;
+    skippedCollisions += batchNewSkips;
     if (batchRowCount === 0) break;
     batches += 1;
     onBatch?.(batchHashed, hashed);
-    // A batch that only skipped collisions (no real progress) would loop
-    // forever re-selecting the same rows -- stop once a full page produced
-    // zero hashed rows.
-    if (batchHashed === 0) break;
   }
 
   return { workspaceId, hashed, skippedCollisions, batches };

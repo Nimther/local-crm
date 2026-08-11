@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, unique, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, uuid, uniqueIndex } from "drizzle-orm/pg-core";
 import { organization } from "./auth.js";
 
 /**
@@ -8,21 +8,21 @@ import { organization } from "./auth.js";
  * contact.repository.ts's createContact (checked before insert) and
  * deleteContact (written here).
  *
- * CMP-04 (D-02, plan 13-12): this table is mid-migration to proving that an
- * address was suppressed WITHOUT recording what the address was. `emailHash`
- * is an HMAC-SHA256 of the normalized address under the workspace's own key
+ * CMP-04 (D-02, plan 13-12): this table proves that an address was
+ * suppressed WITHOUT recording what the address was. `emailHash` is an
+ * HMAC-SHA256 of the normalized address under the workspace's own key
  * (`workspace_suppression_keys`, `packages/contacts-core/src/suppression-hash.ts`)
  * -- a hash is workspace-scoped by key, so it is meaningless outside its
  * workspace and cannot be cross-referenced between tenants.
  *
- * This file reflects the EXPAND state (post-migration-0060, pre-0061): both
- * `email` (now nullable) and `emailHash` (nullable until every row is
- * backfilled) coexist, and both unique constraints exist side by side. Every
- * write site as of this plan writes ONLY `emailHash`, never `email` --
- * `email` survives only on rows written before this conversion, until
- * `npm run db:rehash-suppressions` backfills them and migration 0061 drops
- * the column. Migration 0061's own Task updates this file again to drop
- * `email` and make `emailHash` NOT NULL.
+ * This is the post-migration-0061 (contract) shape: the plaintext `email`
+ * column that this table held through migration 0059 is gone entirely, and
+ * `emailHash` is the sole, NOT NULL identity column, unique per workspace.
+ * Migration 0060 (expand) added `emailHash` alongside a still-nullable
+ * `email` and left both unique constraints in place; `npm run
+ * db:rehash-suppressions` backfilled every pre-existing plaintext row; and
+ * migration 0061 (contract) is what reached this final shape -- it fails
+ * closed if any row still has a null `emailHash` when it runs.
  */
 export const workspaceSuppressions = pgTable(
   "workspace_suppressions",
@@ -31,15 +31,11 @@ export const workspaceSuppressions = pgTable(
     workspaceId: uuid("workspace_id")
       .notNull()
       .references(() => organization.id, { onDelete: "cascade" }),
-    email: text("email"),
-    emailHash: text("email_hash"),
+    emailHash: text("email_hash").notNull(),
     reason: text("reason").notNull().default("manual"),
     suppressedAt: timestamp("suppressed_at", { withTimezone: true }).notNull().defaultNow(),
     source: text("source"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
-  (t) => [
-    unique("workspace_suppressions_workspace_email_unique").on(t.workspaceId, t.email),
-    uniqueIndex("workspace_suppressions_workspace_email_hash_unique").on(t.workspaceId, t.emailHash),
-  ]
+  (t) => [uniqueIndex("workspace_suppressions_workspace_email_hash_unique").on(t.workspaceId, t.emailHash)]
 );
