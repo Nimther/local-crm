@@ -355,6 +355,32 @@ export interface CreateSendReconcilerWorkerOptions {
 }
 
 /**
+ * Test-only synchronization, mirrors `partition-maintenance.worker.ts`'s and
+ * `campaign-scheduler.worker.ts`'s identical WeakMap:
+ * `createSendReconcilerWorker`'s own scheduler registration (and the
+ * short-lived internal `Queue` handle it runs through) is fire-and-forget in
+ * production. This lets `waitForSendReconcilerRegistration` below hand a
+ * test a promise that resolves only once registration (including closing
+ * that internal handle) has actually settled, instead of sleeping -- without
+ * it, a test that constructs this factory has no deterministic point at
+ * which the factory's background Redis handle is finished, and its own
+ * `queue.close()` races the throwaway Redis server's teardown.
+ */
+const registrationSettled = new WeakMap<Worker, Promise<void>>();
+
+/**
+ * Test-only: resolves once the `Worker` returned by
+ * `createSendReconcilerWorker` has finished registering its scheduler (and
+ * closed its own internal tick-registration `Queue` handle). Not used by
+ * production code, mirrors `partition-maintenance.worker.ts`'s identical
+ * helper. Resolves immediately (rather than hanging) for a worker this
+ * module never registered a promise against.
+ */
+export function waitForSendReconcilerRegistration(worker: Worker): Promise<void> {
+  return registrationSettled.get(worker) ?? Promise.resolve();
+}
+
+/**
  * Constructs the repeatable send-reconciler Worker (DLV-03): registers the
  * ~5min job-scheduler tick (idempotent by `SEND_RECONCILER_SCHEDULER_ID`)
  * and processes each tick by validating the job payload against
@@ -392,8 +418,11 @@ export function createSendReconcilerWorker(
   // a Redis hiccup at boot must log, not crash every other registered
   // worker via an unhandled promise rejection; the `finally` always closes
   // this short-lived internal Queue handle so a failure here never leaks a
-  // standalone Redis connection past construction.
-  void (async () => {
+  // standalone Redis connection past construction. Captured into a named
+  // promise (rather than launched as a bare `void` expression) and stored
+  // against the worker so `waitForSendReconcilerRegistration` can hand a
+  // test a deterministic settle point (see that function's own comment).
+  const registration = (async () => {
     try {
       await queue.upsertJobScheduler(
         SEND_RECONCILER_SCHEDULER_ID,
@@ -410,6 +439,7 @@ export function createSendReconcilerWorker(
       await queue.close().catch(() => undefined);
     }
   })();
+  registrationSettled.set(worker, registration);
 
   return worker;
 }
