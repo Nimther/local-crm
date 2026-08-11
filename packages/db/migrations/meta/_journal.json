@@ -393,6 +393,13 @@
       "when": 1783685963497,
       "tag": "0055_webhook_ingress_durability",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1783685963498,
+      "tag": "0056_workspace_daily_rollup_dirtied_at",
+      "breakpoints": true
     }
   ]
 }

@@ -13,8 +13,18 @@ const ANALYTICS_RECONCILE_QUEUE = "analytics-reconcile";
  * rather than a duplicated magic number that could silently drift from it.
  */
 export const RECONCILE_INTERVAL_MS = 3 * 60_000;
-/** Bounded recent window -- a rolling reconcile of "today" and "yesterday" (UTC) is enough to correct any drift from a crashed increment or a race without re-scanning a workspace's entire send history on every tick. */
-const RECONCILE_WINDOW_DAYS = 2;
+/**
+ * Bounded recent window -- a rolling reconcile of "today" and "yesterday"
+ * (UTC) is enough to correct any drift from a crashed increment or a race
+ * without re-scanning a workspace's entire send history on every tick.
+ * Exported (test-only consumer: `analytics-reconciliation-dirty-day.test.ts`)
+ * so tests drive `reconcileWorkspace` with the SAME window width production
+ * uses, rather than a duplicated literal that could silently drift from it.
+ * The dirty-day sweep (CMP-03, D-14) reads this constant to decide which
+ * days count as "standing"; the MARKING predicate (`isNotToday`) no longer
+ * depends on it at all -- see `packages/db/src/analytics/daily-rollup.ts`.
+ */
+export const RECONCILE_WINDOW_DAYS = 2;
 
 /**
  * CMP-02 (D-13) day-semantics authority: `sends.sent_at` is the single
@@ -24,8 +34,8 @@ const RECONCILE_WINDOW_DAYS = 2;
  * already computes. Event-derived counters (`delivered_count`,
  * `opened_count`, `clicked_count`, `bounced_count`, `unsubscribed_count`) key
  * off the provider event's own `occurred_at` UTC day instead (see
- * `incrementWorkspaceDailyRollup` in `analytics-rollup.ts` for the
- * incremental-path half of that contract).
+ * `incrementWorkspaceDailyRollup` in `packages/db/src/analytics/daily-rollup.ts`
+ * for the incremental-path half of that contract).
  */
 export const SEND_DAY_FIELD = "sent_at";
 
@@ -136,17 +146,132 @@ function recentDays(windowDays: number): string[] {
 }
 
 /**
+ * CMP-03 (D-14): the dirty-day sweep's discovery query -- every (workspace,
+ * day) row this workspace's own `dirtied_at` marks as needing re-verification,
+ * oldest day first, bounded by `limit`. `PoolClient`-first and
+ * transaction-scoped like every other query helper in this codebase; scoped
+ * to the caller's own workspace implicitly through RLS (the caller must
+ * already be inside a `withTenant`/`withTenantTransaction` scope), never
+ * through an explicit `workspace_id` parameter here.
+ *
+ * `day::text` is deliberate, not decorative: node-postgres parses a `date`
+ * column into a JS `Date` at LOCAL midnight by default, which would silently
+ * disagree with the `YYYY-MM-DD` strings `recentDays` produces and that
+ * `reconcileWorkspaceDay` expects as its `day` parameter.
+ */
+export async function findDirtyRollupDays(client: PoolClient, limit: number): Promise<string[]> {
+  const { rows } = await client.query<{ day: string }>(
+    `SELECT day::text as day FROM workspace_daily_rollup
+      WHERE dirtied_at IS NOT NULL
+      ORDER BY day ASC
+      LIMIT $1`,
+    [limit]
+  );
+  return rows.map((row) => row.day);
+}
+
+/**
+ * CMP-03 (D-14, T-13-05-02): the dirty-day sweep's race-free conditional
+ * clear. TWO predicates gate the clear, and both are load-bearing:
+ *
+ * - `dirtied_at <= $1` (`sweepStartedAt`) -- a mark written AFTER this tick
+ *   already read its dirty-day list has not yet been reconciled by this
+ *   tick, and clearing it here would lose that late event's verification
+ *   permanently; it must survive to be picked up by the NEXT tick instead.
+ *   `sweepStartedAt` must come from the SAME database clock that wrote
+ *   `dirtied_at` (`now()` inside `incrementWorkspaceDailyRollup`'s upsert)
+ *   -- comparing against an application-clock `Date` would open exactly the
+ *   skew this predicate exists to close.
+ * - `day = ANY($2)` (`reconciledDays`) -- scopes the clear to EXACTLY the
+ *   days this tick actually reconciled. Execution-discovered bug (deviation
+ *   Rule 1): without this second predicate, `DIRTY_DAY_SWEEP_PAGE_LIMIT`
+ *   would be silently defeated -- a backlog larger than the page limit would
+ *   still have EVERY old-enough mark cleared here, including the days
+ *   `findDirtyRollupDays`'s `LIMIT` excluded from this tick's reconcile
+ *   loop, falsely marking them "verified" without ever re-scanning them.
+ *   Proven by a regression test seeding `DIRTY_DAY_SWEEP_PAGE_LIMIT + 5`
+ *   dirty days and asserting exactly 5 remain marked afterwards.
+ */
+export async function clearDirtyRollupDays(client: PoolClient, sweepStartedAt: Date, reconciledDays: string[]): Promise<void> {
+  if (reconciledDays.length === 0) return;
+  await client.query(
+    `UPDATE workspace_daily_rollup
+        SET dirtied_at = NULL
+      WHERE dirtied_at IS NOT NULL
+        AND dirtied_at <= $1
+        AND day = ANY($2::date[])`,
+    [sweepStartedAt, reconciledDays]
+  );
+}
+
+/**
+ * Bounds the per-tick, per-workspace dirty-day sweep (CMP-03, D-14,
+ * T-13-05-03). The dirty set is bounded and SMALL BY CONSTRUCTION under
+ * `isNotToday`'s `day != today` predicate (`packages/db/src/analytics/daily-rollup.ts`)
+ * -- yesterday's rows are marked ROUTINELY by any workspace with
+ * midnight-adjacent traffic, and genuinely late days are the only other
+ * source. Expected steady state is roughly one row per active workspace per
+ * day, plus late arrivals -- NOT deep paging. This bound exists so a
+ * pathological backlog degrades into "more ticks", never "one tick that
+ * never finishes"; a workspace's dirty-day count regularly approaching this
+ * limit is a symptom (a stuck marking bug, or genuinely catastrophic late
+ * event volume) to investigate, not expected operation.
+ */
+export const DIRTY_DAY_SWEEP_PAGE_LIMIT = 50;
+
+/**
  * Reconciles one workspace's bounded recent window inside a FRESH
  * `withTenant`/`withTenantTransaction` scope (Pitfall 5) -- every workspace
  * gets its own transaction/GUC; never shared across two workspace ids.
+ *
+ * CMP-03 (D-14, plan 13-05) -- the dirty-day sweep mechanism: beyond the
+ * standing `recentDays(windowDays)` window this function has always
+ * reconciled, it ALSO reconciles every day `findDirtyRollupDays` returns --
+ * the (workspace, day) rows a late event marked via `incrementWorkspaceDailyRollup`.
+ * A retroactive increment is NEVER trusted on its own; it is verified by the
+ * exact same absolute-overwrite fresh `sends` scan every other day gets
+ * (`reconcileWorkspaceDay`, unchanged). The standing window's width
+ * (`RECONCILE_WINDOW_DAYS`) is deliberately NOT widened to "cover" late
+ * events -- that would pay for every tick, forever, to handle an event class
+ * that is rare by construction; the dirty-day sweep pays only for the days
+ * that actually need it.
+ *
+ * `sweepStartedAt` is captured ONCE, from the DATABASE's own clock (`now()`),
+ * at the top of this transaction -- the SAME clock `incrementWorkspaceDailyRollup`
+ * writes `dirtied_at` from, so `clearDirtyRollupDays`'s `<=` comparison is
+ * never skewed by an application-clock/database-clock drift. Reconcile ALWAYS
+ * runs before clear, and both stay inside this SAME per-workspace transaction
+ * -- never a second transaction for the dirty sweep: a crash between
+ * reconcile and clear leaves a day reconciled but still marked (harmless,
+ * picked up again next tick), while a crash between clear and reconcile
+ * would lose the late event's verification (not harmless). The standing and
+ * dirty day lists are deduplicated so a dirty day that also falls inside the
+ * standing window is reconciled exactly once.
+ *
+ * Exported (test-only consumer: `analytics-reconciliation-dirty-day.test.ts`)
+ * so tests can drive exactly "one tick" for one workspace -- the same unit
+ * the worker processor loops over per discovered workspace -- without
+ * needing a real BullMQ/Redis worker.
  */
-async function reconcileWorkspace(workspaceId: string, windowDays: number): Promise<void> {
-  const days = recentDays(windowDays);
+export async function reconcileWorkspace(workspaceId: string, windowDays: number): Promise<void> {
+  const standingDays = recentDays(windowDays);
   await withTenant(workspaceId, () =>
     withTenantTransaction(async (client) => {
+      const { rows: clockRows } = await client.query<{ now: Date }>(`SELECT now() as now`);
+      const sweepStartedAt = clockRows[0].now;
+
+      const dirtyDays = await findDirtyRollupDays(client, DIRTY_DAY_SWEEP_PAGE_LIMIT);
+      const days = Array.from(new Set([...standingDays, ...dirtyDays]));
+
       for (const day of days) {
         await reconcileWorkspaceDay(client, workspaceId, day);
       }
+
+      // Scoped to `days` (this tick's ACTUAL reconcile set), not "every old
+      // enough mark" -- see clearDirtyRollupDays's own doc comment for the
+      // bug this scoping prevents when the dirty backlog exceeds the page
+      // limit.
+      await clearDirtyRollupDays(client, sweepStartedAt, days);
     })
   );
 }
