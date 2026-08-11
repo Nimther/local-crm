@@ -175,6 +175,11 @@ describe("webhook-events worker: processed event is evidence-only (D-06, 11-07)"
     );
   }
 
+  // Phase 13 (CMP-05, plan 13-04): a fixed 2023-era timestamp is now OLD
+  // ENOUGH to fall outside classifyOccurredAt's [now-7d, now+5min] window and
+  // get quarantined instead of inserted.
+  const FIXED_TIMESTAMP = Math.floor(Date.now() / 1000) - 3600;
+
   // Real SendGrid `processed` events flatten custom_args directly onto the
   // event object's TOP LEVEL, same shape as every other event type
   // (webhook-events-attribution.test.ts's fixture, same convention here).
@@ -189,7 +194,7 @@ describe("webhook-events worker: processed event is evidence-only (D-06, 11-07)"
       event: "processed",
       sg_event_id: `sg-${randomUUID()}`,
       sg_message_id: "abc.filterdrecv-x",
-      timestamp: 1_700_000_000,
+      timestamp: FIXED_TIMESTAMP,
       send_id: sendId,
       workspace_id: workspaceId,
       campaign_id: campaignId,

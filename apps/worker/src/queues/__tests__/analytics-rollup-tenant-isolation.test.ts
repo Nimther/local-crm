@@ -101,7 +101,11 @@ describe("workspace_daily_rollup tenant isolation (07-06)", () => {
     );
   }
 
-  const FIXED_TIMESTAMP = 1_700_000_000;
+  // Phase 13 (CMP-05, plan 13-04): a fixed 2023-era timestamp is now OLD
+  // ENOUGH to fall outside classifyOccurredAt's [now-7d, now+5min] window and
+  // get quarantined instead of inserted -- derive DAY from the SAME runtime
+  // constant rather than a separate wall-clock read.
+  const FIXED_TIMESTAMP = Math.floor(Date.now() / 1000) - 3600;
   const DAY = new Date(FIXED_TIMESTAMP * 1000).toISOString().slice(0, 10);
 
   function sendgridEvent(

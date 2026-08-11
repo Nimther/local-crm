@@ -96,3 +96,10 @@ export { loadContactTimezone } from "./contact-timezone.js";
 export { SEND_ID_NAMESPACE, deriveCampaignSendId, deriveFlowSendId } from "./send-id.js";
 
 export { classifyTransportError, type TransportClassification } from "./transport-classify.js";
+
+export {
+  classifyOccurredAt,
+  OCCURRED_AT_MAX_PAST_DAYS,
+  OCCURRED_AT_MAX_FUTURE_SKEW_MINUTES,
+  type OccurredAtVerdict,
+} from "./occurred-at-bounds.js";

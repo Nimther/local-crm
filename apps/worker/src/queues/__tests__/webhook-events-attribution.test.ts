@@ -127,6 +127,11 @@ describe("webhook-events worker: real flattened SendGrid payload attribution (WB
     );
   }
 
+  // Phase 13 (CMP-05, plan 13-04): a fixed 2023-era timestamp is now OLD
+  // ENOUGH to fall outside classifyOccurredAt's [now-7d, now+5min] window and
+  // get quarantined instead of inserted.
+  const FIXED_TIMESTAMP = Math.floor(Date.now() / 1000) - 3600;
+
   /**
    * The VERBATIM shape SendGrid's Event Webhook posts (confirmed against
    * live UAT payloads): `send_id`/`workspace_id`/`campaign_id` sit at the
@@ -144,7 +149,7 @@ describe("webhook-events worker: real flattened SendGrid payload attribution (WB
       event: "delivered",
       sg_event_id: `sg-${randomUUID()}`,
       sg_message_id: "abc.filterdrecv-x",
-      timestamp: 1_700_000_000,
+      timestamp: FIXED_TIMESTAMP,
       send_id: sendId,
       workspace_id: workspaceId,
       campaign_id: campaignId,
