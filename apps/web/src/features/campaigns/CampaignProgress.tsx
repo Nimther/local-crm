@@ -55,6 +55,17 @@ export function CampaignProgress({
   const excludedBreakdown = progress?.excludedBreakdown ?? [];
   const excludedTotal = progress?.excludedTotal ?? null;
 
+  // D-16 (Phase 13): `reconciling`/`unknown` are ledger states, not
+  // delivery facts -- a send in either state has an outcome the platform
+  // has not observed yet. Reported as one combined "outcome not yet known"
+  // stat, distinct from both `sent` and `failed`, so a marketer cannot
+  // mistake an unresolved send for a delivery failure. Hidden entirely
+  // when both counts are zero, mirroring the excluded-breakdown row's
+  // conditional-render pattern below.
+  const reconciling = progress?.ledger.reconciling ?? 0;
+  const unknownOutcome = progress?.ledger.unknown ?? 0;
+  const ambiguousTotal = reconciling + unknownOutcome;
+
   return (
     <div className="space-y-4">
       <div className="space-y-2">
@@ -63,6 +74,9 @@ export function CampaignProgress({
           {sent} из {total} отправлено
         </p>
         {failed > 0 ? <p className="text-sm font-medium text-destructive tabular-nums">{failed} ошибок</p> : null}
+        {ambiguousTotal > 0 ? (
+          <p className="text-sm text-muted-foreground tabular-nums">Исход неизвестен: {ambiguousTotal}</p>
+        ) : null}
       </div>
 
       <CampaignMetricsSummary
