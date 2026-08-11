@@ -31,6 +31,11 @@ created: 2026-08-10
 | Redis failed set → durable record | Once retention is bounded, the Postgres record is the only lasting evidence of a terminal failure | failure metadata |
 | dead-letter record → operator mail | Alert content leaves the system; anything it carries is exposed to the operator mailbox | counts/queue names only |
 | application process → Redis (producer queues) | Producer queues resolve options from the same module as the worker; drift would desync policy | queue configuration |
+| composition root → worker library options | The process builds every worker through a factory; an option forwarded with no value silently overrides a library default instead of deferring to it | worker construction options |
+| registered worker → observable liveness | Registration success and consumption are different facts; the boot log only proves the first, so the second needs its own evidence | — |
+| accumulated wait list → processor side effects | A backlog released all at once re-executes work that was scheduled while nothing was consuming | tick job backlog |
+| documentation → security review | ARCHITECTURE.md/SPECIFICATION.md are the as-built surface a reviewer reads instead of the code; a false claim here is a review that checks the wrong thing | — |
+| test process → ephemeral Postgres | Fixture INSERTs cross into a provisioned database; a misresolved DSN would cross into the dev database instead | synthetic fixture rows |
 
 ---
 
@@ -80,6 +85,19 @@ created: 2026-08-10
 | T-12-11-01 | Tampering | queue configuration drift between the two processes | medium | mitigate | Both processes import connection and job options from one module (`packages/queue-core`); invariant test fails if a local copy reappears — `send-timing-invariant.test.ts` | closed |
 | T-12-11-02 | Denial of Service | deliberately divergent non-BullMQ client collapsed into shared builder | medium | mitigate | Client excluded from the guarded set with an inline comment stating why; acceptance criteria assert the file unchanged | closed |
 | T-12-11-03 | Information Disclosure | Redis credentials in the repointed modules | low | accept | Credentials continue to come from the process's validated environment, passed to BullMQ exactly as before; no new logging or exposure | closed |
+| T-12-12-01 | Denial of Service | the five repeatable-tick workers | critical | mitigate | `autorun` no longer forwarded when the caller did not supply it — conditional-spread idiom in all five factories (`campaign-scheduler.worker.ts:213`, `analytics-reconciliation.worker.ts:202`, `flow-reconciliation.worker.ts:185`, `partition-maintenance.worker.ts:227`, `send-reconciler.worker.ts:423`); `worker-autorun-default.test.ts` constructs each with the production single-argument call shape and asserts the loop runs and a job reaches `active` | closed |
+| T-12-12-02 | Repudiation | scheduler registration reported as operational | high | mitigate | Regression test asserts consumption (job picked up, reaches `active`), not registration; 12-13 restates the docs claim against observed consumption | closed |
+| T-12-12-03 | Tampering | released backlog re-executing scheduled work | medium | accept | All five processors are idempotent re-scans (exclusive per-row claims, deterministic downstream job ids, overwrite-from-scan rollups); burst-absorption case proves a stacked run drains without duplicated downstream effects, made non-vacuous by 12-14 | closed |
+| T-12-12-04 | Elevation of Privilege | the test-only run-loop suppression | low | accept | `autorun` override reachable only as a factory argument, never read from the environment; dedicated case keeps its explicit form working | closed |
+| T-12-12-SC | Tampering | npm/pip/cargo installs | high | mitigate | No package.json or lockfile touched by any 12-12 commit (verified against git history); no dependencies added | closed |
+| T-12-13-01 | Repudiation | the two documents contradicting each other about failed-job retention | medium | mitigate | `ARCHITECTURE.md:229` forward-looking Phase 12 bullet drops the shipped claim and points at SPECIFICATION.md §5.3 as the single statement of the retention policy | closed |
+| T-12-13-02 | Repudiation | an operational claim inferred from a boot log | high | mitigate | `SPECIFICATION.md` §5.1/§5.2 restate the sixteen-workers claim as observed consumption citing `worker-autorun-default.test.ts` by filename; registration-vs-consumption stated as separate facts; §9 entry #22 records the corrected reasoning error | closed |
+| T-12-13-03 | Information Disclosure | as-built prose describing internals | low | accept | Both files already describe these subsystems at this detail level by design; no secret, credential, endpoint or key material added | closed |
+| T-12-13-SC | Tampering | npm/pip/cargo installs | high | mitigate | Docs-only plan — commits touch only ARCHITECTURE.md and SPECIFICATION.md; no package files in any 12-13 commit | closed |
+| T-12-14-01 | Tampering | fixture INSERTs resolving to the dev database | high | mitigate | No new DSN resolution in `failure-fixtures.ts` or `worker-autorun-default.test.ts`; seeding reuses `insertFixtureOrganization` + tenant-context pool under the fail-closed `assertTestDatabaseUrl` guard (`packages/test-support/src/guard.ts:32`); the sibling's `process.env.DATABASE_URL` line predates this plan (phase 10) and routes through `getTestDatabaseUrl` | closed |
+| T-12-14-02 | Information Disclosure | seeded fixture rows in a shared ephemeral database | low | accept | Fixture data is synthetic (generated slug, empty segment definition); database dropped by global-setup teardown; no contact email, provider key or bearer token written | closed |
+| T-12-14-03 | Denial of Service | seeded `scheduled` campaign left behind for later files | low | mitigate | Burst transitions the campaign to `sending` so it no longer matches the due-scan predicate; control case (`worker-autorun-default.test.ts:405`) turns residue into a loud failure | closed |
+| T-12-14-SC | Tampering | npm/pip/cargo installs | high | mitigate | Zero dependencies added — no package files in any 12-14 commit (verified against git history) | closed |
 
 *Status: open · closed · open — below high threshold (non-blocking)*
 *Severity: critical > high > medium > low — only open threats at or above workflow.security_block_on count toward threats_open*
@@ -98,6 +116,10 @@ created: 2026-08-10
 | AR-12-05 | T-12-08-04 | Duplicate tick execution under a multi-instance deployment: execution exclusivity is out of scope for this milestone. Accepted with the constraint documented explicitly in the architecture notes, including what a future multi-instance move would have to add. Recorded as flagged assumption A-1 | plan-time disposition (12-08) | 2026-08-10 |
 | AR-12-06 | T-12-10-04 | Watchdog reads the platform-scoped dead-letter tables through the application's ordinary connection, exactly as the two existing watchdogs read their health tables; no cross-tenant credential involved | plan-time disposition (12-10) | 2026-08-10 |
 | AR-12-07 | T-12-11-03 | Credentials continue to come from the process's validated environment and are passed to BullMQ exactly as before; no new logging or exposure introduced | plan-time disposition (12-11) | 2026-08-10 |
+| AR-12-08 | T-12-12-03 | Accumulated tick backlog is let to fire on first boot after the autorun fix — every one of the five processors is an idempotent re-scan by construction; a burst-absorption test proves a stacked run drains without duplicated downstream effects. No cleanup code added (would be new operational surface for a resolved bug) | plan-time disposition (12-12) | 2026-08-11 |
+| AR-12-09 | T-12-12-04 | Test-only run-loop suppression remains reachable only from a factory argument, never from the environment; a dedicated case keeps its explicit form working so existing registration suites retain their meaning | plan-time disposition (12-12) | 2026-08-11 |
+| AR-12-10 | T-12-13-03 | ARCHITECTURE.md/SPECIFICATION.md already describe these subsystems at this level of detail by design; the plan adds no secret, credential, endpoint or key material — only a factory-argument mechanism already visible in the repository | plan-time disposition (12-13) | 2026-08-11 |
+| AR-12-11 | T-12-14-02 | Fixture data is synthetic; the ephemeral database is dropped by global-setup's returned teardown; no contact email, provider key or bearer token is written by this plan | plan-time disposition (12-14) | 2026-08-11 |
 
 *Accepted risks do not resurface in future audit runs.*
 
@@ -108,8 +130,11 @@ created: 2026-08-10
 | Audit Date | Threats Total | Closed | Open | Run By |
 |------------|---------------|--------|------|--------|
 | 2026-08-10 | 40 | 40 | 0 | /gsd-secure-phase (L1 grep-depth, short-circuit: register authored at plan time, asvs_level 1) |
+| 2026-08-11 | 53 | 53 | 0 | /gsd-secure-phase (L1 grep-depth, short-circuit: register authored at plan time, asvs_level 1) |
 
 Notes: threat register built from `<threat_model>` blocks in all 11 PLAN files (all parseable — `register_authored_at_plan_time: true`). SUMMARY threat-flag sections reviewed across all 11 summaries; only 12-10 carried a section and it added nothing beyond the plan register. Mitigation anchors verified at grep level with spot-checks on the highest-severity claims: RLS enable+force on `flow_segment_sweep_checkpoint` (0053), scan-role zero grants and platform-scope comments on `dead_letter_jobs` (0054), `scrub` before dead-letter insert, writer/listener catch paths, and the `(queue_name, job_id)` idempotency constraint.
+
+Notes (2026-08-11 re-audit): gap-closure plans 12-12/12-13/12-14 executed after the first audit added 13 threats across three parseable `<threat_model>` blocks. Summary threat-flag sections for 12-13/12-14 explicitly declared nothing beyond the plan registers. Verified at grep level: conditional-spread `autorun` idiom present in all five tick-worker factories with `worker-autorun-default.test.ts` asserting consumption via the production call shape (T-12-12-01/02); ARCHITECTURE.md:229 and SPECIFICATION.md §5.1/§5.2/§9-#22 doc corrections in place (T-12-13-01/02); no DSN re-assignment in 12-14's files with the fail-closed `assertTestDatabaseUrl` guard confirmed in `packages/test-support/src/guard.ts` (T-12-14-01); control case present (T-12-14-03); no package.json/lockfile touched by any 12-12..14 commit (all three -SC threats). Four plan-time accepts recorded as AR-12-08..11.
 
 ---
 
@@ -120,4 +145,4 @@ Notes: threat register built from `<threat_model>` blocks in all 11 PLAN files (
 - [x] `threats_open: 0` confirmed
 - [x] `status: verified` set in frontmatter
 
-**Approval:** verified 2026-08-10
+**Approval:** verified 2026-08-10 · re-verified 2026-08-11 (gap-closure plans 12-12..14)
