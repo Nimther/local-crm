@@ -356,6 +356,18 @@ describe("migration 0057 (Phase 13, CMP-07, plan 13-07, Task 2)", () => {
   describe("fresh apply (0000..0056 then 0057) + dedup insert behavior + rollup-unchanged", () => {
     let adminPool: Pool;
     let appPool: Pool;
+    // A SEPARATE pool for every migration-applying call, mirroring
+    // relocate-default.test.ts's own `pool` vs `relocationPool` split: a
+    // physical connection recycled from a tenant-scoped `SET LOCAL
+    // app.current_workspace_id` transaction reverts that GUC to '' (empty
+    // string, Postgres's placeholder default), not NULL, once released --
+    // `current_setting('app.current_workspace_id')` (bare, no missing_ok,
+    // migration 0044's fail-closed form) then returns '' successfully
+    // instead of raising, and `''::uuid` throws 22P02 from INSIDE 0057's
+    // own guard query. `migratePool` never runs a tenant-scoped SET LOCAL,
+    // so its connections can never carry that contamination into a later
+    // `applyMigrationFile` call.
+    let migratePool: Pool;
     let databaseName: string;
     let adminDsn: string;
     let workspaceId: string;
@@ -368,9 +380,10 @@ describe("migration 0057 (Phase 13, CMP-07, plan 13-07, Task 2)", () => {
       databaseName = created.databaseName;
       adminDsn = created.adminDsn;
       appPool = new Pool({ connectionString: created.dsn, max: 5 });
+      migratePool = new Pool({ connectionString: created.dsn, max: 2 });
       adminPool = new Pool({ connectionString: adminDsnForDatabase(adminDsn, databaseName), max: 5 });
 
-      await applyMigrationsUpTo(appPool, MIGRATIONS_DIR, CHECKPOINT_BEFORE_0057);
+      await applyMigrationsUpTo(migratePool, MIGRATIONS_DIR, CHECKPOINT_BEFORE_0057);
 
       workspaceId = await createWorkspace(adminPool, "fresh");
       contactId = await createContact(appPool, workspaceId);
@@ -396,17 +409,18 @@ describe("migration 0057 (Phase 13, CMP-07, plan 13-07, Task 2)", () => {
 
     afterAll(async () => {
       await adminPool?.end();
+      await migratePool?.end();
       await appPool?.end();
       if (databaseName) await dropEphemeralDatabase(databaseName, adminDsn);
     });
 
     it("applying 0057 succeeds, leaves send_events_dedup_v2_idx valid, and drops the old constraint", async () => {
-      await expect(applyMigrationFile(appPool, MIGRATIONS_DIR, MIGRATION_0057_FILENAME)).resolves.toBeUndefined();
+      await expect(applyMigrationFile(migratePool, MIGRATIONS_DIR, MIGRATION_0057_FILENAME)).resolves.toBeUndefined();
 
-      const index = await indexValidity(appPool, `public.${DEDUP_V2_INDEX}`);
+      const index = await indexValidity(migratePool, `public.${DEDUP_V2_INDEX}`);
       expect(index).toEqual({ exists: true, valid: true });
 
-      expect(await constraintExists(appPool, "send_events", OLD_CONSTRAINT_NAME)).toBe(false);
+      expect(await constraintExists(migratePool, "send_events", OLD_CONSTRAINT_NAME)).toBe(false);
     });
 
     it("workspace_daily_rollup totals seeded before 0057 are unchanged after it", async () => {
@@ -516,6 +530,10 @@ describe("migration 0057 (Phase 13, CMP-07, plan 13-07, Task 2)", () => {
   describe("two attached partitions, each holding rows, enforce the new key independently", () => {
     let adminPool: Pool;
     let appPool: Pool;
+    // See the sibling describe block's own comment on `migratePool` above --
+    // same "never let a migration-applying pool share a connection with a
+    // tenant-scoped SET LOCAL pool" reasoning.
+    let migratePool: Pool;
     let databaseName: string;
     let adminDsn: string;
     let workspaceId: string;
@@ -535,9 +553,10 @@ describe("migration 0057 (Phase 13, CMP-07, plan 13-07, Task 2)", () => {
       databaseName = created.databaseName;
       adminDsn = created.adminDsn;
       appPool = new Pool({ connectionString: created.dsn, max: 5 });
+      migratePool = new Pool({ connectionString: created.dsn, max: 2 });
       adminPool = new Pool({ connectionString: adminDsnForDatabase(adminDsn, databaseName), max: 5 });
 
-      await applyMigrationsUpTo(appPool, MIGRATIONS_DIR, CHECKPOINT_BEFORE_0057);
+      await applyMigrationsUpTo(migratePool, MIGRATIONS_DIR, CHECKPOINT_BEFORE_0057);
 
       workspaceId = await createWorkspace(adminPool, "two-partitions");
       contactId = await createContact(appPool, workspaceId);
@@ -559,25 +578,29 @@ describe("migration 0057 (Phase 13, CMP-07, plan 13-07, Task 2)", () => {
 
     afterAll(async () => {
       await adminPool?.end();
+      await migratePool?.end();
       await appPool?.end();
       if (databaseName) await dropEphemeralDatabase(databaseName, adminDsn);
     });
 
     it("confirms both seed rows landed in DIFFERENT, already-attached partitions before 0057 is applied", async () => {
-      const { rows } = await appPool.query<{ tableoid_name: string }>(
-        `SELECT c.relname AS tableoid_name
-           FROM send_events se
-           JOIN pg_class c ON c.oid = se.tableoid
-          WHERE se.workspace_id = $1
-          ORDER BY se.occurred_at`,
-        [workspaceId],
-      );
+      const rows = await withTenantWrite(appPool, workspaceId, async (client) => {
+        const { rows: r } = await client.query<{ tableoid_name: string }>(
+          `SELECT c.relname AS tableoid_name
+             FROM send_events se
+             JOIN pg_class c ON c.oid = se.tableoid
+            WHERE se.workspace_id = $1
+            ORDER BY se.occurred_at`,
+          [workspaceId],
+        );
+        return r;
+      });
       expect(rows.map((r) => r.tableoid_name)).toEqual(["send_events_2026_07", "send_events_2026_09"]);
     });
 
     it("applying 0057 over this two-partition, row-holding schema succeeds and leaves the parent index valid", async () => {
-      await expect(applyMigrationFile(appPool, MIGRATIONS_DIR, MIGRATION_0057_FILENAME)).resolves.toBeUndefined();
-      const index = await indexValidity(appPool, `public.${DEDUP_V2_INDEX}`);
+      await expect(applyMigrationFile(migratePool, MIGRATIONS_DIR, MIGRATION_0057_FILENAME)).resolves.toBeUndefined();
+      const index = await indexValidity(migratePool, `public.${DEDUP_V2_INDEX}`);
       expect(index).toEqual({ exists: true, valid: true });
     });
 
@@ -608,6 +631,8 @@ describe("migration 0057 (Phase 13, CMP-07, plan 13-07, Task 2)", () => {
     let adminPool: Pool;
     let appPool: Pool;
     let scanPool: Pool;
+    // See the first describe block's comment on `migratePool` -- same reasoning.
+    let migratePool: Pool;
     let databaseName: string;
     let adminDsn: string;
     let workspaceId: string;
@@ -620,13 +645,14 @@ describe("migration 0057 (Phase 13, CMP-07, plan 13-07, Task 2)", () => {
       databaseName = created.databaseName;
       adminDsn = created.adminDsn;
       appPool = new Pool({ connectionString: created.dsn, max: 5 });
+      migratePool = new Pool({ connectionString: created.dsn, max: 2 });
       adminPool = new Pool({ connectionString: adminDsnForDatabase(adminDsn, databaseName), max: 5 });
       scanPool = new Pool({
         connectionString: buildRoleDsn(adminDsnForDatabase(adminDsn, databaseName), databaseName, SCAN_ROLE, "mega_crm_dev_pw"),
         max: 5,
       });
 
-      await applyMigrationsUpTo(appPool, MIGRATIONS_DIR, CHECKPOINT_BEFORE_0057);
+      await applyMigrationsUpTo(migratePool, MIGRATIONS_DIR, CHECKPOINT_BEFORE_0057);
 
       workspaceId = await createWorkspace(adminPool, "guard");
       contactId = await createContact(appPool, workspaceId);
@@ -650,17 +676,18 @@ describe("migration 0057 (Phase 13, CMP-07, plan 13-07, Task 2)", () => {
     afterAll(async () => {
       await scanPool?.end();
       await adminPool?.end();
+      await migratePool?.end();
       await appPool?.end();
       if (databaseName) await dropEphemeralDatabase(databaseName, adminDsn);
     });
 
     it("applying 0057 over unresolved duplicates raises, naming db:resolve-send-event-duplicates, and leaves both rows and the old constraint in place", async () => {
-      await expect(applyMigrationFile(appPool, MIGRATIONS_DIR, MIGRATION_0057_FILENAME)).rejects.toThrow(
+      await expect(applyMigrationFile(migratePool, MIGRATIONS_DIR, MIGRATION_0057_FILENAME)).rejects.toThrow(
         /db:resolve-send-event-duplicates/,
       );
 
-      expect(await constraintExists(appPool, "send_events", OLD_CONSTRAINT_NAME)).toBe(true);
-      const index = await indexValidity(appPool, `public.${DEDUP_V2_INDEX}`);
+      expect(await constraintExists(migratePool, "send_events", OLD_CONSTRAINT_NAME)).toBe(true);
+      const index = await indexValidity(migratePool, `public.${DEDUP_V2_INDEX}`);
       expect(index.exists).toBe(false);
 
       const survivors = await sendEventIds(appPool, workspaceId);
@@ -675,11 +702,11 @@ describe("migration 0057 (Phase 13, CMP-07, plan 13-07, Task 2)", () => {
       expect(survivorsAfterResolve).toHaveLength(1);
       expect(survivorsAfterResolve[0].id).toBe(earlierRowId);
 
-      await expect(applyMigrationFile(appPool, MIGRATIONS_DIR, MIGRATION_0057_FILENAME)).resolves.toBeUndefined();
+      await expect(applyMigrationFile(migratePool, MIGRATIONS_DIR, MIGRATION_0057_FILENAME)).resolves.toBeUndefined();
 
-      const index = await indexValidity(appPool, `public.${DEDUP_V2_INDEX}`);
+      const index = await indexValidity(migratePool, `public.${DEDUP_V2_INDEX}`);
       expect(index).toEqual({ exists: true, valid: true });
-      expect(await constraintExists(appPool, "send_events", OLD_CONSTRAINT_NAME)).toBe(false);
+      expect(await constraintExists(migratePool, "send_events", OLD_CONSTRAINT_NAME)).toBe(false);
 
       const finalSurvivors = await sendEventIds(appPool, workspaceId);
       expect(finalSurvivors).toHaveLength(1);
@@ -708,8 +735,9 @@ describe("migration 0057 static shape (Phase 13, CMP-07, plan 13-07, Task 2)", (
     expect(withoutComments).not.toMatch(/CONCURRENTLY/i);
   });
 
-  it("contains no ATTACH PARTITION statement", () => {
-    expect(migrationSql).not.toMatch(/ATTACH PARTITION/i);
+  it("contains no ATTACH PARTITION statement (comment-stripped -- the header legitimately discusses the rejected alternative in prose)", () => {
+    const withoutComments = stripLineComments(migrationSql);
+    expect(withoutComments).not.toMatch(/ATTACH PARTITION/i);
   });
 
   it("contains no DELETE statement, and its guard is the first executable statement", () => {
