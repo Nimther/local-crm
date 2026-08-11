@@ -18,6 +18,14 @@ export {
 } from "./contact-repository.js";
 export { applyCsvRowMapping, type CsvMappingResult } from "./csv-mapping.js";
 export {
+  normalizeSuppressionEmail,
+  hashSuppressionEmail,
+  ensureWorkspaceSuppressionKey,
+  loadWorkspaceSuppressionKey,
+  clearSuppressionKeyCache,
+  SUPPRESSION_KEY_CACHE_TTL_MS,
+} from "./suppression-hash.js";
+export {
   recordSubscriptionStatusChange,
   type RecordSubscriptionStatusChangeParams,
   type SubscriptionStatusChangeSource,

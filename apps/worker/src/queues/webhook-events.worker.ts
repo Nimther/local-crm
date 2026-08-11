@@ -3,7 +3,13 @@ import { Worker, type Job, type ConnectionOptions } from "bullmq";
 import type { PoolClient } from "pg";
 import { scrubbedConsole } from "@mega-crm/redaction";
 import { withCrossWorkspaceScan, withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
-import { recordSubscriptionStatusChange, applyUnsubscribeWithSendFact } from "@mega-crm/contacts-core";
+import {
+  recordSubscriptionStatusChange,
+  applyUnsubscribeWithSendFact,
+  ensureWorkspaceSuppressionKey,
+  hashSuppressionEmail,
+  normalizeSuppressionEmail,
+} from "@mega-crm/contacts-core";
 import { incrementWorkspaceDailyRollup } from "@mega-crm/db/src/analytics/daily-rollup.js";
 import { setFactColumnOnce, incrementCampaignCounter } from "@mega-crm/db/src/sends/fact-columns.js";
 import {
@@ -231,11 +237,19 @@ async function applySuppression(
   );
   const email = rows[0]?.email;
   if (email) {
+    // CMP-04 (D-02, plan 13-12): hash the address under this workspace's own
+    // key and write ONLY the hash -- never the plaintext `email` column,
+    // which this write site no longer populates. `ensureWorkspaceSuppressionKey`
+    // is safe to call unconditionally: this write site only runs when a
+    // suppression is actually being recorded, so creating the key on a
+    // workspace's first-ever suppression here is the intended, one-time cost.
+    const key = await ensureWorkspaceSuppressionKey(client, workspaceId);
+    const hash = hashSuppressionEmail(normalizeSuppressionEmail(email), key);
     await client.query(
-      `INSERT INTO workspace_suppressions (id, workspace_id, email, reason, created_at)
+      `INSERT INTO workspace_suppressions (id, workspace_id, email_hash, reason, created_at)
        VALUES (gen_random_uuid(), $1, $2, $3, now())
-       ON CONFLICT (workspace_id, email) DO NOTHING`,
-      [workspaceId, email, reason]
+       ON CONFLICT (workspace_id, email_hash) DO NOTHING`,
+      [workspaceId, hash, reason]
     );
   }
 

@@ -17,6 +17,7 @@
     "db:audit-sends-history": "tsx scripts/audit-sends-history.ts",
     "db:count-send-event-duplicates": "tsx scripts/count-send-event-duplicates.ts",
     "db:resolve-send-event-duplicates": "tsx scripts/count-send-event-duplicates.ts --resolve",
+    "db:rehash-suppressions": "tsx scripts/rehash-suppressions.ts",
     "replay:webhook-journal": "tsx scripts/replay-webhook-journal.ts",
     "test": "vitest run"
   },
@@ -29,6 +30,7 @@
     "@mega-crm/queue-core": "0.1.0"
   },
   "devDependencies": {
+    "@mega-crm/contacts-core": "0.1.0",
     "@mega-crm/delivery-core": "0.1.0",
     "@mega-crm/test-support": "0.1.0",
     "@types/pg": "^8.15.6",

@@ -322,13 +322,15 @@ describe("the fail-closed RLS contract (SEC-03/SEC-04)", () => {
     // ingress_journal and send_event_quarantine, both fail-closed from birth
     // with the same shared predicate. Phase 13 (CMP-04, D-01, plan 13-10,
     // migration 0059) adds the 26th: erasure_records, mirroring migration
-    // 0053's own fail-closed-from-birth form verbatim.
-    expect(rows, "expected exactly 26 workspace_isolation policies in the catalog").toHaveLength(26);
+    // 0053's own fail-closed-from-birth form verbatim. Phase 13 (CMP-04, D-02,
+    // plan 13-12, migration 0060) adds the 27th: workspace_suppression_keys,
+    // the per-workspace HMAC key table, also fail-closed from birth.
+    expect(rows, "expected exactly 27 workspace_isolation policies in the catalog").toHaveLength(27);
 
     const distinctQuals = new Set(rows.map((r) => r.qual));
     expect(
       distinctQuals.size,
-      `expected one shared predicate across all 26 policies, found ${distinctQuals.size} distinct forms: ${[...distinctQuals].join(" | ")}`,
+      `expected one shared predicate across all 27 policies, found ${distinctQuals.size} distinct forms: ${[...distinctQuals].join(" | ")}`,
     ).toBe(1);
   });
 

@@ -7,7 +7,13 @@ import { buildServer } from "../../../server.js";
 import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool } from "../../../test/db-fixture.js";
 import { withTenant, withTenantTransaction } from "../../../middleware/tenant-context.js";
 import { createContact, deleteContact, getContact, type DeleteContactDeps } from "../contact.repository.js";
-import { isEmailSuppressed, upsertContactByIdentity } from "@mega-crm/contacts-core";
+import {
+  hashSuppressionEmail,
+  isEmailSuppressed,
+  loadWorkspaceSuppressionKey,
+  normalizeSuppressionEmail,
+  upsertContactByIdentity,
+} from "@mega-crm/contacts-core";
 import { buildErasureScrubJobId, type ErasureScrubJob } from "@mega-crm/shared-schemas";
 
 /**
@@ -97,15 +103,23 @@ describe("deleteContact: anonymize-in-place with erasure record + scrub enqueue 
     );
   }
 
+  // CMP-04 (D-02, plan 13-12): workspace_suppressions no longer stores
+  // plaintext -- reads the row by its HMAC hash, which is what the write
+  // sites under test (deleteContact) actually write. `emailHash` is
+  // returned instead of `email` so callers assert against the hash of the
+  // address they captured, not a plaintext column that no longer exists.
   async function readSuppressionRow(
     workspaceId: string,
     email: string
-  ): Promise<{ email: string; reason: string } | null> {
+  ): Promise<{ emailHash: string; reason: string } | null> {
     return withTenant(workspaceId, () =>
       withTenantTransaction(async (client) => {
-        const { rows } = await client.query<{ email: string; reason: string }>(
-          `SELECT email, reason FROM workspace_suppressions WHERE workspace_id = $1 AND email = $2`,
-          [workspaceId, email]
+        const key = await loadWorkspaceSuppressionKey(client, workspaceId);
+        if (!key) return null;
+        const hash = hashSuppressionEmail(normalizeSuppressionEmail(email), key);
+        const { rows } = await client.query<{ emailHash: string; reason: string }>(
+          `SELECT email_hash as "emailHash", reason FROM workspace_suppressions WHERE workspace_id = $1 AND email_hash = $2`,
+          [workspaceId, hash]
         );
         return rows[0] ?? null;
       })
@@ -237,19 +251,23 @@ describe("deleteContact: anonymize-in-place with erasure record + scrub enqueue 
     await withTenant(workspaceId, () => deleteContact(contactId));
 
     const suppression = await readSuppressionRow(workspaceId, email);
-    expect(suppression?.email).toBe(email);
+    expect(suppression, "expected a suppression row hashed from the captured pre-erasure address").not.toBeNull();
     expect(suppression?.reason).toBe("contact_deleted");
   });
 
-  it("BLOCKER finding 1: suppresses a SUBSCRIBED contact's address too, asserted against the literal stored address", async () => {
+  it("BLOCKER finding 1: suppresses a SUBSCRIBED contact's address too, asserted against the hash of the literal captured address", async () => {
     const workspaceId = await freshWorkspaceId("erasure-subscribed-suppress");
     const email = `erased-${Date.now()}@example.test`;
     const contactId = await seedContact(workspaceId, { email, subscriptionStatus: "subscribed" });
 
     await withTenant(workspaceId, () => deleteContact(contactId));
 
+    // CMP-04 (D-02, plan 13-12): the captured pre-erasure address must be
+    // hashed and stored, not null/empty -- readSuppressionRow looks the row
+    // up BY that hash, so finding it at all is the assertion that matters
+    // (there is no plaintext column left to compare against directly).
     const suppression = await readSuppressionRow(workspaceId, email);
-    expect(suppression?.email, "the captured pre-erasure address must be stored, not null/empty").toBe(email);
+    expect(suppression).not.toBeNull();
     expect(suppression?.reason).toBe("contact_deleted");
   });
 
@@ -375,7 +393,7 @@ describe("deleteContact: anonymize-in-place with erasure record + scrub enqueue 
     expect(row?.anonymizedAt, "the commit already happened -- anonymization survives the enqueue failure").not.toBeNull();
 
     const suppression = await readSuppressionRow(workspaceId, email);
-    expect(suppression?.email).toBe(email);
+    expect(suppression, "expected a suppression row hashed from the captured pre-erasure address").not.toBeNull();
 
     const records = await readErasureRecords(workspaceId, contactId);
     expect(records).toHaveLength(1);

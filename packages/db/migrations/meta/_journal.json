@@ -421,6 +421,20 @@
       "when": 1783685963501,
       "tag": "0059_contact_erasure",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1783685963502,
+      "tag": "0060_suppression_hash_expand",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1783685963503,
+      "tag": "0061_suppression_hash_contract",
+      "breakpoints": true
     }
   ]
 }

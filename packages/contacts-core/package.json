@@ -12,6 +12,7 @@
   "dependencies": {
     "@mega-crm/db": "0.1.0",
     "@mega-crm/delivery-core": "0.1.0",
+    "@mega-crm/kms": "0.1.0",
     "pg": "8.22.0",
     "pino": "10.3.1"
   },

@@ -31,6 +31,7 @@ import * as sendEventQuarantineSchema from "./schema/send-event-quarantine.js";
 import * as reputationAlertStateSchema from "./schema/reputation-alert-state.js";
 import * as ingestionAlertStateSchema from "./schema/ingestion-alert-state.js";
 import * as erasureRecordsSchema from "./schema/erasure-records.js";
+import * as workspaceSuppressionKeysSchema from "./schema/workspace-suppression-keys.js";
 
 const schema = {
   ...authSchema,
@@ -64,6 +65,7 @@ const schema = {
   ...reputationAlertStateSchema,
   ...ingestionAlertStateSchema,
   ...erasureRecordsSchema,
+  ...workspaceSuppressionKeysSchema,
 };
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -161,4 +163,5 @@ export * from "./schema/send-reconciler-runs.js";
 export * from "./schema/dead-letter-jobs.js";
 export * from "./schema/reputation-alert-state.js";
 export * from "./schema/ingestion-alert-state.js";
+export * from "./schema/workspace-suppression-keys.js";
 export { TENANT_GUC_KEY } from "./rls.js";

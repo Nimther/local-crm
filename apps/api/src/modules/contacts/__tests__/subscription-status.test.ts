@@ -192,6 +192,32 @@ describe("Contact subscription status & suppression (SUBS-01)", () => {
     expect(recreated.subscriptionStatus).toBe("suppressed");
   });
 
+  it("CMP-04 (D-02, plan 13-12): a suppression survives a letter-case change -- re-creating the SHOUTED-CASE form of a deleted address still yields suppressed", async () => {
+    const { cookie, workspace } = await owner("subs-suppression-case");
+    const email = `Case-Sensitive-${Date.now()}@example.com`;
+
+    const first = await createContact(cookie, workspace.slug, { email });
+    await app.inject({
+      method: "PATCH",
+      url: contactsUrl(workspace.slug, first.id),
+      headers: { cookie },
+      payload: { subscriptionStatus: "unsubscribed" },
+    });
+    await app.inject({
+      method: "DELETE",
+      url: contactsUrl(workspace.slug, first.id),
+      headers: { cookie },
+    });
+
+    // A different letter case than the address originally suppressed --
+    // normalizeSuppressionEmail must make these match, or the hash-based
+    // suppression check would let this slip past.
+    const shouted = email.toUpperCase();
+    expect(shouted).not.toBe(email);
+    const recreated = await createContact(cookie, workspace.slug, { email: shouted });
+    expect(recreated.subscriptionStatus).toBe("suppressed");
+  });
+
   it("CMP-04 (plan 13-10, Codex BLOCKER finding 1): deleting a still-subscribed contact ALSO suppresses its email -- erasure must not weaken suppression", async () => {
     // Pre-13-10 this contact recreated as "subscribed" (the suppression
     // insert was gated on the pre-erasure status, so a still-subscribed
