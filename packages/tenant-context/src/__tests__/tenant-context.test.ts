@@ -311,7 +311,7 @@ describe("the fail-closed RLS contract (SEC-03/SEC-04)", () => {
     }
   });
 
-  it("uses one identical predicate across exactly 25 workspace_isolation policies", async () => {
+  it("uses one identical predicate across exactly 26 workspace_isolation policies", async () => {
     const { rows } = await fresh.query<{ qual: string }>(
       `SELECT qual FROM pg_policies WHERE policyname = 'workspace_isolation'`,
     );
@@ -320,13 +320,15 @@ describe("the fail-closed RLS contract (SEC-03/SEC-04)", () => {
     // the pre-0044 NULLIF-guarded form this file's other tests guard against).
     // Phase 13 (CMP-08, D-05, 13-01, migration 0055) adds the 24th and 25th:
     // ingress_journal and send_event_quarantine, both fail-closed from birth
-    // with the same shared predicate.
-    expect(rows, "expected exactly 25 workspace_isolation policies in the catalog").toHaveLength(25);
+    // with the same shared predicate. Phase 13 (CMP-04, D-01, plan 13-10,
+    // migration 0059) adds the 26th: erasure_records, mirroring migration
+    // 0053's own fail-closed-from-birth form verbatim.
+    expect(rows, "expected exactly 26 workspace_isolation policies in the catalog").toHaveLength(26);
 
     const distinctQuals = new Set(rows.map((r) => r.qual));
     expect(
       distinctQuals.size,
-      `expected one shared predicate across all 25 policies, found ${distinctQuals.size} distinct forms: ${[...distinctQuals].join(" | ")}`,
+      `expected one shared predicate across all 26 policies, found ${distinctQuals.size} distinct forms: ${[...distinctQuals].join(" | ")}`,
     ).toBe(1);
   });
 
