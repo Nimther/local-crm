@@ -301,36 +301,117 @@ describe("erasure-scrub-reclaim.worker.ts (CMP-04, D-04, plan 13-15)", () => {
     expect(jobsB[0].data.workspaceId).toBe(workspaceB);
   });
 
-  it("a reclaim tick performs no write against contacts, workspace_suppressions, send_events, or events", async () => {
+  it("a reclaim tick performs no write against contacts, workspace_suppressions, send_events, or events -- row counts and the affected contact's column values are unchanged", async () => {
     const workspaceId = await freshWorkspaceId("reclaim-no-side-effects");
     const email = "no-side-effects@example.test";
     const contactId = await createFixtureContact(workspaceId, email);
+
+    async function seedSideEffectSurface(): Promise<void> {
+      await withTenant(workspaceId, () =>
+        withTenantTransaction(async (client) => {
+          const { rows: campaignRows } = await client.query<{ id: string }>(
+            `INSERT INTO segments (workspace_id, name, definition, created_by_user_id)
+             VALUES ($1, 'Reclaim no-side-effects segment', $2, 'test-user') RETURNING id`,
+            [workspaceId, { operator: "and", conditions: [] }]
+          );
+          const { rows: camp } = await client.query<{ id: string }>(
+            `INSERT INTO campaigns (workspace_id, name, status, segment_id, template_id, from_email, created_by_user_id)
+             VALUES ($1, 'Reclaim no-side-effects campaign', 'sent', $2, 'd-fixture-template', 'sender@fixture.test', 'test-user')
+             RETURNING id`,
+            [workspaceId, campaignRows[0].id]
+          );
+          const { rows: sendRows } = await client.query<{ id: string }>(
+            `INSERT INTO sends (workspace_id, campaign_id, contact_id, kind, status, sent_at)
+             VALUES ($1, $2, $3, 'campaign', 'sent', now()) RETURNING id`,
+            [workspaceId, camp[0].id, contactId]
+          );
+          await client.query(
+            `INSERT INTO send_events (id, workspace_id, sg_event_id, send_id, event_type, payload, occurred_at)
+             VALUES (gen_random_uuid(), $1, $2, $3, 'delivered', $4::jsonb, now())`,
+            [workspaceId, `sg-no-side-effects-${sendRows[0].id}`, sendRows[0].id, JSON.stringify({ email, event: "delivered" })]
+          );
+          await client.query(
+            `INSERT INTO events (id, workspace_id, contact_id, name, properties, occurred_at)
+             VALUES (gen_random_uuid(), $1, $2, 'placed_order', $3::jsonb, now())`,
+            [workspaceId, contactId, JSON.stringify({ order_total: 1, contact_email: email })]
+          );
+          await client.query(
+            `INSERT INTO workspace_suppressions (workspace_id, email_hash, reason)
+             VALUES ($1, $2, 'contact_deleted')`,
+            [workspaceId, "reclaim-no-side-effects-fixture-hash"]
+          );
+        })
+      );
+    }
+    await seedSideEffectSurface();
     await seedErasureRecord(workspaceId, contactId, {
       status: "pending",
       requestedAtMinutesAgo: ERASURE_SCRUB_RECLAIM_LEASE_MINUTES + 1,
     });
 
-    const before = await withTenant(workspaceId, () =>
-      withTenantTransaction(async (client) => {
-        const { rows } = await client.query<{ email: string | null }>(`SELECT email FROM contacts WHERE id = $1`, [
-          contactId,
-        ]);
-        return rows[0];
-      })
-    );
+    interface SideEffectSnapshot {
+      contactEmail: string | null;
+      contactsCount: number;
+      suppressionsCount: number;
+      sendEventPayloads: Record<string, unknown>[];
+      eventProperties: Record<string, unknown>[];
+    }
+
+    async function snapshot(): Promise<SideEffectSnapshot> {
+      return withTenant(workspaceId, () =>
+        withTenantTransaction(async (client) => {
+          const contact = await client.query<{ email: string | null }>(`SELECT email FROM contacts WHERE id = $1`, [
+            contactId,
+          ]);
+          const contactsCount = await client.query<{ count: string }>(
+            `SELECT count(*)::text as count FROM contacts WHERE workspace_id = $1`,
+            [workspaceId]
+          );
+          const suppressions = await client.query<{ count: string }>(
+            `SELECT count(*)::text as count FROM workspace_suppressions WHERE workspace_id = $1`,
+            [workspaceId]
+          );
+          const sendEvents = await client.query<{ payload: Record<string, unknown> }>(
+            `SELECT se.payload FROM send_events se JOIN sends s ON s.id = se.send_id WHERE se.workspace_id = $1 AND s.contact_id = $2`,
+            [workspaceId, contactId]
+          );
+          const events = await client.query<{ properties: Record<string, unknown> }>(
+            `SELECT properties FROM events WHERE workspace_id = $1 AND contact_id = $2`,
+            [workspaceId, contactId]
+          );
+          return {
+            contactEmail: contact.rows[0]?.email ?? null,
+            contactsCount: Number(contactsCount.rows[0].count),
+            suppressionsCount: Number(suppressions.rows[0].count),
+            sendEventPayloads: sendEvents.rows.map((r) => r.payload),
+            eventProperties: events.rows.map((r) => r.properties),
+          };
+        })
+      );
+    }
+
+    const before = await snapshot();
 
     await runErasureScrubReclaim({ workspaceIds: [workspaceId] });
 
-    const after = await withTenant(workspaceId, () =>
-      withTenantTransaction(async (client) => {
-        const { rows } = await client.query<{ email: string | null }>(`SELECT email FROM contacts WHERE id = $1`, [
-          contactId,
-        ]);
-        return rows[0];
-      })
-    );
+    const after = await snapshot();
     expect(after).toEqual(before);
-    expect(after?.email).toBe(email);
+    expect(after.contactEmail).toBe(email);
+  });
+
+  it("the only statement inside withCrossWorkspaceScan reads organization (source-level check)", async () => {
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+    const source = await fs.readFile(
+      path.resolve(import.meta.dirname, "../erasure-scrub-reclaim.worker.ts"),
+      "utf8"
+    );
+    const scanBlockMatch = source.match(/withCrossWorkspaceScan\(async \(client\) => \{([\s\S]*?)\n  \}\);/);
+    expect(scanBlockMatch, "expected exactly one withCrossWorkspaceScan callback body").not.toBeNull();
+    const scanBody = scanBlockMatch![1];
+    const queryCalls = scanBody.match(/client\.query/g) ?? [];
+    expect(queryCalls).toHaveLength(1);
+    expect(scanBody).toContain("FROM organization");
   });
 
   it("a tick whose enqueue rejects for one workspace still processes the remaining workspaces and does not throw out of the tick", async () => {
