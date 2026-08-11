@@ -232,3 +232,15 @@ None — no external service configuration required. The sweep and the operator 
 ---
 *Phase: 13-compliance-analytics-integrity*
 *Completed: 2026-08-12*
+
+## Self-Check: PASSED
+
+- FOUND: `apps/worker/src/queues/webhook-replay-sweep.worker.ts`
+- FOUND: `packages/db/scripts/replay-webhook-journal.ts`
+- FOUND: `apps/worker/src/queues/__tests__/webhook-replay-sweep.test.ts`
+- FOUND: `.planning/phases/13-compliance-analytics-integrity/13-06-SUMMARY.md`
+- FOUND commit: `49e214c` (test)
+- FOUND commit: `295bde1` (feat, Task 1)
+- FOUND commit: `4b174fd` (feat, Task 2)
+- FOUND commit: `0493d5c` (feat, Task 3)
+- FOUND commit: `c3bfa3c` (docs, this summary)
