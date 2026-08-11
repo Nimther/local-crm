@@ -197,3 +197,8 @@ None — no external service configuration required. The operator sequence (`npm
 ---
 *Phase: 13-compliance-analytics-integrity*
 *Completed: 2026-08-12*
+
+## Self-Check: PASSED
+
+- All 5 files listed under "Files Created/Modified" (created subset) verified present on disk via `ls -la`.
+- All 7 commit hashes referenced above (`7c5a857`, `e1fe6d0`, `b0e844e`, `707a528`, `c129044`, `8d9fcd5`) verified present via `git log --oneline -8`.
