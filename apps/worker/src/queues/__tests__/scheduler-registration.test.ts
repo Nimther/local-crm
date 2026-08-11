@@ -23,6 +23,12 @@ import {
   waitForWebhookReplaySweepRegistration,
   WEBHOOK_REPLAY_SWEEP_INTERVAL_MS,
 } from "../webhook-replay-sweep.worker.js";
+import {
+  createReputationTickWorker,
+  waitForReputationTickRegistration,
+  REPUTATION_TICK_INTERVAL_MS,
+  REPUTATION_TICK_QUEUE,
+} from "../reputation-tick.worker.js";
 
 /**
  * Phase 12 (WRK-13), Task 1: `campaign-scheduler.worker.ts`,
@@ -513,6 +519,150 @@ describe("webhook-replay-sweep scheduler (CMP-08, plan 13-06)", () => {
   it("the worker file registers through upsertJobScheduler behind a guard that logs (never rethrows) and always closes the registration queue", () => {
     const source = readFileSync(
       path.join(REPO_ROOT, "apps/worker/src/queues/webhook-replay-sweep.worker.ts"),
+      "utf8"
+    );
+
+    expect(source).toContain("upsertJobScheduler");
+    expect(source).toMatch(/finally\s*\{[\s\S]*?queue\.close\(\)/);
+    expect(source).toMatch(/catch\s*\(err\)\s*\{\s*scrubbedConsole\.error/);
+  });
+});
+
+/**
+ * Phase 13 (CMP-09, plan 13-09): `reputation-tick.worker.ts` is a BRAND NEW
+ * queue -- like `webhook-replay-sweep.worker.ts` above, built directly on
+ * `upsertJobScheduler` from day one with no legacy `tickQueue.add({repeat})`
+ * entry to migrate away from, so it gets its own describe block rather than
+ * joining the FIXTURES loop (which asserts a `removeRepeatable` cleanup this
+ * worker correctly never calls).
+ */
+describe("reputation-tick scheduler (CMP-09, plan 13-09)", () => {
+  let redis: TempRedis;
+
+  beforeAll(async () => {
+    redis = await startTempRedis({});
+  });
+
+  afterAll(async () => {
+    await redis?.stop();
+  });
+
+  it("registers exactly one job scheduler with the stable id and the correct every interval", async () => {
+    const connection = buildRedisConnectionOptions(redis.url);
+    const worker = createReputationTickWorker(connection, { autorun: false });
+    const queue = new Queue(REPUTATION_TICK_QUEUE, { connection });
+
+    try {
+      await vi.waitFor(async () => {
+        expect(await queue.getJobSchedulersCount()).toBe(1);
+      });
+
+      const schedulers = await queue.getJobSchedulers();
+      expect(schedulers).toHaveLength(1);
+      expect(schedulers[0].key).toBe("reputation-tick");
+      expect(schedulers[0].every).toBe(REPUTATION_TICK_INTERVAL_MS);
+
+      await waitForReputationTickRegistration(worker);
+    } finally {
+      await worker.close();
+      await queue.obliterate({ force: true });
+      await queue.close();
+    }
+  });
+
+  it("constructing the worker twice still leaves exactly one scheduler with that id", async () => {
+    const connection = buildRedisConnectionOptions(redis.url);
+    const queue = new Queue(REPUTATION_TICK_QUEUE, { connection });
+    const workerA = createReputationTickWorker(connection, { autorun: false });
+
+    try {
+      await vi.waitFor(async () => {
+        expect(await queue.getJobSchedulersCount()).toBe(1);
+      });
+
+      const workerB = createReputationTickWorker(connection, { autorun: false });
+      try {
+        await vi.waitFor(async () => {
+          expect(await queue.getJobSchedulersCount()).toBe(1);
+        });
+
+        const schedulers = await queue.getJobSchedulers();
+        expect(schedulers).toHaveLength(1);
+        expect(schedulers[0].key).toBe("reputation-tick");
+
+        await waitForReputationTickRegistration(workerB);
+      } finally {
+        await workerB.close();
+      }
+
+      await waitForReputationTickRegistration(workerA);
+    } finally {
+      await workerA.close();
+      await queue.obliterate({ force: true });
+      await queue.close();
+    }
+  });
+
+  it("boot enqueues one immediate job with a per-boot jobId carrying the current schemaVersion, not owned by the scheduler", async () => {
+    const connection = buildRedisConnectionOptions(redis.url);
+    const worker = createReputationTickWorker(connection, { autorun: false });
+    const queue = new Queue(REPUTATION_TICK_QUEUE, { connection });
+
+    try {
+      await vi.waitFor(async () => {
+        const jobs = await queue.getJobs(["waiting", "delayed"]);
+        expect(jobs.some((job) => job.id?.startsWith("boot-"))).toBe(true);
+      });
+
+      const jobs = await queue.getJobs(["waiting", "delayed"]);
+      const bootJobs = jobs.filter((job) => job.id?.startsWith("boot-"));
+      expect(bootJobs).toHaveLength(1);
+      expect((bootJobs[0].data as { schemaVersion?: number }).schemaVersion).toBe(1);
+
+      await waitForReputationTickRegistration(worker);
+    } finally {
+      await worker.close();
+      await queue.obliterate({ force: true });
+      await queue.close();
+    }
+  });
+
+  it("a rejecting registration is logged and swallowed -- the factory call resolves and never surfaces as an unhandled rejection", async () => {
+    const connection = buildRedisConnectionOptions(redis.url);
+    const err = new Error("simulated redis hiccup at boot");
+    const upsertSpy = vi.spyOn(Queue.prototype, "upsertJobScheduler").mockRejectedValueOnce(err);
+    const closeSpy = vi.spyOn(Queue.prototype, "close");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const unhandledRejections: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => {
+      unhandledRejections.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+
+    const worker = createReputationTickWorker(connection, { autorun: false });
+
+    try {
+      await expect(waitForReputationTickRegistration(worker)).resolves.toBeUndefined();
+
+      expect(closeSpy).toHaveBeenCalled();
+      expect(errorSpy).toHaveBeenCalled();
+      expect(upsertSpy).toHaveBeenCalledTimes(1);
+      expect(unhandledRejections).toHaveLength(0);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+      upsertSpy.mockRestore();
+      closeSpy.mockRestore();
+      errorSpy.mockRestore();
+      await worker.close();
+      const queue = new Queue(REPUTATION_TICK_QUEUE, { connection });
+      await queue.obliterate({ force: true }).catch(() => undefined);
+      await queue.close();
+    }
+  });
+
+  it("the worker file registers through upsertJobScheduler behind a guard that logs (never rethrows) and always closes the registration queue", () => {
+    const source = readFileSync(
+      path.join(REPO_ROOT, "apps/worker/src/queues/reputation-tick.worker.ts"),
       "utf8"
     );
 

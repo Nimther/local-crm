@@ -28,6 +28,8 @@ import * as sendReconcilerRunsSchema from "./schema/send-reconciler-runs.js";
 import * as deadLetterJobsSchema from "./schema/dead-letter-jobs.js";
 import * as ingressJournalSchema from "./schema/ingress-journal.js";
 import * as sendEventQuarantineSchema from "./schema/send-event-quarantine.js";
+import * as reputationAlertStateSchema from "./schema/reputation-alert-state.js";
+import * as ingestionAlertStateSchema from "./schema/ingestion-alert-state.js";
 
 const schema = {
   ...authSchema,
@@ -58,6 +60,8 @@ const schema = {
   ...deadLetterJobsSchema,
   ...ingressJournalSchema,
   ...sendEventQuarantineSchema,
+  ...reputationAlertStateSchema,
+  ...ingestionAlertStateSchema,
 };
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -153,4 +157,6 @@ export * from "./schema/workspace-daily-rollup.js";
 export * from "./schema/partition-maintenance-runs.js";
 export * from "./schema/send-reconciler-runs.js";
 export * from "./schema/dead-letter-jobs.js";
+export * from "./schema/reputation-alert-state.js";
+export * from "./schema/ingestion-alert-state.js";
 export { TENANT_GUC_KEY } from "./rls.js";
