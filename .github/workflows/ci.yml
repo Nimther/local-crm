@@ -76,6 +76,14 @@ jobs:
       - name: Migration linter
         run: npm run lint:migrations
 
+      # GSD 10-05 (SEC-16): the machine half of "transaction-local session
+      # state only" (CONVENTIONS.md) -- a connection-scoped SET or role
+      # switch reintroduced anywhere in the source tree fails here instead of
+      # only being caught by review, which matters most once Phase 14 puts
+      # PgBouncer in transaction-pooling mode in front of Postgres.
+      - name: Session-state audit
+        run: npm run lint:session-state
+
       - name: Working-root hygiene
         run: npm run check:root-hygiene
 
@@ -196,6 +204,9 @@ jobs:
       - name: SendGrid rate limit (429)
         run: npm run failure:429
 
+      - name: Two-tenant fairness under one tenant's saturation
+        run: npm run failure:tenant-fairness
+
       - name: SendGrid timeout
         run: npm run failure:timeout
 
@@ -205,8 +216,20 @@ jobs:
       - name: Worker SIGKILL mid-dispatch
         run: npm run failure:sigkill
 
+      - name: Worker SIGKILL after provider acceptance
+        run: npm run failure:crash-post-accept
+
+      - name: Crashed before the result write (202 and 4xx variants)
+        run: npm run failure:crash-pre-result-write
+
+      - name: Reconciler vs retry-worker race
+        run: npm run failure:reconciler-race
+
       - name: Redis restart under a live queue
         run: npm run failure:redis-restart
+
+      - name: Segment sweep kill-resume
+        run: npm run failure:segment-sweep-resume
 
   # ---------------------------------------------------------------------------
   # Reports, never blocks. What CI needs from this job is not the browser

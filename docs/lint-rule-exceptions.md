@@ -83,3 +83,37 @@ Every one of those 87 sites was therefore resolved individually — the code was
 site carries a line-scoped directive naming the rule with a reason after a `--` separator.
 The exact rule names, and this prohibition, live in the `eslint.config.js` Block 4b comment,
 which is where a developer editing the config will actually encounter them.
+
+---
+
+## `session-state-exception` — the session-state audit's marker
+
+**Not an ESLint exception.** `scripts/lint-session-state.mjs` (`npm run lint:session-state`) is
+a separate checker, not an ESLint rule, but its suppression mechanism follows the same
+discipline as everything above and in CONVENTIONS.md's escape-hatch policy: registered here,
+scoped to a single site, and required to carry a reason.
+
+**Form.** A single-line `//` comment on the line immediately preceding the statement it
+excepts:
+
+```ts
+// session-state-exception: <reason>
+await client.query("SET statement_timeout = '0'");
+```
+
+**Reason is required.** A colon followed by at least one non-whitespace character is what makes
+the marker suppress. `// session-state-exception:` with nothing after the colon does **not**
+suppress — the checker's own test suite (`scripts/__tests__/lint-session-state.test.mjs`, Test 5)
+asserts this directly.
+
+**Placement is scoped, not blanket.** The marker suppresses only the statement on the
+immediately following non-blank line. A marker anywhere else — including one in a file header
+meant to cover the whole file — does **not** suppress. This is the identical "no blanket form"
+rule the destructive-DDL marker enforces (CONVENTIONS.md § Expand/contract); a marker that could
+silently grow to cover statements nobody examined is the exact failure mode both markers exist
+to prevent.
+
+**Current exceptions:** none. No first-party source in this repository currently needs one —
+every connection that sets session state does so transaction-locally already.
+`scripts/__fixtures__/session-state/compliant.ts` demonstrates the marker's shape without it
+being a real, in-use exception.

@@ -3,7 +3,12 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { buildServer } from "../../../server.js";
 import { ensureTestDbMigrated, getTestDatabaseUrl } from "../../../test/db-fixture.js";
-import { db, invitation, member } from "@mega-crm/db";
+// 10-09 (SEC-05): these are test-only direct writes to better-auth tables
+// used to seed/mutate fixture state (a member row, an invitation's expiry)
+// outside better-auth's own API surface -- as of migration 0045 that needs
+// the mega_crm_auth-backed client, not the app-role `db` these call sites
+// used before the boundary existed.
+import { authDb, invitation, member } from "@mega-crm/db";
 
 interface CapturedMailBody {
   content: Array<{ type: string; value: string }>;
@@ -194,7 +199,7 @@ describe("invite lifecycle (TENANT-02)", () => {
     });
     const invite = inviteRes.json();
 
-    await db
+    await authDb
       .update(invitation)
       .set({ expiresAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000) })
       .where(eq(invitation.id, invite.id));
@@ -261,7 +266,7 @@ describe("invite lifecycle (TENANT-02)", () => {
       "correct horse battery staple 42",
       "List Member"
     );
-    await db.insert(member).values({ organizationId: workspace.id, userId: memberAccount.userId, role: "member" });
+    await authDb.insert(member).values({ organizationId: workspace.id, userId: memberAccount.userId, role: "member" });
 
     const memberRes = await app.inject({
       method: "GET",
@@ -293,7 +298,7 @@ describe("invite lifecycle (TENANT-02)", () => {
     });
     const invite = inviteRes.json();
 
-    await db.update(invitation).set({ expiresAt: new Date(Date.now() + 1000) }).where(eq(invitation.id, invite.id));
+    await authDb.update(invitation).set({ expiresAt: new Date(Date.now() + 1000) }).where(eq(invitation.id, invite.id));
 
     mockSendGrid();
     const resendRes = await app.inject({

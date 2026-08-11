@@ -362,9 +362,40 @@ describe("CSV contact import (CONT-02, D-15..D-20)", () => {
     });
     expect(errorsRes.statusCode, `error report failed: ${errorsRes.body}`).toBe(200);
     expect(errorsRes.headers["content-type"]).toContain("text/csv");
+    // WR-06 regression guard: the happy path's Content-Disposition header
+    // must stay exactly this shape once the :id UUID guard is added.
+    expect(errorsRes.headers["content-disposition"]).toBe(`attachment; filename="import-${upload.importId}-errors.csv"`);
     const lines = errorsRes.body.trim().split("\n");
     expect(lines[0]).toContain("reason");
     expect(lines.length).toBe(3); // header + 2 errored rows
+  });
+
+  it("WR-06: a non-UUID :id on the error-report route is rejected with 400 and no Content-Disposition header", async () => {
+    const { cookie, workspace } = await owner("csv-wr06-invalid");
+
+    const errorsRes = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/imports/not-a-uuid/errors`,
+      headers: { cookie },
+    });
+
+    expect(errorsRes.statusCode, `expected 400, got ${errorsRes.statusCode}: ${errorsRes.body}`).toBe(400);
+    expect(errorsRes.json()).toHaveProperty("error");
+    expect(errorsRes.headers["content-disposition"]).toBeUndefined();
+  });
+
+  it("WR-06: a double-quote-bearing :id cannot inject a second filename parameter into Content-Disposition", async () => {
+    const { cookie, workspace } = await owner("csv-wr06-injection");
+    const maliciousId = encodeURIComponent('x"; filename="evil.html');
+
+    const errorsRes = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/imports/${maliciousId}/errors`,
+      headers: { cookie },
+    });
+
+    expect(errorsRes.statusCode, `expected 400, got ${errorsRes.statusCode}: ${errorsRes.body}`).toBe(400);
+    expect(errorsRes.headers["content-disposition"]).toBeUndefined();
   });
 
   it("apply enqueues a background job; the status route immediately reflects 'applying' (D-16)", async () => {

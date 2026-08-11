@@ -1,5 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { db, member } from "@mega-crm/db";
+// 10-09 (SEC-05): seeding a member row directly for test setup is not a live
+// application query site -- as of migration 0045 it needs the
+// mega_crm_auth-backed client, not the app-role `db`.
+import { authDb, member } from "@mega-crm/db";
 import { buildServer } from "../../../server.js";
 import { ensureTestDbMigrated, getTestDatabaseUrl } from "../../../test/db-fixture.js";
 
@@ -63,7 +66,7 @@ describe("Flow lifecycle (FLOW-01/06/07, D-17/D-20/D-23/D-24)", () => {
   async function addMemberWithRole(organizationId: string, role: "member" | "admin" | "owner", nameSeed: string) {
     const email = `${nameSeed}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
     const account = await signUp(email, "correct horse battery staple 42", nameSeed);
-    await db.insert(member).values({ organizationId, userId: account.userId, role });
+    await authDb.insert(member).values({ organizationId, userId: account.userId, role });
     return account;
   }
 

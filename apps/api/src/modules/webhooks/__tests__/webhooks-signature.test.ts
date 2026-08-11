@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { buildServer } from "../../../server.js";
 import { ensureTestDbMigrated, getTestDatabaseUrl } from "../../../test/db-fixture.js";
 import { webhookEventsQueue } from "../enqueue.js";
+import { findWebhookEndpointByToken } from "../webhook-endpoint.repository.js";
 
 /**
  * POST /webhooks/sendgrid/:pathToken (WBHK-01, T-05-01/02/03): drives the
@@ -60,8 +61,23 @@ describe("POST /webhooks/sendgrid/:pathToken (WBHK-01)", () => {
 
   afterAll(async () => {
     await app.close();
-    await webhookEventsQueue.obliterate({ force: true }).catch(() => undefined);
+    // Deliberately NOT `.obliterate()` (10-11, SEC-07 deviation): this file
+    // is no longer the only apps/api test file enqueueing real jobs onto
+    // the shared webhookEventsQueue -- webhook-timestamp-window.test.ts does
+    // too, and vitest runs test files concurrently by default, so
+    // obliterating the ENTIRE queue here could wipe a sibling file's
+    // in-flight jobs mid-assertion. This file's own assertions are already
+    // workspace-scoped (unique per test) and never depend on the queue
+    // being empty. CI starts Redis fresh per run (docker compose), so the
+    // only cost is jobs accumulating in a long-lived LOCAL dev Redis across
+    // repeated manual test runs.
     await webhookEventsQueue.close();
+  });
+
+  afterEach(() => {
+    // Safety net for the fake-Date test below (10-11, SEC-07) -- restores
+    // real time even if an assertion throws before its own finally runs.
+    vi.useRealTimers();
   });
 
   async function signUp(email: string, password: string, name: string) {
@@ -114,23 +130,47 @@ describe("POST /webhooks/sendgrid/:pathToken (WBHK-01)", () => {
     const pathToken = `tok-valid-${randomUUID()}`;
     await provisionEndpoint(workspace.id, pathToken, PUBLIC_KEY);
 
-    const before = await webhookEventsQueue.getJobCounts("waiting");
-
-    const res = await app.inject({
-      method: "POST",
-      url: `/webhooks/sendgrid/${pathToken}`,
-      headers: {
-        "content-type": "application/json",
-        "x-twilio-email-event-webhook-signature": SIGNATURE,
-        "x-twilio-email-event-webhook-timestamp": TIMESTAMP,
-      },
-      payload: PAYLOAD,
-    });
+    // 10-11 (SEC-07): SendGrid's own published fixture's TIMESTAMP
+    // ("1600112502", 2020-09-14) is now genuinely stale relative to real
+    // wall-clock time -- freeze `Date` to that exact instant so this
+    // pinned fixture stays inside the freshness window without touching
+    // its signed bytes (the signature is computed over `timestamp +
+    // payload`; re-timestamping would invalidate it). Only `Date` is
+    // faked, never timers -- ioredis/BullMQ/pg are unaffected.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Number(TIMESTAMP) * 1000);
+    let res;
+    try {
+      res = await app.inject({
+        method: "POST",
+        url: `/webhooks/sendgrid/${pathToken}`,
+        headers: {
+          "content-type": "application/json",
+          "x-twilio-email-event-webhook-signature": SIGNATURE,
+          "x-twilio-email-event-webhook-timestamp": TIMESTAMP,
+        },
+        payload: PAYLOAD,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
 
     expect(res.statusCode, `valid signature request failed: ${res.body}`).toBe(200);
 
-    const after = await webhookEventsQueue.getJobCounts("waiting");
-    expect(after.waiting).toBe((before.waiting ?? 0) + 1);
+    // Scoped by workspaceId (unique per test), not a global before/after
+    // getJobCounts() delta -- 10-11 (SEC-07) added a second apps/api test
+    // file that also enqueues real jobs onto this same shared
+    // webhookEventsQueue, and vitest runs test files concurrently by
+    // default, so two files racing the queue's TOTAL depth produced a
+    // genuine cross-file flake (mirrors apps/worker/vitest.config.ts's
+    // documented "steals sibling files' jobs mid-assertion" class of bug).
+    // No worker runs in this test process, so an enqueued job stays
+    // "waiting" and is directly countable.
+    const waitingJobs = await webhookEventsQueue.getJobs(["waiting"]);
+    const forThisWorkspace = waitingJobs.filter(
+      (job) => (job.data as { workspaceId?: string }).workspaceId === workspace.id
+    );
+    expect(forThisWorkspace.length).toBe(1);
   });
 
   it("tampered signature -> 400, and no job is enqueued (fail-closed, no JSON.parse reached)", async () => {
@@ -220,5 +260,29 @@ describe("POST /webhooks/sendgrid/:pathToken (WBHK-01)", () => {
     });
 
     expect(res.statusCode).toBe(404);
+  });
+
+  // ---------------------------------------------------------------------
+  // Phase 10 plan 10-07 (SEC-03/SEC-04): findWebhookEndpointByToken runs
+  // through withPreTenantLookup under migration 0044's fail-closed
+  // workspace_isolation predicate. The HTTP-level tests above already
+  // exercise this indirectly (valid token -> 200, unknown token -> 404);
+  // these two assert the repository function's own return contract
+  // directly.
+  // ---------------------------------------------------------------------
+
+  it("findWebhookEndpointByToken: returns the matching endpoint for a valid path token after migration 0044", async () => {
+    const workspace = await freshWorkspace("wh-repo-lookup");
+    const pathToken = `tok-repo-lookup-${randomUUID()}`;
+    await provisionEndpoint(workspace.id, pathToken, PUBLIC_KEY);
+
+    const row = await findWebhookEndpointByToken(pathToken);
+    expect(row).not.toBeNull();
+    expect(row?.workspaceId).toBe(workspace.id);
+    expect(row?.publicKey).toBe(PUBLIC_KEY);
+  });
+
+  it("findWebhookEndpointByToken: returns null for an unknown token", async () => {
+    await expect(findWebhookEndpointByToken(`unknown-repo-${randomUUID()}`)).resolves.toBeNull();
   });
 });

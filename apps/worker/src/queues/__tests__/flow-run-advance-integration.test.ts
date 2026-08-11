@@ -7,7 +7,8 @@ import type { FlowRunAdvanceJob } from "@mega-crm/shared-schemas";
 import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool } from "../../test/db-fixture.js";
 import { createFlowRunAdvanceWorker } from "../flows/flow-run-advance.worker.js";
 import { emailTriggeredQueue, enqueueFlowRunAdvance, flowRunAdvanceQueue } from "../flows/flow-queues.js";
-import { buildRedisConnectionOptions } from "../connection.js";
+import { buildRedisConnectionOptions } from "@mega-crm/queue-core";
+import { insertFixtureOrganization } from "../../test/failure-fixtures.js";
 
 /**
  * CR-01 regression coverage (06-12): a REAL BullMQ `Queue`/`Worker` pair
@@ -41,13 +42,11 @@ describe("flow-run-advance CR-01 integration: real Queue/Worker multi-step advan
     await pool.end();
   });
 
+  // 10-09 (SEC-05): delegates to the mega_crm_auth-backed INSERT in
+  // failure-fixtures.ts instead of duplicating it -- mega_crm_app holds
+  // only SELECT on organization post-migration-0045.
   async function freshWorkspaceId(nameSeed: string): Promise<string> {
-    const slug = `${nameSeed}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const { rows } = await pool.query<{ id: string }>(
-      `INSERT INTO organization (name, slug) VALUES ($1, $2) RETURNING id`,
-      [`${nameSeed} Co`, slug]
-    );
-    return rows[0].id;
+    return insertFixtureOrganization(nameSeed);
   }
 
   async function createFixtureContact(workspaceId: string): Promise<string> {

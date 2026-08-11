@@ -2,6 +2,8 @@ import "./load-env.js";
 import Fastify from "fastify";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
+import { Redis } from "ioredis";
+import sgMail from "@sendgrid/mail";
 import {
   serializerCompiler,
   validatorCompiler,
@@ -9,6 +11,26 @@ import {
 } from "@fastify/type-provider-zod";
 import { logger } from "./logger.js";
 import { env } from "./env.js";
+import { pool } from "./db.js";
+import {
+  startPartitionWatchdog,
+  WATCHDOG_INTERVAL_MS,
+  STALE_THRESHOLD_HOURS,
+  type OperatorAlertMessage,
+} from "./modules/ops/partition-watchdog.js";
+import {
+  startSendReconcilerWatchdog,
+  RECONCILER_WATCHDOG_INTERVAL_MS,
+  RECONCILER_STALE_THRESHOLD_MINUTES,
+  RECONCILING_AGE_ALERT_HOURS,
+  type ReconcilerAlertMessage,
+} from "./modules/ops/send-reconciler-watchdog.js";
+import {
+  startDeadLetterWatchdog,
+  DEAD_LETTER_WATCHDOG_INTERVAL_MS,
+  DEAD_LETTER_ALERT_DEDUP_HOURS,
+  type DeadLetterAlertMessage,
+} from "./modules/ops/dead-letter-watchdog.js";
 import { authPlugin } from "./modules/auth/plugin.js";
 import { registerWorkspaceRoutes } from "./modules/tenancy/workspaces.js";
 import { registerProfileRoutes } from "./modules/tenancy/profile.js";
@@ -30,8 +52,23 @@ import { registerWebhookSettingsRoutes } from "./modules/webhooks/webhook-settin
 import { registerAnalyticsRoutes } from "./modules/analytics/index.js";
 import { registerSendLogRoutes } from "./modules/send-log/send-log.routes.js";
 
+/**
+ * Options for `buildServer`. The only override that exists today is the
+ * distributed rate limiter's Redis endpoint -- needed so
+ * rate-limit-distributed.test.ts (SEC-11) can point two in-process instances
+ * at one disposable Redis, and separately point an instance at a Redis it is
+ * about to stop, without touching the process-wide `env.REDIS_URL` every
+ * other apps/api test relies on for its own (unrelated, unconnected) BullMQ
+ * queue construction. Production and every other test call `buildServer()`
+ * with no arguments and get `env.REDIS_URL`, the same Redis URL the rest of
+ * the system already uses.
+ */
+export interface BuildServerOptions {
+  rateLimitRedisUrl?: string;
+}
+
 /** Assembles the Fastify app: zod type provider, better-auth handler, workspace/profile/invite/member routes. */
-export async function buildServer() {
+export async function buildServer(options: BuildServerOptions = {}) {
   const app = Fastify({
     loggerInstance: logger,
     // 04-03: find-my-way's default maxParamLength (100) is too small for the
@@ -45,10 +82,87 @@ export async function buildServer() {
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
 
+  // SEC-11 (T-10-12-01): a per-process (in-memory) rate-limit store silently
+  // multiplies every configured limit by however many API replicas are
+  // running -- each replica counts only the requests IT saw, so N replicas
+  // together allow N times the configured max before any of them returns
+  // 429. Backing the store with Redis makes the count a single value shared
+  // by every instance regardless of which one a given request lands on
+  // (rate-limit-distributed.test.ts's two-instance test asserts the exact
+  // request count this fixes).
+  //
+  // This client is deliberately separate from every BullMQ connection in
+  // this codebase (apps/worker/src/queues/connection.ts,
+  // apps/api/.../*-queue.ts): it sits directly in the request path -- the
+  // `incr` call happens before the route handler runs -- so unlike a queue
+  // connection (which SHOULD hold open and retry indefinitely, per BullMQ's
+  // own `maxRetriesPerRequest: null` requirement) this one is configured to
+  // fail FAST: a short `connectTimeout`, a reconnect backoff that gives up
+  // after a few attempts (`retryStrategy` returning `null`), and
+  // `enableOfflineQueue: false` so a command issued while disconnected
+  // rejects immediately instead of queuing behind a reconnect (T-10-12-06).
+  const rateLimitRedisUrl = options.rateLimitRedisUrl ?? env.REDIS_URL;
+  const rateLimitRedis = new Redis(rateLimitRedisUrl, {
+    connectTimeout: 1_000,
+    maxRetriesPerRequest: 1,
+    enableOfflineQueue: false,
+    retryStrategy: (times) => (times > 3 ? null : Math.min(times * 200, 1_000)),
+  });
+
+  // T-10-12-04 (SEC-08): `skipOnError` below swallows the failure silently
+  // from the request's point of view -- this listener is the ONLY thing
+  // that makes a store outage observable. The message names the limiter
+  // explicitly and says what happened (unthrottled, not merely "errored")
+  // so an operator reading logs does not have to infer the consequence.
+  rateLimitRedis.on("error", (err) => {
+    logger.error(
+      { err },
+      "rate-limiter Redis client error -- requests are proceeding UNTHROTTLED (fail-open, SEC-08)"
+    );
+  });
+
   // `global: false`: only routes that opt in via `{ config: { rateLimit } }`
   // are limited (invite accept/register-from-invite, T-01-13 brute-force
-  // mitigation) -- every other route is unaffected.
-  await app.register(rateLimit, { global: false });
+  // mitigation; the contacts/events ingest APIs; the SendGrid webhook
+  // receiver as of this plan) -- every other route is unaffected.
+  // `skipOnError: true` is the deliberate fail-open (T-10-12-03):
+  // availability is preferred over throttling during a store outage, made
+  // visible by the error listener above rather than silently swallowed.
+  // `nameSpace` keeps the limiter's Redis keys out of BullMQ's own key space
+  // in the same Redis instance/db (T-10-12-05 -- BullMQ prefixes its keys
+  // with `bull:`).
+  await app.register(rateLimit, {
+    global: false,
+    redis: rateLimitRedis,
+    nameSpace: "fastify-rate-limit-api:",
+    skipOnError: true,
+  });
+
+  // `enableOfflineQueue: false` above means a command issued before this
+  // client's INITIAL connection finishes rejects immediately, same as a
+  // genuine outage -- which would make the very first requests after boot
+  // silently unthrottled (skipOnError) even against a perfectly healthy
+  // Redis, purely because the handshake hadn't completed yet. Waiting here,
+  // bounded by `connectTimeout`, closes that startup window: `buildServer()`
+  // does not return until the client has either reached "ready" or already
+  // failed once (in which case the error listener above has already logged
+  // it, and later requests fail open exactly as designed).
+  await new Promise<void>((resolve) => {
+    if (rateLimitRedis.status === "ready") {
+      resolve();
+      return;
+    }
+    const onReady = (): void => {
+      rateLimitRedis.off("error", onSettled);
+      resolve();
+    };
+    const onSettled = (): void => {
+      rateLimitRedis.off("ready", onReady);
+      resolve();
+    };
+    rateLimitRedis.once("ready", onReady);
+    rateLimitRedis.once("error", onSettled);
+  });
 
   // CR-01/WR-05: script-blocking CSP on every response, defense-in-depth on
   // top of the token format guard + attribute escaping in
@@ -94,12 +208,132 @@ export async function buildServer() {
   await app.register(registerAnalyticsRoutes);
   await app.register(registerSendLogRoutes);
 
+  // Every apps/api integration test calls `buildServer()` and closes the
+  // returned instance in teardown -- closing the limiter's Redis client here
+  // (rather than leaving every call site to remember it exists) is what
+  // keeps `npx vitest run --root apps/api` from hanging on an open ioredis
+  // handle after the suite finishes. `disconnect()`, not `quit()`: this hook
+  // must also succeed cleanly when the limiter's Redis is already down (the
+  // Redis-down proof in rate-limit-distributed.test.ts closes the app in
+  // exactly that state), and `quit()` needs a live connection to send its
+  // command over.
+  app.addHook("onClose", () => {
+    rateLimitRedis.disconnect();
+  });
+
   return app;
+}
+
+/**
+ * D-04: the partition watchdog's real dispatch -- plain-text only, through
+ * the PLATFORM's own SendGrid account/key (never a tenant's BYO key, never
+ * a Dynamic Template), mirroring `modules/platform-mail/client.ts`'s own
+ * platform-key-only discipline so an emergency channel never depends on a
+ * template existing in the platform SendGrid account.
+ */
+async function sendOperatorAlert(message: OperatorAlertMessage): Promise<void> {
+  await sgMail.send({
+    to: message.to,
+    from: env.PLATFORM_MAIL_FROM,
+    subject: "Mega CRM partition maintenance alert",
+    text: message.text,
+  });
+}
+
+/**
+ * 11-09 (D-14): the send-reconciler watchdog's own real dispatch -- same
+ * platform-key-only, plain-text discipline as `sendOperatorAlert` above, just
+ * a different subject line so the two alert channels are distinguishable in
+ * an operator's inbox.
+ */
+async function sendReconcilerOperatorAlert(message: ReconcilerAlertMessage): Promise<void> {
+  await sgMail.send({
+    to: message.to,
+    from: env.PLATFORM_MAIL_FROM,
+    subject: "Mega CRM send reconciler alert",
+    text: message.text,
+  });
+}
+
+/**
+ * 12-10 (D-08): the dead-letter watchdog's own real dispatch -- same
+ * platform-key-only, plain-text discipline as `sendOperatorAlert` and
+ * `sendReconcilerOperatorAlert` above, a third distinct subject line so all
+ * three alert channels stay distinguishable in an operator's inbox.
+ */
+async function sendDeadLetterOperatorAlert(message: DeadLetterAlertMessage): Promise<void> {
+  await sgMail.send({
+    to: message.to,
+    from: env.PLATFORM_MAIL_FROM,
+    subject: "Mega CRM dead-letter alert",
+    text: message.text,
+  });
 }
 
 async function main(): Promise<void> {
   const app = await buildServer();
   await app.listen({ port: env.API_PORT, host: "0.0.0.0" });
+
+  // D-02: the watchdog must live in a DIFFERENT process from the BullMQ
+  // worker whose liveness it checks (apps/worker's partition-maintenance
+  // job, 09-02 task 1) -- started here, in apps/api's own process, and
+  // never registered as a queue job. Started in main(), never inside
+  // buildServer(): every apps/api integration test calls buildServer(), so
+  // an interval registered there would keep a timer alive in every test
+  // process, poll a test database on WATCHDOG_INTERVAL_MS's cadence, and
+  // reach the real SendGrid dispatch path from a test run. main() runs
+  // only under the isDirectRun guard below, which is exactly the boundary
+  // wanted.
+  //
+  // 11-09 (D-14) update: this process now arms TWO independent dead-man's
+  // switches sharing one alert channel (the platform SendGrid key, plain
+  // text, `OPERATOR_ALERT_EMAIL`) -- the pre-existing partition-maintenance
+  // watchdog above, and the send-reconciler watchdog below. They alert on
+  // completely independent conditions (partition buffer/DEFAULT-row health
+  // vs. reconciler tick liveness/ambiguity backlog) and dedup independently
+  // (their own `last_alert_sent_at` columns live on two different tables),
+  // so neither watchdog's dedup window or health state can mask the other's.
+  sgMail.setApiKey(env.PLATFORM_SENDGRID_API_KEY);
+  startPartitionWatchdog({
+    client: pool,
+    operatorEmail: env.OPERATOR_ALERT_EMAIL,
+    sendMail: sendOperatorAlert,
+  });
+  startSendReconcilerWatchdog({
+    client: pool,
+    operatorEmail: env.OPERATOR_ALERT_EMAIL,
+    sendMail: sendReconcilerOperatorAlert,
+  });
+  // 12-10 (D-08): a THIRD independent dead-man's switch, over
+  // dead_letter_jobs rather than a per-tick health row -- it alerts on an
+  // entirely different condition (unacknowledged terminal job failures) and
+  // dedups independently (its own last_alert_sent_at column on
+  // dead_letter_alert_state), so it cannot mask or be masked by either
+  // watchdog above.
+  startDeadLetterWatchdog({
+    client: pool,
+    operatorEmail: env.OPERATOR_ALERT_EMAIL,
+    sendMail: sendDeadLetterOperatorAlert,
+  });
+
+  // Names only the interval/threshold numbers -- never the operator
+  // address or anything derived from the SendGrid key (T-09-11).
+  logger.info(
+    { pollIntervalMs: WATCHDOG_INTERVAL_MS, staleThresholdHours: STALE_THRESHOLD_HOURS },
+    "partition watchdog armed -- watching apps/worker's partition-maintenance job from a separate process"
+  );
+  logger.info(
+    {
+      pollIntervalMs: RECONCILER_WATCHDOG_INTERVAL_MS,
+      staleThresholdMinutes: RECONCILER_STALE_THRESHOLD_MINUTES,
+      reconcilingAgeAlertHours: RECONCILING_AGE_ALERT_HOURS,
+    },
+    "send-reconciler watchdog armed -- watching apps/worker's send-reconciler tick from a separate process"
+  );
+  logger.info(
+    { pollIntervalMs: DEAD_LETTER_WATCHDOG_INTERVAL_MS, alertDedupHours: DEAD_LETTER_ALERT_DEDUP_HOURS },
+    "dead-letter watchdog armed -- watching dead_letter_jobs for unacknowledged terminal failures"
+  );
 }
 
 const isDirectRun = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;

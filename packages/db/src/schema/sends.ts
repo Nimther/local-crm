@@ -4,12 +4,26 @@ import { campaigns } from "./campaigns.js";
 import { contacts } from "./contacts.js";
 import { flowRuns } from "./flow-runs.js";
 
-/** Per-message send lifecycle (SEND-04/SEND-06). */
+/**
+ * Per-message send lifecycle (SEND-04/SEND-06). Phase 11 (DLV-01/DB-08,
+ * D-02) appends `reconciling`/`unknown` -- the ambiguous-outcome and
+ * no-evidence-terminal states migrations 0047/0048 add to the live
+ * database. The TS array order below is cosmetic (Drizzle only uses it for
+ * type inference); the physical enum's on-disk order is whatever order
+ * 0047/0048 added the two values in. This array MUST stay equal (as a set)
+ * to `SEND_STATUSES` in `@mega-crm/delivery-core`'s
+ * `send-state-machine.ts` -- `send-status-enum-parity.test.ts` asserts this
+ * against both the TS array and the live database's `enum_range`, so
+ * schema, delivery-core, and Postgres itself can never silently drift
+ * apart.
+ */
 export const sendStatusEnum = pgEnum("send_status", [
   "dispatching",
   "sent",
   "failed",
   "excluded",
+  "reconciling",
+  "unknown",
 ]);
 
 /**
@@ -42,6 +56,19 @@ export const sendStatusEnum = pgEnum("send_status", [
  * `clickCount` climb once per genuinely-new open/click webhook event
  * (independent of `firstOpenedAt`/`firstClickedAt`'s first-write-only gate)
  * so the send log and contact timeline can show "xN" repeat opens/clicks.
+ *
+ * Phase 11 reconciliation columns (11-02, migration 0049, D-17): all three
+ * nullable, no backfill, no historical row touched. `reconcilingSince` is
+ * when this row entered the ambiguous `reconciling` status -- deliberately
+ * a SEPARATE column from `queuedAt` (locked decision: Phase 15's
+ * webhook-lag alert queries this column directly, and overloading
+ * `queuedAt` would conflate "when the job was enqueued" with "when it
+ * became ambiguous"). `dispatchedAt` is the moment the outbound SendGrid
+ * `mail/send` call started; `dispatchDurationMs` is the wall-clock
+ * milliseconds that call took -- together these make send duration
+ * SQL-queryable (DLV-09) before any metrics infrastructure exists. Nothing
+ * in this plan writes these columns yet; the worker-side write lands in a
+ * later plan of this phase (11-03 onward).
  */
 export const sends = pgTable(
   "sends",
@@ -73,6 +100,9 @@ export const sends = pgTable(
     nodeId: text("node_id"),
     openCount: integer("open_count").notNull().default(0),
     clickCount: integer("click_count").notNull().default(0),
+    reconcilingSince: timestamp("reconciling_since", { withTimezone: true }),
+    dispatchedAt: timestamp("dispatched_at", { withTimezone: true }),
+    dispatchDurationMs: integer("dispatch_duration_ms"),
   },
   (t) => [
     unique("sends_workspace_campaign_contact_unique").on(t.workspaceId, t.campaignId, t.contactId),

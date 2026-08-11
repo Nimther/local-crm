@@ -1,5 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { db, member } from "@mega-crm/db";
+// 10-09 (SEC-05): seeding a member row directly for test setup is not a live
+// application query site -- as of migration 0045 it needs the
+// mega_crm_auth-backed client, not the app-role `db`.
+import { authDb, member } from "@mega-crm/db";
 import { buildServer } from "../../../server.js";
 import { ensureTestDbMigrated, getTestDatabaseUrl } from "../../../test/db-fixture.js";
 
@@ -54,7 +57,7 @@ describe("API-keys management (D-21/D-22/D-23)", () => {
   async function addMemberWithRole(organizationId: string, role: "member" | "admin") {
     const email = `${role}-apikey-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
     const account = await signUp(email, "correct horse battery staple 42", role);
-    await db.insert(member).values({ organizationId, userId: account.userId, role });
+    await authDb.insert(member).values({ organizationId, userId: account.userId, role });
     return account;
   }
 

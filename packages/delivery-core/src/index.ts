@@ -8,6 +8,7 @@ export {
 export {
   buildMailSendRequest,
   sendTenantMailV3,
+  SENDGRID_TIMEOUT_MS,
   type SendGridMailSendRequest,
   type BuildMailSendRequestParams,
   type SendTenantMailResult,
@@ -33,13 +34,27 @@ export {
   recordExcluded,
   audienceExclusionBreakdown,
   incrementCampaignSendCounter,
+  backfillCampaignSendCounter,
   tryCompleteCampaign,
   claimFlowSend,
   recordFlowStepResult,
   recordFlowExcluded,
+  resolveReconcilingSend,
+  sweepStaleDispatchingSend,
   type DispatchSendGateResult,
   type AudienceExclusionBreakdown,
+  type ResolveReconcilingResult,
+  type ResolveReconcilingVerdict,
 } from "./send-ledger.js";
+
+export {
+  classifyReconcilableSend,
+  RECONCILE_RESOLUTION_WINDOW_MS,
+  RECONCILE_RESCAN_HORIZON_MS,
+  STALE_DISPATCHING_AGE_MS,
+  type ReconcileVerdict,
+  type ReconcileInput,
+} from "./reconciler.js";
 
 export {
   getWorkspaceSendSettings,
@@ -59,6 +74,16 @@ export {
 export { deriveCurrentStatus, type DeliveryFacts, type CurrentStatus } from "./send-status.js";
 
 export {
+  SEND_STATUSES,
+  SEND_STATUS_TRANSITIONS,
+  isAllowedTransition,
+  writersFor,
+  type SendStatus,
+  type SendStatusWriter,
+  type SendTransition,
+} from "./send-state-machine.js";
+
+export {
   isValidIanaTimezone,
   resolveTimezone,
   isInsideQuietHours,
@@ -67,3 +92,7 @@ export {
 } from "./quiet-hours.js";
 
 export { loadContactTimezone } from "./contact-timezone.js";
+
+export { SEND_ID_NAMESPACE, deriveCampaignSendId, deriveFlowSendId } from "./send-id.js";
+
+export { classifyTransportError, type TransportClassification } from "./transport-classify.js";

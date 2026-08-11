@@ -10,6 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@mega-crm/db": "0.1.0",
     "pg": "8.22.0",
     "ioredis": "5.11.0"
   },

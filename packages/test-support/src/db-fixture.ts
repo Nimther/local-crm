@@ -4,8 +4,22 @@ import { fileURLToPath } from "node:url";
 
 import { Pool } from "pg";
 
+import { AMBIGUOUS_PROJECT_MARKER } from "./global-setup.js";
 import { assertTestDatabaseUrl } from "./guard.js";
 import { applyMigrationFile, listMigrationFiles } from "./migration-runner.js";
+import { AUTH_ROLE, buildTestRoleDsn, SCAN_ROLE } from "./provision-db.js";
+
+// Deep specifier, not the package root (09-03 task 2, D-05): `packages/db/src/index.ts`
+// constructs a Drizzle client at import time and throws when DATABASE_URL is
+// unset, and this module is reachable from contexts that evaluate before
+// global-setup.ts has published the ephemeral DSN. Reaching the partition
+// module directly avoids that initialisation entirely -- the same precedent
+// as apps/api/src/kms/local-provider.ts's `@mega-crm/kms/src/local-provider.js`.
+import {
+  ensurePartitions,
+  LOOKAHEAD_MONTHS,
+  PARTITIONED_TABLES,
+} from "@mega-crm/db/src/partitions/ensure-partitions.js";
 
 /**
  * 08-06 (QG-04, D-13) — the ONE migration-applying test fixture.
@@ -51,6 +65,26 @@ export const MIGRATION_ADVISORY_LOCK_KEY = 8_472_991;
  * There is deliberately no `??` fallback to DATABASE_URL anywhere in this file.
  */
 export function getTestDatabaseUrl(): string {
+  // D-14 layer c (Phase 10 debug, aggregate-coverage-run-fails): in a run with
+  // more than one vitest project, each project provisions its OWN ephemeral
+  // database and receives its DSN through vitest's per-project `config.env`.
+  // global-setup.ts poisons the SHARED process.env copy of GSD_TEST_PROJECT as
+  // soon as a second project provisions, precisely so this marker can only ever
+  // be observed by a worker the per-project channel failed to reach. Such a
+  // worker holds another project's DSN and would read and write another
+  // project's tenants — the original defect, which announced itself only by
+  // luck (one project's fixture happened to crash another project's code).
+  // Fail closed instead.
+  if (process.env.GSD_TEST_PROJECT === AMBIGUOUS_PROJECT_MARKER) {
+    throw new Error(
+      "FATAL: this test worker did not receive its project's own ephemeral database DSN. " +
+        "Several vitest projects provisioned databases in this run, so the DSN in process.env " +
+        "belongs to whichever project's globalSetup ran last, not to this one. " +
+        "vitest's per-project `config.env` channel (see packages/test-support/src/global-setup.ts) " +
+        "did not reach this worker.",
+    );
+  }
+
   const testUrl = process.env.TEST_DATABASE_URL;
 
   // Compare against the TRUE dev DSN. When globalSetup ran it stashed the
@@ -110,6 +144,33 @@ async function applyPendingMigrations(pool: Pool): Promise<void> {
       await applyMigrationFile(client, MIGRATIONS_DIR, file);
       await client.query("INSERT INTO _test_migrations_applied (filename) VALUES ($1)", [file]);
     }
+
+    // 09-03 (D-05): migrations create FROZEN partition months (migration
+    // 0038's catch-up window), so a test database built from the chain alone
+    // routes every insert made outside that frozen window into the DEFAULT
+    // partition. Tests would still pass -- DEFAULT is a valid catch-all --
+    // while silently no longer exercising partition routing at all. Calling
+    // the production code path here means a fresh test database always
+    // carries the same rolling horizon production has, and the
+    // partition-creation code is exercised by every DB-touching suite in the
+    // repository rather than only by its own unit test.
+    //
+    // Passed `pool`, not the locally-scoped `client`: `attachPartitionCheckFirst`
+    // needs its own genuinely fresh, dedicated connection per month (via the
+    // structural `PartitionClient.connect()`), which only a `Pool` -- not an
+    // already-connected `PoolClient` -- can hand out. `pool.connect()` opens a
+    // NEW physical connection, but the mutual exclusion this section still
+    // needs across concurrent vitest worker processes holds regardless of
+    // which connection performs the DDL: it comes from `client`'s own
+    // session-scoped advisory lock, held from `pg_advisory_lock` above through
+    // to the `finally` block's `pg_advisory_unlock` below -- a second process
+    // calling `pg_advisory_lock` with the same key blocks until THIS session
+    // releases it, which does not happen until after this call returns.
+    //
+    // No try/catch: a partition-creation failure during fixture setup must
+    // fail the test run loudly. A fixture that silently proceeded without
+    // partitions would reintroduce exactly the drift this call closes.
+    await ensurePartitions(pool, PARTITIONED_TABLES, new Date(), LOOKAHEAD_MONTHS);
   } finally {
     // 08-REVIEW WR-01: release unconditionally. If the unlock query itself
     // throws (e.g. the connection was already dropped by the server), the
@@ -140,6 +201,31 @@ export function ensureTestDbMigrated(): Promise<void> {
 /** A fresh pg Pool pointed at the test database. Caller owns its lifecycle (must `.end()`). */
 export function createTestPool(): Pool {
   return new Pool({ connectionString: getTestDatabaseUrl(), max: 5 });
+}
+
+/**
+ * Phase 10 (SEC-01/SEC-05, D-01/D-04) — the scan/auth-role equivalents of
+ * `getTestDatabaseUrl()`.
+ *
+ * Both go THROUGH `getTestDatabaseUrl()` first, so the dev-DSN fail-closed
+ * guard still applies before any role swap happens — only the username and
+ * password change; the database (already validated) stays identical.
+ */
+function swapRole(testUrl: string, role: string): string {
+  // One definition of the swap, shared with global-setup.ts (Phase 10 debug):
+  // if this file and that one built role DSNs differently, a project's scan or
+  // auth pool could end up on a different database than its app pool.
+  return buildTestRoleDsn(testUrl, role);
+}
+
+/** The scan-role DSN for the SAME ephemeral database `getTestDatabaseUrl()` returns. */
+export function getScanTestDatabaseUrl(): string {
+  return swapRole(getTestDatabaseUrl(), SCAN_ROLE);
+}
+
+/** The auth-role DSN for the SAME ephemeral database `getTestDatabaseUrl()` returns. */
+export function getAuthTestDatabaseUrl(): string {
+  return swapRole(getTestDatabaseUrl(), AUTH_ROLE);
 }
 
 /** The absolute migrations directory this fixture applies from. Exported for path assertions. */

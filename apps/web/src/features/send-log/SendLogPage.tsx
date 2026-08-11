@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useParams, useSearchParams } from "react-router";
 import {
@@ -13,7 +13,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Command, CommandGroup, CommandItem, CommandList } from "@/components/ui/command";
+import {
+  Command,
+  CommandGroup,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+} from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -38,8 +44,20 @@ function relativeTime(iso: string): string {
   return RELATIVE_TIME_FORMAT.format(diffDay, "day");
 }
 
-/** 07-UI-SPEC.md § Color: the send-log status column's 3-hue badge vocabulary (D-06 chain + failed/excluded, D-15). */
-const SEND_STATUS_LABELS: Record<string, string> = {
+/**
+ * 07-UI-SPEC.md § Color: the send-log status column's 3-hue badge vocabulary
+ * (D-06 chain + failed/excluded, D-15).
+ *
+ * Phase 11 (11-10, DLV-02/DLV-07): `reconciling`/`unknown` added, deliberately
+ * NOT green (success) and NOT red (failure) -- neither is true. Copy is
+ * honest to ARCHITECTURE.md ##9's delivery model: `reconciling` means the
+ * outcome is still being determined (the reconciler hasn't adjudicated the
+ * evidence yet); `unknown` means the platform could not determine the
+ * outcome within its resolution window and, per DLV-07, the message MAY
+ * have reached the recipient and will NOT be automatically re-sent -- never
+ * label it "failed", "not sent", or "delivered".
+ */
+export const SEND_STATUS_LABELS: Record<string, string> = {
   sent: "Отправлено",
   delivered: "Доставлено",
   opened: "Открыто",
@@ -49,9 +67,11 @@ const SEND_STATUS_LABELS: Record<string, string> = {
   spam: "Не доставлено",
   failed: "Ошибка отправки",
   excluded: "Пропущено",
+  reconciling: "Уточняется",
+  unknown: "Исход неизвестен",
 };
 
-const SEND_STATUS_CLASSES: Record<string, string> = {
+export const SEND_STATUS_CLASSES: Record<string, string> = {
   sent: "border-transparent bg-neutral-100 text-neutral-500",
   delivered: "border-transparent bg-green-50 text-green-600",
   opened: "border-transparent bg-green-50 text-green-600",
@@ -61,9 +81,11 @@ const SEND_STATUS_CLASSES: Record<string, string> = {
   spam: "border-transparent bg-red-50 text-destructive",
   failed: "border-transparent bg-red-50 text-destructive",
   excluded: "border-transparent bg-neutral-100 text-neutral-500",
+  reconciling: "border-transparent bg-amber-50 text-amber-700",
+  unknown: "border-transparent bg-amber-50 text-amber-700",
 };
 
-const STATUS_OPTIONS: { value: SendLogStatus; label: string }[] = [
+export const STATUS_OPTIONS: { value: SendLogStatus; label: string }[] = [
   { value: "sent", label: "Отправлено" },
   { value: "delivered", label: "Доставлено" },
   { value: "opened", label: "Открыто" },
@@ -73,6 +95,48 @@ const STATUS_OPTIONS: { value: SendLogStatus; label: string }[] = [
   { value: "spam", label: "Жалоба (спам)" },
   { value: "failed", label: "Ошибка отправки" },
   { value: "excluded", label: "Пропущено" },
+  { value: "reconciling", label: "Уточняется" },
+  { value: "unknown", label: "Исход неизвестен" },
+];
+
+/**
+ * The two statuses whose outcome is not yet determined (Phase 11 DLV-02/DLV-07).
+ * They are grouped apart from the delivery-lifecycle statuses in the filter
+ * because they answer a different question: not "what happened to this send"
+ * but "we do not yet know what happened".
+ */
+export const AMBIGUOUS_STATUSES: readonly SendLogStatus[] = ["reconciling", "unknown"];
+
+/**
+ * Grouped view of `STATUS_OPTIONS` for the filter popover (UAT gap G-11-2).
+ *
+ * Plan 11-10 appended `reconciling`/`unknown` to the END of a 9-item list.
+ * `CommandList`'s shared `max-h-[300px]` (`components/ui/command.tsx`) then
+ * clipped exactly those two items below the fold, and cmdk renders no scroll
+ * affordance -- so a marketer opening the filter saw 9 options and reasonably
+ * concluded the new statuses did not exist. Grouping alone would make that
+ * WORSE (two headings add height), so the popover's own `CommandList` also
+ * carries a taller local `max-h` -- deliberately local, since `CommandList` is
+ * shared with 6 other features (timezone combobox, campaign/flow filter,
+ * campaign builder, template pickers, flow node config, segment builder) that
+ * must keep the 300px default.
+ *
+ * DERIVED from `STATUS_OPTIONS`, never hand-listed: a status added there cannot
+ * silently go missing from the filter, and `send-log-status-vocabulary.test.ts`
+ * asserts the grouped view covers every option exactly once.
+ */
+export const STATUS_OPTION_GROUPS: {
+  heading: string;
+  options: typeof STATUS_OPTIONS;
+}[] = [
+  {
+    heading: "Доставка",
+    options: STATUS_OPTIONS.filter((o) => !AMBIGUOUS_STATUSES.includes(o.value)),
+  },
+  {
+    heading: "Неоднозначные",
+    options: STATUS_OPTIONS.filter((o) => AMBIGUOUS_STATUSES.includes(o.value)),
+  },
 ];
 
 const PERIOD_OPTIONS: { value: 7 | 30 | 90; label: string }[] = [
@@ -300,15 +364,23 @@ export function SendLogPage() {
           </PopoverTrigger>
           <PopoverContent className="w-64 p-0" align="start">
             <Command>
-              <CommandList>
-                <CommandGroup>
-                  {STATUS_OPTIONS.map((option) => (
-                    <CommandItem key={option.value} onSelect={() => toggleStatus(option.value)}>
-                      <Checkbox checked={statuses.includes(option.value)} className="mr-2" />
-                      {option.label}
-                    </CommandItem>
-                  ))}
-                </CommandGroup>
+              {/* Local max-h (G-11-2): all 11 grouped options must fit without
+                  scrolling. Not raised in ui/command.tsx — 6 other features
+                  depend on that component's 300px default. */}
+              <CommandList className="max-h-[460px]">
+                {STATUS_OPTION_GROUPS.map((group, index) => (
+                  <Fragment key={group.heading}>
+                    {index > 0 && <CommandSeparator />}
+                    <CommandGroup heading={group.heading}>
+                      {group.options.map((option) => (
+                        <CommandItem key={option.value} onSelect={() => toggleStatus(option.value)}>
+                          <Checkbox checked={statuses.includes(option.value)} className="mr-2" />
+                          {option.label}
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </Fragment>
+                ))}
               </CommandList>
             </Command>
           </PopoverContent>

@@ -3,7 +3,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import {
+  AUTH_ROLE,
   assertTestDatabaseUrl,
+  buildRoleDsn,
   createEphemeralDatabase,
   ensureTestDbMigrated,
 } from "@mega-crm/test-support";
@@ -53,6 +55,21 @@ export const E2E_DSN_MARKER = "[e2e:database]";
  */
 const REUSE_ENV_VAR = "MEGA_CRM_E2E_DATABASE_URL";
 
+export interface ProvisionedE2eDatabase {
+  databaseUrl: string;
+  authDatabaseUrl: string;
+}
+
+function buildAuthDatabaseUrl(databaseUrl: string): string {
+  const databaseName = new URL(databaseUrl).pathname.replace(/^\//, "");
+  return buildRoleDsn(
+    databaseUrl,
+    databaseName,
+    AUTH_ROLE,
+    process.env.TEST_APP_DB_PASSWORD ?? "mega_crm_dev_pw",
+  );
+}
+
 /** Strip the password so the line is safe to print into a CI log. */
 function redact(dsn: string): string {
   try {
@@ -64,14 +81,16 @@ function redact(dsn: string): string {
   }
 }
 
-export async function provisionE2eDatabase(): Promise<string> {
+export async function provisionE2eDatabase(): Promise<ProvisionedE2eDatabase> {
   const alreadyProvisioned = process.env[REUSE_ENV_VAR];
   if (alreadyProvisioned) {
-    // A worker process re-loading the config. Re-assign the two variables the
+    // A worker process re-loading the config. Re-assign the variables the
     // in-process code reads, but do not touch the database or the state file.
     process.env.TEST_DATABASE_URL = alreadyProvisioned;
     process.env.DATABASE_URL = alreadyProvisioned;
-    return alreadyProvisioned;
+    const authDatabaseUrl = buildAuthDatabaseUrl(alreadyProvisioned);
+    process.env.AUTH_DATABASE_URL = authDatabaseUrl;
+    return { databaseUrl: alreadyProvisioned, authDatabaseUrl };
   }
 
   const created = await createEphemeralDatabase({ workspace: "e2e" });
@@ -88,6 +107,8 @@ export async function provisionE2eDatabase(): Promise<string> {
 
   process.env.DATABASE_URL = created.dsn;
   process.env[REUSE_ENV_VAR] = created.dsn;
+  const authDatabaseUrl = buildAuthDatabaseUrl(created.dsn);
+  process.env.AUTH_DATABASE_URL = authDatabaseUrl;
 
   writeFileSync(
     E2E_STATE_FILE,
@@ -99,5 +120,5 @@ export async function provisionE2eDatabase(): Promise<string> {
   // config value nobody reads back is not evidence.
   console.log(`${E2E_DSN_MARKER} ${redact(created.dsn)}`);
 
-  return created.dsn;
+  return { databaseUrl: created.dsn, authDatabaseUrl };
 }

@@ -1,6 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
-import { db as sharedDb, organization } from "@mega-crm/db";
+// 10-09 (SEC-05): seeding an organization row directly for test setup is not
+// a live application query site -- as of migration 0045 it needs the
+// mega_crm_auth-backed client, not the app-role `db`.
+import { authDb as sharedDb, organization } from "@mega-crm/db";
 import { ensureTestDbMigrated, getTestDatabaseUrl } from "../../test/db-fixture.js";
 import { withTenant, withTenantTransaction } from "../../middleware/tenant-context.js";
 import { pool } from "../../db.js";

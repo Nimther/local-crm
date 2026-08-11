@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { buildServer } from "../../../server.js";
 import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool } from "../../../test/db-fixture.js";
 import { eventsIngestQueue } from "../events-queue.js";
@@ -117,11 +118,23 @@ describe("Event ingestion API (EVNT-01/EVNT-03, D-24)", () => {
     // Fast-path proof (EVNT-03/D-24 Anti-Pattern): nothing processes this
     // queued job in this test process (no worker is running here), so an
     // immediate DB read must find NO contact yet.
-    const { rows } = await pool.query(`SELECT 1 FROM contacts WHERE workspace_id = $1 AND external_id = $2`, [
-      workspace.id,
-      externalId,
-    ]);
-    expect(rows).toHaveLength(0);
+    //
+    // Phase 10 (SEC-03/SEC-04, migration 0044): `workspace_isolation` is now
+    // fail-closed -- the bare, tenant-scope-free `pool.query` this used to
+    // be would THROW rather than silently return zero rows. Reading through
+    // `withTenant`/`withTenantTransaction` makes "no contact exists in THIS
+    // workspace" a genuine, tenant-scoped assertion instead of one that
+    // happened to also work by accident under the old fail-open predicate.
+    const rowCount = await withTenant(workspace.id, () =>
+      withTenantTransaction(async (client) => {
+        const { rows } = await client.query(
+          `SELECT 1 FROM contacts WHERE workspace_id = $1 AND external_id = $2`,
+          [workspace.id, externalId],
+        );
+        return rows.length;
+      }),
+    );
+    expect(rowCount).toBe(0);
   });
 
   it("valid key: batch of events -> 202 with one result per item", async () => {

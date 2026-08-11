@@ -29,6 +29,13 @@ describe("applyPendingMigrations releases the client when the advisory unlock re
     process.env.TEST_DATABASE_URL = "postgres://u:p@localhost:5432/mega_crm_test_wr01";
     delete process.env.GSD_DEV_DATABASE_URL;
     delete process.env.DATABASE_URL;
+    // This suite deliberately synthesises the environment a globalSetup-free
+    // entrypoint would have. In an aggregated run the shared process.env copy of
+    // GSD_TEST_PROJECT carries global-setup.ts's ambiguity marker (this project
+    // registers no globalSetup of its own, so it inherits other projects'), and
+    // db-fixture.ts fails closed on it. Clearing it keeps this test measuring
+    // release-on-error ordering rather than that guard.
+    delete process.env.GSD_TEST_PROJECT;
   });
 
   afterEach(() => {

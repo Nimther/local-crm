@@ -1,16 +1,32 @@
 import { apiGet } from "@/lib/api";
 
-/** D-15's closed status vocabulary (mirrors apps/api/src/modules/send-log/send-log.repository.ts's SEND_LOG_STATUSES). */
-export type SendLogStatus =
-  | "sent"
-  | "delivered"
-  | "opened"
-  | "clicked"
-  | "bounced"
-  | "dropped"
-  | "spam"
-  | "failed"
-  | "excluded";
+/**
+ * D-15's closed status vocabulary (mirrors apps/api/src/modules/send-log/
+ * send-log.repository.ts's SEND_LOG_STATUSES).
+ *
+ * Phase 11 (11-10): `reconciling`/`unknown` added -- ledger states, not
+ * delivery facts. `SEND_LOG_STATUS_VALUES` is the runtime source both
+ * `SendLogStatus` (below) and the drift test derive from -- apps/web has no
+ * package dependency on apps/api, so the two vocabularies cannot be
+ * compared via a shared import; `send-log-status-vocabulary.test.ts` instead
+ * asserts this array against a copy of the API's list committed in the test
+ * itself, with a comment naming this file's sibling as the source of truth.
+ */
+export const SEND_LOG_STATUS_VALUES = [
+  "sent",
+  "delivered",
+  "opened",
+  "clicked",
+  "bounced",
+  "dropped",
+  "spam",
+  "failed",
+  "excluded",
+  "reconciling",
+  "unknown",
+] as const;
+
+export type SendLogStatus = (typeof SEND_LOG_STATUS_VALUES)[number];
 
 export interface SendLogItem {
   id: string;

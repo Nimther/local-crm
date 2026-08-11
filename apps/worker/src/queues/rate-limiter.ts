@@ -3,9 +3,31 @@ import type { Redis } from "ioredis";
 
 /**
  * Default per-tenant RPS ceiling (SEND-02) when a workspace has no
- * `workspace_send_settings.rps_limit` override -- RESEARCH.md Assumption A1
- * [ASSUMED], flagged for user confirmation but shipped as the starting
- * default since no universal-safe value exists across SendGrid plan tiers.
+ * `workspace_send_settings.rps_limit` override.
+ *
+ * D-06 (Phase 12, WRK-04): backed by both halves the decision calls for.
+ *
+ * Platform half -- the platform's own send pipeline sustains this rate for
+ * a full measurement window without its queue's waiting depth growing,
+ * proven by the on-demand load test at
+ * `apps/worker/src/queues/__tests__/loadtest/tenant-rps-sustained.test.ts`
+ * (`npm run loadtest:tenant-rps`; deliberately not wired into CI, D-04).
+ *
+ * Provider half -- SendGrid's own published Web API v3 rate-limit guidance
+ * (https://www.twilio.com/docs/sendgrid/api-reference/how-to-use-the-sendgrid-v3-api/rate-limits,
+ * retrieved 2026-08-10) states that the API enforces limits PER ENDPOINT,
+ * surfaced dynamically via the `X-RateLimit-Limit`/`-Remaining`/`-Reset`
+ * response headers, and does NOT publish one universal fixed
+ * requests-per-second ceiling for the `mail/send` endpoint specifically --
+ * the docs' own example headers (`500`, `150`) are illustrative of the
+ * MECHANISM, not a `mail/send`-specific number. This is exactly why this
+ * constant can only ever be a self-imposed, platform-side default, never a
+ * figure copied out of SendGrid's docs: every tenant supplies their OWN
+ * SendGrid API key (BYO, per CLAUDE.md's delivery model), so their real
+ * provider ceiling depends on their own plan tier and sending reputation --
+ * neither of which this platform can observe in advance. 10 is a
+ * conservative starting point, sized well inside what the sustained run
+ * above proves the platform's own pipeline can sustain.
  */
 export const DEFAULT_TENANT_RPS = 10;
 

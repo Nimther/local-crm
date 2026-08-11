@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Pool } from "pg";
 import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool } from "../../test/db-fixture.js";
+import { insertFixtureOrganization } from "../../test/failure-fixtures.js";
 import { processEventIngestJob } from "../events-ingest.worker.js";
 
 /**
@@ -31,14 +32,11 @@ describe("events:ingest worker (EVNT-02/EVNT-03, Pitfall 1/4)", () => {
     await pool.end();
   });
 
+  // 10-09 (SEC-05): delegates to the mega_crm_auth-backed INSERT in
+  // failure-fixtures.ts -- mega_crm_app holds only SELECT on organization
+  // post-migration-0045, so a plain pool insert is no longer fine here.
   async function freshWorkspaceId(nameSeed: string): Promise<string> {
-    const slug = `${nameSeed}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    // organization is a better-auth table, NOT RLS-scoped (0001_rls_policies.sql) -- a plain pool insert is fine here.
-    const { rows } = await pool.query<{ id: string }>(
-      `INSERT INTO organization (name, slug) VALUES ($1, $2) RETURNING id`,
-      [`${nameSeed} Co`, slug]
-    );
-    return rows[0].id;
+    return insertFixtureOrganization(nameSeed);
   }
 
   it("EVNT-02: creates the contact for an unknown identity and writes exactly one events row", async () => {

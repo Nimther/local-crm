@@ -1,7 +1,7 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { organization } from "better-auth/plugins/organization";
-import { db } from "@mega-crm/db";
+import { authDb } from "@mega-crm/db";
 import { env } from "../../env.js";
 import { ac, admin, member, owner } from "./access-control.js";
 import { platformMail } from "../platform-mail/client.js";
@@ -15,7 +15,10 @@ export const auth = betterAuth({
   baseURL: env.BETTER_AUTH_URL,
   secret: env.BETTER_AUTH_SECRET,
   trustedOrigins: [env.WEB_URL],
-  database: drizzleAdapter(db, { provider: "pg" }),
+  // 10-09 (SEC-05, D-04): connects as `mega_crm_auth`, not `mega_crm_app` --
+  // the secret-bearing tables (session/account/verification) are reachable
+  // only through this connection as of migration 0045.
+  database: drizzleAdapter(authDb, { provider: "pg" }),
   // D-02/Pitfall 2: soft verification — usable immediately, verification is
   // gated per-critical-action (SendGrid-key-connect, 01-05), never globally.
   emailAndPassword: {

@@ -125,7 +125,7 @@ describe("Send log filters (07-05, ANLT-05)", () => {
       campaignId?: string;
       flowRunId?: string;
       nodeId?: string;
-      status?: "dispatching" | "sent" | "failed" | "excluded";
+      status?: "dispatching" | "sent" | "failed" | "excluded" | "reconciling" | "unknown";
       sentAt?: Date;
       queuedAt?: Date;
       deliveredAt?: Date;
@@ -253,6 +253,56 @@ describe("Send log filters (07-05, ANLT-05)", () => {
     const filteredBody = filtered.json<{ items: Array<{ id: string }>; total: number }>();
     expect(filteredBody.total).toBe(2);
     expect(new Set(filteredBody.items.map((i) => i.id))).toEqual(new Set([failedId, excludedId]));
+  });
+
+  it("11-10 (DLV-02/DLV-07): renders and filters `reconciling`/`unknown` -- an `unknown` row with no facts never renders as `sent`, and a `reconciling` row is checked before the delivery-fact chain", async () => {
+    const { cookie, workspace } = await owner("sendlog-ambiguous");
+    const contact = await createContact(cookie, workspace.slug, { email: `ambiguous-${Date.now()}@example.com` });
+
+    const reconcilingId = await insertSend(workspace.id, contact.id, { status: "reconciling", queuedAt: new Date() });
+    const unknownNoFactsId = await insertSend(workspace.id, contact.id, { status: "unknown", queuedAt: new Date() });
+    const unknownWithFactId = await insertSend(workspace.id, contact.id, {
+      status: "unknown",
+      queuedAt: new Date(),
+      deliveredAt: new Date(),
+    });
+    // A reconciling row that already gained a fact (webhook arrived before
+    // the reconciler adjudicated it) must still render as 'reconciling' --
+    // the fact chain does NOT win here, unlike the 'unknown' case above.
+    const reconcilingWithFactId = await insertSend(workspace.id, contact.id, {
+      status: "reconciling",
+      queuedAt: new Date(),
+      deliveredAt: new Date(),
+    });
+
+    const all = await app.inject({ method: "GET", url: sendLogUrl(workspace.slug), headers: { cookie } });
+    expect(all.statusCode, `send-log failed: ${all.body}`).toBe(200);
+    const allBody = all.json<{ items: Array<{ id: string; status: string }> }>();
+    const byId = new Map(allBody.items.map((i) => [i.id, i.status]));
+    expect(byId.get(reconcilingId)).toBe("reconciling");
+    expect(byId.get(unknownNoFactsId)).toBe("unknown");
+    expect(byId.get(unknownWithFactId)).toBe("delivered");
+    expect(byId.get(reconcilingWithFactId)).toBe("reconciling");
+
+    const filteredReconciling = await app.inject({
+      method: "GET",
+      url: sendLogUrl(workspace.slug, "status=reconciling"),
+      headers: { cookie },
+    });
+    expect(filteredReconciling.statusCode, `send-log failed: ${filteredReconciling.body}`).toBe(200);
+    const reconcilingBody = filteredReconciling.json<{ items: Array<{ id: string }>; total: number }>();
+    expect(reconcilingBody.total).toBe(2);
+    expect(new Set(reconcilingBody.items.map((i) => i.id))).toEqual(new Set([reconcilingId, reconcilingWithFactId]));
+
+    const filteredUnknown = await app.inject({
+      method: "GET",
+      url: sendLogUrl(workspace.slug, "status=unknown"),
+      headers: { cookie },
+    });
+    expect(filteredUnknown.statusCode, `send-log failed: ${filteredUnknown.body}`).toBe(200);
+    const unknownBody = filteredUnknown.json<{ items: Array<{ id: string }>; total: number }>();
+    expect(unknownBody.total).toBe(1);
+    expect(unknownBody.items[0].id).toBe(unknownNoFactsId);
   });
 
   it("filters by period (a bound now() - interval window), excluding an old send", async () => {

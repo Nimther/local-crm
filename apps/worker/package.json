@@ -16,6 +16,8 @@
     "@mega-crm/delivery-core": "0.1.0",
     "@mega-crm/flows-core": "0.1.0",
     "@mega-crm/kms": "0.1.0",
+    "@mega-crm/queue-core": "0.1.0",
+    "@mega-crm/redaction": "0.1.0",
     "@mega-crm/segments-core": "0.1.0",
     "@mega-crm/shared-schemas": "0.1.0",
     "@mega-crm/tenant-context": "0.1.0",
@@ -25,6 +27,7 @@
     "rate-limiter-flexible": "11.2.0"
   },
   "devDependencies": {
+    "@mega-crm/api": "0.1.0",
     "@mega-crm/test-support": "0.1.0",
     "@types/node": "^22.10.5",
     "@types/pg": "^8.15.6",

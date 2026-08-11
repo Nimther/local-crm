@@ -5,4 +5,9 @@
 // Every existing importer of this path (contact.repository.ts,
 // sendgrid-key.repository.ts, api-keys.repository.ts, route modules, the
 // rls-pooling-chaos chaos test) keeps resolving unchanged.
-export { withTenant, withTenantTransaction, getWorkspaceId } from "@mega-crm/tenant-context";
+export {
+  withTenant,
+  withTenantTransaction,
+  getWorkspaceId,
+  withPreTenantLookup,
+} from "@mega-crm/tenant-context";

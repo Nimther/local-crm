@@ -253,6 +253,24 @@ export async function processFlowTriggerCheck(data: FlowTriggerCheckJob): Promis
 
   await withTenant(workspaceId, () =>
     withTenantTransaction(async (client) => {
+      // Phase 10 (SEC-16, T-10-14-03): re-verify the contact belongs to
+      // THIS workspace before any flow entry -- job.data's `contactId` is
+      // never trusted as already scoped to `workspaceId` (Pattern 2, same
+      // discipline as every other job handler in this codebase). Without
+      // this, a misrouted/hostile job payload naming a contact id from a
+      // DIFFERENT workspace could still create a `flow_runs` row here:
+      // `flow_runs.contact_id`'s FK targets `contacts(id)` alone (not a
+      // composite `(workspace_id, id)` key), so the foreign key alone does
+      // not reject a cross-workspace reference, and neither `canEnterFlow`
+      // nor the INSERT below ever re-reads the contact's own row to compare
+      // workspace ids. Discovered by negative-cross-tenant-jobs.test.ts
+      // (plan 10-14).
+      const { rows: contactRows } = await client.query<{ id: string }>(
+        `SELECT id FROM contacts WHERE id = $1 AND workspace_id = $2`,
+        [contactId, workspaceId]
+      );
+      if (contactRows.length === 0) return;
+
       if (eventName) {
         const matchingFlows = await loadLiveEventTriggeredFlows(client, workspaceId, eventName);
 

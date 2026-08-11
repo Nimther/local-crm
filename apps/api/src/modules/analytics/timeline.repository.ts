@@ -67,6 +67,15 @@ export async function listContactTimeline(
              'nodeId', s.node_id,
              'status', CASE
                WHEN s.status = 'excluded' THEN 'excluded'
+               -- Phase 11 (11-10): checked before the fact chain for the
+               -- same reason send-log.repository.ts's COMPUTED_STATUS_SQL
+               -- does -- a row can be 'reconciling' with a fact already
+               -- recorded but not yet adjudicated by the reconciler.
+               -- 'unknown' needs no matching explicit arm: this ladder's
+               -- own ELSE already falls through to the raw status text
+               -- after the fact chain, which is the desired late-evidence-
+               -- wins behavior for 'unknown' too.
+               WHEN s.status = 'reconciling' THEN 'reconciling'
                WHEN s.bounced_at IS NOT NULL THEN 'bounced'
                WHEN s.dropped_at IS NOT NULL THEN 'dropped'
                WHEN s.spam_reported_at IS NOT NULL THEN 'spam'

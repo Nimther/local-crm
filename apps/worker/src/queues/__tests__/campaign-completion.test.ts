@@ -5,7 +5,16 @@ import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { encryptTenantSecret } from "@mega-crm/kms";
 import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool } from "../../test/db-fixture.js";
 import { processSendJob } from "../send-dispatch.js";
+import {
+  dispatchSendGate,
+  resolveReconcilingSend,
+  sweepStaleDispatchingSend,
+  backfillCampaignSendCounter,
+  incrementCampaignSendCounter,
+  tryCompleteCampaign,
+} from "@mega-crm/delivery-core";
 import type { SendGridMailSendRequest, SendTenantMailResult } from "@mega-crm/delivery-core";
+import { insertFixtureOrganization } from "../../test/failure-fixtures.js";
 
 /**
  * CR-05/CR-06 regression tests (04-13, CAMP-02/03/05): pins that a
@@ -59,13 +68,11 @@ describe("campaign completion + cancel (CR-05/CR-06, CAMP-02/03/05)", () => {
     };
   }
 
+  // 10-09 (SEC-05): delegates to the mega_crm_auth-backed INSERT in
+  // failure-fixtures.ts instead of duplicating it -- mega_crm_app holds
+  // only SELECT on organization post-migration-0045.
   async function freshWorkspaceId(nameSeed: string): Promise<string> {
-    const slug = `${nameSeed}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const { rows } = await pool.query<{ id: string }>(
-      `INSERT INTO organization (name, slug) VALUES ($1, $2) RETURNING id`,
-      [`${nameSeed} Co`, slug]
-    );
-    return rows[0].id;
+    return insertFixtureOrganization(nameSeed);
   }
 
   async function connectFixtureSendgridKey(workspaceId: string): Promise<void> {
@@ -256,5 +263,300 @@ describe("campaign completion + cancel (CR-05/CR-06, CAMP-02/03/05)", () => {
     expect(snapshot.status).toBe("sent");
     expect(snapshot.sentCount).toBe(0);
     expect(snapshot.failedCount).toBe(0);
+  });
+
+  /**
+   * Phase 11 (D-12, plan 11-08, Task 2): `tryCompleteCampaign`'s completion
+   * predicate now counts `reconciling`/`unknown` rows toward
+   * `sendable_total`, so a campaign whose LAST outstanding recipient is
+   * ambiguous still completes instead of hanging on that one recipient.
+   * `dispatching` is deliberately excluded (still genuinely in flight).
+   *
+   * `arrangeSendAtStatus` claims a fresh send via `dispatchSendGate` (so the
+   * row satisfies every FK/unique constraint the same way a real dispatch
+   * would) then force-writes its `status` directly -- mirrors
+   * `claim-gate-exclusivity.test.ts`'s own `arrangeCampaignSendAtStatus`
+   * helper.
+   */
+  describe("tryCompleteCampaign counts ambiguity toward sendable_total (D-12)", () => {
+    async function arrangeSendAtStatus(
+      workspaceId: string,
+      campaignId: string,
+      contactId: string,
+      status: "reconciling" | "unknown" | "dispatching"
+    ): Promise<string> {
+      return withTenant(workspaceId, () =>
+        withTenantTransaction(async (client) => {
+          const claim = await dispatchSendGate(client, { workspaceId, campaignId, contactId });
+          if (claim === "skipped" || !claim.sendId) {
+            throw new Error("test setup failure: expected a fresh dispatchSendGate claim");
+          }
+          if (status !== "dispatching") {
+            await client.query(`UPDATE sends SET status = $2::send_status WHERE id = $1`, [claim.sendId, status]);
+          }
+          return claim.sendId;
+        })
+      );
+    }
+
+    it("completes a campaign one short of sendable_total when exactly one 'reconciling' row exists for it", async () => {
+      const workspaceId = await freshWorkspaceId("completion-ambiguous-reconciling");
+      await connectFixtureSendgridKey(workspaceId);
+      const campaignId = await createFixtureCampaign(workspaceId, { sendableTotal: 2, fanOutComplete: true });
+      const contactA = await createFixtureContact(workspaceId);
+      const contactB = await createFixtureContact(workspaceId);
+
+      const counting = countingSendMail(202);
+      const result = await processSendJob(
+        { workspaceId, campaignId, kind: "campaign", contactId: contactA },
+        { sendMail: counting.fn, redisClient }
+      );
+      expect(result.outcome).toBe("sent");
+
+      await arrangeSendAtStatus(workspaceId, campaignId, contactB, "reconciling");
+
+      // In production this re-check is `resolveOneSend`'s own post-resolution
+      // call to tryCompleteCampaign (Task 3) -- here it is invoked directly
+      // to isolate the completion PREDICATE itself, independent of the
+      // reconciler tick's own wiring.
+      await withTenant(workspaceId, () => withTenantTransaction((client) => tryCompleteCampaign(client, campaignId)));
+
+      const snapshot = await getCampaignSnapshot(workspaceId, campaignId);
+      expect(snapshot.sentCount).toBe(1);
+      expect(snapshot.status, "the one-short shortfall is ambiguous, not missing -- the campaign must complete").toBe(
+        "sent"
+      );
+      expect(snapshot.terminalAt).not.toBeNull();
+    });
+
+    it("completes the same campaign when the outstanding row is 'unknown' instead of 'reconciling'", async () => {
+      const workspaceId = await freshWorkspaceId("completion-ambiguous-unknown");
+      await connectFixtureSendgridKey(workspaceId);
+      const campaignId = await createFixtureCampaign(workspaceId, { sendableTotal: 2, fanOutComplete: true });
+      const contactA = await createFixtureContact(workspaceId);
+      const contactB = await createFixtureContact(workspaceId);
+
+      const counting = countingSendMail(202);
+      const result = await processSendJob(
+        { workspaceId, campaignId, kind: "campaign", contactId: contactA },
+        { sendMail: counting.fn, redisClient }
+      );
+      expect(result.outcome).toBe("sent");
+
+      await arrangeSendAtStatus(workspaceId, campaignId, contactB, "unknown");
+      await withTenant(workspaceId, () => withTenantTransaction((client) => tryCompleteCampaign(client, campaignId)));
+
+      const snapshot = await getCampaignSnapshot(workspaceId, campaignId);
+      expect(snapshot.sentCount).toBe(1);
+      expect(snapshot.status).toBe("sent");
+      expect(snapshot.terminalAt).not.toBeNull();
+    });
+
+    it("does NOT complete when the shortfall is a 'dispatching' row -- still genuinely in flight, not ambiguous", async () => {
+      const workspaceId = await freshWorkspaceId("completion-ambiguous-dispatching");
+      await connectFixtureSendgridKey(workspaceId);
+      const campaignId = await createFixtureCampaign(workspaceId, { sendableTotal: 2, fanOutComplete: true });
+      const contactA = await createFixtureContact(workspaceId);
+      const contactB = await createFixtureContact(workspaceId);
+
+      const counting = countingSendMail(202);
+      const result = await processSendJob(
+        { workspaceId, campaignId, kind: "campaign", contactId: contactA },
+        { sendMail: counting.fn, redisClient }
+      );
+      expect(result.outcome).toBe("sent");
+
+      await arrangeSendAtStatus(workspaceId, campaignId, contactB, "dispatching");
+      await withTenant(workspaceId, () => withTenantTransaction((client) => tryCompleteCampaign(client, campaignId)));
+
+      const snapshot = await getCampaignSnapshot(workspaceId, campaignId);
+      expect(snapshot.sentCount).toBe(1);
+      expect(snapshot.status, "a genuinely in-flight row must not be treated as ambiguous").toBe("sending");
+      expect(snapshot.terminalAt).toBeNull();
+    });
+
+    it("remains a single-fire no-op on a campaign already 'sent', even with an ambiguous row present", async () => {
+      const workspaceId = await freshWorkspaceId("completion-ambiguous-already-sent");
+      await connectFixtureSendgridKey(workspaceId);
+      const campaignId = await createFixtureCampaign(workspaceId, { sendableTotal: 1, fanOutComplete: true });
+      const contactId = await createFixtureContact(workspaceId);
+
+      await arrangeSendAtStatus(workspaceId, campaignId, contactId, "reconciling");
+      await setCampaignStatus(workspaceId, campaignId, "sent");
+
+      const transitioned = await withTenant(workspaceId, () =>
+        withTenantTransaction((client) => tryCompleteCampaign(client, campaignId))
+      );
+
+      expect(transitioned, "already-sent is a no-op, not a re-fire").toBe(false);
+      const snapshot = await getCampaignSnapshot(workspaceId, campaignId);
+      expect(snapshot.status).toBe("sent");
+    });
+  });
+
+  /**
+   * Phase 11 (D-12, plan 11-08, Task 2): direct ledger-function coverage for
+   * `resolveReconcilingSend`'s widened verdict, `sweepStaleDispatchingSend`,
+   * `backfillCampaignSendCounter`, and `incrementCampaignSendCounter`'s
+   * unweakened guard -- arranged directly against `sends`/`campaigns` rows
+   * rather than through `processSendJob`, mirroring
+   * `claim-gate-exclusivity.test.ts`'s own arrange-then-assert convention.
+   */
+  describe("send-ledger.ts direct coverage: resolveReconcilingSend / sweepStaleDispatchingSend / backfillCampaignSendCounter (D-12)", () => {
+    async function claimFreshSend(workspaceId: string, campaignId: string, contactId: string): Promise<string> {
+      return withTenant(workspaceId, () =>
+        withTenantTransaction(async (client) => {
+          const claim = await dispatchSendGate(client, { workspaceId, campaignId, contactId });
+          if (claim === "skipped" || !claim.sendId) {
+            throw new Error("test setup failure: expected a fresh dispatchSendGate claim");
+          }
+          return claim.sendId;
+        })
+      );
+    }
+
+    async function forceStatus(workspaceId: string, sendId: string, status: string): Promise<void> {
+      await withTenant(workspaceId, () =>
+        withTenantTransaction((client) =>
+          client.query(`UPDATE sends SET status = $2::send_status WHERE id = $1`, [sendId, status])
+        )
+      );
+    }
+
+    async function sendRow(
+      workspaceId: string,
+      sendId: string
+    ): Promise<{ status: string; sentAt: Date | null; reconcilingSince: Date | null }> {
+      const row = await withTenant(workspaceId, () =>
+        withTenantTransaction(async (client) => {
+          const { rows } = await client.query<{ status: string; sentAt: Date | null; reconcilingSince: Date | null }>(
+            `SELECT status, sent_at as "sentAt", reconciling_since as "reconcilingSince" FROM sends WHERE id = $1`,
+            [sendId]
+          );
+          return rows[0];
+        })
+      );
+      if (!row) throw new Error(`test assertion failure: no sends row for id ${sendId}`);
+      return row;
+    }
+
+    it("resolveReconcilingSend({ kind: 'resolve_unknown' }) moves 'reconciling' to 'unknown', leaves sent_at null, clears nothing else", async () => {
+      const workspaceId = await freshWorkspaceId("ledger-resolve-unknown");
+      await connectFixtureSendgridKey(workspaceId);
+      const campaignId = await createFixtureCampaign(workspaceId, { sendableTotal: 1, fanOutComplete: true });
+      const contactId = await createFixtureContact(workspaceId);
+      const sendId = await claimFreshSend(workspaceId, campaignId, contactId);
+      await forceStatus(workspaceId, sendId, "reconciling");
+
+      const beforeRow = await sendRow(workspaceId, sendId);
+      expect(beforeRow.reconcilingSince).toBeNull(); // forced directly, not via recordSendResult
+
+      const { resolved } = await withTenant(workspaceId, () =>
+        withTenantTransaction((client) => resolveReconcilingSend(client, sendId, { kind: "resolve_unknown" }))
+      );
+      expect(resolved).toBe(true);
+
+      const afterRow = await sendRow(workspaceId, sendId);
+      expect(afterRow.status).toBe("unknown");
+      expect(afterRow.sentAt).toBeNull();
+      expect(afterRow.reconcilingSince).toBeNull(); // untouched -- resolve_unknown clears nothing
+    });
+
+    it("resolveReconcilingSend({ kind: 'resolve_sent' }) moves either 'reconciling' or 'unknown' to 'sent' and back-dates sent_at", async () => {
+      for (const startingStatus of ["reconciling", "unknown"] as const) {
+        const workspaceId = await freshWorkspaceId(`ledger-resolve-sent-${startingStatus}`);
+        await connectFixtureSendgridKey(workspaceId);
+        const campaignId = await createFixtureCampaign(workspaceId, { sendableTotal: 1, fanOutComplete: true });
+        const contactId = await createFixtureContact(workspaceId);
+        const sendId = await claimFreshSend(workspaceId, campaignId, contactId);
+        await forceStatus(workspaceId, sendId, startingStatus);
+
+        const { resolved } = await withTenant(workspaceId, () =>
+          withTenantTransaction((client) => resolveReconcilingSend(client, sendId, { kind: "resolve_sent" }))
+        );
+        expect(resolved).toBe(true);
+
+        const afterRow = await sendRow(workspaceId, sendId);
+        expect(afterRow.status).toBe("sent");
+        expect(afterRow.sentAt).not.toBeNull();
+        expect(afterRow.reconcilingSince).toBeNull();
+      }
+    });
+
+    it("resolveReconcilingSend on an already-'sent' row updates nothing and reports resolved: false", async () => {
+      const workspaceId = await freshWorkspaceId("ledger-resolve-noop");
+      await connectFixtureSendgridKey(workspaceId);
+      const campaignId = await createFixtureCampaign(workspaceId, { sendableTotal: 1, fanOutComplete: true });
+      const contactId = await createFixtureContact(workspaceId);
+      const sendId = await claimFreshSend(workspaceId, campaignId, contactId);
+      await forceStatus(workspaceId, sendId, "sent");
+
+      const { resolved } = await withTenant(workspaceId, () =>
+        withTenantTransaction((client) => resolveReconcilingSend(client, sendId, { kind: "resolve_sent" }))
+      );
+      expect(resolved).toBe(false);
+
+      const afterRow = await sendRow(workspaceId, sendId);
+      expect(afterRow.status).toBe("sent");
+    });
+
+    it("sweepStaleDispatchingSend moves a 'dispatching' row to 'reconciling' and sets reconciling_since; a non-'dispatching' row transitions nothing", async () => {
+      const workspaceId = await freshWorkspaceId("ledger-sweep");
+      await connectFixtureSendgridKey(workspaceId);
+      const campaignId = await createFixtureCampaign(workspaceId, { sendableTotal: 2, fanOutComplete: true });
+      const dispatchingContact = await createFixtureContact(workspaceId);
+      const sentContact = await createFixtureContact(workspaceId);
+
+      const dispatchingSendId = await claimFreshSend(workspaceId, campaignId, dispatchingContact);
+      const sentSendId = await claimFreshSend(workspaceId, campaignId, sentContact);
+      await forceStatus(workspaceId, sentSendId, "sent");
+
+      const sweepResult = await withTenant(workspaceId, () =>
+        withTenantTransaction((client) => sweepStaleDispatchingSend(client, dispatchingSendId))
+      );
+      expect(sweepResult.resolved).toBe(true);
+
+      const sweptRow = await sendRow(workspaceId, dispatchingSendId);
+      expect(sweptRow.status).toBe("reconciling");
+      expect(sweptRow.reconcilingSince).not.toBeNull();
+
+      const noopResult = await withTenant(workspaceId, () =>
+        withTenantTransaction((client) => sweepStaleDispatchingSend(client, sentSendId))
+      );
+      expect(noopResult.resolved).toBe(false);
+
+      const untouchedRow = await sendRow(workspaceId, sentSendId);
+      expect(untouchedRow.status).toBe("sent");
+    });
+
+    it("backfillCampaignSendCounter increments sent_count on a campaign whose status is already 'sent' -- the path incrementCampaignSendCounter refuses", async () => {
+      const workspaceId = await freshWorkspaceId("ledger-backfill");
+      await connectFixtureSendgridKey(workspaceId);
+      const campaignId = await createFixtureCampaign(workspaceId, { sendableTotal: 1, fanOutComplete: true });
+      await setCampaignStatus(workspaceId, campaignId, "sent");
+
+      await withTenant(workspaceId, () =>
+        withTenantTransaction((client) => backfillCampaignSendCounter(client, campaignId, "sent"))
+      );
+
+      const snapshot = await getCampaignSnapshot(workspaceId, campaignId);
+      expect(snapshot.sentCount, "backfillCampaignSendCounter must increment even though the campaign is already 'sent'").toBe(
+        1
+      );
+    });
+
+    it("incrementCampaignSendCounter still refuses to increment a campaign that is not 'sending' (the pre-existing guard is not weakened)", async () => {
+      const workspaceId = await freshWorkspaceId("ledger-increment-guard");
+      await connectFixtureSendgridKey(workspaceId);
+      const campaignId = await createFixtureCampaign(workspaceId, { sendableTotal: 1, fanOutComplete: true });
+      await setCampaignStatus(workspaceId, campaignId, "sent");
+
+      await withTenant(workspaceId, () =>
+        withTenantTransaction((client) => incrementCampaignSendCounter(client, campaignId, "sent"))
+      );
+
+      const snapshot = await getCampaignSnapshot(workspaceId, campaignId);
+      expect(snapshot.sentCount, "incrementCampaignSendCounter's WHERE status='sending' guard must still refuse").toBe(0);
+    });
   });
 });

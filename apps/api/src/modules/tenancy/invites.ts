@@ -14,10 +14,21 @@ import { requirePermission, toFetchHeaders } from "../../middleware/role-guard.j
 import { env } from "../../env.js";
 import { findActiveWorkspaceBySlug } from "./workspace-lookup.js";
 import { getCallerRoles } from "./member-roles.js";
+import { NOT_FOUND_BODY } from "./resolve-workspace-member.js";
 
 function toIsoString(value: Date | string): string {
   return value instanceof Date ? value.toISOString() : value;
 }
+
+/**
+ * SEC-10/SEC-15/T-10-04-03: the ONE 404 body both `GET /api/invites/:id`
+ * failure branches send -- mirrors `resolve-workspace-member.ts`'s
+ * `NOT_FOUND_BODY` precedent, scoped to this endpoint's own resource
+ * (an invitation, not a workspace). An imported reference, not a re-typed
+ * literal, so "id doesn't exist" and "id exists but its organization row is
+ * gone" cannot silently drift apart.
+ */
+const INVITATION_NOT_FOUND_BODY = { error: "Invitation not found" } as const;
 
 function toInviteResponse(inv: {
   id: string;
@@ -57,7 +68,7 @@ export async function registerInviteRoutes(fastify: FastifyInstance): Promise<vo
 
       const workspace = await findActiveWorkspaceBySlug(slug);
       if (!workspace) {
-        return reply.code(404).send({ error: "Workspace not found" });
+        return reply.code(404).send(NOT_FOUND_BODY);
       }
 
       const headers = toFetchHeaders(request);
@@ -92,7 +103,7 @@ export async function registerInviteRoutes(fastify: FastifyInstance): Promise<vo
       const { slug } = request.params as { slug: string };
       const workspace = await findActiveWorkspaceBySlug(slug);
       if (!workspace) {
-        return reply.code(404).send({ error: "Workspace not found" });
+        return reply.code(404).send(NOT_FOUND_BODY);
       }
 
       try {
@@ -119,7 +130,20 @@ export async function registerInviteRoutes(fastify: FastifyInstance): Promise<vo
     "/api/workspaces/:slug/invites/:invitationId/revoke",
     { preHandler: requirePermission("invitation", "cancel") },
     async (request, reply) => {
-      const { invitationId } = request.params as { invitationId: string };
+      const { slug, invitationId } = request.params as { slug: string; invitationId: string };
+
+      const workspace = await findActiveWorkspaceBySlug(slug);
+      if (!workspace) {
+        return reply.code(404).send(NOT_FOUND_BODY);
+      }
+
+      const existing = await db.query.invitation.findFirst({
+        where: eq(invitation.id, invitationId),
+      });
+      if (!existing || existing.organizationId !== workspace.id) {
+        return reply.code(404).send({ error: "Invitation not found" });
+      }
+
       try {
         await auth.api.cancelInvitation({
           headers: toFetchHeaders(request),
@@ -142,7 +166,7 @@ export async function registerInviteRoutes(fastify: FastifyInstance): Promise<vo
       const { slug, invitationId } = request.params as { slug: string; invitationId: string };
       const workspace = await findActiveWorkspaceBySlug(slug);
       if (!workspace) {
-        return reply.code(404).send({ error: "Workspace not found" });
+        return reply.code(404).send(NOT_FOUND_BODY);
       }
 
       const existing = await db.query.invitation.findFirst({
@@ -183,6 +207,29 @@ export async function registerInviteRoutes(fastify: FastifyInstance): Promise<vo
    * exactly the case D-12 (an invitee with no account yet) can never satisfy.
    * Reads the invitation/organization rows directly instead (no hand-rolled
    * table -- these are better-auth's own).
+   *
+   * SEC-10/RESEARCH.md Open Question #1: resolved as interpretation (a) --
+   * "byte-identical 404 everywhere, invite included" (the CONTEXT interview
+   * lock) tightens the NOT-FOUND path only. Both 404 branches below send the
+   * SAME `INVITATION_NOT_FOUND_BODY` so "no such id" and "id exists but its
+   * organization row is gone" are provably indistinguishable. The 200
+   * preview for a genuinely pending/expired/revoked/accepted invitation is
+   * deliberately KEPT as-is: a legitimate invitee with no account yet must
+   * still be able to see who invited them before creating one (D-12).
+   * Interpretation (b) -- shrinking the expired/revoked payload below the
+   * pending one -- was considered and NOT taken here: that would change
+   * legitimate-invitee UX (the expired/revoked copy on the invite-accept
+   * page needs `organizationName`/`email` too), not attacker-visible
+   * behaviour, so it's out of this plan's scope.
+   *
+   * Payload audit (T-10-04-03): every field below is read by
+   * `apps/web/src/routes/invite-accept.tsx`'s `InviteAcceptPage` --
+   * `status` (branches valid/expired/revoked/accepted),
+   * `organizationSlug` (post-accept redirect + the accepted-state link),
+   * `email` (signed-in-as-invitee check + displayed to the invitee),
+   * `organizationName` (card title), `role` (displayed via `ROLE_LABELS`).
+   * No field is carried "just in case" -- `invite-response-identity.test.ts`
+   * asserts this exact key set so an added field fails the test.
    */
   fastify.get("/api/invites/:invitationId", async (request, reply) => {
     const { invitationId } = request.params as { invitationId: string };
@@ -191,14 +238,14 @@ export async function registerInviteRoutes(fastify: FastifyInstance): Promise<vo
       where: eq(invitation.id, invitationId),
     });
     if (!invite) {
-      return reply.code(404).send({ error: "Invitation not found" });
+      return reply.code(404).send(INVITATION_NOT_FOUND_BODY);
     }
 
     const org = await db.query.organization.findFirst({
       where: eq(organization.id, invite.organizationId),
     });
     if (!org) {
-      return reply.code(404).send({ error: "Invitation not found" });
+      return reply.code(404).send(INVITATION_NOT_FOUND_BODY);
     }
 
     let status: "pending" | "expired" | "revoked" | "accepted";

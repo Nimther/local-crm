@@ -1,0 +1,24 @@
+-- Phase 11 (DLV-01/DB-08, D-02) — send_status enum, expand half, value 1 of 2.
+--
+-- STANDALONE by design (Phase 8 D-30's migration linter enforces this
+-- mechanically): no other statement in this file, and no code anywhere in
+-- THIS deploy references the literal 'reconciling' -- Postgres refuses to use
+-- a freshly-added enum value inside the same transaction that added it, and
+-- this repo applies each migration file as one client.query(sql) call, so a
+-- same-file reference would be a guaranteed runtime failure at deploy time,
+-- not just a lint nit.
+--
+-- 'reconciling' is the ambiguous-outcome state this phase introduces: a send
+-- whose transport-layer outcome could not be proven one way or the other
+-- (timeout, connection reset, or an interrupted redelivery that found a
+-- prior claim with no terminal write). The code that writes and reads this
+-- value -- send-dispatch.ts's interrupted/ambiguous branches, the new
+-- send-reconciler worker -- lands in later plans of this phase (11-03
+-- onward), never in this file or this deploy.
+--
+-- Zero historical `sends` rows are touched by this migration (Pitfall 2,
+-- locked): adding a value to the enum's vocabulary changes no existing row's
+-- `status`. See packages/db/scripts/audit-sends-history.ts for the read-only
+-- report of what production-shaped history looks like before this value
+-- exists in application code.
+ALTER TYPE send_status ADD VALUE 'reconciling';

@@ -1,4 +1,5 @@
 import type { PoolClient } from "pg";
+import { deriveCampaignSendId, deriveFlowSendId } from "./send-id.js";
 
 /**
  * Either the send is a genuine no-op (already terminal -- idempotent
@@ -23,19 +24,30 @@ export type DispatchSendGateResult = "skipped" | { sendId: string; interrupted?:
  *     re-calling SendGrid.
  * A fresh insert (no conflict) returns `{ sendId }` (interrupted
  * undefined/false) and the caller proceeds to send.
+ *
+ * Phase 11 (D-09, DLV-05): `id` is now `deriveCampaignSendId(workspaceId,
+ * campaignId, contactId)` -- a pure function of the send intent, computed
+ * here rather than plumbed through from the caller so every campaign insert
+ * site can never drift onto a different id for the same intent. This is what
+ * makes `releaseDispatchClaim`'s `DELETE` below safe: a fresh insert for the
+ * SAME intent, whenever it happens, reproduces the SAME id. `kind='test'` is
+ * the one exempt path (D-11) -- it never reaches this function at all, since
+ * it inserts no ledger row; `send-dispatch.ts`'s `randomUUID()` there is
+ * correct and must not be "fixed" to call this module.
  */
 export async function dispatchSendGate(
   client: PoolClient,
   params: { workspaceId: string; campaignId: string; contactId: string }
 ): Promise<DispatchSendGateResult> {
   const { workspaceId, campaignId, contactId } = params;
+  const derivedId = deriveCampaignSendId(workspaceId, campaignId, contactId);
 
   const { rows } = await client.query<{ id: string }>(
     `INSERT INTO sends (id, workspace_id, campaign_id, contact_id, status, queued_at)
-     VALUES (gen_random_uuid(), $1, $2, $3, 'dispatching', now())
+     VALUES ($4, $1, $2, $3, 'dispatching', now())
      ON CONFLICT (workspace_id, campaign_id, contact_id) DO NOTHING
      RETURNING id`,
-    [workspaceId, campaignId, contactId]
+    [workspaceId, campaignId, contactId, derivedId]
   );
 
   let sendId = rows[0]?.id;
@@ -46,6 +58,17 @@ export async function dispatchSendGate(
     );
     const existingStatus = existing[0]?.status;
     if (existingStatus === "sent" || existingStatus === "failed" || existingStatus === "excluded") {
+      return "skipped";
+    }
+    // Phase 11 (DLV-04, T-11-03-02): 'reconciling'/'unknown' are "not my
+    // job" for the job processor, not "try again" -- only
+    // resolveReconcilingSend, called from the reconciler
+    // (send-reconciler.worker.ts), may leave these states (D-03). This
+    // branch -- not row locking -- is what closes the
+    // reconciler-vs-retry-worker half of DLV-04's exclusivity guarantee:
+    // `FOR UPDATE SKIP LOCKED` in the reconciler's own claim only protects
+    // reconciler-vs-reconciler.
+    if (existingStatus === "reconciling" || existingStatus === "unknown") {
       return "skipped";
     }
     sendId = existing[0]?.id;
@@ -68,16 +91,57 @@ export async function dispatchSendGate(
  * 429/5xx (SendGrid never accepted the message) or after the per-tenant
  * rate limiter denies a token, so a clean retry re-claims a fresh row
  * instead of finding a stranded claim (T-04-12-03).
+ *
+ * Phase 11 (D-09, RESEARCH.md Pitfall 4): this `DELETE` is now safe in a way
+ * it was NOT before `dispatchSendGate`/`claimFlowSend` started deriving
+ * `id` from the send intent. If SendGrid silently accepted the message
+ * despite the 429/5xx that triggered this release, the deleted row's id is
+ * gone -- but the NEXT claim attempt for the same intent (whenever it
+ * happens) reproduces that EXACT SAME id via `deriveCampaignSendId`/
+ * `deriveFlowSendId`, so a late-arriving webhook event for the phantom
+ * attempt still correlates to whatever row currently occupies that id
+ * (either the new attempt's live row, or the reconciler's later resolution
+ * of it). This is why the `DELETE` was never replaced with a status
+ * transition (unlike `dispatching -> reconciling`, D-08): a deleted-then-
+ * reinserted row and a status-transitioned row are indistinguishable once
+ * the id is stable across the gap.
  */
 export async function releaseDispatchClaim(client: PoolClient, sendId: string): Promise<void> {
   await client.query(`DELETE FROM sends WHERE id = $1 AND status = 'dispatching'`, [sendId]);
 }
 
-/** Advances a `sends` row to its terminal `sent`/`failed` status, recording the provider's message id on success. */
+/**
+ * Advances a `sends` row to a terminal `sent`/`failed` status, or to the
+ * ambiguous `reconciling` status (Phase 11, DLV-02) -- recording the
+ * provider's message id on success. `reconciling` is NOT terminal: it is
+ * the ONLY status this function may write that has an outgoing transition
+ * of its own (`reconciling -> sent`/`unknown`, written exclusively by
+ * `resolveReconcilingSend` below, D-03). `reconciling_since` is set once,
+ * on first entry into `reconciling` -- `COALESCE(reconciling_since, now())`
+ * so a row that is (re-)written with `status = 'reconciling'` more than
+ * once (should that ever happen) never has its original ambiguity
+ * timestamp overwritten; Phase 15's webhook-lag alert reads this column.
+ *
+ * Phase 11 (DLV-09, plan 11-06): `dispatchedAt`/`dispatchDurationMs` are
+ * optional so an omitted measurement never erases a recorded one --
+ * `COALESCE($4, dispatched_at)`/`COALESCE($5, dispatch_duration_ms)`, never a
+ * blind overwrite with `null`. `dispatched_at` is the moment the outbound
+ * SendGrid `mail/send` call started; `dispatch_duration_ms` is that call's
+ * wall-clock duration. Both are written on EVERY outcome branch this
+ * function is called for -- `sent`, `failed`, AND `reconciling` -- so a
+ * stuck send's own latency (how long the ambiguous call ran before this
+ * process gave up on it) is available for forensics, not just the outcomes
+ * that resolved cleanly.
+ */
 export async function recordSendResult(
   client: PoolClient,
   sendId: string,
-  result: { status: "sent" | "failed"; providerMessageId?: string | null }
+  result: {
+    status: "sent" | "failed" | "reconciling";
+    providerMessageId?: string | null;
+    dispatchedAt?: Date;
+    dispatchDurationMs?: number;
+  }
 ): Promise<void> {
   // $2::send_status is cast explicitly at BOTH usages -- without the cast,
   // Postgres deduces $2's type from its first use (assigned to the
@@ -88,10 +152,141 @@ export async function recordSendResult(
     `UPDATE sends
      SET status = $2::send_status,
          provider_message_id = $3,
-         sent_at = CASE WHEN $2::send_status = 'sent' THEN now() ELSE sent_at END
+         sent_at = CASE WHEN $2::send_status = 'sent' THEN now() ELSE sent_at END,
+         reconciling_since = CASE WHEN $2::send_status = 'reconciling' THEN COALESCE(reconciling_since, now()) ELSE reconciling_since END,
+         dispatched_at = COALESCE($4, dispatched_at),
+         dispatch_duration_ms = COALESCE($5, dispatch_duration_ms)
      WHERE id = $1`,
-    [sendId, result.status, result.providerMessageId ?? null]
+    [sendId, result.status, result.providerMessageId ?? null, result.dispatchedAt ?? null, result.dispatchDurationMs ?? null]
   );
+}
+
+/**
+ * The result of `resolveReconcilingSend`'s (or `sweepStaleDispatchingSend`'s)
+ * terminal write attempt -- `resolved: false` means the caller's own status
+ * guard matched zero rows (a concurrent writer already resolved it, or the
+ * row somehow left the expected states between the caller's own lock
+ * acquisition and this call -- should not happen given `resolveOneSend`'s
+ * `FOR UPDATE SKIP LOCKED` discipline, but this function's own guard makes
+ * that a no-op rather than a stomp regardless).
+ */
+export interface ResolveReconcilingResult {
+  resolved: boolean;
+}
+
+/**
+ * `resolveReconcilingSend`'s verdict parameter (Phase 11, plan 11-08). Typing
+ * it as this narrow, two-member union -- rather than accepting a generic
+ * `SendStatus` -- is what makes "the reconciler writes `failed`" a compile
+ * error instead of a code-review question: there is no third member here to
+ * ever pass. `providerMessageId` is accepted on `resolve_sent` for API-shape
+ * completeness with the pre-11-08 signature, but is NOT written to
+ * `provider_message_id` below -- the reconciler resolves purely from
+ * `send_events` evidence (D-01/D-05) and has no provider-observed message id
+ * of its own to record; a future caller that does have one may extend the
+ * UPDATE, but this plan does not need to.
+ */
+export type ResolveReconcilingVerdict =
+  | { kind: "resolve_sent"; providerMessageId?: string | null }
+  | { kind: "resolve_unknown" };
+
+/**
+ * The ONLY function in this codebase permitted to write a status onto a
+ * `sends` row currently in `reconciling` or `unknown` (Phase 11, D-03 --
+ * "the reconciler is the sole writer of every `reconciling -> terminal`
+ * transition"). Its `WHERE status IN ('reconciling', 'unknown')` guard is
+ * what makes that rule enforceable in code, not just in convention: no
+ * other call site in the codebase may target either of those two statuses
+ * with an UPDATE, and this is the one place that does.
+ *
+ * Two verdicts, both guarded identically:
+ *   - `resolve_sent`: moves a `reconciling` OR an `unknown` row to `sent`
+ *     (D-04's late-evidence upgrade reaches `unknown` rows through this same
+ *     branch, not a separate one) and BACK-DATES `sent_at` to
+ *     `COALESCE(dispatched_at, reconciling_since, queued_at)` rather than
+ *     stamping `now()` -- load-bearing, not cosmetic. `workspace_daily_rollup`
+ *     is computed from `sent_at::date`; if this function stamped resolution
+ *     time instead, a send that was actually accepted on day N but not
+ *     resolved until day N+2 (a backlogged tick, or a re-scanned `unknown`
+ *     row inside the ~72h horizon) would silently move into the wrong
+ *     calendar day's rollup. `sent_at` is guaranteed NULL going in (a row in
+ *     `reconciling`/`unknown` has never been `sent`), so dropping `sent_at`
+ *     itself from the COALESCE chain (11-03's version led with it) changes
+ *     nothing observable -- it is removed here only because it was always
+ *     redundant, per this plan's own <behavior> spec.
+ *   - `resolve_unknown`: moves a `reconciling` row to `unknown` and touches
+ *     NOTHING else -- `sent_at` stays NULL, and `reconciling_since` is left
+ *     exactly as it was. Preserving `reconciling_since` here (rather than
+ *     clearing it, the way `resolve_sent` does) is deliberate: it remains the
+ *     record of when ambiguity began, which 11-09's watchdog and Phase 15's
+ *     webhook-lag alert both read, and which a LATER `resolve_sent` (D-04's
+ *     late-evidence path) still needs for the SAME back-dating COALESCE
+ *     chain above.
+ *
+ * The caller MUST already hold the row lock (`resolveOneSend`'s `SELECT
+ * ... FOR UPDATE SKIP LOCKED`, inside the same `withTenantTransaction`) --
+ * this function does not lock anything itself; its `WHERE status IN (...)`
+ * guard is a correctness backstop for the lost-the-race case, not a
+ * substitute for holding the lock in the first place.
+ */
+export async function resolveReconcilingSend(
+  client: PoolClient,
+  sendId: string,
+  verdict: ResolveReconcilingVerdict
+): Promise<ResolveReconcilingResult> {
+  if (verdict.kind === "resolve_unknown") {
+    const { rowCount } = await client.query(
+      `UPDATE sends
+       SET status = 'unknown'::send_status
+       WHERE id = $1 AND status IN ('reconciling', 'unknown')`,
+      [sendId]
+    );
+    return { resolved: (rowCount ?? 0) > 0 };
+  }
+
+  const { rowCount } = await client.query(
+    `UPDATE sends
+     SET status = 'sent'::send_status,
+         sent_at = COALESCE(dispatched_at, reconciling_since, queued_at),
+         reconciling_since = NULL
+     WHERE id = $1 AND status IN ('reconciling', 'unknown')`,
+    [sendId]
+  );
+  return { resolved: (rowCount ?? 0) > 0 };
+}
+
+/**
+ * Sweeps a stale `dispatching` row into `reconciling` (Phase 11, D-08,
+ * DLV-03, plan 11-08) -- the SECOND of the two writers ARCHITECTURE.md ##9's
+ * matrix records for `dispatching -> reconciling` (the first is the send
+ * worker's own ambiguous-throw/interrupted-redelivery branch in
+ * `send-dispatch.ts`; see `dispatchSendGate`'s own doc comment above). Its
+ * `WHERE status = 'dispatching'` guard, combined with the caller's row lock
+ * (`resolveOneSend`'s `SELECT ... FOR UPDATE SKIP LOCKED`), is what keeps
+ * this from racing the send worker's own write: if the worker's unit 3 wins
+ * the race and writes `sent`/`failed`/`reconciling` first, this UPDATE's
+ * `WHERE` clause matches zero rows and reports no transition -- never a
+ * stomp. `reconciling_since` is set via `COALESCE(reconciling_since, now())`
+ * for the same reason `recordSendResult` uses it: a row's first entry into
+ * ambiguity must never be overwritten by a later write (should this ever be
+ * called twice on the same row, which the caller's own status branch on
+ * `classifyReconcilableSend`'s verdict should prevent in practice).
+ *
+ * The caller is expected to STOP after this call -- `resolveOneSend`
+ * (send-reconciler.worker.ts) does not attempt to also classify the freshly
+ * swept row in the same transaction; the swept row resolves on a LATER tick
+ * through the normal `reconciling` evidence path, which keeps each
+ * transaction to at most one status transition.
+ */
+export async function sweepStaleDispatchingSend(client: PoolClient, sendId: string): Promise<ResolveReconcilingResult> {
+  const { rowCount } = await client.query(
+    `UPDATE sends
+     SET status = 'reconciling'::send_status,
+         reconciling_since = COALESCE(reconciling_since, now())
+     WHERE id = $1 AND status = 'dispatching'`,
+    [sendId]
+  );
+  return { resolved: (rowCount ?? 0) > 0 };
 }
 
 /**
@@ -99,29 +294,45 @@ export async function recordSendResult(
  * exclusion breakdown) instead of ever calling SendGrid for them.
  *
  * CR-07 (SEND-04/SEND-06): the ON CONFLICT ... DO UPDATE is guarded by
- * `WHERE sends.status NOT IN ('sent', 'dispatching', 'failed')` so an
- * at-least-once BullMQ kickoff redelivery's exclusion re-walk can never
- * demote an already-terminal 'sent'/'failed' row or an in-flight
- * 'dispatching' claim back to 'excluded' -- that would both erase delivery
- * history and let pre-send-gate's rolling frequency-cap count (which counts
- * this campaign's own status='sent' rows) undercount, allowing a re-send
- * past the cap. When the conflicting row's status IS preserved, Postgres
- * simply skips the update (no error) -- a no-op, not a failure. An existing
- * 'excluded' row still has its exclusion_reason updated (re-classification).
+ * `WHERE sends.status NOT IN ('sent', 'dispatching', 'failed', 'reconciling',
+ * 'unknown')` so an at-least-once BullMQ kickoff redelivery's exclusion
+ * re-walk can never demote an already-terminal 'sent'/'failed' row or an
+ * in-flight 'dispatching' claim back to 'excluded' -- that would both erase
+ * delivery history and let pre-send-gate's rolling frequency-cap count
+ * (which counts this campaign's own status='sent' rows) undercount,
+ * allowing a re-send past the cap. When the conflicting row's status IS
+ * preserved, Postgres simply skips the update (no error) -- a no-op, not a
+ * failure. An existing 'excluded' row still has its exclusion_reason
+ * updated (re-classification).
+ *
+ * Phase 11 (T-11-03-03, RESEARCH.md Pitfall 3): 'reconciling'/'unknown' were
+ * added to this guard's list in the SAME change that introduced code
+ * consuming them (this file), not in the enum-add migration itself (0047/
+ * 0048) -- Postgres does not warn about an enum value missing from a `NOT
+ * IN` list, so leaving the original three-value list unchanged would let a
+ * redelivered exclusion re-walk silently stomp an in-flight reconciliation
+ * back to 'excluded', erasing the row the reconciler was about to resolve.
+ *
+ * Phase 11 (D-09, DLV-05): `id` is `deriveCampaignSendId(...)`, the SAME
+ * derivation `dispatchSendGate` uses for the identical (workspaceId,
+ * campaignId, contactId) triple -- an intent excluded here and later
+ * dispatched (or vice versa) can never end up represented by two different
+ * ids depending on which path inserted first (RESEARCH.md key_links).
  */
 export async function recordExcluded(
   client: PoolClient,
   params: { workspaceId: string; campaignId: string; contactId: string },
   reason: string
 ): Promise<void> {
+  const derivedId = deriveCampaignSendId(params.workspaceId, params.campaignId, params.contactId);
   await client.query(
     `INSERT INTO sends (id, workspace_id, campaign_id, contact_id, status, exclusion_reason, queued_at)
-     VALUES (gen_random_uuid(), $1, $2, $3, 'excluded', $4, now())
+     VALUES ($5, $1, $2, $3, 'excluded', $4, now())
      ON CONFLICT (workspace_id, campaign_id, contact_id) DO UPDATE SET
        status = 'excluded',
        exclusion_reason = EXCLUDED.exclusion_reason
-     WHERE sends.status NOT IN ('sent', 'dispatching', 'failed')`,
-    [params.workspaceId, params.campaignId, params.contactId, reason]
+     WHERE sends.status NOT IN ('sent', 'dispatching', 'failed', 'reconciling', 'unknown')`,
+    [params.workspaceId, params.campaignId, params.contactId, reason, derivedId]
   );
 }
 
@@ -142,19 +353,27 @@ export async function recordExcluded(
  *     `failed` rather than re-calling SendGrid.
  *   - `{ sendId }` (a fresh insert, no conflict) -- the caller proceeds to
  *     send.
+ *
+ * Phase 11 (D-09, DLV-05): `id` is `deriveFlowSendId(workspaceId, flowRunId,
+ * nodeId)` -- the flow-shaped sibling of `dispatchSendGate`'s campaign
+ * derivation, computed here rather than plumbed through from the caller for
+ * the same drift-prevention reason. `sends.id` is now a pure function of the
+ * send intent for both campaign and flow ledger inserts; `kind='test'`
+ * remains the one exempt path (D-11), never reaching this function.
  */
 export async function claimFlowSend(
   client: PoolClient,
   params: { workspaceId: string; flowRunId: string; nodeId: string; contactId: string }
 ): Promise<DispatchSendGateResult> {
   const { workspaceId, flowRunId, nodeId, contactId } = params;
+  const derivedId = deriveFlowSendId(workspaceId, flowRunId, nodeId);
 
   const { rows } = await client.query<{ id: string }>(
     `INSERT INTO sends (id, workspace_id, flow_run_id, node_id, contact_id, kind, status, queued_at)
-     VALUES (gen_random_uuid(), $1, $2, $3, $4, 'flow', 'dispatching', now())
+     VALUES ($5, $1, $2, $3, $4, 'flow', 'dispatching', now())
      ON CONFLICT (workspace_id, flow_run_id, node_id) WHERE kind = 'flow' DO NOTHING
      RETURNING id`,
-    [workspaceId, flowRunId, nodeId, contactId]
+    [workspaceId, flowRunId, nodeId, contactId, derivedId]
   );
 
   let sendId = rows[0]?.id;
@@ -167,6 +386,17 @@ export async function claimFlowSend(
     );
     const existingStatus = existing[0]?.status;
     if (existingStatus === "sent" || existingStatus === "failed" || existingStatus === "excluded") {
+      return "skipped";
+    }
+    // Phase 11 (DLV-04, T-11-03-02): 'reconciling'/'unknown' are "not my
+    // job" for the job processor, not "try again" -- only
+    // resolveReconcilingSend, called from the reconciler
+    // (send-reconciler.worker.ts), may leave these states (D-03). This
+    // branch -- not row locking -- is what closes the
+    // reconciler-vs-retry-worker half of DLV-04's exclusivity guarantee:
+    // `FOR UPDATE SKIP LOCKED` in the reconciler's own claim only protects
+    // reconciler-vs-reconciler.
+    if (existingStatus === "reconciling" || existingStatus === "unknown") {
       return "skipped";
     }
     sendId = existing[0]?.id;
@@ -184,16 +414,28 @@ export async function claimFlowSend(
 
 /**
  * Advances a flow-step `sends` row (`kind='flow'`) to its terminal
- * `sent`/`failed` status -- the flow-shaped sibling of `recordSendResult`.
- * Callers use this instead of `recordSendResult` for flow sends so the
- * function name at each call site documents which ledger shape it is
- * updating; the underlying `sends` row (looked up by `id`, not by kind) is
- * identical either way.
+ * `sent`/`failed` status, or to the ambiguous `reconciling` status (Phase
+ * 11, DLV-02) -- the flow-shaped sibling of `recordSendResult`. Callers use
+ * this instead of `recordSendResult` for flow sends so the function name at
+ * each call site documents which ledger shape it is updating; the
+ * underlying `sends` row (looked up by `id`, not by kind) is identical
+ * either way, including the `reconciling_since`/timing-column behavior
+ * documented on `recordSendResult` above -- both functions must stay
+ * identical in that respect, not just similar.
+ *
+ * Phase 11 (DLV-09, plan 11-06): `dispatchedAt`/`dispatchDurationMs` mirror
+ * `recordSendResult`'s own optional, `COALESCE`-guarded timing fields --
+ * see that function's doc comment for the full rationale.
  */
 export async function recordFlowStepResult(
   client: PoolClient,
   sendId: string,
-  result: { status: "sent" | "failed"; providerMessageId?: string | null }
+  result: {
+    status: "sent" | "failed" | "reconciling";
+    providerMessageId?: string | null;
+    dispatchedAt?: Date;
+    dispatchDurationMs?: number;
+  }
 ): Promise<void> {
   // $2::send_status is cast explicitly at BOTH usages -- without the cast,
   // Postgres deduces $2's type from its first use (assigned to the
@@ -205,9 +447,12 @@ export async function recordFlowStepResult(
     `UPDATE sends
      SET status = $2::send_status,
          provider_message_id = $3,
-         sent_at = CASE WHEN $2::send_status = 'sent' THEN now() ELSE sent_at END
+         sent_at = CASE WHEN $2::send_status = 'sent' THEN now() ELSE sent_at END,
+         reconciling_since = CASE WHEN $2::send_status = 'reconciling' THEN COALESCE(reconciling_since, now()) ELSE reconciling_since END,
+         dispatched_at = COALESCE($4, dispatched_at),
+         dispatch_duration_ms = COALESCE($5, dispatch_duration_ms)
      WHERE id = $1`,
-    [sendId, result.status, result.providerMessageId ?? null]
+    [sendId, result.status, result.providerMessageId ?? null, result.dispatchedAt ?? null, result.dispatchDurationMs ?? null]
   );
 }
 
@@ -220,25 +465,36 @@ export async function recordFlowStepResult(
  * (workspace_id, campaign_id, contact_id).
  *
  * Mirrors `recordExcluded`'s CR-07 guard: the ON CONFLICT ... DO UPDATE is
- * guarded by `WHERE sends.status NOT IN ('sent', 'dispatching', 'failed')`
- * so a redelivered exclusion re-walk can never demote an already-terminal
- * 'sent'/'failed' row or an in-flight 'dispatching' claim back to
- * 'excluded'. An existing 'excluded' row still has its exclusion_reason
- * updated (re-classification).
+ * guarded by `WHERE sends.status NOT IN ('sent', 'dispatching', 'failed',
+ * 'reconciling', 'unknown')` so a redelivered exclusion re-walk can never
+ * demote an already-terminal 'sent'/'failed' row, an in-flight 'dispatching'
+ * claim, or an in-flight reconciliation back to 'excluded'. An existing
+ * 'excluded' row still has its exclusion_reason updated (re-classification).
+ *
+ * Phase 11 (T-11-03-03, RESEARCH.md Pitfall 3): same rationale as
+ * `recordExcluded`'s own comment above -- 'reconciling'/'unknown' were added
+ * to this guard in the same change that introduced consuming code, not the
+ * enum-add migration itself.
+ *
+ * Phase 11 (D-09, DLV-05): `id` is `deriveFlowSendId(...)`, the SAME
+ * derivation `claimFlowSend` uses for the identical (workspaceId,
+ * flowRunId, nodeId) triple -- mirrors `recordExcluded`'s own same-id
+ * guarantee for the campaign path.
  */
 export async function recordFlowExcluded(
   client: PoolClient,
   params: { workspaceId: string; flowRunId: string; nodeId: string; contactId: string },
   reason: string
 ): Promise<void> {
+  const derivedId = deriveFlowSendId(params.workspaceId, params.flowRunId, params.nodeId);
   await client.query(
     `INSERT INTO sends (id, workspace_id, flow_run_id, node_id, contact_id, kind, status, exclusion_reason, queued_at)
-     VALUES (gen_random_uuid(), $1, $2, $3, $4, 'flow', 'excluded', $5, now())
+     VALUES ($6, $1, $2, $3, $4, 'flow', 'excluded', $5, now())
      ON CONFLICT (workspace_id, flow_run_id, node_id) WHERE kind = 'flow' DO UPDATE SET
        status = 'excluded',
        exclusion_reason = EXCLUDED.exclusion_reason
-     WHERE sends.status NOT IN ('sent', 'dispatching', 'failed')`,
-    [params.workspaceId, params.flowRunId, params.nodeId, params.contactId, reason]
+     WHERE sends.status NOT IN ('sent', 'dispatching', 'failed', 'reconciling', 'unknown')`,
+    [params.workspaceId, params.flowRunId, params.nodeId, params.contactId, reason, derivedId]
   );
 }
 
@@ -251,6 +507,13 @@ export async function recordFlowExcluded(
  * counters frozen rather than incremented past a terminal state. The
  * UPDATE's own row lock serializes concurrent sends against the same
  * campaign row.
+ *
+ * This guard is DELIBERATELY not weakened for Phase 11's reconciler: a
+ * `reconciling`/`unknown` row resolving well after the campaign has already
+ * reached `sent` needs a DIFFERENT increment path, since this one refuses
+ * by design once `status <> 'sending'`. See `backfillCampaignSendCounter`
+ * below -- the sanctioned, reconciler-only counter path for exactly that
+ * case (D-12).
  */
 export async function incrementCampaignSendCounter(
   client: PoolClient,
@@ -266,14 +529,72 @@ export async function incrementCampaignSendCounter(
 }
 
 /**
+ * The reconciler-only counter backfill (Phase 11, D-12, plan 11-08) --
+ * structurally `incrementCampaignSendCounter` WITHOUT the `WHERE status =
+ * 'sending'` clause, since a reconciler resolution can land well after a
+ * campaign has already reached `sent` (the whole point of D-12: one
+ * ambiguous send must not permanently under-count a campaign that has
+ * otherwise finished).
+ *
+ * SAFETY -- read this before calling this function anywhere: it is callable
+ * ONLY from inside `resolveReconcilingSend`'s exclusive resolution
+ * transaction, and ONLY when that call reported an actual transition
+ * (`resolved: true`). Exactly-once is NOT guaranteed by a flag column on
+ * this function's own call -- it is guaranteed by the fact that
+ * `resolveReconcilingSend`'s `WHERE status IN ('reconciling', 'unknown')`
+ * guard, evaluated under the caller's `FOR UPDATE SKIP LOCKED` row lock,
+ * makes each row's terminal transition happen AT MOST ONCE (D-04's
+ * `unknown -> sent` late-evidence upgrade goes through that exact same
+ * guard, so it too can only fire once per row). Call this speculatively --
+ * before checking `resolved`, or outside that transaction -- and a
+ * redelivered/duplicate tick WILL double-count. `incrementCampaignSendCounter`
+ * above remains the sanctioned pre-completion path for every other caller;
+ * this function exists so the reconciler's POST-completion resolution has
+ * somewhere correct to go.
+ */
+export async function backfillCampaignSendCounter(
+  client: PoolClient,
+  campaignId: string,
+  status: "sent" | "failed"
+): Promise<void> {
+  const column = status === "sent" ? "sent_count" : "failed_count";
+  await client.query(
+    `UPDATE campaigns SET ${column} = ${column} + 1, updated_at = now()
+     WHERE id = $1`,
+    [campaignId]
+  );
+}
+
+/**
  * Idempotent completion transition (CR-05, T-04-13-03): moves a campaign
  * from 'sending' to 'sent' once fan-out has finished AND every sendable
- * recipient has reached a terminal send (sent_count + failed_count >=
- * sendable_total). Guarded `WHERE status = 'sending'` so it fires at most
- * once -- a no-op both before completion and after a prior call has already
- * transitioned the row. Returns whether this call performed the
- * transition, so callers can distinguish "already terminal" from "just
- * completed" if ever needed.
+ * recipient has reached a terminal send. Guarded `WHERE status = 'sending'`
+ * so it fires at most once -- a no-op both before completion and after a
+ * prior call has already transitioned the row. Returns whether this call
+ * performed the transition, so callers can distinguish "already terminal"
+ * from "just completed" if ever needed.
+ *
+ * Phase 11 (D-12, plan 11-08): the completion predicate now counts
+ * AMBIGUOUS rows toward `sendable_total` too --
+ * `sent_count + failed_count + (count of this campaign's 'reconciling'/
+ * 'unknown' rows) >= sendable_total` -- so a campaign whose LAST outstanding
+ * recipient is ambiguous still completes instead of hanging for up to the
+ * full ~24h resolution window (or the ~72h re-scan horizon, for an
+ * `unknown` row) on that one recipient. `sent_count`/`failed_count`
+ * themselves stay honest, per-outcome counters that NO ambiguous row is
+ * ever added to directly -- only `backfillCampaignSendCounter` above moves
+ * an ambiguous row's eventual resolution into one of those two columns, and
+ * only once the reconciler actually resolves it.
+ *
+ * `dispatching` is deliberately ABSENT from the ambiguous-row subquery: a
+ * row still in flight (a worker actively holding its claim, not yet
+ * ambiguous) is not the same as a row the reconciler has classified as
+ * ambiguous -- counting it here would complete a campaign mid-fan-out,
+ * while its own send is still genuinely in progress.
+ *
+ * `sends_campaign_ambiguous_idx` (migration 0051) keeps this subquery
+ * index-backed: this function runs on EVERY terminal write, so an unindexed
+ * per-campaign scan here would become a real cost at volume.
  */
 export async function tryCompleteCampaign(client: PoolClient, campaignId: string): Promise<boolean> {
   const { rowCount } = await client.query(
@@ -281,7 +602,10 @@ export async function tryCompleteCampaign(client: PoolClient, campaignId: string
      WHERE id = $1
        AND status = 'sending'
        AND fan_out_complete = true
-       AND (sent_count + failed_count) >= sendable_total`,
+       AND (
+         sent_count + failed_count +
+         (SELECT count(*) FROM sends WHERE campaign_id = $1 AND status IN ('reconciling', 'unknown'))
+       ) >= sendable_total`,
     [campaignId]
   );
   return (rowCount ?? 0) > 0;

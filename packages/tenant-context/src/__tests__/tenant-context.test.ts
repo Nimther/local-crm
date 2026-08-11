@@ -1,8 +1,17 @@
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ensureTestDbMigrated, getTestDatabaseUrl } from "@mega-crm/test-support";
+import { ensureTestDbMigrated, getAuthTestDatabaseUrl, getTestDatabaseUrl } from "@mega-crm/test-support";
 
-import { getWorkspaceId, pool, withTenant, withTenantTransaction } from "../index.js";
+import { getWorkspaceId, pool, withPreTenantLookup, withTenant, withTenantTransaction } from "../index.js";
+
+// 10-09 (SEC-05): mega_crm_app (`pool` above) holds only SELECT on
+// organization post-migration-0045 -- seeding fixture workspace rows needs
+// the mega_crm_auth-backed connection instead.
+let authPool: Pool | undefined;
+function getAuthTestPool(): Pool {
+  if (!authPool) authPool = new Pool({ connectionString: getAuthTestDatabaseUrl() });
+  return authPool;
+}
 
 /**
  * 08-16 (QG-03) — the tenant context and the RLS session variable.
@@ -12,9 +21,9 @@ import { getWorkspaceId, pool, withTenant, withTenantTransaction } from "../inde
  * and until now nothing asserted cross-tenant invisibility DIRECTLY — it was
  * only ever an implicit consequence of other tests happening to pass.
  *
- * Two of the assertions below are deliberate pre-change baselines and are
- * labelled as such: Phase 10 unifies the RLS policy variants, and the
- * no-tenant-in-scope behaviour is exactly what that change moves.
+ * The second describe block below pins Phase 10's fail-closed RLS contract
+ * (SEC-03/SEC-04): every `workspace_isolation` policy raises on absent or
+ * reverted-to-empty tenant context, never silently returns zero rows.
  */
 
 const WORKSPACE_A = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
@@ -26,7 +35,7 @@ async function seedOrganizations(): Promise<void> {
     [WORKSPACE_A, "tenant-ctx-a"],
     [WORKSPACE_B, "tenant-ctx-b"],
   ]) {
-    await pool.query(
+    await getAuthTestPool().query(
       `INSERT INTO organization (id, name, slug) VALUES ($1, $2, $3)
        ON CONFLICT (id) DO NOTHING`,
       [id, `Tenant ${slug}`, `${slug}-${Date.now().toString(36)}`],
@@ -42,6 +51,7 @@ describe("tenant context (RLS session variable)", () => {
 
   afterAll(async () => {
     await pool.end();
+    await authPool?.end();
   });
 
   it("binds the workspace id into the session for the transaction's duration", async () => {
@@ -140,58 +150,219 @@ describe("tenant context (RLS session variable)", () => {
     );
     expect(survived, "the insert must not have survived the throw").toBe(0);
   });
+
+  it("withPreTenantLookup's sentinel grants nothing beyond letting the predicate evaluate -- zero contacts rows visible", async () => {
+    // Seed a real contacts row under a real workspace first, so "zero rows
+    // visible" is a meaningful claim, not vacuously true on an empty table.
+    await withTenant(WORKSPACE_A, () =>
+      withTenantTransaction((client) =>
+        client.query(
+          `INSERT INTO contacts (workspace_id, email, subscription_status) VALUES ($1, $2, 'subscribed')`,
+          [WORKSPACE_A, `sentinel-fixture-${Date.now().toString(36)}@fixture.test`],
+        ),
+      ),
+    );
+
+    const visible = await withPreTenantLookup((client) =>
+      client.query(`SELECT id FROM contacts`).then((res) => res.rows.length),
+    );
+    expect(
+      visible,
+      "the sentinel matches no real organization.id -- it must grant no rows, only make the predicate evaluable",
+    ).toBe(0);
+  });
 });
 
 /**
- * PRE-PHASE-10 BASELINE — do not "fix" these by changing the expectation.
+ * THE FAIL-CLOSED RLS CONTRACT (SEC-03/SEC-04) — pinned Phase 10 baseline.
  *
- * `0001_rls_policies.sql` writes twelve policies as a bare cast
- * (`current_setting('app.current_workspace_id', true)::uuid`) and ten with a
- * NULLIF guard. SPECIFICATION.md §4.3 documents the consequence, and these two
- * assertions are where it becomes observable:
+ * Every `workspace_isolation` policy in the schema now shares ONE predicate:
+ * `current_setting('app.current_workspace_id')::uuid` — no `missing_ok`
+ * second argument, no NULLIF guard. Absent tenant context is a programming
+ * error, not "no such record": an error is the only signal application code
+ * cannot mistake for a legitimately empty result set.
  *
- *   - on a connection that has NEVER been tenant-scoped, current_setting returns
- *     NULL, the predicate is NULL, and the table returns ZERO ROWS;
- *   - on a connection that HAS been scoped and returned to the pool, the custom
- *     GUC holds the EMPTY STRING, and a bare-cast policy evaluates `''::uuid`
- *     and THROWS.
- *
- * So the same query fails open-to-zero-rows or errors depending only on the
- * connection's history. Phase 10 unifies the variants and must do so in the
- * fail-closed direction; these assertions are what that change has to move
- * deliberately rather than discover.
+ * This describe block replaces what used to be a "PRE-PHASE-10 BASELINE" at
+ * this exact spot in the file, documenting the OPPOSITE (fail-open)
+ * behaviour: before migration 0044, a connection that had never been
+ * tenant-scoped returned ZERO ROWS (current_setting's `missing_ok` form
+ * returns NULL, and `NULL::uuid = anything` is NULL — excluded, not an
+ * error). Inverting that assertion — asserting the thrown error, never a row
+ * count — is a first-class SEC-03/SEC-04 deliverable, not incidental
+ * collateral (RESEARCH.md Pitfall 1: a row-count assertion of 0 passes under
+ * BOTH the old and the new predicate and proves nothing).
  */
-describe("no tenant in scope — the pre-Phase-10 RLS baseline", () => {
+describe("the fail-closed RLS contract (SEC-03/SEC-04)", () => {
   let fresh: Pool;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     fresh = new Pool({ connectionString: getTestDatabaseUrl(), max: 1 });
+
+    // `flows` (unlike `contacts`) has no rows seeded anywhere else in this
+    // file — without at least one row, Postgres's executor has nothing to
+    // filter and never invokes current_setting() at all, so the predicate
+    // would never get a chance to throw. One committed row is enough to make
+    // "the query throws" a meaningful assertion rather than vacuously true.
+    //
+    // Seeded through a THROWAWAY pool, never `fresh` and never the shared
+    // `pool` export: the module-level `pool` is already closed by the
+    // preceding describe block's own `afterAll`, and seeding through `fresh`
+    // itself (max: 1, a single physical connection) would leave that one
+    // connection "touched" -- its GUC reverted to '' rather than genuinely
+    // unset -- which would break the never-scoped assertions below that
+    // depend on `fresh` staying pristine.
+    const seedPool = new Pool({ connectionString: getTestDatabaseUrl(), max: 1 });
+    try {
+      const client = await seedPool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SELECT set_config('app.current_workspace_id', $1, true)", [WORKSPACE_A]);
+        await client.query(
+          `INSERT INTO flows (workspace_id, name, created_by_user_id) VALUES ($1, $2, $3)`,
+          [WORKSPACE_A, `fail-closed-contract-fixture-${Date.now().toString(36)}`, "test-user"],
+        );
+        await client.query("COMMIT");
+      } finally {
+        client.release();
+      }
+    } finally {
+      await seedPool.end();
+    }
   });
 
   afterAll(async () => {
     await fresh.end();
   });
 
-  it("returns zero rows on a connection that has never been scoped", async () => {
-    const { rows } = await fresh.query(`SELECT id FROM contacts`);
-    expect(rows.length, "an unset GUC reads as NULL, so the policy matches nothing").toBe(0);
-  });
-
-  it("throws on a connection recycled from a scoped transaction", async () => {
-    const client = await fresh.connect();
+  it("rejects on a connection that has never been scoped (contacts)", async () => {
+    // A DEDICATED, single-use pool -- never `fresh` (shared with the catalog
+    // tests below, and reused by the recycled-connection tests via
+    // `fresh.connect()`). With `max: 1`, sharing `fresh` across the
+    // never-scoped and recycled-connection tests would hand the recycled
+    // tests' already-touched physical connection back to a later
+    // never-scoped test, turning "unrecognized configuration parameter"
+    // (never touched) into "invalid input syntax for type uuid" (touched,
+    // reverted to '') purely from test-ordering leakage, not from anything
+    // this contract itself asserts.
+    const neverScoped = new Pool({ connectionString: getTestDatabaseUrl(), max: 1 });
     try {
-      // Reproduce what withTenantTransaction leaves behind.
-      await client.query("BEGIN");
-      await client.query("SELECT set_config('app.current_workspace_id', $1, true)", [WORKSPACE_A]);
-      await client.query("COMMIT");
-
-      // The GUC has now reverted to '' rather than being unset.
       await expect(
-        client.query(`SELECT id FROM contacts`),
-        "a bare-cast policy evaluates ''::uuid here and errors",
-      ).rejects.toThrow(/invalid input syntax for type uuid/);
+        neverScoped.query(`SELECT id FROM contacts`),
+        "an unset GUC must raise, not silently exclude every row",
+      ).rejects.toThrow(/unrecognized configuration parameter/);
     } finally {
-      client.release();
+      await neverScoped.end();
     }
   });
+
+  it("rejects on a connection recycled from a committed tenant-scoped transaction (contacts)", async () => {
+    const recycled = new Pool({ connectionString: getTestDatabaseUrl(), max: 1 });
+    try {
+      const client = await recycled.connect();
+      try {
+        // Reproduce what withTenantTransaction leaves behind.
+        await client.query("BEGIN");
+        await client.query("SELECT set_config('app.current_workspace_id', $1, true)", [WORKSPACE_A]);
+        await client.query("COMMIT");
+
+        // The GUC has now reverted to '' rather than being unset.
+        await expect(
+          client.query(`SELECT id FROM contacts`),
+          "the fail-closed predicate evaluates ''::uuid here and errors",
+        ).rejects.toThrow(/invalid input syntax for type uuid/);
+      } finally {
+        client.release();
+      }
+    } finally {
+      await recycled.end();
+    }
+  });
+
+  it("rejects on a connection that has never been scoped — a second, previously null-tolerating table (flows)", async () => {
+    const neverScoped = new Pool({ connectionString: getTestDatabaseUrl(), max: 1 });
+    try {
+      await expect(
+        neverScoped.query(`SELECT id FROM flows`),
+        "flows was NULLIF-guarded before this phase and silently returned zero rows here; the unification must be uniform, not contacts-specific",
+      ).rejects.toThrow(/unrecognized configuration parameter/);
+    } finally {
+      await neverScoped.end();
+    }
+  });
+
+  it("rejects on a connection recycled from a committed tenant-scoped transaction — flows", async () => {
+    const recycled = new Pool({ connectionString: getTestDatabaseUrl(), max: 1 });
+    try {
+      const client = await recycled.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SELECT set_config('app.current_workspace_id', $1, true)", [WORKSPACE_A]);
+        await client.query("COMMIT");
+
+        await expect(
+          client.query(`SELECT id FROM flows`),
+          "flows' old NULLIF guard converted this leftover '' into NULL (excluded, not an error) -- the fail-closed rewrite must remove that too",
+        ).rejects.toThrow(/invalid input syntax for type uuid/);
+      } finally {
+        client.release();
+      }
+    } finally {
+      await recycled.end();
+    }
+  });
+
+  it("uses one identical predicate across exactly 23 workspace_isolation policies", async () => {
+    const { rows } = await fresh.query<{ qual: string }>(
+      `SELECT qual FROM pg_policies WHERE policyname = 'workspace_isolation'`,
+    );
+    // Phase 12 (WRK-05/WRK-06, D-09, migration 0053) adds the 23rd:
+    // flow_segment_sweep_checkpoint, fail-closed from birth (never carried
+    // the pre-0044 NULLIF-guarded form this file's other tests guard against).
+    expect(rows, "expected exactly 23 workspace_isolation policies in the catalog").toHaveLength(23);
+
+    const distinctQuals = new Set(rows.map((r) => r.qual));
+    expect(
+      distinctQuals.size,
+      `expected one shared predicate across all 23 policies, found ${distinctQuals.size} distinct forms: ${[...distinctQuals].join(" | ")}`,
+    ).toBe(1);
+  });
+
+  it("never uses the null-tolerating NULLIF guard, asserted from the catalog (prohibition P2)", async () => {
+    const { rows } = await fresh.query<{ tablename: string; qual: string; with_check: string }>(
+      `SELECT tablename, qual, with_check FROM pg_policies WHERE policyname = 'workspace_isolation'`,
+    );
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row.qual, `${row.tablename}'s USING clause must not use NULLIF`).not.toMatch(/NULLIF/i);
+      expect(row.with_check, `${row.tablename}'s WITH CHECK clause must not use NULLIF`).not.toMatch(/NULLIF/i);
+    }
+  });
+
+  it("scopes every workspace_isolation policy to an explicit, non-PUBLIC role", async () => {
+    // node-postgres does not register a default array parser for `name[]`
+    // (pg_policies.roles' actual column type), so `roles` would otherwise
+    // come back as the raw `'{public}'`-style text literal instead of a
+    // parsed JS array. Computing the two booleans in SQL sidesteps that
+    // entirely -- `= ANY(roles)` and `array_length` work directly against
+    // the array value inside Postgres, no client-side array parsing needed.
+    const { rows } = await fresh.query<{
+      tablename: string;
+      roleCount: number | null;
+      appliesToPublic: boolean;
+    }>(
+      `SELECT tablename,
+              array_length(roles, 1) AS "roleCount",
+              ('public' = ANY(roles)) AS "appliesToPublic"
+         FROM pg_policies WHERE policyname = 'workspace_isolation'`,
+    );
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row.roleCount, `${row.tablename}'s workspace_isolation policy has an empty roles array`).toBeGreaterThan(0);
+      expect(
+        row.appliesToPublic,
+        `${row.tablename}'s workspace_isolation policy must not apply to PUBLIC`,
+      ).toBe(false);
+    }
+  });
+
 });

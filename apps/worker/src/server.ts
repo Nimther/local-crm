@@ -1,6 +1,10 @@
 import "./load-env.js";
-import type { Worker } from "bullmq";
-import { buildRedisConnectionOptions, createRedisConnection } from "./queues/connection.js";
+import type { Redis } from "ioredis";
+import type { Job, Worker } from "bullmq";
+import { scrubbedConsole } from "@mega-crm/redaction";
+import { attachSharedErrorListeners, buildRedisConnectionOptions, createRedisConnection } from "@mega-crm/queue-core";
+import { closeTrackedQueues } from "./queues/queue-registry.js";
+import { isTerminalJobFailure, writeDeadLetterOnTerminalFailure } from "./queues/dead-letter/dead-letter-writer.js";
 import { createEventsIngestWorker } from "./queues/events-ingest.worker.js";
 import { createImportsCsvWorker } from "./queues/imports-csv.worker.js";
 import { createEmailBroadcastWorker } from "./queues/email-broadcast.worker.js";
@@ -13,7 +17,10 @@ import { createFlowRunAdvanceWorker } from "./queues/flows/flow-run-advance.work
 import { createFlowReconciliationWorker } from "./queues/flows/flow-reconciliation.worker.js";
 import { createFlowTriggerEvaluatorWorker } from "./queues/flows/flow-trigger-evaluator.worker.js";
 import { createFlowSegmentSweepWorker } from "./queues/flows/flow-segment-sweep.worker.js";
+import { createFlowSegmentSweepFlowWorker } from "./queues/flows/flow-segment-sweep-flow.worker.js";
 import { createFlowEnrollExistingWorker } from "./queues/flows/flow-enroll-existing.worker.js";
+import { createPartitionMaintenanceWorker } from "./queues/partition-maintenance.worker.js";
+import { createSendReconcilerWorker } from "./queues/send-reconciler.worker.js";
 
 /**
  * The worker process's runtime handle: a standalone shared ioredis
@@ -41,6 +48,63 @@ export interface WorkerRuntime {
 }
 
 /**
+ * Phase 12 (WRK-07): the shutdown ordering, factored out of `buildWorker()`
+ * so it is testable without constructing all sixteen production workers
+ * (`graceful-shutdown.test.ts` drives this directly against a handful of
+ * real, test-scoped `Worker`s/`Queue`s).
+ *
+ * Order matters: every registered `Worker` closes FIRST (draining any
+ * in-flight job to completion, BullMQ's own default), THEN every tracked
+ * long-lived `Queue` handle (`queue-registry.ts`) closes, and ONLY THEN does
+ * the shared connection disconnect. A producer `Queue` close racing a
+ * still-draining `Worker` could drop an enqueue the worker was mid-making;
+ * closing workers first removes that race entirely. Idempotent: calling
+ * this twice is safe -- `closeTrackedQueues()` drains its own registry
+ * before closing, so a second call has nothing left to close, and BullMQ's
+ * own `Worker.close()` and `Redis.disconnect()` both tolerate being called
+ * more than once.
+ */
+export async function closeWorkerRuntime(workers: Worker[], connection: Redis): Promise<void> {
+  await Promise.all(workers.map((worker) => worker.close()));
+  await closeTrackedQueues();
+  connection.disconnect();
+}
+
+/**
+ * Phase 12 (WRK-08/WRK-10): attaches the shared error/failed listener over
+ * the FULL worker array handed to it, rather than at each factory's own
+ * construction site. Factored out of `buildWorker()` so
+ * `shared-error-listener.test.ts` can drive it directly against a handful
+ * of real, test-scoped `Worker`s without constructing all sixteen
+ * production workers (the same testability reasoning as
+ * `closeWorkerRuntime` above).
+ *
+ * `onTerminalFailure` composes the terminal-vs-mid-retry gate
+ * (`isTerminalJobFailure`) with the dead-letter writer explicitly, even
+ * though the writer re-checks the same gate internally -- a mid-retry
+ * failure must never reach the writer at all, not merely be filtered inside
+ * it, so the composition is visible at the call site that wires the two
+ * together.
+ *
+ * Attaching over the array (not per-factory) is deliberate: the array is
+ * the exhaustive registry of every worker this process runs, so a worker
+ * added to it later can never be forgotten the way a per-factory call site
+ * could be if a future author simply forgot to add it to a new factory.
+ */
+export function attachSharedListeners(workers: Worker[]): void {
+  const onTerminalFailure = (job: Job | undefined, err: Error, queueName: string): Promise<void> | undefined => {
+    if (!job || !isTerminalJobFailure(job)) {
+      return undefined;
+    }
+    return writeDeadLetterOnTerminalFailure(job, err, queueName);
+  };
+
+  for (const worker of workers) {
+    attachSharedErrorListeners(worker, worker.name, { onTerminalFailure });
+  }
+}
+
+/**
  * Assembles the worker runtime: one shared Redis connection plus the
  * events:ingest (EVNT-02/EVNT-03) and imports:csv (CONT-02) BullMQ Workers.
  * No HTTP listener; this is a long-running background process, not a
@@ -51,6 +115,19 @@ export async function buildWorker(): Promise<WorkerRuntime> {
   const redisUrl = process.env.REDIS_URL;
   if (!redisUrl) {
     throw new Error("REDIS_URL is required for apps/worker to start");
+  }
+
+  // Phase 10 (SEC-01/SEC-02, P3): the worker is the ONLY process that may
+  // hold this credential -- apps/api/src/env.ts's schema deliberately does
+  // not declare SCAN_DATABASE_URL at all, which is the structural half of
+  // the "API process holds neither scan-role credentials nor membership"
+  // proof. Fail fast here rather than let the first cross-workspace scan
+  // throw lazily deep inside a BullMQ job.
+  const scanDatabaseUrl = process.env.SCAN_DATABASE_URL;
+  if (!scanDatabaseUrl) {
+    throw new Error(
+      "SCAN_DATABASE_URL is required for apps/worker to start -- cross-workspace scans connect as the dedicated least-privilege mega_crm_scan role"
+    );
   }
 
   // 04-16 gap closure: the send workers registered below (email-broadcast,
@@ -106,18 +183,39 @@ export async function buildWorker(): Promise<WorkerRuntime> {
     // control + the one-active-run guard, and creates version-pinned runs.
     createFlowTriggerEvaluatorWorker(buildRedisConnectionOptions(redisUrl)),
     // FLOW-02 (06-08): the segment-entry periodic bulk-diff sweep (D-02b
-    // safety net).
+    // safety net) -- discovery half, enqueues one bounded walk job per flow.
     createFlowSegmentSweepWorker(buildRedisConnectionOptions(redisUrl)),
+    // WRK-05/WRK-06 (12-06): the sweep's bounded, checkpointed, resumable
+    // per-flow walk -- pages on contacts.id under a per-page statement
+    // timeout, committing its resume cursor in the same transaction as
+    // that page's enrollment work, so a kill between pages is exactly
+    // resumable by construction.
+    createFlowSegmentSweepFlowWorker(buildRedisConnectionOptions(redisUrl)),
     // FLOW-02/D-04 (06-08): the publish route's enroll-existing resumable
     // batch, fired once per publish when the marketer chooses to back-fill
     // current segment members.
     createFlowEnrollExistingWorker(buildRedisConnectionOptions(redisUrl)),
+    // DB-01/DB-02 (09-02): keeps the rolling monthly partition horizon for
+    // `events`/`send_events` self-maintaining (daily 03:00 UTC job-scheduler
+    // tick plus one immediate run per boot) and writes the
+    // `partition_maintenance_runs` health row the API-side watchdog
+    // (`apps/api/src/modules/ops/partition-watchdog.ts`, started in a
+    // DIFFERENT process by this plan's task 3) reads.
+    createPartitionMaintenanceWorker(buildRedisConnectionOptions(redisUrl)),
+    // DLV-03 (11-03): the classification-only reconciler -- discovers
+    // `reconciling` rows across every tenant (cross-workspace scan role),
+    // claims each one exclusively per-tenant, and resolves it to `sent`
+    // from webhook evidence already on disk. Never calls SendGrid (D-01).
+    createSendReconcilerWorker(buildRedisConnectionOptions(redisUrl)),
   ];
 
-  const close = async (): Promise<void> => {
-    await Promise.all(workers.map((worker) => worker.close()));
-    connection.disconnect();
-  };
+  // Phase 12 (WRK-08/WRK-10): attach the shared error/failed listener,
+  // wired to the dead-letter writer, over the FULL worker array immediately
+  // after it is built -- see attachSharedListeners's own doc comment above
+  // for why this happens over the array rather than per-factory.
+  attachSharedListeners(workers);
+
+  const close = (): Promise<void> => closeWorkerRuntime(workers, connection);
 
   return { connection, workers, close };
 }
@@ -126,12 +224,12 @@ async function main(): Promise<void> {
   const runtime = await buildWorker();
 
   const shutdown = (signal: NodeJS.Signals) => {
-    console.log(`apps/worker received ${signal}, shutting down gracefully`);
+    scrubbedConsole.log(`apps/worker received ${signal}, shutting down gracefully`);
     runtime
       .close()
       .then(() => process.exit(0))
       .catch((err) => {
-        console.error("apps/worker shutdown error", err);
+        scrubbedConsole.error("apps/worker shutdown error", err);
         process.exit(1);
       });
   };
@@ -139,15 +237,15 @@ async function main(): Promise<void> {
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
 
-  console.log(
-    `apps/worker started (${runtime.workers.length} BullMQ worker(s) registered: events:ingest, imports:csv, email-broadcast, email-triggered, campaign-kickoff, campaign-scheduler, webhook-events, analytics-reconciliation, flow-run-advance, flow-reconciliation, flow-trigger-evaluator, flow-segment-sweep, flow-enroll-existing)`
+  scrubbedConsole.log(
+    `apps/worker started (${runtime.workers.length} BullMQ worker(s) registered: events:ingest, imports:csv, email-broadcast, email-triggered, campaign-kickoff, campaign-scheduler, webhook-events, analytics-reconciliation, flow-run-advance, flow-reconciliation, flow-trigger-evaluator, flow-segment-sweep, flow-segment-sweep-flow, flow-enroll-existing, partition-maintenance, send-reconciler)`
   );
 }
 
 const isDirectRun = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
 if (isDirectRun) {
   main().catch((err) => {
-    console.error(err);
+    scrubbedConsole.error(err);
     process.exitCode = 1;
   });
 }

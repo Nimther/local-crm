@@ -6,6 +6,7 @@ import { encryptTenantSecret } from "@mega-crm/kms";
 import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool } from "../../test/db-fixture.js";
 import { processSendJob, type SendJobResult } from "../send-dispatch.js";
 import { verifyUnsubscribeToken, type SendGridMailSendRequest, type SendTenantMailResult } from "@mega-crm/delivery-core";
+import { insertFixtureOrganization } from "../../test/failure-fixtures.js";
 
 /**
  * send-dispatch.ts's shared `processSendJob` (SEND-01/05/06/07, SUBS-03,
@@ -53,13 +54,11 @@ describe("send-dispatch.ts processSendJob (SEND-01/05/06/07, SUBS-03, D-12)", ()
     };
   }
 
+  // 10-09 (SEC-05): delegates to the mega_crm_auth-backed INSERT in
+  // failure-fixtures.ts instead of duplicating it -- mega_crm_app holds
+  // only SELECT on organization post-migration-0045.
   async function freshWorkspaceId(nameSeed: string): Promise<string> {
-    const slug = `${nameSeed}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const { rows } = await pool.query<{ id: string }>(
-      `INSERT INTO organization (name, slug) VALUES ($1, $2) RETURNING id`,
-      [`${nameSeed} Co`, slug]
-    );
-    return rows[0].id;
+    return insertFixtureOrganization(nameSeed);
   }
 
   // workspace_sendgrid_keys/segments/campaigns/contacts all carry ENABLE +

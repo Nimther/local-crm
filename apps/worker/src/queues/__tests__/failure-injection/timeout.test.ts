@@ -11,6 +11,7 @@ import {
   freshWorkspaceId,
   sendsRowCountFor,
   sendsStatusFor,
+  sendsTimingFor,
   throwingSendMail,
 } from "../../../test/failure-fixtures.js";
 
@@ -19,20 +20,17 @@ import {
  *
  * Reproduce with `npm run failure:timeout` from the repo root.
  *
- * What this asserts is the chain that runs TODAY, deliberately. There is no
- * AbortController in packages/delivery-core/src/send-mail.ts yet, so a timeout
- * and a connection reset are indistinguishable to send-dispatch.ts: both are
- * simply a rejected promise. What the injected error models is therefore the
- * SHAPE Phase 11's timeout will throw, not a mechanism that exists now.
- *
- * The chain: rejection leaves the claim committed by unit 1 stranded at
- * `dispatching` -> BullMQ redelivers -> claimCampaignSend's interrupted branch
- * intercepts it before any second send attempt -> terminal status `failed`.
- *
- * That last step is the pre-Phase-11 baseline this harness exists to protect,
- * and it is asserted literally rather than aspirationally. A harness that
- * asserted the `reconciling` state Phase 11 will introduce would be red from
- * birth, and a permanently-red harness gets deleted rather than fixed.
+ * Phase 11 (11-06, D-10): `classifyTransportError` now classifies this throw
+ * INLINE, inside `processSendJob` itself -- no redelivery required. An
+ * `AbortError`/`TimeoutError` falls through the classifier's fail-closed
+ * default (`ambiguous`, never `pre_connection_retryable`), so the FIRST call
+ * to `processSendJob` already returns `{ outcome: "reconciling" }` and writes
+ * `reconciling` directly. This supersedes the pre-11-06 baseline, where the
+ * throw propagated out of `processSendJob` entirely and a SECOND
+ * (redelivered) call was needed to observe `claimCampaignSend`'s interrupted
+ * branch resolve the stranded claim -- that two-call shape is now the
+ * behavior of a genuinely crashed worker (never even reaching the catch
+ * block), not of a rejection this process is alive to observe.
  */
 describe("failure injection: SendGrid timeout (QG-06)", () => {
   let pool: Pool;
@@ -58,33 +56,37 @@ describe("failure injection: SendGrid timeout (QG-06)", () => {
    */
   const timeoutError = new DOMException("The operation was aborted", "AbortError");
 
-  it("strands the claim at dispatching, then the redelivery resolves it to failed without a second attempt", async () => {
+  it("classifies the timeout as ambiguous inline and resolves to reconciling with exactly one send attempt", async () => {
     const workspaceId = await freshWorkspaceId(pool, "failure-timeout");
     await connectFixtureSendgridKey(workspaceId);
     const campaignId = await createFixtureCampaign(workspaceId);
     const contactId = await createFixtureContact(workspaceId);
 
-    // --- the timeout itself -------------------------------------------------
     const throwing = throwingSendMail(timeoutError);
-    await expect(
-      processSendJob(
-        { workspaceId, campaignId, kind: "campaign", contactId },
-        { sendMail: throwing.fn, redisClient },
-      ),
-      "the abort must propagate out of processSendJob with its identity intact",
-    ).rejects.toBe(timeoutError);
+    const result = await processSendJob(
+      { workspaceId, campaignId, kind: "campaign", contactId },
+      { sendMail: throwing.fn, redisClient },
+    );
 
     expect(throwing.callCount(), "the send was attempted exactly once before timing out").toBe(1);
+    expect(result.outcome).toBe("reconciling");
+    if (result.outcome !== "reconciling") {
+      throw new Error("test assertion failure: expected outcome 'reconciling'");
+    }
 
-    // --- the claim is stranded ---------------------------------------------
-    // This is what a real mid-flight failure leaves behind: unit 1 committed
-    // the claim, unit 3 never ran.
     expect(
       await sendsStatusFor(workspaceId, campaignId, contactId),
-      "a rejection after the claim commit must leave the row at 'dispatching'",
-    ).toBe("dispatching");
+      "an ambiguous throw must write 'reconciling' directly, never leave the row stranded at 'dispatching'",
+    ).toBe("reconciling");
 
-    // --- BullMQ redelivers --------------------------------------------------
+    const timing = await sendsTimingFor(result.sendId, workspaceId);
+    expect(timing?.dispatchedAt, "dispatch timing must be recorded even on the ambiguous branch").not.toBeNull();
+    expect(timing?.dispatchDurationMs).not.toBeNull();
+    expect(timing?.reconcilingSince).not.toBeNull();
+
+    // --- BullMQ redelivers (e.g. a crash strictly between this write and
+    // job completion) -- the claim-gate's "skipped" branch, not a second
+    // SendGrid call, must intercept it.
     const counting = countingSendMail(202);
     const redelivered = await processSendJob(
       { workspaceId, campaignId, kind: "campaign", contactId },
@@ -93,14 +95,11 @@ describe("failure injection: SendGrid timeout (QG-06)", () => {
 
     expect(
       counting.callCount(),
-      "the interrupted branch must intercept the redelivery before any second SendGrid call — this is the duplicate-email window",
+      "a redelivered job for a 'reconciling' row must never call SendGrid again — this is the duplicate-email window",
     ).toBe(0);
-    expect(redelivered.outcome).toBe("failed");
+    expect(redelivered.outcome).toBe("skipped");
 
-    // Phase 11 will replace this terminal state with a reconciling one, at
-    // which point THIS assertion is the thing that must be updated
-    // deliberately. Until then, `failed` is what the code produces.
-    expect(await sendsStatusFor(workspaceId, campaignId, contactId)).toBe("failed");
+    expect(await sendsStatusFor(workspaceId, campaignId, contactId)).toBe("reconciling");
     expect(
       await sendsRowCountFor(workspaceId, campaignId, contactId),
       "the redelivery must resolve the existing row, not insert a second one",

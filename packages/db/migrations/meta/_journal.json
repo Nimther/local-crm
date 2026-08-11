@@ -267,6 +267,125 @@
       "when": 1783685963479,
       "tag": "0037_workspace_daily_rollup",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1783685963480,
+      "tag": "0038_partition_catchup_and_maintenance_runs",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1783685963481,
+      "tag": "0039_partition_relocation_admin_scan",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1783685963482,
+      "tag": "0040_partition_maintenance_runs_seed",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1783685963483,
+      "tag": "0041_scan_role_bootstrap",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1783685963484,
+      "tag": "0042_scan_role_grants_and_policies",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1783685963485,
+      "tag": "0043_retire_admin_scan_guc_policies",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1783685963486,
+      "tag": "0044_workspace_isolation_fail_closed",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1783685963487,
+      "tag": "0045_auth_role_grants",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1783685963488,
+      "tag": "0046_api_key_scopes_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1783685963489,
+      "tag": "0047_send_status_reconciling",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1783685963490,
+      "tag": "0048_send_status_unknown",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1783685963491,
+      "tag": "0049_send_reconciliation_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1783685963492,
+      "tag": "0050_send_reconciler_runs",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1783685963493,
+      "tag": "0051_sends_campaign_ambiguous_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1783685963494,
+      "tag": "0052_sends_reconciling_status_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1783685963495,
+      "tag": "0053_flow_segment_sweep_checkpoint",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1783685963496,
+      "tag": "0054_dead_letter_jobs",
+      "breakpoints": true
     }
   ]
 }

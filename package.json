@@ -10,16 +10,20 @@
     "packages/*"
   ],
   "scripts": {
-    "predev": "node scripts/check-env.mjs && node scripts/migrate-dev.mjs",
+    "predev": "node scripts/check-env.mjs && node scripts/ensure-db-roles.mjs && node scripts/migrate-dev.mjs",
     "dev": "concurrently -n api,web,worker -c blue,green,yellow \"npm run dev -w apps/api\" \"npm run dev -w apps/web\" \"npm run dev -w apps/worker\"",
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "lint": "eslint . --max-warnings=0",
     "lint:floor": "eslint . --format json | node scripts/check-lint-file-floor.mjs",
     "lint:migrations": "node scripts/lint-migrations.mjs",
+    "lint:session-state": "node scripts/lint-session-state.mjs",
     "verify:redis-config": "node scripts/verify-redis-config.mjs",
     "db:generate": "npm run db:generate -w packages/db",
     "db:migrate": "npm run db:migrate -w packages/db",
+    "db:roles": "node scripts/ensure-db-roles.mjs",
+    "relocate:default-partition-rows": "npm run relocate:default-partition-rows -w packages/db",
+    "db:audit-sends-history": "npm run db:audit-sends-history -w packages/db",
     "failure:429": "vitest run --root apps/worker src/queues/__tests__/failure-injection/rate-limit-429.test.ts",
     "failure:timeout": "vitest run --root apps/worker src/queues/__tests__/failure-injection/timeout.test.ts",
     "failure:reset": "vitest run --root apps/worker src/queues/__tests__/failure-injection/connection-reset.test.ts",
@@ -27,8 +31,14 @@
     "test:e2e": "npm run test:e2e -w apps/web",
     "coverage": "vitest run --coverage --testTimeout=60000",
     "failure:sigkill": "vitest run --root apps/worker src/queues/__tests__/failure-injection/sigkill.test.ts",
+    "failure:crash-post-accept": "vitest run --root apps/worker src/queues/__tests__/failure-injection/crash-post-accept.test.ts",
+    "failure:crash-pre-result-write": "vitest run --root apps/worker src/queues/__tests__/failure-injection/crash-pre-result-write.test.ts",
+    "failure:reconciler-race": "vitest run --root apps/worker src/queues/__tests__/failure-injection/reconciler-retry-race.test.ts",
     "failure:redis-restart": "vitest run --root apps/worker src/queues/__tests__/failure-injection/redis-restart.test.ts",
-    "failure:all": "npm run failure:429 && npm run failure:timeout && npm run failure:reset && npm run failure:sigkill && npm run failure:redis-restart",
+    "failure:segment-sweep-resume": "vitest run --root apps/worker src/queues/__tests__/failure-injection/segment-sweep-kill-resume.test.ts",
+    "failure:tenant-fairness": "vitest run --root apps/worker src/queues/__tests__/failure-injection/tenant-fairness.test.ts",
+    "failure:all": "npm run failure:429 && npm run failure:timeout && npm run failure:reset && npm run failure:sigkill && npm run failure:crash-post-accept && npm run failure:crash-pre-result-write && npm run failure:reconciler-race && npm run failure:redis-restart && npm run failure:segment-sweep-resume && npm run failure:tenant-fairness",
+    "loadtest:tenant-rps": "vitest run --root apps/worker src/queues/__tests__/loadtest/tenant-rps-sustained.test.ts",
     "coverage:gate": "node scripts/coverage-gate.mjs",
     "coverage:ratchet": "node scripts/coverage-ratchet.mjs",
     "check:root-hygiene": "node scripts/check-root-hygiene.mjs"
@@ -40,7 +50,9 @@
     "eslint-plugin-import-x": "^4.17.1",
     "eslint-plugin-no-only-tests": "^3.4.0",
     "eslint-plugin-react-hooks": "^7.1.1",
+    "pg": "8.22.0",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.65.0"
+    "typescript-eslint": "^8.65.0",
+    "vitest": "4.1.9"
   }
 }

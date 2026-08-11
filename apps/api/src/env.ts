@@ -3,6 +3,14 @@ import { z } from "zod";
 export const envSchema = z
   .object({
     DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
+    // 10-09 (SEC-05, D-04): better-auth's drizzleAdapter pool connects as the
+    // dedicated `mega_crm_auth` login role on its OWN DSN, not `mega_crm_app`
+    // -- the secret-bearing auth tables (session/account/verification) are
+    // reachable only through this credential as of migration 0045. Deliberately
+    // NO cross-workspace-scan variable here -- plan 10-01's P3 negative test
+    // (apps/api/src/__tests__/env-schema.test.ts) asserts this schema's
+    // source never names that variable.
+    AUTH_DATABASE_URL: z.string().min(1, "AUTH_DATABASE_URL is required"),
     // 02-05: BullMQ queue backend (event ingestion + CSV import); the API
     // refuses to boot without a configured Redis, same pattern as DATABASE_URL.
     REDIS_URL: z.string().min(1, "REDIS_URL is required"),
@@ -15,6 +23,16 @@ export const envSchema = z
     // reset, invite) -- structurally separate from any tenant's BYO key.
     PLATFORM_SENDGRID_API_KEY: z.string().min(1, "PLATFORM_SENDGRID_API_KEY is required"),
     PLATFORM_MAIL_FROM: z.string().email("PLATFORM_MAIL_FROM must be a valid email address"),
+    // 09-02 (DB-02, D-01): the address the partition watchdog emails when
+    // the maintenance job stops, when the partition buffer drops below the
+    // threshold, or when a DEFAULT partition holds rows -- it is the only
+    // push channel the platform has before Phase 15's real alerting
+    // arrives, so a missing value must fail the API boot rather than
+    // silently disable the dead-man's switch. Same email validator shape as
+    // PLATFORM_MAIL_FROM so a typo fails at boot rather than at first
+    // alert. Deliberately no `.optional()` and no `.default(` -- a default
+    // would mean alerts going nowhere while every check reports configured.
+    OPERATOR_ALERT_EMAIL: z.string().email("OPERATOR_ALERT_EMAIL must be a valid email address"),
     // 01-05 / RESEARCH.md Pattern 3 + Pitfall 3: envelope encryption of the
     // tenant SendGrid key. "local" is a dev-only static-KEK provider;
     // "aws" is the real KMS path for staging/prod (KMS_KEK_ID required).
@@ -29,6 +47,12 @@ export const envSchema = z
       .string()
       .min(32, "UNSUBSCRIBE_TOKEN_SECRET must be at least 32 characters"),
     PUBLIC_APP_URL: z.string().url(),
+    // 10-11 (SEC-07): the SendGrid Event Webhook's signature-timestamp
+    // replay/staleness window, in seconds -- overridable without a deploy.
+    // Same coercion shape as API_PORT. Default matches
+    // signature-verify.ts's DEFAULT_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS;
+    // keep the two in sync if either changes.
+    WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS: z.coerce.number().int().positive().default(600),
   })
   .superRefine((val, ctx) => {
     // Boot-time guard (RESEARCH.md Pitfall 3 / Open Question 2): the
@@ -62,6 +86,20 @@ export const envSchema = z
         code: z.ZodIssueCode.custom,
         message: "PUBLIC_APP_URL must use https when NODE_ENV=production (SendGrid rejects non-https webhook URLs)",
         path: ["PUBLIC_APP_URL"],
+      });
+    }
+    // 10-09 (SEC-12): the base field above only enforces min(16) -- fine for
+    // development/test, where a short fixture secret is convenient and the
+    // cost of guessing it is zero. Production sessions are signed with this
+    // secret, so a weak value there silently weakens every session in the
+    // system; the floor is gated the same NODE_ENV-conditional way as the
+    // KMS_PROVIDER=local and PUBLIC_APP_URL guards above, so
+    // development/test are unaffected.
+    if (val.NODE_ENV === "production" && val.BETTER_AUTH_SECRET.length < 32) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "BETTER_AUTH_SECRET must be at least 32 characters when NODE_ENV=production",
+        path: ["BETTER_AUTH_SECRET"],
       });
     }
   });

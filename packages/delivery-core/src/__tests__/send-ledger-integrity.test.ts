@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { Pool } from "pg";
+import { Pool } from "pg";
 import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
+import { getAuthTestDatabaseUrl } from "@mega-crm/test-support";
 import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool } from "../test/db-fixture.js";
 import { dispatchSendGate, recordSendResult, recordExcluded } from "../send-ledger.js";
 
@@ -20,6 +21,10 @@ import { dispatchSendGate, recordSendResult, recordExcluded } from "../send-ledg
  */
 describe("recordExcluded ledger integrity (CR-07, SEND-04/SEND-06)", () => {
   let pool: Pool;
+  // 10-09 (SEC-05): mega_crm_app (`pool` above) holds only SELECT on
+  // organization post-migration-0045 -- seeding a fixture workspace row
+  // needs the mega_crm_auth-backed connection instead.
+  let authPool: Pool | undefined;
 
   beforeAll(async () => {
     await ensureTestDbMigrated();
@@ -29,11 +34,17 @@ describe("recordExcluded ledger integrity (CR-07, SEND-04/SEND-06)", () => {
 
   afterAll(async () => {
     await pool.end();
+    await authPool?.end();
   });
+
+  function getAuthTestPool(): Pool {
+    if (!authPool) authPool = new Pool({ connectionString: getAuthTestDatabaseUrl() });
+    return authPool;
+  }
 
   async function freshWorkspaceId(nameSeed: string): Promise<string> {
     const slug = `${nameSeed}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const { rows } = await pool.query<{ id: string }>(
+    const { rows } = await getAuthTestPool().query<{ id: string }>(
       `INSERT INTO organization (name, slug) VALUES ($1, $2) RETURNING id`,
       [`${nameSeed} Co`, slug]
     );

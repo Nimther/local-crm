@@ -44,9 +44,11 @@ export default defineConfig({
       "packages/flows-core/vitest.config.ts",
       "packages/test-support/vitest.config.ts",
       "packages/kms/vitest.config.ts",
+      "packages/redaction/vitest.config.ts",
       "packages/tenant-context/vitest.config.ts",
       "packages/segments-core/vitest.config.ts",
       "packages/shared-schemas/vitest.config.ts",
+      "scripts/vitest.config.ts",
     ],
     coverage: {
       provider: "v8",

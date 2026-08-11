@@ -1,9 +1,8 @@
-import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { FastifyInstance } from "fastify";
+import { z } from "zod";
 import { createContactSchema, updateContactSchema, contactListQuerySchema } from "@mega-crm/shared-schemas";
-import { toFetchHeaders } from "../../middleware/role-guard.js";
 import { withTenant } from "../../middleware/tenant-context.js";
-import { findActiveWorkspaceBySlug, type ActiveWorkspace } from "../tenancy/workspace-lookup.js";
-import { getCallerRoles } from "../tenancy/member-roles.js";
+import { resolveWorkspaceMember } from "../tenancy/resolve-workspace-member.js";
 import {
   ContactConflictError,
   ContactValidationError,
@@ -17,6 +16,10 @@ import {
   type ContactRow,
 } from "./contact.repository.js";
 import { listPropertyRegistry } from "./property-registry.js";
+
+const contactEventsQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).optional(),
+});
 
 function toContactEventResponse(row: ContactEventRow) {
   return {
@@ -49,34 +52,6 @@ function toContactResponse(row: ContactRow) {
 }
 
 /**
- * Resolves `:slug` to a workspace AND confirms the caller is a member --
- * ANY throw from getCallerRoles (unauthenticated, unknown slug, non-member)
- * maps to the SAME 404 a nonexistent workspace returns, mirroring
- * sendgrid-key.ts's GET route so contact routes cannot be used as a
- * workspace-enumeration oracle (T-02-01-04).
- */
-async function resolveWorkspaceMember(
-  request: FastifyRequest,
-  reply: FastifyReply,
-  slug: string
-): Promise<ActiveWorkspace | null> {
-  const workspace = await findActiveWorkspaceBySlug(slug);
-  if (!workspace) {
-    await reply.code(404).send({ error: "Workspace not found" });
-    return null;
-  }
-
-  try {
-    await getCallerRoles(toFetchHeaders(request), slug);
-  } catch {
-    await reply.code(404).send({ error: "Workspace not found" });
-    return null;
-  }
-
-  return workspace;
-}
-
-/**
  * Session-authed contact CRUD (CONT-01, CONT-05, SUBS-01). Ordinary
  * workspace membership is sufficient -- contact management is not an
  * elevated-role action, unlike SendGrid-key connect or member-role changes.
@@ -90,8 +65,9 @@ export async function registerContactsRoutes(fastify: FastifyInstance): Promise<
       return reply.code(400).send({ error: parsed.error.flatten() });
     }
 
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     const result = await withTenant(workspace.id, () => listContacts(parsed.data));
     return reply.send({
@@ -109,8 +85,9 @@ export async function registerContactsRoutes(fastify: FastifyInstance): Promise<
       return reply.code(400).send({ error: parsed.error.flatten() });
     }
 
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     try {
       const created = await withTenant(workspace.id, () => createContact(parsed.data));
@@ -128,8 +105,9 @@ export async function registerContactsRoutes(fastify: FastifyInstance): Promise<
 
   fastify.get("/api/workspaces/:slug/contacts/:id", async (request, reply) => {
     const { slug, id } = request.params as { slug: string; id: string };
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     const contact = await withTenant(workspace.id, () => getContact(id));
     if (!contact) {
@@ -145,11 +123,15 @@ export async function registerContactsRoutes(fastify: FastifyInstance): Promise<
   // workspace) AND by RLS on the `events` table underneath (T-02-08-01).
   fastify.get("/api/workspaces/:slug/contacts/:id/events", async (request, reply) => {
     const { slug, id } = request.params as { slug: string; id: string };
-    const query = request.query as { page?: string };
-    const page = query.page ? Math.max(1, Number(query.page) || 1) : 1;
+    const parsed = contactEventsQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      return reply.code(400).send({ error: parsed.error.flatten() });
+    }
+    const page = parsed.data.page ?? 1;
 
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     const contact = await withTenant(workspace.id, () => getContact(id));
     if (!contact) {
@@ -167,8 +149,9 @@ export async function registerContactsRoutes(fastify: FastifyInstance): Promise<
       return reply.code(400).send({ error: parsed.error.flatten() });
     }
 
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     try {
       const updated = await withTenant(workspace.id, () => updateContact(id, parsed.data));
@@ -191,8 +174,9 @@ export async function registerContactsRoutes(fastify: FastifyInstance): Promise<
   // powering the contact-form property editor's key autocomplete.
   fastify.get("/api/workspaces/:slug/property-registry", async (request, reply) => {
     const { slug } = request.params as { slug: string };
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     const items = await withTenant(workspace.id, () => listPropertyRegistry());
     return reply.send(items);
@@ -200,8 +184,9 @@ export async function registerContactsRoutes(fastify: FastifyInstance): Promise<
 
   fastify.delete("/api/workspaces/:slug/contacts/:id", async (request, reply) => {
     const { slug, id } = request.params as { slug: string; id: string };
-    const workspace = await resolveWorkspaceMember(request, reply, slug);
-    if (!workspace) return;
+    const resolved = await resolveWorkspaceMember(request, reply, slug);
+    if (!resolved) return;
+    const workspace = resolved.workspace;
 
     const deleted = await withTenant(workspace.id, () => deleteContact(id));
     if (!deleted) {
