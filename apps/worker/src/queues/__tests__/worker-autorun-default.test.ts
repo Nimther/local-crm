@@ -7,7 +7,9 @@ import {
   createCampaignSchedulerWorker,
   waitForCampaignSchedulerRegistration,
   getCampaignSchedulerKickoffQueueForTest,
+  findDueCampaignCandidates,
 } from "../campaign-scheduler.worker.js";
+import { seedDueCampaign, readDueCampaignState } from "../../test/failure-fixtures.js";
 import {
   createAnalyticsReconciliationWorker,
   waitForAnalyticsReconciliationRegistration,
@@ -252,7 +254,20 @@ describe("repeatable-tick worker autorun default (G-12-1, WRK-13)", () => {
     }
   });
 
-  it("campaign-scheduler: a stacked burst of identical tick jobs drains to zero waiting/failed without duplicated kickoff work", async () => {
+  it(
+    "campaign-scheduler: a stacked burst of identical tick jobs drains to zero waiting/failed without duplicated kickoff work",
+    async () => {
+    // G-12-3: arrange guard -- prove the scan is empty BEFORE seeding, so a
+    // due campaign left behind by an earlier file in this run can never make
+    // the "exactly one" assertion below pass for the wrong reason.
+    expect(await findDueCampaignCandidates()).toEqual([]);
+
+    const { workspaceId, campaignId } = await seedDueCampaign("burst-dedup");
+
+    const dueAfterSeed = await findDueCampaignCandidates();
+    expect(dueAfterSeed).toHaveLength(1);
+    expect(dueAfterSeed[0]).toMatchObject({ id: campaignId, workspaceId });
+
     const BURST_SIZE = 20;
     const connection = buildRedisConnectionOptions(redis.url);
     const queue = new Queue("campaign-scheduler", { connection });
@@ -295,10 +310,10 @@ describe("repeatable-tick worker autorun default (G-12-1, WRK-13)", () => {
 
       await waitForCampaignSchedulerRegistration(drainWorker);
 
-      // No duplicated downstream effect: this run's ephemeral test database
-      // has no campaign rows, so `findDueCampaignCandidates()` finds nothing
-      // due on any of the burst's ticks and the kickoff producer queue never
-      // receives a single job -- burst or no burst.
+      // G-12-3: the seeded campaign proves the dedup-bearing loop
+      // (campaign-scheduler.worker.ts:200-204) actually ran -- exactly one
+      // kickoff job across the five states, not the vacuous "zero because
+      // nothing was seeded" observation this case used to make.
       drainKickoffQueue = getCampaignSchedulerKickoffQueueForTest(drainWorker);
       const kickoffCounts = await drainKickoffQueue?.getJobCounts(
         "waiting",
@@ -307,7 +322,23 @@ describe("repeatable-tick worker autorun default (G-12-1, WRK-13)", () => {
         "completed",
         "failed"
       );
-      expect(kickoffCounts).toMatchObject({ waiting: 0, active: 0, delayed: 0, completed: 0, failed: 0 });
+      // Nothing consumes CAMPAIGN_KICKOFF_QUEUE in this test, so the single
+      // kickoff job sits in `waiting` and never completes -- assert the
+      // five-state SUM, not `completed` (contra 12-REVIEW.md WR-03).
+      const kickoffTotal =
+        (kickoffCounts?.waiting ?? 0) +
+        (kickoffCounts?.active ?? 0) +
+        (kickoffCounts?.delayed ?? 0) +
+        (kickoffCounts?.completed ?? 0) +
+        (kickoffCounts?.failed ?? 0);
+      expect(kickoffTotal).toBe(1);
+
+      const kickoffJob = await drainKickoffQueue?.getJob(campaignId);
+      expect(kickoffJob).toBeDefined();
+      expect(kickoffJob?.data).toEqual({ workspaceId, campaignId });
+
+      const seededState = await readDueCampaignState(workspaceId, campaignId);
+      expect(seededState.status).toBe("sending");
     } finally {
       // This test's own throwaway Redis (freshly started in `beforeEach`) is
       // stopped in `afterEach` regardless, but close every handle explicitly
@@ -317,5 +348,7 @@ describe("repeatable-tick worker autorun default (G-12-1, WRK-13)", () => {
       await kickoffQueue?.close();
       await drainKickoffQueue?.close();
     }
-  });
+    },
+    30_000
+  );
 });
