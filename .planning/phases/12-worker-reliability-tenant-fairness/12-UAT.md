@@ -1,29 +1,48 @@
 ---
-status: diagnosed
+status: testing
 phase: 12-worker-reliability-tenant-fairness
-source: 12-01-SUMMARY.md, 12-02-SUMMARY.md, 12-03-SUMMARY.md, 12-04-SUMMARY.md, 12-05-SUMMARY.md, 12-06-SUMMARY.md, 12-07-SUMMARY.md, 12-08-SUMMARY.md, 12-09-SUMMARY.md, 12-10-SUMMARY.md, 12-11-SUMMARY.md
+source: 12-01-SUMMARY.md, 12-02-SUMMARY.md, 12-03-SUMMARY.md, 12-04-SUMMARY.md, 12-05-SUMMARY.md, 12-06-SUMMARY.md, 12-07-SUMMARY.md, 12-08-SUMMARY.md, 12-09-SUMMARY.md, 12-10-SUMMARY.md, 12-11-SUMMARY.md, 12-12-SUMMARY.md, 12-13-SUMMARY.md, 12-VERIFICATION.md
 started: 2026-08-11T02:49:33Z
-updated: 2026-08-11T03:17:46Z
+updated: 2026-08-11T05:35:00Z
 ---
 
 ## Current Test
 
-[testing complete]
+number: 1
+name: Cold Start Smoke Test (re-run after G-12-1 fix)
+expected: |
+  Boot the worker process against the real development Redis instance that held the
+  originally-reported backlog (partition-maintenance: 107 waiting, and siblings) and watch
+  it for a few minutes. The five tick queues' waiting counts fall toward zero, `active`
+  events appear on each of the five, nothing lands in the failed set, and
+  partition-horizon/campaign-scan behavior is unaffected.
+awaiting: user response
 
 ## Tests
 
 ### 1. Cold Start Smoke Test
 expected: Kill any running worker/api processes. Clear ephemeral state (temp DBs, caches, lock files). Start the application from scratch. Both apps boot without errors, migrations 0053/0054 apply cleanly, repeatable schedulers register via upsertJobScheduler, and a primary check (health endpoint or basic API call) returns live data.
-result: issue
+result: pending
 reported: "Claude-run test. Boot itself clean: predev env check + migrations 0053/0054 applied (journal 53→55, all three new tables present, alert-state singleton seeded, RLS on checkpoint table), 16 workers registered, API on :4000 with all three watchdogs armed, web on :5173, GET /api/auth/get-session 200, guarded route structured 401, zero error-level log lines. BUT: the five repeatable-tick queues whose factories pass `autorun: options.autorun` (campaign-scheduler, analytics-reconcile, flow-reconciliation, partition-maintenance, send-reconciler) register their job schedulers correctly and then NEVER consume jobs — jobs pile up in wait (campaign-scheduler: 9, partition-maintenance: 107), zero 'active' events since 12-08 landed (21:17 Aug 10) for the three migrated queues; partition-maintenance/send-reconciler born broken (Phase 9/11). Exactly 16−11=5 workers have no blocked bzpopmin connection — their run loops never started."
 severity: blocker
+retest: |
+  Gap G-12-1 closed by plan 12-12 (conditional-spread autorun fix in all five factories;
+  code-verified + worker-autorun-default.test.ts 8/8 passing, full apps/worker 404/404).
+  Live re-test against the real dev Redis backlog was NOT performable from the executor's
+  isolated worktree — re-run this test to confirm live drain (plan 12-12 human-check D5).
 
 ### 2. Documentation Accuracy — Worker Reliability Sections
 expected: ARCHITECTURE.md has a section covering the tenant-fairness mechanism, the drain-budget derivation, and multi-instance safety stated precisely (registration idempotency is NOT execution exclusivity; single-instance deployment is an explicit v1.1 constraint). SPECIFICATION.md's worker-scheduling table, shutdown description and observability section record the same facts as-built. The prose must not overclaim multi-instance safety.
-result: issue
+result: pending
 reported: "Documentation is not fully accurate. SPECIFICATION.md §5.1/§5.2 presents all scheduled workers as operational, but the cold-start test proved that five workers register their schedulers yet never consume jobs because their run loops do not start. ARCHITECTURE.md's Forward-looking Phase 12 entry also says failed-job retention remains open, while SPECIFICATION.md §5.3 documents the implemented 7-day retention and durable Postgres DLQ. The tenant-fairness, drain-budget and single-instance wording itself is accurate, but the documents as a whole do not match the as-built runtime. Record this as a documentation gap."
 severity: major
 coverage_id: D5 (12-08)
+retest: |
+  Gap G-12-2 closed by plan 12-13. Verifier confirmed all four doc truths at line level
+  (ARCHITECTURE.md:229 forward-looking bullet reduced to the memory-ceiling item;
+  SPECIFICATION.md §5.1/§5.2 attribute consumption to worker-autorun-default.test.ts +
+  the G-12-1 BZPOPMIN diagnosis, and document the conditional-spread mechanism). Quick
+  human re-read to accept.
 
 ### 3. Tenant-scoped rate_limited deferral (12-01 D1)
 expected: A tenant-scoped rate_limited rejection defers only the offending job via job.moveToDelayed/DelayedError, never worker.rateLimit() — verified for both send lanes, including a two-workspace race proving the deferred tenant does not stall the other tenant's job.
@@ -265,12 +284,26 @@ result: pass
 source: automated
 coverage_id: D2 (12-11)
 
+### 43. Burst-absorption dedup assertion is non-vacuous (12-12 D4)
+expected: |
+  Decision needed (test-design gap, not a runtime uncertainty — VERIFICATION.md
+  behavior_unverified item + 12-REVIEW.md WR-03): the burst-absorption test's "without
+  duplicated side effects" assertion currently passes vacuously because the ephemeral test
+  DB has zero campaign rows. Either (a) seed one past-due `scheduled` campaign before
+  stacking the 20-job burst and assert the kickoff producer queue shows completed === 1
+  (not 0) across the burst, or (b) explicitly accept the underlying mechanism
+  (deterministic BullMQ jobId collision + FOR UPDATE SKIP LOCKED re-check, both
+  independently established elsewhere in this codebase) as sufficient without a dedicated
+  test. The "drains to zero without failures" half of D4 IS genuinely proven.
+result: pending
+coverage_id: D4 (12-12)
+
 ## Summary
 
-total: 42
+total: 43
 passed: 40
-issues: 2
-pending: 0
+issues: 0
+pending: 3
 skipped: 0
 blocked: 0
 
@@ -278,7 +311,8 @@ blocked: 0
 
 - gap_id: G-12-1
   truth: "Repeatable schedulers register via upsertJobScheduler AND their workers consume the scheduled tick jobs — scheduled campaigns kick off, analytics/flow/send reconciliation and partition maintenance actually run"
-  status: failed
+  status: resolved
+  resolved_by: "12-12 (conditional-spread autorun in all five factories; worker-autorun-default.test.ts 8/8; verified 12-VERIFICATION.md 2026-08-11). Live backlog-drain re-test tracked as test 1."
   reason: "User reported: five repeatable-tick workers (campaign-scheduler, analytics-reconcile, flow-reconciliation, partition-maintenance, send-reconciler) register schedulers but never process jobs; jobs accumulate in wait indefinitely (partition-maintenance: 107 waiting), no 'active' event ever emitted"
   severity: blocker
   test: 1
@@ -302,7 +336,8 @@ blocked: 0
 
 - gap_id: G-12-2
   truth: "ARCHITECTURE.md and SPECIFICATION.md record the worker-scheduling, retention and DLQ facts as-built, without contradicting each other or the runtime"
-  status: failed
+  status: resolved
+  resolved_by: "12-13 (ARCHITECTURE.md forward-looking bullet reduced to memory-ceiling item; SPECIFICATION.md §5.1/§5.2 rewritten to observed-consumption facts naming worker-autorun-default.test.ts; all four doc truths line-verified in 12-VERIFICATION.md 2026-08-11). Acceptance re-read tracked as test 2."
   reason: "User reported: SPECIFICATION.md §5.1/§5.2 presents all scheduled workers as operational while five never consume jobs (see G-12-1); ARCHITECTURE.md's Forward-looking Phase 12 entry says failed-job retention remains open while SPECIFICATION.md §5.3 documents the implemented 7-day retention and durable Postgres DLQ. Tenant-fairness, drain-budget and single-instance wording is accurate."
   severity: major
   test: 2

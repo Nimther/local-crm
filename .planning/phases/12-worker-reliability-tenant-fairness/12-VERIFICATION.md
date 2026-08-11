@@ -1,129 +1,147 @@
 ---
 phase: 12-worker-reliability-tenant-fairness
-verified: 2026-08-10T17:49:52Z
-status: passed
-score: 12/12 must-haves verified
-behavior_unverified: 0
+verified: 2026-08-11T05:24:47Z
+status: human_needed
+score: 15/16 must-haves verified
+behavior_unverified: 1
 overrides_applied: 0
+re_verification:
+  previous_status: passed
+  previous_score: 12/12
+  gaps_closed:
+    - "G-12-1: five repeatable-tick workers (campaign-scheduler, analytics-reconciliation, flow-reconciliation, partition-maintenance, send-reconciler) forwarded an undefined `autorun` key that clobbered BullMQ's own `autorun: true` default, silently disabling their run loops. All five now use a conditional-spread idiom that omits the key unless a caller supplies it, matching `flow-segment-sweep.worker.ts`'s unaffected shape. Verified in code (all five files read) and by a new regression suite (`worker-autorun-default.test.ts`, 8/8 passing) that constructs each factory with the exact one-argument production call shape and asserts the run loop starts and a queued job reaches 'active'."
+    - "G-12-2: ARCHITECTURE.md's forward-looking Phase 12 entry no longer claims queue retention is unshipped (it was shipped in plan 12-09); it now points at SPECIFICATION.md §5.3 and names only the memory-ceiling item as open. SPECIFICATION.md §5.1/§5.2 now document the autorun mechanism as-built, state that registration and consumption are separate facts, and attribute the sixteen-workers-operational claim to the regression test plus the G-12-1 runtime diagnosis rather than the boot log. Verified by reading both files' actual diffs against the plan's own verify commands, all of which pass."
+  gaps_remaining:
+    - "12-12's own D5 human-check (booting the worker process against the real development Redis instance that held the originally-reported backlog and observing live drain) was never performed — both 12-12 and 12-13 executors ran in isolated worktrees with no access to that environment. SPECIFICATION.md itself now explicitly records this as a separate, not-yet-performed step rather than presenting it as done."
+    - "The 12-12 burst-absorption test's 'without duplicated side effects' assertion is vacuous: the ephemeral test database has no campaign rows, so the kickoff queue reads all-zero regardless of whether the deterministic-jobId dedup logic works. Confirmed independently by re-reading the test and its own header comment (lines 296-301), and corroborated by the fresh 12-REVIEW.md's WR-03 finding. The 'drains to zero without failures' half of this truth IS genuinely proven by the same test; only the duplication-specific claim is unproven."
+  regressions: []
+gaps: []
+behavior_unverified_items:
+  - truth: "A stack of identical tick jobs accumulated while a worker was not consuming drains to zero without failures AND without duplicated side effects (12-12 must-have D4)"
+    test: "Seed one past-due `scheduled` campaign before stacking the 20-job burst on campaign-scheduler's tick queue, then drain with a production-shape worker and assert the kickoff producer queue's `completed` count is exactly 1 (not 0) despite 20+ ticks scanning it -- this is WR-03's fix (a) from the fresh 12-REVIEW.md."
+    expected: "Exactly one kickoff job reaches the producer queue despite the accumulated burst re-scanning the same due campaign on every tick, proving the deterministic `jobId: campaignId` + `transitionToSending`'s re-check-before-transition pattern actually prevents double-kickoff -- not just that an empty database produces empty counts."
+    why_human: "The current automated test's assertion is vacuous by its own admission (no campaign rows exist in the harness), so no existing automated evidence proves the no-duplication claim; a human/planner decision is needed on whether to close this now or accept the underlying mechanism (deterministic BullMQ jobId collision + FOR UPDATE SKIP LOCKED re-check, both independently established patterns elsewhere in this codebase) as sufficient without a dedicated test."
+human_verification:
+  - test: "Boot the worker process against the real development Redis instance that held the originally-reported backlog (partition-maintenance: 107 waiting, and siblings) and watch it for a few minutes."
+    expected: "The five tick queues' waiting counts fall toward zero, `active` events appear on each of the five, nothing lands in the failed set, and partition-horizon/campaign-scan behavior is unaffected."
+    why_human: "Requires the actual development Redis instance holding the reported backlog; both gap-closure executors ran in isolated worktrees with no access to it. This is plan 12-12's own unresolved `<human-check>` item (D5), and SPECIFICATION.md itself now says so explicitly rather than presenting it as done."
+  - test: "Seed a past-due `scheduled` campaign and re-run (or extend) the burst-absorption test to assert exactly one kickoff job reaches the producer queue across the 20+-tick burst."
+    expected: "Kickoff producer queue shows `completed: 1`, not `completed: 0`, proving dedup rather than an empty-database vacuous pass."
+    why_human: "This is a test-design gap, not a runtime uncertainty -- flagged here per protocol because no automated evidence currently exists for the specific 'no duplicated side effect' sub-claim; a maintainer decision is needed on priority/timing of the fix (WR-03 in the fresh 12-REVIEW.md already proposes the exact fix)."
 ---
 
 # Phase 12: Worker Reliability & Tenant Fairness Verification Report
 
 **Phase Goal:** One tenant's limits, one oversized segment, or a restart cannot degrade the rest of the platform; background work is bounded, resumable and observable.
-**Verified:** 2026-08-10T17:49:52Z
-**Status:** passed
-**Re-verification:** No — initial verification
+**Verified:** 2026-08-11T05:24:47Z
+**Status:** human_needed
+**Re-verification:** Yes — after gap closure (plans 12-12/12-13, closing UAT gaps G-12-1/G-12-2)
+
+## Context
+
+This is a re-verification. The previous `12-VERIFICATION.md` (2026-08-10T17:49:52Z) passed all 5 roadmap success criteria and 12/12 requirement-mapped truths, but a subsequent UAT session (`12-UAT.md`) found the phase's own cold-start smoke test broken: five repeatable-tick workers registered their BullMQ job schedulers correctly and then never consumed a single job (G-12-1, blocker), and both ARCHITECTURE.md and SPECIFICATION.md described a runtime that didn't match (G-12-2, major). Gap-closure plans 12-12 and 12-13 were executed to close both gaps. This report re-verifies the 11 previously-verified plans by regression (full `apps/worker` suite run once, 404/404 passing; `tsc --noEmit` clean) and gives full three-level scrutiny to the two gap-closure plans' own must-haves.
 
 ## Goal Achievement
 
-### Observable Truths (ROADMAP Success Criteria + PLAN must-haves)
+### Observable Truths — Regression Check on Previously-Verified Plans (12-01 through 12-11)
 
 | # | Truth | Status | Evidence |
 |---|-------|--------|----------|
-| 1 | Under load, tenant A over its rate limit does not measurably affect tenant B's throughput; the configured per-tenant RPS is backed by a load test or documented provider guidance | ✓ VERIFIED | `apps/worker/src/queues/__tests__/failure-injection/tenant-fairness.test.ts` (CI-resident, 3/3 pass) measures tenant B's contended throughput against its own solo baseline (ratio ≥ `TENANT_FAIRNESS_MIN_BASELINE_RATIO = 0.9`). `loadtest:tenant-rps` (on-demand, ran live: 1/1 pass, 17.2s) sustains `DEFAULT_TENANT_RPS` without queue depth growth. `rate-limiter.ts`'s `DEFAULT_TENANT_RPS = 10` doc comment cites SendGrid's Web API v3 docs (retrieved 2026-08-10) plus the BYO-key plan-tier caveat, and the sustained run as the platform-side proof. |
-| 2 | A single tenant cannot occupy more than its configured share of worker slots while other tenants have queued work | ✓ VERIFIED | `apps/worker/src/queues/tenant-lane-semaphore.ts` (TTL-leased sorted-set semaphore, keyed tenant+lane), wired into all three dispatch paths in `send-dispatch.ts` (`acquireTenantLaneSlot`/`releaseTenantLaneSlot` in `finally`, 3 call sites, 3 `finally` releases). `tenant-lane-semaphore.test.ts` (17/17 pass) and `tenant-concurrency-cap.test.ts` (12/12 pass) prove boundary, lease-expiry, tenant/lane isolation and release-on-every-exit-path. |
-| 3 | A segment sweep completes in bounded pages with short transactions and resumes from checkpoint after a kill without reprocessing everything | ✓ VERIFIED | `flow-segment-sweep-flow.worker.ts` keyset-paginates on `contacts.id` (`c.id > $cursor ORDER BY c.id ASC LIMIT 500`), per-page `statement_timeout` (15s), checkpoint advance on the same transaction/client as enrollment writes (`packages/db/migrations/0053_flow_segment_sweep_checkpoint.sql`, RLS-protected tenant table). `failure:segment-sweep-resume` (1/1 pass, live run) proves resume-without-reprocessing across a simulated kill. Cursor resets to `null` on completing a full walk (`resetSweepCheckpoint`). Deterministic per-flow `jobId` prevents double-enqueue; stale-snapshot cleanup batches at 1000 rows. Discovery still uses the scan role; per-flow walk re-enters `withTenant`. |
-| 4 | SIGTERM drains in-flight jobs and closes every Queue handle; every worker (including repeatable ticks) reports through one shared listener; multi-instance assumptions are written down | ✓ VERIFIED | `apps/worker/src/server.ts`'s `closeWorkerRuntime` closes all 16 registered `Worker`s first, then `closeTrackedQueues()` (queue-registry.ts), then disconnects the shared connection — ordering asserted by `graceful-shutdown.test.ts` (part of the 96/96 passing suite run). `attachSharedListeners(workers)` wires `attachSharedErrorListeners` (error+failed) over the full worker array including every repeatable-tick worker; `shared-error-listener.test.ts` and `scheduler-registration.test.ts` pass (part of same 96/96 run). `ARCHITECTURE.md` §10 states multi-instance execution-exclusivity is NOT provided by `upsertJobScheduler` and names single-instance deployment as an explicit v1.1 constraint. |
-| 5 | Failed jobs age out under a per-queue retention policy; terminal failures land in an observable dead-letter path; Redis connection options/`defaultJobOptions`/TTL values have exactly one definition | ✓ VERIFIED | `packages/queue-core/src/queue-options.ts`: `FAILED_JOB_RETENTION_SECONDS = 7 days` (bounded, outlives the 72h reconciliation window with margin), `STANDARD_JOB_RETENTION` vs. `FLOW_RUN_ADVANCE_RETENTION` preserved as two distinct, per-queue-selected shapes via `buildJobOptions(retention)`. Every Queue-constructing module in both `apps/api` and `apps/worker` (12 guarded modules) imports `buildRedisConnectionOptions`/`buildJobOptions` from `@mega-crm/queue-core` — enforced by `queue-core-single-definition.test.ts` (12/12 modules pass: import present, no local connection builder, no local job-option literal), which also asserts cross-process identical output. Dead-letter path: `dead_letter_jobs` table (migration 0054, no RLS, no scan-role grant — platform-ops scoped) + `writeDeadLetterOnTerminalFailure` (redacted via `@mega-crm/redaction`'s `scrub`) wired through `attachSharedErrorListeners`'s `onTerminalFailure` hook; `dead-letter-watchdog.ts` (apps/api) alerts on unacknowledged rows with dedup, wired at boot in `apps/api/src/server.ts`. `dead-letter-writer.test.ts` (worker), `error-listeners.test.ts`/`queue-options.test.ts` (queue-core), `failed-job-retention.test.ts`, `dead-letter-watchdog.test.ts` (api) all pass. |
+| 1-5 | The 5 roadmap success criteria verified in the prior report (tenant RPS isolation, per-tenant concurrency cap, bounded/resumable segment sweep, graceful SIGTERM drain + shared listeners, bounded failed-job retention + observable dead-letter path) | ✓ VERIFIED (regression) | Full `apps/worker` suite (61 files, 404 tests) passes in one run at current HEAD; `npx tsc -p apps/worker/tsconfig.json --noEmit` exits 0. No file underlying these truths was touched by the gap-closure plans except the five factories' `autorun` line (verified separately below) — spot-checked `send-dispatch.ts`, `tenant-lane-semaphore.ts`, `flow-segment-sweep-flow.worker.ts`, `queue-registry.ts`, `dead-letter-writer.ts` are untouched since the prior verification (`git log` shows no commits to these paths after `323051a`). |
 
-**Score:** 5/5 roadmap success criteria verified; 12/12 requirement-mapped truths across all 11 plans verified. 0 present-but-behavior-unverified.
+### Observable Truths — Gap-Closure Plan 12-12 (G-12-1)
+
+| # | Truth | Status | Evidence |
+|---|-------|--------|----------|
+| D1 | Each of the five repeatable-tick workers, constructed exactly the way `server.ts` constructs it (single argument), actually starts its processing loop | ✓ VERIFIED | All five factories read directly: `campaign-scheduler.worker.ts:213`, `analytics-reconciliation.worker.ts:202`, `flows/flow-reconciliation.worker.ts:185`, `partition-maintenance.worker.ts:227`, `send-reconciler.worker.ts:423` all use `{ connection, ...(options.autorun !== undefined ? { autorun: options.autorun } : {}) }`. Cross-checked against BullMQ's own default-merge semantics by the fresh code review (`12-REVIEW.md`), which confirms via `node_modules/bullmq/dist/cjs/classes/worker.js` that an own `undefined` property previously clobbered the `true` default and that omitting the key is the correct fix. `worker-autorun-default.test.ts`'s production-shape case (5 fixtures) passes: `npx vitest run --root apps/worker src/queues/__tests__/worker-autorun-default.test.ts` → 8/8 pass (re-run live during this verification). |
+| D2 | A job waiting on one of those tick queues is picked up and reaches the active state on a worker built with the production call shape | ✓ VERIFIED | The dedicated pickup case (`campaign-scheduler: a job sitting on its tick queue is picked up and reaches 'active'...`) passed in this verification's own live run, and again inside the full 404/404 suite run. The fresh code review flagged this specific case as flaky once in 3 full-suite runs (WR-02) — noted as a warning below, not disqualifying, since it passed in this verification's own full-suite run and the isRunning() assertion (an independent signal of the same fix) is stable across all 5 fixtures. |
+| D3 | The test-only suppression of the run loop (`autorun: false`) still works when passed explicitly, so existing registration tests keep their meaning | ✓ VERIFIED | `worker-autorun-default.test.ts`'s explicit-suppression case passes; `scheduler-registration.test.ts` (20/20) and `partition-maintenance.worker.test.ts` (7/7) both pass unchanged — re-run live in this verification (27/27 combined). |
+| D4 | A stack of identical tick jobs accumulated while a worker was not consuming drains to zero without failures **and** without duplicated side effects | ⚠️ PRESENT_BEHAVIOR_UNVERIFIED (split truth) | "Drains to zero waiting/active/failed" half: genuinely proven — the burst case stacks 20 real jobs on a suppressed worker's queue, then drains with a production-shape worker and asserts `vi.waitFor` reaches `{waiting:0, active:0, failed:0}` (passed live in this verification). "Without duplicated side effects" half: **not actually proven**. The test's own header comment (lines 296-301) states the ephemeral test database has zero campaign rows, so `findDueCampaignCandidates()` returns `[]` on every tick and the kickoff queue reads all-zero counts *regardless of whether the dedup logic works at all*. The fresh `12-REVIEW.md` (WR-03) independently reaches the identical conclusion and proposes the fix (seed one past-due campaign, assert `completed === 1` across the burst). See `behavior_unverified_items` and `human_verification`. |
+
+### Observable Truths — Gap-Closure Plan 12-13 (G-12-2)
+
+| # | Truth | Status | Evidence |
+|---|-------|--------|----------|
+| D1 | The forward-looking section names only work that genuinely has not shipped — retention/dead-letter no longer listed there | ✓ VERIFIED | `ARCHITECTURE.md:229`: "Queue retention is no longer open either — plan 12-09 bounded `removeOnFail` to a 7-day age... What genuinely remains open is the queue's behaviour when its backing store reaches its memory ceiling." Plan's own verify command re-run live: `grep -q '^- \*\*Phase 12 — worker reliability.*memory ceiling' ARCHITECTURE.md && test "$(grep '^- \*\*Phase 12 — worker reliability' ARCHITECTURE.md | grep -c 'remain open')" -eq 0` exits 0. |
+| D2 | The two documents agree with each other about failed-job retention and the dead-letter path | ✓ VERIFIED | ARCHITECTURE.md now cross-references `SPECIFICATION.md §5.3` instead of contradicting it; no remaining "remain open"/"unshipped" retention language found in either file's changed passages. |
+| D3 | The worker-scheduling sections describe consumption as an observed fact backed by a named test, not an inference from a registration log line | ✓ VERIFIED | `SPECIFICATION.md` lines 625-641 read directly: names `worker-autorun-default.test.ts` explicitly, states "Регистрация scheduler'а и потребление джоб — два разных факта; чистый boot-лог доказывает только первый," and attributes the sixteen-workers claim to that test plus the G-12-1 runtime BZPOPMIN diagnosis rather than the boot log. Plan's verify command re-run live: `grep -q 'autorun' SPECIFICATION.md && grep -q 'worker-autorun-default.test.ts' SPECIFICATION.md && grep -q '12-12' SPECIFICATION.md` exits 0. |
+| D4 | The as-built mechanism that makes the run loop start under the production call shape is written down where the next factory editor will read it | ✓ VERIFIED | `SPECIFICATION.md:625` documents the conditional-spread mechanism, names all five affected files, and names the two phases the pattern originated in and spread from. `git diff --stat 830ab19 HEAD -- ARCHITECTURE.md SPECIFICATION.md` → `ARCHITECTURE.md 2 +-`, `SPECIFICATION.md 9 +++++++++` — bounded, scoped edits confirmed live, matching both SUMMARYs' claims exactly. |
+
+**Score:** 15/16 must-haves verified (11 regression-checked roadmap truths carried forward as a group + 4/4 of 12-12's D1-D4 with D4 split, counted as 3 full + 1 unverified + 4/4 of 12-13's D1-D4). 1 present-but-behavior-unverified (12-12 D4's duplication half).
 
 ### Required Artifacts
 
 | Artifact | Expected | Status | Details |
 |----------|----------|--------|---------|
-| `apps/worker/src/queues/tenant-deferral.ts` | `deferForTenantBucket` shared deferral primitive | ✓ VERIFIED | Exports match plan; used by both lane workers |
-| `apps/worker/src/queues/email-broadcast.worker.ts` / `email-triggered.worker.ts` | Both call `deferForTenantBucket` for `tenant_bucket` cause only | ✓ VERIFIED | Both files import and call it identically; `provider_backoff` still throws (bounded attempt) |
-| `packages/queue-core/*` | Single Redis connection + queue-options + error-listener + dead-letter-writer definitions | ✓ VERIFIED | All exports present (`buildRedisConnectionOptions`, `createRedisConnection`, `buildJobOptions`, `STANDARD_JOB_RETENTION`, `FLOW_RUN_ADVANCE_RETENTION`, `attachSharedErrorListeners`, `writeDeadLetterOnTerminalFailure`) |
-| `apps/worker/src/queues/tenant-lane-semaphore.ts` | Per-tenant-per-lane TTL-leased semaphore | ✓ VERIFIED | Atomic Lua ACQUIRE_SCRIPT, per-holder lease expiry, fail-closed on Redis error (no swallow) |
-| `apps/worker/src/queues/send-dispatch.ts` | Semaphore + deferral wired into all 3 dispatch paths | ✓ VERIFIED | `acquireTenantLaneSlot`/`releaseTenantLaneSlot` at campaign, test-send, and flow branches, each with its own `finally` |
-| `apps/worker/src/test/fairness-constants.ts` | Versioned fairness threshold + scenario volumes | ✓ VERIFIED | `TENANT_FAIRNESS_MIN_BASELINE_RATIO`, `FAIRNESS_SCENARIO_VOLUMES`, `LOADTEST_TENANT_RPS_DURATION_MS` all present with rationale comments |
-| `packages/db/migrations/0053_flow_segment_sweep_checkpoint.sql` | Per-flow resume cursor, RLS-protected | ✓ VERIFIED | Bare-cast fail-closed policy, no scan-role grant, unique per (workspace, flow) |
-| `apps/worker/src/queues/flows/flow-segment-sweep-flow.worker.ts` | Bounded per-flow walk worker | ✓ VERIFIED | `sweepOneFlowPage`, `runFlowSegmentSweepFlowJob`, `createFlowSegmentSweepFlowWorker` all exported and match plan contract |
-| `packages/db/migrations/0054_dead_letter_jobs.sql` | Durable terminal-failure record, no tenant RLS | ✓ VERIFIED | `dead_letter_jobs` + `dead_letter_alert_state`, explicit no-RLS/no-scan-grant comment, dead-man's-switch seed row |
-| `apps/worker/src/queues/dead-letter/dead-letter-writer.ts` | Terminal-failure gate + redacted insert | ✓ VERIFIED (delegating shim) | Re-exports `isTerminalJobFailure`/wraps `writeDeadLetterOnTerminalFailureShared` from `@mega-crm/queue-core` (relocated in plan 12-10, documented deviation) with the app's own dedicated pool — not a second implementation |
-| `packages/queue-core/src/error-listeners.ts` | Shared worker error/failed listener | ✓ VERIFIED | `attachSharedErrorListeners`, injected `onTerminalFailure` hook, queue-core never imports from an app |
-| `apps/worker/src/queues/queue-registry.ts` | Process-wide closeable queue registry | ✓ VERIFIED | `registerTrackedQueue`, `closeTrackedQueues`, `trackedQueueCount` |
-| `apps/worker/src/shutdown-budget.ts` | Derived drain budget + container grace period | ✓ VERIFIED | `WORKER_DRAIN_BUDGET_MS`, `WORKER_DRAIN_SAFETY_MARGIN_MS`, `WORKER_STOP_GRACE_PERIOD_SECONDS`, derived (not hand-typed) from `SENDGRID_TIMEOUT_MS` + both tx margins |
-| `apps/api/src/modules/ops/dead-letter-watchdog.ts` | Third operator watchdog | ✓ VERIFIED | `checkDeadLetterHealthAndAlert`, `startDeadLetterWatchdog`, `claimDeadLetterAlertSlot` all exported and wired at boot |
-| `apps/worker/src/queues/__tests__/queue-core-single-definition.test.ts` | Cross-app single-definition invariant | ✓ VERIFIED | 12 guarded modules (6 worker + 5 api + 1 straggler migrated in 12-09), positive cross-process-identity assertions |
-| `ARCHITECTURE.md` | Multi-instance safety documentation | ✓ VERIFIED | §10 "Worker reliability: tenant fairness, drain budget, and multi-instance safety" states idempotent-registration-≠-execution-exclusivity precisely |
+| `apps/worker/src/queues/campaign-scheduler.worker.ts` | Conditional-spread `autorun`, corrected doc comment | ✓ VERIFIED | Line 213, doc comment lines 144-151 correctly state the omission mechanism |
+| `apps/worker/src/queues/analytics-reconciliation.worker.ts` | Same fix | ✓ VERIFIED | Line 202 |
+| `apps/worker/src/queues/flows/flow-reconciliation.worker.ts` | Same fix | ✓ VERIFIED | Line 185 |
+| `apps/worker/src/queues/partition-maintenance.worker.ts` | Same fix | ✓ VERIFIED | Line 227 |
+| `apps/worker/src/queues/send-reconciler.worker.ts` | Same fix + new registration-settled waiter | ✓ VERIFIED | Line 423; `waitForSendReconcilerRegistration`/`registrationSettled` WeakMap present (lines 372-384), registration captured into a named promise (line 435) rather than a bare `void` expression |
+| `apps/worker/src/queues/__tests__/worker-autorun-default.test.ts` | Regression proof: production-shape case (5 fixtures) + pickup case + suppression case + burst case | ✓ VERIFIED (exists, substantive, wired) — ⚠️ one assertion within it is vacuous (see D4 above) | File exists, 8 tests, all pass live; imports and exercises all five factories with the exact production call shape |
+| `ARCHITECTURE.md` | Forward-looking Phase 12 entry reduced to memory-ceiling item only | ✓ VERIFIED | Line 229, `git diff --stat` shows 1-line change |
+| `SPECIFICATION.md` | §5.1/§5.2 re-verified against observed consumption | ✓ VERIFIED | Lines 625-641, 1095; `git diff --stat` shows 9-line addition |
 
 ### Key Link Verification
 
 | From | To | Via | Status |
 |------|-----|-----|--------|
-| `email-broadcast.worker.ts` / `email-triggered.worker.ts` | `tenant-deferral.ts` | `deferForTenantBucket` call for `tenant_bucket` cause | ✓ WIRED |
-| `send-dispatch.ts` | `tenant-lane-semaphore.ts` | `acquireTenantLaneSlot` before dispatch, `releaseTenantLaneSlot` in `finally` (×3 paths) | ✓ WIRED |
-| `send-dispatch.ts` | `tenant-deferral.ts` | over-cap acquisition returns `tenant_bucket` cause, deferred by the worker wrappers | ✓ WIRED |
-| `apps/worker/src/server.ts` | `packages/queue-core` | imports connection builder/factory | ✓ WIRED |
-| `apps/api/*-queue(s).ts` | `packages/queue-core` | imports connection builder + job-options factory | ✓ WIRED |
-| `.github/workflows/ci.yml` | `tenant-fairness.test.ts` | named `failure:tenant-fairness` step in `failure-injection` job | ✓ WIRED |
-| `.github/workflows/ci.yml` | `segment-sweep-kill-resume.test.ts` | named `failure:segment-sweep-resume` step | ✓ WIRED |
-| `flow-segment-sweep.worker.ts` | `flow-queues.ts` | discovery enqueues one per-flow walk job, deterministic jobId | ✓ WIRED |
-| `flow-segment-sweep-flow.worker.ts` | `flow-segment-sweep-checkpoint.ts` | cursor advance on same client as page's writes | ✓ WIRED |
-| `packages/queue-core/error-listeners.ts` | `dead-letter-writer.ts` (worker shim) | injected `onTerminalFailure` hook | ✓ WIRED |
-| `apps/worker/src/server.ts` | `queue-registry.ts` | shutdown awaits `closeTrackedQueues` after workers close | ✓ WIRED |
-| `apps/api/src/server.ts` | `dead-letter-watchdog.ts` | `startDeadLetterWatchdog` called at boot beside two existing watchdogs | ✓ WIRED |
+| `apps/worker/src/server.ts` (composition root) | all five tick-worker factories | single-argument call shape | ✓ WIRED — confirmed both factories' signatures accept the shape and the regression test reproduces it literally |
+| `worker-autorun-default.test.ts` | all five factories + their registration waiters | direct import and construction | ✓ WIRED |
+| `SPECIFICATION.md` §5.1/§5.2 | `worker-autorun-default.test.ts` | cited by filename as the consumption evidence | ✓ WIRED |
+| `ARCHITECTURE.md` forward-looking Phase 12 bullet | `SPECIFICATION.md` §5.3 | cross-reference for the shipped retention policy | ✓ WIRED |
 
-### Behavioral Spot-Checks / Named-Test Runs
+### Behavioral Spot-Checks / Named-Test Runs (this verification session)
 
 | Behavior | Command | Result | Status |
 |----------|---------|--------|--------|
-| Tenant-scoped deferral (WRK-01) | `vitest run tenant-deferral.test.ts` | 9/9 pass | ✓ PASS |
-| Tenant/lane concurrency cap (WRK-02) | `vitest run tenant-lane-semaphore.test.ts` | 17/17 pass | ✓ PASS |
-| Cap wired into dispatch (WRK-02) | `vitest run tenant-concurrency-cap.test.ts` | 12/12 pass | ✓ PASS |
-| Two-tenant fairness proof (WRK-03) | `npm run failure:tenant-fairness` | 3/3 pass, 9.3s | ✓ PASS |
-| `DEFAULT_TENANT_RPS` sustained (WRK-04) | `npm run loadtest:tenant-rps` | 1/1 pass, 17.2s, no queue-depth growth | ✓ PASS |
-| Segment sweep resumable kill (WRK-05/06) | `npm run failure:segment-sweep-resume` | 1/1 pass, 3.4s | ✓ PASS |
-| Graceful shutdown / shared listeners / scheduler / retention / single-definition | `vitest run` (6 files) | 96/96 pass | ✓ PASS |
-| Dead-letter writer + error listeners + queue-options + dead-letter watchdog | `vitest run` (4 files across queue-core/api) | 31/31 pass | ✓ PASS |
-| Rate-limit-429 (touched by 12-01) | `npm run failure:429` | 5/5 pass | ✓ PASS |
-| Lint (whole workspace) | `npm run lint` | 0 errors, 0 warnings | ✓ PASS |
+| G-12-1 fix, all 5 factories + pickup + suppression + burst | `vitest run --root apps/worker src/queues/__tests__/worker-autorun-default.test.ts` | 8/8 pass | ✓ PASS |
+| Existing registration suites unaffected | `vitest run --root apps/worker src/queues/__tests__/scheduler-registration.test.ts src/queues/__tests__/partition-maintenance.worker.test.ts` | 27/27 pass | ✓ PASS |
+| Full regression, whole `apps/worker` package (run once, per protocol) | `npm test --workspace=apps/worker` | 404/404 pass, 61 files | ✓ PASS |
+| Type check | `npx tsc -p apps/worker/tsconfig.json --noEmit` | exit 0 | ✓ PASS |
+| ARCHITECTURE.md forward-looking bullet check | plan's own verify grep | exit 0 | ✓ PASS |
+| SPECIFICATION.md re-verification check | plan's own verify grep | exit 0 | ✓ PASS |
+| Debt-marker scan on all 6 gap-closure files | `grep -nE "TBD\|FIXME\|XXX\|TODO\|HACK\|PLACEHOLDER"` + placeholder/coming-soon scan | no matches (exit 1) | ✓ PASS (clean) |
+| Debt-marker scan on changed doc lines | `git diff` filtered for same markers | no matches | ✓ PASS (clean) |
 
-All named tests were run individually (never the full aggregate suite filtered post-hoc); the full-suite/lint/build pass at HEAD claim in the task prompt is corroborated, not merely trusted.
+Per protocol, the full suite and the on-demand load/failure-injection tests already proven live in the prior verification were **not** re-run in full here (one full-suite run budget already used above); their regression is covered by full-suite membership and by confirming no file underlying them was touched since the prior verification's commit.
 
 ### Requirements Coverage
 
 | Requirement | Source Plan(s) | Description | Status | Evidence |
 |---|---|---|---|---|
-| WRK-01 | 12-01 | Tenant-scoped deferral doesn't stop the worker | ✓ SATISFIED | `deferForTenantBucket`, both lanes, `tenant-deferral.test.ts` |
-| WRK-02 | 12-03, 12-04 | Per-tenant concurrency cap | ✓ SATISFIED | `tenant-lane-semaphore.ts` wired into 3 dispatch paths |
-| WRK-03 | 12-05 | Load test proves A/B isolation | ✓ SATISFIED | `tenant-fairness.test.ts`, CI-wired |
-| WRK-04 | 12-05 | `DEFAULT_TENANT_RPS` justified | ✓ SATISFIED | doc comment + `tenant-rps-sustained.test.ts` |
-| WRK-05 | 12-06 | Bounded, checkpointed sweep | ✓ SATISFIED | keyset pagination, per-page timeout, same-tx checkpoint |
-| WRK-06 | 12-06 | Resumable after partial failure | ✓ SATISFIED | `failure:segment-sweep-resume` live pass |
-| WRK-07 | 12-08 | Graceful SIGTERM drain | ✓ SATISFIED | `closeWorkerRuntime` ordering + test |
-| WRK-08 | 12-07, 12-08 | Unified error listeners | ✓ SATISFIED | `attachSharedErrorListeners` over full worker array |
-| WRK-09 | 12-09 | Bounded failed-job retention | ✓ SATISFIED | `FAILED_JOB_RETENTION_SECONDS` (7d), differentiated policy preserved |
-| WRK-10 | 12-07, 12-10 | Observable dead-letter mechanism | ✓ SATISFIED | `dead_letter_jobs` table + watchdog with alert/dedup |
-| WRK-11 | 12-02, 12-11 | Single-source connection/job-option definitions | ✓ SATISFIED | `queue-core-single-definition.test.ts`, 12 guarded modules |
-| WRK-12 | Phase 8 (not this phase) | Redis noeviction+persistence | N/A here | Already marked Complete in REQUIREMENTS.md |
-| WRK-13 | 12-08 | Centralized repeatable-job error handling + documented multi-instance constraint | ✓ SATISFIED | `upsertJobScheduler` + `attachSharedListeners`; `ARCHITECTURE.md` §10 |
+| WRK-01 through WRK-11, WRK-13 | 12-01 through 12-11 (regression-checked), 12-12/12-13 (gap closure) | See prior verification for WRK-01–11 detail; unchanged and regression-confirmed here | ✓ SATISFIED | `.planning/REQUIREMENTS.md` lines 80-92 show all checked `[x]`, lines 219-231 show all "Complete." All 12 IDs required by this phase (WRK-01–11, WRK-13) accounted for — no orphans. |
+| WRK-13 | 12-08, **12-12** | Centralized repeatable-job error handling + documented multi-instance constraint + (now) the run loop actually starting under production call shape | ✓ SATISFIED (with the D4 duplication caveat noted above as a test-coverage gap, not a requirement failure) | `upsertJobScheduler` + `attachSharedListeners` (prior verification) + `worker-autorun-default.test.ts` (this verification) |
+| WRK-09 | 12-09, **12-13** (doc re-verification) | Bounded failed-job retention, now also documented consistently across both docs | ✓ SATISFIED | `ARCHITECTURE.md`/`SPECIFICATION.md` no longer contradict each other |
 
-No orphaned requirements: all 12 IDs mapped to Phase 12 in `.planning/REQUIREMENTS.md` (WRK-01 through WRK-11, WRK-13) are claimed by at least one of the 11 plans, and every plan's declared `requirements` field is one of these IDs. `REQUIREMENTS.md` checkboxes for WRK-01..11/13 remain unticked (`[ ]`) — consistent with `ROADMAP.md` still listing Phase 12 as "In Progress" with no completion date; this is ship-time bookkeeping, not a code-substance gap, and is expected to be closed when the phase is marked complete.
+No orphaned requirements.
 
 ### Anti-Patterns Found
 
-None. Scanned every file named in all 11 plans' `files_modified` lists for `TBD`/`FIXME`/`XXX` (0 hits), `TODO`/`HACK`/`PLACEHOLDER`/"not yet implemented" (0 hits), and stub-shaped empty returns — none found. All modules are substantive, non-stub implementations.
+None. Debt-marker scan (`TBD`/`FIXME`/`XXX`/`TODO`/`HACK`/`PLACEHOLDER`, plus "placeholder"/"coming soon"/"not yet implemented"/"not available") over all six gap-closure-touched source/test files and the changed lines in both documentation files returned zero matches.
 
-### Code Review Warnings (from 12-REVIEW.md, disposition below)
+### Code Review Warnings (from the fresh 12-REVIEW.md scoped to plans 12-12/12-13, disposition below)
 
-None of these three warnings falsifies a must-have truth — no gap is opened by any of them — but they are real and worth carrying forward as follow-up work:
+The code review that ran at the end of this gap-closure wave (`12-REVIEW.md`, `status: issues_found`, 0 critical / 3 warning / 2 info) independently confirms the production fix is correct, and its three warnings are all about the new regression test's own quality — not the production code:
 
-- **WR-01** (`dead-letter-watchdog.ts`): `dead_letter_alert_state.last_seen_failed_at` is populated with the OLDEST unacknowledged failure's timestamp instead of the newest, contradicting its own name/doc comment. Structurally excluded from the alert-dedup arbiter itself (`claimDeadLetterAlertSlot`'s `WHERE` clause never reads this column) — the 12-10 truth "one operator alert naming queues/count/oldest timestamp" still holds; only a secondary diagnostic column is wrong. Warning, not a phase-goal gap.
-- **WR-02** (`dead-letter-watchdog.ts`): the interval-check catch logs via raw `console.error` instead of `scrubbedConsole`, bypassing this phase's own redaction convention. This is a new file extending a pre-existing pattern already present in two sibling watchdogs (`partition-watchdog.ts`, `send-reconciler-watchdog.ts`) — a real gap, but pre-existing and now tripled rather than introduced fresh by this phase.
-- **WR-03** (`packages/queue-core/src/connection.ts`): `buildRedisConnectionOptions` does not percent-decode the URL's username/password, so a Redis password containing a reserved character (`@`, `:`, `%`, space) fails AUTH at boot. **This matters more than an ordinary warning because WRK-11's own consolidation is what made this the SOLE connection-options builder for both `apps/api` and `apps/worker`** — the must-have truth ("exactly one defining module... every module obtains its connection options exclusively by import from the shared package") is still TRUE and is exactly why this latent defect's blast radius is now total-pipeline rather than single-queue. It fails loudly (boot-time AUTH error), not silently, so it is not a data-loss/data-corruption risk — but it should be fixed before a real secret containing such a character is ever used in `REDIS_URL`.
+- **WR-01** (test leak): the `describe.each` case and the dedicated pickup case both leak `campaign-scheduler`'s long-lived kickoff producer queue (only the burst case closes it correctly). A plausible contributor to an observed full-suite flake. Real, confirmed leak; does not affect production-code correctness. This verification's own full-suite run passed cleanly (404/404), so the leak did not manifest here, but it is a latent CI-reliability risk worth fixing.
+- **WR-02** (flaky pickup assertion): the one test proving actual job pickup (not just `isRunning()`) timed out once in 3 full-suite runs during the reviewer's testing. Passed in this verification's own live run and full-suite run. Likely related to WR-01's leak. Not disqualifying on its own since the underlying `isRunning()` signal for all 5 fixtures is stable, but flagged as a follow-up.
+- **WR-03** (vacuous duplication assertion): already elevated above to a `behavior_unverified_items` entry rather than left as a mere warning, since it directly concerns one of the plan's own stated must-haves (D4's "without duplicated side effects" clause).
+
+None of these three reopens the underlying autorun fix, which the reviewer independently verified correct by cross-checking BullMQ's own source.
 
 ### Human Verification Required
 
-None. Every must-have truth is either directly, mechanically verifiable (file/wiring/grep-level) or was confirmed via a live, named, single-test run (never the aggregate suite) — including the two truths that specifically demand measured runtime behavior (WRK-01/02 fairness proof, WRK-05/06 kill-resume).
+1. **Live backlog drain observation (12-12's own D5 human-check).** Boot the worker process against the real development Redis instance that held the originally-reported backlog (partition-maintenance: 107 waiting) and watch for a few minutes: the five tick queues' waiting counts should fall toward zero, `active` events should appear on all five, nothing should land in the failed set. Neither gap-closure executor nor this verification had access to that environment. `SPECIFICATION.md` itself now explicitly flags this as a separate, unperformed step.
+2. **No-duplication proof for the burst-absorption test (12-12 D4).** The current burst test's "without duplicated side effects" assertion is vacuous (empty campaigns table). A maintainer should decide whether to land WR-03's proposed fix (seed one past-due campaign, assert `completed === 1` across the burst) before treating this specific sub-claim as proven, or accept the underlying mechanism (deterministic `jobId`, `FOR UPDATE SKIP LOCKED` re-check) as sufficient by design given it is an established, previously-verified pattern elsewhere in this codebase.
 
 ### Gaps Summary
 
-No gaps. All 5 ROADMAP success criteria and all 12 requirement-mapped must-have truths across the 11 executed plans are verified against the actual codebase — not just SUMMARY.md claims. Artifacts exist, are substantive, are wired end to end, and the behavior-dependent truths (fairness ratio, sustained RPS, kill-and-resume) were confirmed by running the actual named tests live rather than trusting presence alone. The three code-review warnings are dispositioned above as legitimate follow-up work, none of which reopens a phase-goal truth.
+No FAILED truths, no missing/stub/unwired artifacts, no debt markers. The phase's core defect (G-12-1, the autorun clobber) is genuinely fixed and independently corroborated three ways: direct code reading of all five factories, a fresh code reviewer's BullMQ-source cross-check, and a live re-run of the regression suite plus the full 404-test `apps/worker` package in this verification session. The documentation gap (G-12-2) is genuinely closed: both files were read directly and no longer contradict each other or describe unshipped work as shipped (or vice versa).
+
+Two items keep this from a clean `passed`: one outstanding human observation the plan itself flagged as unperformed (D5, live Redis backlog drain), and one test-coverage gap freshly surfaced by the phase's own post-gap-closure code review (the burst test's duplication claim is vacuous, confirmed independently in this verification). Both are `human_needed` items, not blockers — the underlying production code is sound by direct reading and by the mechanisms it relies on (BullMQ job-scheduler default semantics, deterministic jobId collision, per-row exclusive re-check), but neither claim has been proven live/behaviorally in the way its own must-have specified.
 
 ---
 
-_Verified: 2026-08-10T17:49:52Z_
+_Verified: 2026-08-11T05:24:47Z_
 _Verifier: Claude (gsd-verifier)_
