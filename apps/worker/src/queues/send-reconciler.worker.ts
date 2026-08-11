@@ -348,10 +348,39 @@ export interface CreateSendReconcilerWorkerOptions {
    * Test-only, mirrors `partition-maintenance.worker.ts`'s identical
    * option: BullMQ Workers start processing immediately on construction;
    * tests assert what gets REGISTERED without wanting a real tick to race
-   * those assertions. Always left at BullMQ's own default (`true`) in
-   * production.
+   * those assertions. Omitted entirely from the constructed worker's
+   * options unless a caller supplies it (G-12-1): forwarding this key with
+   * an `undefined` value under the composition root's one-argument call
+   * shape would overwrite BullMQ's own enabling default rather than fall
+   * back to it, silently disabling the run loop.
    */
   autorun?: boolean;
+}
+
+/**
+ * Test-only synchronization, mirrors `partition-maintenance.worker.ts`'s and
+ * `campaign-scheduler.worker.ts`'s identical WeakMap:
+ * `createSendReconcilerWorker`'s own scheduler registration (and the
+ * short-lived internal `Queue` handle it runs through) is fire-and-forget in
+ * production. This lets `waitForSendReconcilerRegistration` below hand a
+ * test a promise that resolves only once registration (including closing
+ * that internal handle) has actually settled, instead of sleeping -- without
+ * it, a test that constructs this factory has no deterministic point at
+ * which the factory's background Redis handle is finished, and its own
+ * `queue.close()` races the throwaway Redis server's teardown.
+ */
+const registrationSettled = new WeakMap<Worker, Promise<void>>();
+
+/**
+ * Test-only: resolves once the `Worker` returned by
+ * `createSendReconcilerWorker` has finished registering its scheduler (and
+ * closed its own internal tick-registration `Queue` handle). Not used by
+ * production code, mirrors `partition-maintenance.worker.ts`'s identical
+ * helper. Resolves immediately (rather than hanging) for a worker this
+ * module never registered a promise against.
+ */
+export function waitForSendReconcilerRegistration(worker: Worker): Promise<void> {
+  return registrationSettled.get(worker) ?? Promise.resolve();
 }
 
 /**
@@ -384,7 +413,14 @@ export function createSendReconcilerWorker(
       }
       await runReconcilerTick();
     },
-    { connection, autorun: options.autorun }
+    // G-12-1: the `autorun` key is included ONLY when a caller actually
+    // supplied a value (mirrors `flow-segment-sweep.worker.ts`, which never
+    // mentions the key at all) -- never nullish-coalesced to a restated
+    // `true`, which would be a second source of truth for a value BullMQ
+    // already owns. Under the composition root's single-argument call
+    // shape, `options.autorun` is `undefined` and this spread contributes
+    // nothing, leaving BullMQ's own default in effect.
+    { connection, ...(options.autorun !== undefined ? { autorun: options.autorun } : {}) }
   );
 
   // Fire-and-forget registration -- copied in shape from
@@ -392,8 +428,11 @@ export function createSendReconcilerWorker(
   // a Redis hiccup at boot must log, not crash every other registered
   // worker via an unhandled promise rejection; the `finally` always closes
   // this short-lived internal Queue handle so a failure here never leaks a
-  // standalone Redis connection past construction.
-  void (async () => {
+  // standalone Redis connection past construction. Captured into a named
+  // promise (rather than launched as a bare `void` expression) and stored
+  // against the worker so `waitForSendReconcilerRegistration` can hand a
+  // test a deterministic settle point (see that function's own comment).
+  const registration = (async () => {
     try {
       await queue.upsertJobScheduler(
         SEND_RECONCILER_SCHEDULER_ID,
@@ -410,6 +449,7 @@ export function createSendReconcilerWorker(
       await queue.close().catch(() => undefined);
     }
   })();
+  registrationSettled.set(worker, registration);
 
   return worker;
 }
