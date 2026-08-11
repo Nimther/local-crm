@@ -348,8 +348,11 @@ export interface CreateSendReconcilerWorkerOptions {
    * Test-only, mirrors `partition-maintenance.worker.ts`'s identical
    * option: BullMQ Workers start processing immediately on construction;
    * tests assert what gets REGISTERED without wanting a real tick to race
-   * those assertions. Always left at BullMQ's own default (`true`) in
-   * production.
+   * those assertions. Omitted entirely from the constructed worker's
+   * options unless a caller supplies it (G-12-1): forwarding this key with
+   * an `undefined` value under the composition root's one-argument call
+   * shape would overwrite BullMQ's own enabling default rather than fall
+   * back to it, silently disabling the run loop.
    */
   autorun?: boolean;
 }
@@ -410,7 +413,14 @@ export function createSendReconcilerWorker(
       }
       await runReconcilerTick();
     },
-    { connection, autorun: options.autorun }
+    // G-12-1: the `autorun` key is included ONLY when a caller actually
+    // supplied a value (mirrors `flow-segment-sweep.worker.ts`, which never
+    // mentions the key at all) -- never nullish-coalesced to a restated
+    // `true`, which would be a second source of truth for a value BullMQ
+    // already owns. Under the composition root's single-argument call
+    // shape, `options.autorun` is `undefined` and this spread contributes
+    // nothing, leaving BullMQ's own default in effect.
+    { connection, ...(options.autorun !== undefined ? { autorun: options.autorun } : {}) }
   );
 
   // Fire-and-forget registration -- copied in shape from

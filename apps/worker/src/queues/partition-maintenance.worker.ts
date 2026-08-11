@@ -154,9 +154,12 @@ export interface CreatePartitionMaintenanceWorkerOptions {
    * Test-only: BullMQ Workers start processing immediately on construction.
    * Tests 1-3 assert what gets REGISTERED (the scheduler shape, the
    * boot-time job) without wanting a real `processPartitionMaintenance()`
-   * run to race against those assertions against the pooled client. Always
-   * left at BullMQ's own default (`true`) in production -- this worker must
-   * actually process jobs there.
+   * run to race against those assertions against the pooled client. Omitted
+   * entirely from the constructed worker's options unless a caller supplies
+   * it (G-12-1): forwarding this key with an `undefined` value under the
+   * composition root's one-argument call shape would overwrite BullMQ's own
+   * enabling default rather than fall back to it, silently disabling the
+   * run loop -- this worker must actually process jobs in production.
    */
   autorun?: boolean;
 }
@@ -214,7 +217,14 @@ export function createPartitionMaintenanceWorker(
     async () => {
       await processPartitionMaintenance();
     },
-    { connection, autorun: options.autorun },
+    // G-12-1: the `autorun` key is included ONLY when a caller actually
+    // supplied a value (mirrors `flow-segment-sweep.worker.ts`, which never
+    // mentions the key at all) -- never nullish-coalesced to a restated
+    // `true`, which would be a second source of truth for a value BullMQ
+    // already owns. Under the composition root's single-argument call
+    // shape, `options.autorun` is `undefined` and this spread contributes
+    // nothing, leaving BullMQ's own default in effect.
+    { connection, ...(options.autorun !== undefined ? { autorun: options.autorun } : {}) },
   );
 
   // Fire-and-forget registration -- the constructor itself stays
