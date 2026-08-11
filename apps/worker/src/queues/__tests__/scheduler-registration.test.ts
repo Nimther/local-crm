@@ -18,6 +18,11 @@ import {
   createFlowReconciliationWorker,
   waitForFlowReconciliationRegistration,
 } from "../flows/flow-reconciliation.worker.js";
+import {
+  createWebhookReplaySweepWorker,
+  waitForWebhookReplaySweepRegistration,
+  WEBHOOK_REPLAY_SWEEP_INTERVAL_MS,
+} from "../webhook-replay-sweep.worker.js";
 
 /**
  * Phase 12 (WRK-13), Task 1: `campaign-scheduler.worker.ts`,
@@ -366,5 +371,153 @@ describe("analytics-reconciliation scheduler interval (CMP-06)", () => {
       await queue.obliterate({ force: true });
       await queue.close();
     }
+  });
+});
+
+/**
+ * Phase 13 (CMP-08, D-06, plan 13-06), Task 2: `webhook-replay-sweep.worker.ts`
+ * is a BRAND NEW queue -- unlike the FIXTURES loop above (which each migrated
+ * away from an older `tickQueue.add({repeat})` registration form and
+ * therefore needs the "starting from a Redis holding the legacy repeatable
+ * entry" coexistence/cleanup case), this worker was built directly on
+ * `upsertJobScheduler` from day one and has no legacy entry to migrate away
+ * from. It is deliberately covered by its OWN describe block, not folded
+ * into the shared FIXTURES array, for exactly that reason: joining the loop
+ * would assert a `removeRepeatable` cleanup this file's own registration
+ * code correctly never calls.
+ */
+describe("webhook-replay-sweep scheduler (CMP-08, plan 13-06)", () => {
+  let redis: TempRedis;
+
+  beforeAll(async () => {
+    redis = await startTempRedis({});
+  });
+
+  afterAll(async () => {
+    await redis?.stop();
+  });
+
+  it("registers exactly one job scheduler with the stable id and the correct every interval", async () => {
+    const connection = buildRedisConnectionOptions(redis.url);
+    const worker = createWebhookReplaySweepWorker(connection, { autorun: false });
+    const queue = new Queue("webhook-replay-sweep", { connection });
+
+    try {
+      await vi.waitFor(async () => {
+        expect(await queue.getJobSchedulersCount()).toBe(1);
+      });
+
+      const schedulers = await queue.getJobSchedulers();
+      expect(schedulers).toHaveLength(1);
+      expect(schedulers[0].key).toBe("webhook-replay-sweep-tick");
+      expect(schedulers[0].every).toBe(WEBHOOK_REPLAY_SWEEP_INTERVAL_MS);
+
+      await waitForWebhookReplaySweepRegistration(worker);
+    } finally {
+      await worker.close();
+      await queue.obliterate({ force: true });
+      await queue.close();
+    }
+  });
+
+  it("constructing the worker twice still leaves exactly one scheduler with that id", async () => {
+    const connection = buildRedisConnectionOptions(redis.url);
+    const queue = new Queue("webhook-replay-sweep", { connection });
+    const workerA = createWebhookReplaySweepWorker(connection, { autorun: false });
+
+    try {
+      await vi.waitFor(async () => {
+        expect(await queue.getJobSchedulersCount()).toBe(1);
+      });
+
+      const workerB = createWebhookReplaySweepWorker(connection, { autorun: false });
+      try {
+        await vi.waitFor(async () => {
+          expect(await queue.getJobSchedulersCount()).toBe(1);
+        });
+
+        const schedulers = await queue.getJobSchedulers();
+        expect(schedulers).toHaveLength(1);
+        expect(schedulers[0].key).toBe("webhook-replay-sweep-tick");
+
+        await waitForWebhookReplaySweepRegistration(workerB);
+      } finally {
+        await workerB.close();
+      }
+
+      await waitForWebhookReplaySweepRegistration(workerA);
+    } finally {
+      await workerA.close();
+      await queue.obliterate({ force: true });
+      await queue.close();
+    }
+  });
+
+  it("boot enqueues one immediate job with a per-boot jobId carrying the current schemaVersion, not owned by the scheduler", async () => {
+    const connection = buildRedisConnectionOptions(redis.url);
+    const worker = createWebhookReplaySweepWorker(connection, { autorun: false });
+    const queue = new Queue("webhook-replay-sweep", { connection });
+
+    try {
+      await vi.waitFor(async () => {
+        const jobs = await queue.getJobs(["waiting", "delayed"]);
+        expect(jobs.some((job) => job.id?.startsWith("boot-"))).toBe(true);
+      });
+
+      const jobs = await queue.getJobs(["waiting", "delayed"]);
+      const bootJobs = jobs.filter((job) => job.id?.startsWith("boot-"));
+      expect(bootJobs).toHaveLength(1);
+      expect((bootJobs[0].data as { schemaVersion?: number }).schemaVersion).toBe(1);
+
+      await waitForWebhookReplaySweepRegistration(worker);
+    } finally {
+      await worker.close();
+      await queue.obliterate({ force: true });
+      await queue.close();
+    }
+  });
+
+  it("a rejecting registration is logged and swallowed -- the factory call resolves and never surfaces as an unhandled rejection", async () => {
+    const connection = buildRedisConnectionOptions(redis.url);
+    const err = new Error("simulated redis hiccup at boot");
+    const upsertSpy = vi.spyOn(Queue.prototype, "upsertJobScheduler").mockRejectedValueOnce(err);
+    const closeSpy = vi.spyOn(Queue.prototype, "close");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const unhandledRejections: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => {
+      unhandledRejections.push(reason);
+    };
+    process.on("unhandledRejection", onUnhandled);
+
+    const worker = createWebhookReplaySweepWorker(connection, { autorun: false });
+
+    try {
+      await expect(waitForWebhookReplaySweepRegistration(worker)).resolves.toBeUndefined();
+
+      expect(closeSpy).toHaveBeenCalled();
+      expect(errorSpy).toHaveBeenCalled();
+      expect(upsertSpy).toHaveBeenCalledTimes(1);
+      expect(unhandledRejections).toHaveLength(0);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+      upsertSpy.mockRestore();
+      closeSpy.mockRestore();
+      errorSpy.mockRestore();
+      await worker.close();
+      const queue = new Queue("webhook-replay-sweep", { connection });
+      await queue.obliterate({ force: true }).catch(() => undefined);
+      await queue.close();
+    }
+  });
+
+  it("the worker file registers through upsertJobScheduler behind a guard that logs (never rethrows) and always closes the registration queue", () => {
+    const source = readFileSync(
+      path.join(REPO_ROOT, "apps/worker/src/queues/webhook-replay-sweep.worker.ts"),
+      "utf8"
+    );
+
+    expect(source).toContain("upsertJobScheduler");
+    expect(source).toMatch(/finally\s*\{[\s\S]*?queue\.close\(\)/);
+    expect(source).toMatch(/catch\s*\(err\)\s*\{\s*scrubbedConsole\.error/);
   });
 });

@@ -21,6 +21,7 @@ import { createFlowSegmentSweepFlowWorker } from "./queues/flows/flow-segment-sw
 import { createFlowEnrollExistingWorker } from "./queues/flows/flow-enroll-existing.worker.js";
 import { createPartitionMaintenanceWorker } from "./queues/partition-maintenance.worker.js";
 import { createSendReconcilerWorker } from "./queues/send-reconciler.worker.js";
+import { createWebhookReplaySweepWorker } from "./queues/webhook-replay-sweep.worker.js";
 
 /**
  * The worker process's runtime handle: a standalone shared ioredis
@@ -207,6 +208,12 @@ export async function buildWorker(): Promise<WorkerRuntime> {
     // claims each one exclusively per-tenant, and resolves it to `sent`
     // from webhook evidence already on disk. Never calls SendGrid (D-01).
     createSendReconcilerWorker(buildRedisConnectionOptions(redisUrl)),
+    // CMP-08 (D-06/D-07, 13-06): the recovery half of the webhook-ingress
+    // durability journal (13-01) -- finds journal rows with no
+    // ingestion-complete mark past the stuck threshold and re-enqueues them
+    // onto webhook-events, then prunes/tombstones the journal at its
+    // retention horizon in the same tick.
+    createWebhookReplaySweepWorker(buildRedisConnectionOptions(redisUrl)),
   ];
 
   // Phase 12 (WRK-08/WRK-10): attach the shared error/failed listener,
@@ -238,7 +245,7 @@ async function main(): Promise<void> {
   process.on("SIGTERM", shutdown);
 
   scrubbedConsole.log(
-    `apps/worker started (${runtime.workers.length} BullMQ worker(s) registered: events:ingest, imports:csv, email-broadcast, email-triggered, campaign-kickoff, campaign-scheduler, webhook-events, analytics-reconciliation, flow-run-advance, flow-reconciliation, flow-trigger-evaluator, flow-segment-sweep, flow-segment-sweep-flow, flow-enroll-existing, partition-maintenance, send-reconciler)`
+    `apps/worker started (${runtime.workers.length} BullMQ worker(s) registered: events:ingest, imports:csv, email-broadcast, email-triggered, campaign-kickoff, campaign-scheduler, webhook-events, analytics-reconciliation, flow-run-advance, flow-reconciliation, flow-trigger-evaluator, flow-segment-sweep, flow-segment-sweep-flow, flow-enroll-existing, partition-maintenance, send-reconciler, webhook-replay-sweep)`
   );
 }
 

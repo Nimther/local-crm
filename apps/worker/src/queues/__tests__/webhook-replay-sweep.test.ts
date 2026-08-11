@@ -285,4 +285,127 @@ describe("webhook-replay-sweep.worker.ts (CMP-08, D-06, plan 13-06)", () => {
     expect(WEBHOOK_REPLAY_SWEEP_PAGE_LIMIT).toBeGreaterThan(0);
     expect(WEBHOOK_REPLAY_MAX_ATTEMPTS).toBeGreaterThan(0);
   });
+
+  /**
+   * Task 2 (Codex follow-up review, WARNING finding 6): the retention step
+   * -- `pruneIngressJournal`/`purgeExpiredIngressJournalPayloads`, run after
+   * the replay step in the SAME per-workspace transaction. `retentionDays`
+   * is overridden per test (rather than waiting on the real ~7-day
+   * horizon), and `receivedAtMinutesAgo` is chosen so a row is unambiguously
+   * past (or inside) that overridden horizon.
+   */
+  describe("retention (Task 2)", () => {
+    it("a COMPLETED row aged past the retention horizon is deleted outright", async () => {
+      const workspaceId = await freshWorkspaceId("retention-prune");
+      const journalId = await seedJournalRow(workspaceId, {
+        receivedAtMinutesAgo: 2 * 24 * 60, // 2 days
+        ingestionCompletedAt: new Date(),
+      });
+
+      const summary = await runWebhookReplaySweep({ workspaceIds: [workspaceId], retentionDays: 1 });
+
+      expect(summary.journalRowsPruned).toBe(1);
+      expect(await readJournalRow(workspaceId, journalId)).toBeUndefined();
+    });
+
+    it("a COMPLETED row aged inside the retention horizon is left present", async () => {
+      const workspaceId = await freshWorkspaceId("retention-prune-fresh");
+      const journalId = await seedJournalRow(workspaceId, {
+        receivedAtMinutesAgo: 30,
+        ingestionCompletedAt: new Date(),
+      });
+
+      const summary = await runWebhookReplaySweep({ workspaceIds: [workspaceId], retentionDays: 1 });
+
+      expect(summary.journalRowsPruned).toBe(0);
+      const row = await readJournalRow(workspaceId, journalId);
+      expect(row).toBeDefined();
+      expect(row?.rawBatch).not.toBeNull();
+    });
+
+    it("an INCOMPLETE, attempt-capped row aged past the retention horizon survives as a tombstone: raw_batch null, payload_purged_at set", async () => {
+      const workspaceId = await freshWorkspaceId("retention-purge-capped");
+      const journalId = await seedJournalRow(workspaceId, {
+        receivedAtMinutesAgo: 2 * 24 * 60,
+        replayCount: WEBHOOK_REPLAY_MAX_ATTEMPTS,
+      });
+
+      const summary = await runWebhookReplaySweep({ workspaceIds: [workspaceId], retentionDays: 1 });
+
+      expect(summary.rowsEnqueued, "an attempt-capped row must never be enqueued, purged or not").toBe(0);
+      expect(summary.journalPayloadsPurged).toBe(1);
+      const row = await readJournalRow(workspaceId, journalId);
+      expect(row).toBeDefined();
+      expect(row?.rawBatch).toBeNull();
+      expect(row?.payloadPurgedAt).not.toBeNull();
+    });
+
+    it("an incomplete/never-transitions-to-absent property: a merely-stuck row aged past the horizon is ALSO enqueued this same tick, then survives purge as a tombstone -- retention runs after replay, never before it", async () => {
+      const workspaceId = await freshWorkspaceId("retention-purge-stuck");
+      const journalId = await seedJournalRow(workspaceId, { receivedAtMinutesAgo: 2 * 24 * 60 });
+
+      const beforeCount = await withTenant(workspaceId, () =>
+        withTenantTransaction(async (client) => {
+          const { rows } = await client.query<{ count: string }>(
+            `SELECT count(*)::text as count FROM ingress_journal WHERE id = $1`,
+            [journalId]
+          );
+          return Number(rows[0].count);
+        })
+      );
+      expect(beforeCount).toBe(1);
+
+      const summary = await runWebhookReplaySweep({ workspaceIds: [workspaceId], retentionDays: 1 });
+
+      // Enqueued THIS tick (replay ran before retention)...
+      expect(summary.rowsEnqueued).toBe(1);
+      expect(summary.journalPayloadsPurged).toBe(1);
+
+      // ...and the job it produced actually carries the real batch --
+      // proof the payload was captured before this same tick's retention
+      // step nulled raw_batch on the row.
+      const [result] = (await drainEnqueuedJobsFor(workspaceId)) as { inserted: number }[];
+      expect(result.inserted).toBe(1);
+
+      // The row itself never transitioned from present to absent -- only
+      // present-with-payload to present-without-payload.
+      const row = await readJournalRow(workspaceId, journalId);
+      expect(row, "an incomplete row must never be deleted by retention, only tombstoned").toBeDefined();
+      expect(row?.rawBatch).toBeNull();
+      expect(row?.payloadPurgedAt).not.toBeNull();
+      expect(row?.replayCount).toBe(1);
+
+      const afterCount = await withTenant(workspaceId, () =>
+        withTenantTransaction(async (client) => {
+          const { rows } = await client.query<{ count: string }>(
+            `SELECT count(*)::text as count FROM ingress_journal WHERE id = $1`,
+            [journalId]
+          );
+          return Number(rows[0].count);
+        })
+      );
+      expect(afterCount, "count(*) must be 1 both before and after the tick").toBe(1);
+    });
+
+    it("a tombstone created by one tick is still present, unchanged, after a second tick over the same data", async () => {
+      const workspaceId = await freshWorkspaceId("retention-tombstone-survives");
+      const journalId = await seedJournalRow(workspaceId, {
+        receivedAtMinutesAgo: 2 * 24 * 60,
+        replayCount: WEBHOOK_REPLAY_MAX_ATTEMPTS,
+      });
+
+      await runWebhookReplaySweep({ workspaceIds: [workspaceId], retentionDays: 1 });
+      const afterFirstTick = await readJournalRow(workspaceId, journalId);
+      expect(afterFirstTick?.payloadPurgedAt).not.toBeNull();
+
+      const secondSummary = await runWebhookReplaySweep({ workspaceIds: [workspaceId], retentionDays: 1 });
+
+      expect(secondSummary.journalRowsPruned, "a tombstone must never be pruned -- it never reached ingestion_completed_at").toBe(0);
+      expect(secondSummary.journalPayloadsPurged, "an already-purged row is idempotent -- a second purge call matches zero rows").toBe(0);
+      const afterSecondTick = await readJournalRow(workspaceId, journalId);
+      expect(afterSecondTick).toBeDefined();
+      expect(afterSecondTick?.rawBatch).toBeNull();
+      expect(afterSecondTick?.payloadPurgedAt?.getTime()).toBe(afterFirstTick?.payloadPurgedAt?.getTime());
+    });
+  });
 });
