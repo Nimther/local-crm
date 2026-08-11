@@ -130,6 +130,30 @@ test("degraded live-count state shows the amber marker and preserves the last-go
   const slug = await registerAndCreateWorkspace(page);
   await openSegmentCreatePage(page, slug);
 
+  // FAILURE INJECTION -- this is stimulus, not a remedy, and it is the reason
+  // this test can no longer flake silently.
+  //
+  // SegmentBuilder renders the count paragraph and the «контактов подходит»
+  // label in the SAME commit (both live inside the `canPreview` branch), and
+  // the count shows the literal «—» until the preview-count response lands and
+  // sets `lastGoodCount`. That «—» window is exactly one round-trip wide. On a
+  // developer machine the API answers in single-digit milliseconds, so the
+  // window closes before the harness can look and the bug is invisible; on a
+  // loaded CI runner it stays open longer than the harness's own round-trips
+  // and the read lands on «—». That is why this test failed three times in
+  // Phase 8 CI while passing on the identical commit in a sibling run.
+  //
+  // Holding the first response open pins that environment condition ON for
+  // every machine, so the wait below is genuinely exercised and a regression
+  // fails deterministically here instead of once every few CI runs. It does
+  // NOT make the test pass -- the retrying assertion below does that, and
+  // removing it fails this test 100% of the time with the delay in place.
+  const FIRST_COUNT_RESPONSE_DELAY_MS = 1_000;
+  await page.route("**/segments/preview-count", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, FIRST_COUNT_RESPONSE_DELAY_MS));
+    await route.continue();
+  });
+
   // Build a simple, valid attribute condition so a real (non-intercepted)
   // count settles first -- this is the "last-good count" the degraded state
   // must preserve.
@@ -137,13 +161,27 @@ test("degraded live-count state shows the amber marker and preserves the last-go
   await page.getByRole("option", { name: "Страна" }).click();
   await page.getByPlaceholder("Значение").fill("RU");
 
+  // The preview card exists. This says the request is about to start -- it says
+  // nothing about whether a count has arrived, so it cannot be the only wait.
   await expect(page.getByText(/контактов подходит/i)).toBeVisible({ timeout: 10_000 });
 
   const countParagraph = page.getByText(/контактов подходит/i).locator("xpath=preceding-sibling::p[1]");
-  await expect(countParagraph).toBeVisible();
+
+  // THE fix for SEGM-04: wait on the value this test actually goes on to read.
+  // «—» is precisely the placeholder shown while `lastGoodCount === null`, so
+  // this retrying assertion flips at the exact moment a response landed and the
+  // count was committed to state. The previous code waited only for the sibling
+  // label to become visible and then took a one-shot, NON-retrying
+  // `textContent()` snapshot, which is why the outcome was decided by whether
+  // the network beat the harness.
+  await expect(countParagraph).not.toHaveText("—", { timeout: 15_000 });
+
   const lastGoodText = (await countParagraph.textContent())?.trim();
   expect(lastGoodText).toBeTruthy();
   expect(lastGoodText).not.toBe("—");
+  // Strengthened, not relaxed: «not —» alone would also accept an empty or
+  // spinner-only paragraph. The last-good count must be a real number.
+  expect(lastGoodText).toMatch(/\d/);
 
   // Now intercept the preview-count route to return the exact degraded
   // shape the real route emits on a 57014 statement-timeout, and trigger a
