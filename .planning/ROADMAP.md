@@ -429,14 +429,14 @@ Plans:
   4. A provider event carrying an out-of-range or manipulated timestamp cannot bypass deduplication or land outside its partition, and a redelivered event is counted once even when `sg_event_id` is not stable across retries.
   5. Metric drift is corrected by a scheduled reconciliation job rather than a one-off fix, events missed while the webhook endpoint was unreachable are recovered by backfill, and a tenant approaching the spam-complaint threshold raises an alert.
 
-**Plans**: 15 plans across 9 waves
+**Plans**: 3/15 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 13-01-PLAN.md — [tracer] Ingress journal end-to-end: verified batch journaled before enqueue, worker marks it ingested; quarantine table DDL (CMP-08)
-- [ ] 13-02-PLAN.md — UTC day semantics: force `AT TIME ZONE 'UTC'` on every reconciliation cast, pin `sent_at` as the day authority, assert the recurring schedule (CMP-02, CMP-06)
-- [ ] 13-03-PLAN.md — `unknown`/`reconciling` sends get their own visible count in campaign stats; ledger provably sums to total sends (CMP-02 / D-16)
+- [x] 13-01-PLAN.md — [tracer] Ingress journal end-to-end: verified batch journaled before enqueue, worker marks it ingested; quarantine table DDL (CMP-08)
+- [x] 13-02-PLAN.md — UTC day semantics: force `AT TIME ZONE 'UTC'` on every reconciliation cast, pin `sent_at` as the day authority, assert the recurring schedule (CMP-02, CMP-06)
+- [x] 13-03-PLAN.md — `unknown`/`reconciling` sends get their own visible count in campaign stats; ledger provably sums to total sends (CMP-02 / D-16)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -625,7 +625,7 @@ Phase 9 has no dependents and may be scheduled in parallel at any point after Ph
 | 10. Tenant Isolation & Trust Boundaries | v1.1 | 15/15 | Complete    | 2026-08-09 |
 | 11. Delivery Correctness | v1.1 | 11/11 | Complete    | 2026-08-09 |
 | 12. Worker Reliability & Tenant Fairness | v1.1 | 14/14 | Complete    | 2026-08-11 |
-| 13. Compliance & Analytics Integrity | v1.1 | 0/TBD | Not started | - |
+| 13. Compliance & Analytics Integrity | v1.1 | 3/15 | In Progress|  |
 | 14. Deployment & Database Durability | v1.1 | 0/TBD | Not started | - |
 | 15. Observability, Alerting & Frontend Resilience | v1.1 | 0/TBD | Not started | - |
 | 16. Live SendGrid Verification | v1.1 | 0/TBD | Not started | - |
