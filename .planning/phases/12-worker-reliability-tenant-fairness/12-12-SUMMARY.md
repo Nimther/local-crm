@@ -180,3 +180,12 @@ None - no external service configuration required.
 ---
 *Phase: 12-worker-reliability-tenant-fairness*
 *Completed: 2026-08-11*
+
+## Self-Check: PASSED
+
+- FOUND: apps/worker/src/queues/__tests__/worker-autorun-default.test.ts
+- FOUND: .planning/phases/12-worker-reliability-tenant-fairness/12-12-SUMMARY.md
+- FOUND commit: 065b742 (Task 1)
+- FOUND commit: 4bc0750 (Task 2)
+- FOUND commit: 2820e78 (Task 3)
+- FOUND commit: 250c70a (SUMMARY.md)
