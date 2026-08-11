@@ -32,7 +32,7 @@ Milestone: v1.1 Production Hardening (Phases 8-16, 95 requirements)
 Phase: 13 — Compliance & Analytics Integrity
 Plan: Not started
 Status: Ready to execute
-Last activity: 2026-08-11 — Phase 12 complete, transitioned to Phase 13
+Last activity: 2026-08-11 - Completed quick task 260811-qit: Append Codex follow-up review section to Phase 13 REVIEWS.md
 Progress: [████████████████████] 63/63 plans (100%) — 5/9 v1.1 phases complete (8–12), 44/95 requirements
 
 ✓ **Deadline closed (2026-08-07):** Phase 9 (DB-01/DB-02 partition automation) completed ahead of the hard **2026-09-01** deadline — 20 attached monthly partitions (2026-09…2027-06) confirmed by catalog query against a migrated database.
@@ -283,6 +283,7 @@ Research flags carried from v1.0:
 | 260722-q4t | Создать README.md в корне репозитория | 2026-07-22 | 939b816 | | [260722-q4t-readme-md](./quick/260722-q4t-readme-md/) |
 | 260727-sfk | Audit SPECIFICATION.md as-built + relocate CLAUDE.md maintenance rule | 2026-07-27 | b63ca82 | Verified | [260727-sfk-specification-md-as-built-claude-md-spec](./quick/260727-sfk-specification-md-as-built-claude-md-spec/) |
 | 260809-eqr | Close Phase 10 residual review findings WR-06/WR-07 + sync STATE.md to Phase 11 | 2026-08-09 | ebc754c | Complete | [260809-eqr-close-phase-10-residual-review-findings-](./quick/260809-eqr-close-phase-10-residual-review-findings-/) |
+| 260811-qit | Append Codex follow-up review section to Phase 13 REVIEWS.md | 2026-08-11 | b37e7bd | Verified | [260811-qit-append-codex-follow-up-review-section-to](./quick/260811-qit-append-codex-follow-up-review-section-to/) |
 
 ## Deferred Items
 
