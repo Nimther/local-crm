@@ -1,9 +1,9 @@
 ---
-status: complete
+status: diagnosed
 phase: 12-worker-reliability-tenant-fairness
 source: 12-01-SUMMARY.md, 12-02-SUMMARY.md, 12-03-SUMMARY.md, 12-04-SUMMARY.md, 12-05-SUMMARY.md, 12-06-SUMMARY.md, 12-07-SUMMARY.md, 12-08-SUMMARY.md, 12-09-SUMMARY.md, 12-10-SUMMARY.md, 12-11-SUMMARY.md, 12-12-SUMMARY.md, 12-13-SUMMARY.md, 12-VERIFICATION.md
 started: 2026-08-11T02:49:33Z
-updated: 2026-08-11T06:50:00Z
+updated: 2026-08-11T07:05:00Z
 ---
 
 ## Current Test
@@ -341,7 +341,19 @@ blocked: 0
   reason: "User reported: Test-design gap: seed exactly one past-due scheduled campaign before the 20-job burst, then assert that exactly one kickoff job is produced/processed and the campaign transitions only once. Also assert no duplicate kickoff remains in waiting/active/completed state. The current empty-database result is vacuous; separate jobId and row-lock tests do not replace this end-to-end burst assertion."
   severity: major
   test: 43
-  root_cause: ""     # Filled by diagnosis
-  artifacts: []      # Filled by diagnosis
-  missing: []        # Filled by diagnosis
-  debug_session: ""
+  root_cause: "Test-design defect in apps/worker/src/queues/__tests__/worker-autorun-default.test.ts:255-320. The burst case's only dedup assertion (line 310) expects the kickoff queue to be all-zeros (waiting/active/delayed/completed/failed all 0). Because the test never seeds a campaign, findDueCampaignCandidates() (campaign-scheduler.worker.ts:59-67, WHERE status='scheduled' AND scheduled_at <= now()) returns [] on every one of the 20+ burst ticks, so the dedup-bearing loop (transitionToSending's FOR UPDATE SKIP LOCKED re-check at :83-101, the if-not-transitioned continue, and the deterministic jobId enqueue at :196-205) executes zero times — an all-zero kickoff queue is observed whether or not dedup works. Vacuous by construction (the test's own comment at :297-301 admits it). Postgres infrastructure is ALREADY live in this test: beforeAll calls ensureTestDbMigrated() and global-setup publishes DATABASE_URL/SCAN_DATABASE_URL, and the passing failed===0 assertion proves the real scan ran 20+ times against the migrated ephemeral DB. Missing piece is seeded data + exactly-one assertions, not plumbing. Note: 12-REVIEW.md WR-03's suggestion to assert kickoff completed===1 is wrong on one detail — nothing consumes CAMPAIGN_KICKOFF_QUEUE in this test, so the single job sits in waiting."
+  artifacts:
+    - path: "apps/worker/src/queues/__tests__/worker-autorun-default.test.ts"
+      issue: "lines 255-320 (esp. 296-310): vacuous all-zeros kickoff assertion against a deliberately empty campaigns table; missing seed + missing exactly-one assertions"
+    - path: "apps/worker/src/queues/campaign-scheduler.worker.ts"
+      issue: "nothing wrong — :59-67 scan, :83-101 FOR UPDATE SKIP LOCKED transition, :196-205 deterministic-jobId enqueue are the mechanism the test must actually exercise"
+    - path: "apps/worker/src/queues/__tests__/campaign-scheduler-scan.test.ts"
+      issue: "nothing wrong — :32-56 seedDueCampaign recipe (insertFixtureOrganization + withTenant INSERT of segment + past-due scheduled campaign) and :58-68 status readback are the proven helpers to reuse"
+  missing:
+    - "Seed one workspace (insertFixtureOrganization, failure-fixtures.ts:121-128) and one past-due scheduled campaign (seedDueCampaign recipe) in the burst case before stacking the 20-job burst"
+    - "Replace line-310 all-zeros assertion with: total kickoff jobs across waiting+active+delayed+completed+failed === 1 (job sits in waiting — nothing consumes CAMPAIGN_KICKOFF_QUEUE here)"
+    - "Assert drainKickoffQueue.getJob(campaignId) is non-null (deterministic jobId seam end to end)"
+    - "Assert campaign readback via withTenant shows status === 'sending' (combined with kickoff-count 1 proves exactly one transition)"
+    - "Enqueue one extra manual scan-due-campaigns job as a post-transition re-check tick (avoids waiting for 60s SCAN_INTERVAL_MS)"
+    - "Optionally keep the empty-DB variant as an honestly-named control case (no due campaigns → no kickoff jobs)"
+  debug_session: ".planning/debug/burst-absorption-vacuous-dedup.md"
