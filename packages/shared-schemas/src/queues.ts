@@ -269,12 +269,54 @@ export type CampaignKickoffJob = z.infer<typeof campaignKickoffJobSchema>;
  * event rows (dedup-only slice, WBHK-03) -- normalized field extraction
  * happens inside the worker, not at the schema boundary, since SendGrid's
  * per-event-type shape varies (05-03 adds normalization/side effects).
+ *
+ * Phase 13 (CMP-08, D-05, R-05, plan 13-01) widens this shape with two
+ * OPTIONAL fields, both optional by design and not by omission:
+ * `schemaVersion` and `journalId`. A job enqueued by pre-Phase-13 code
+ * carries NEITHER field, and per ROADMAP R-05's backward-compatible-payload
+ * intent such a job must still be processed to completion -- an absent
+ * `schemaVersion` means the pre-versioned shape, and is processed WITHOUT
+ * the journal completion mark (there is no journal row to mark). An
+ * unrecognized NON-ABSENT version (e.g. `2` once this schema's literal only
+ * names `1`) is deferred the same way `sendReconcilerTickJobSchema`
+ * consumers defer: logged and returned, never thrown into BullMQ retries.
+ * `journalId` is the `ingress_journal` row id `enqueueWebhookBatch` was
+ * handed after `writeIngressJournal` committed -- the worker's sole handle
+ * to close the loop via `markIngestionComplete`.
  */
+export const WEBHOOK_EVENTS_SCHEMA_VERSION = 1;
+
 export const webhookEventsJobSchema = z.object({
   workspaceId: z.string().uuid(),
   events: z.array(z.unknown()),
+  schemaVersion: z.literal(WEBHOOK_EVENTS_SCHEMA_VERSION).optional(),
+  journalId: z.string().uuid().optional(),
 });
 export type WebhookEventsJob = z.infer<typeof webhookEventsJobSchema>;
+
+/**
+ * Pure payload constructor shared by BOTH producers of `WEBHOOK_EVENTS_QUEUE`
+ * -- `enqueueWebhookBatch` (apps/api, this plan) and plan 13-06's replay
+ * sweep (apps/worker) -- so the two cannot drift on job shape while neither
+ * app imports the other (the phase-wide `apps/api` <-> `apps/worker` import
+ * boundary decision, 13-01-PLAN.md's "Cross-app shared-module placement").
+ * `journalId` is optional here too: the replay sweep's own re-enqueue MAY
+ * omit it for a row it cannot resolve, and a caller that never journaled a
+ * batch (should not happen post-13-01, but this constructor makes no
+ * assumption about its caller) can still build a valid legacy-shaped payload.
+ */
+export function buildWebhookEventsJobPayload(
+  workspaceId: string,
+  events: unknown[],
+  journalId?: string
+): WebhookEventsJob {
+  return {
+    workspaceId,
+    events,
+    schemaVersion: WEBHOOK_EVENTS_SCHEMA_VERSION,
+    ...(journalId !== undefined ? { journalId } : {}),
+  };
+}
 
 /**
  * Phase 12 (WRK-05/WRK-06, D-09, R-05, plan 12-06): the segment-sweep

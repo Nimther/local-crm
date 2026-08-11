@@ -26,6 +26,7 @@ import * as workspaceDailyRollupSchema from "./schema/workspace-daily-rollup.js"
 import * as partitionMaintenanceRunsSchema from "./schema/partition-maintenance-runs.js";
 import * as sendReconcilerRunsSchema from "./schema/send-reconciler-runs.js";
 import * as deadLetterJobsSchema from "./schema/dead-letter-jobs.js";
+import * as ingressJournalSchema from "./schema/ingress-journal.js";
 
 const schema = {
   ...authSchema,
@@ -54,6 +55,7 @@ const schema = {
   ...partitionMaintenanceRunsSchema,
   ...sendReconcilerRunsSchema,
   ...deadLetterJobsSchema,
+  ...ingressJournalSchema,
 };
 
 const databaseUrl = process.env.DATABASE_URL;
