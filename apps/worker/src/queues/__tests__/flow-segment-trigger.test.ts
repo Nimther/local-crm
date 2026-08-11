@@ -469,15 +469,16 @@ describe("06-08: branch node + segment-entry trigger (sweep + enroll-existing)",
     // Leave the trigger segment.
     await setContactTier(everyTimeWorkspaceId, everyTimeContactId, "regular");
     await runFullSweep();
-    // RED under current code: the snapshot row is never cleared on segment
-    // exit, so this stays true instead of false.
+    // The sweep's stale-snapshot cleanup (drainStaleSnapshotBatches /
+    // deleteStaleSnapshotBatch) clears this on segment exit, so a rejoin
+    // re-enters below.
     expect(await getSnapshotSeen(everyTimeWorkspaceId, everyTimeFlowId, everyTimeContactId)).toBe(false);
 
     // Rejoin the trigger segment.
     await setContactTier(everyTimeWorkspaceId, everyTimeContactId, "vip");
     await runFullSweep();
-    // RED under current code: the rejoin never re-enters, so this stays at
-    // length 1 instead of 2.
+    // The stale-snapshot clear above means canEnterFlow no longer sees this
+    // contact as previously seen, so the rejoin creates a second run.
     expect(await getRunsForContact(everyTimeWorkspaceId, everyTimeFlowId, everyTimeContactId)).toHaveLength(2);
 
     // once_ever sub-scenario -- fresh workspace/segment/flow/contact so state
