@@ -194,3 +194,7 @@ None - no external service configuration required.
 ---
 *Phase: 13-compliance-analytics-integrity*
 *Completed: 2026-08-11*
+
+## Self-Check: PASSED
+
+All created/modified files confirmed present on disk (migration, relocated module, worker file, both test files, this SUMMARY); `apps/worker/src/queues/analytics-rollup.ts` confirmed deleted (no re-export shim). All 4 commit hashes (`a414faa`, `d04f18b`, `72d6604`, `473907c`) confirmed present in `git log`.
