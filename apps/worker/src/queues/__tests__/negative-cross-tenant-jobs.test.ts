@@ -26,6 +26,7 @@ import { runFlowSegmentSweepFlowJob } from "../flows/flow-segment-sweep-flow.wor
 import { processFlowEnrollExisting } from "../flows/flow-enroll-existing.worker.js";
 import { findReconcilableCandidates, resolveOneSend } from "../send-reconciler.worker.js";
 import { runWebhookReplaySweep } from "../webhook-replay-sweep.worker.js";
+import { runErasureScrub } from "../erasure-scrub.worker.js";
 
 /**
  * SEC-16 (background-job half), SPEC R2: this is the counterpart to
@@ -415,6 +416,90 @@ describe("Negative cross-tenant suite: background-job families (SEC-16)", () => 
         })
       );
       expect(snapshotCount).toBe(0);
+    });
+  });
+
+  describe("erasure-scrub (runErasureScrub, plan 13-13)", () => {
+    it("a job naming workspace B with workspace A's contactId/erasureRecordId is a no-op -- workspace A's erasure record and send_events are unchanged", async () => {
+      const workspaceA = await freshWorkspaceId("jobs-erasure-a");
+      const workspaceB = await freshWorkspaceId("jobs-erasure-b");
+
+      const contactAId = await insertContact(workspaceA, { email: "erased-negative-suite@example.test" });
+      const sendId = await withTenant(workspaceA, () =>
+        withTenantTransaction(async (client) => {
+          const { rows: segmentRows } = await client.query<{ id: string }>(
+            `INSERT INTO segments (workspace_id, name, definition, created_by_user_id)
+             VALUES ($1, 'Negative-suite erasure segment', $2, 'test-user') RETURNING id`,
+            [workspaceA, { operator: "and", conditions: [] }]
+          );
+          const { rows: campaignRows } = await client.query<{ id: string }>(
+            `INSERT INTO campaigns (workspace_id, name, status, segment_id, template_id, from_email, created_by_user_id)
+             VALUES ($1, 'Negative-suite erasure campaign', 'sent', $2, 'd-fixture-template', 'sender@fixture.test', 'test-user')
+             RETURNING id`,
+            [workspaceA, segmentRows[0].id]
+          );
+          const { rows: sendRows } = await client.query<{ id: string }>(
+            `INSERT INTO sends (workspace_id, campaign_id, contact_id, kind, status, sent_at)
+             VALUES ($1, $2, $3, 'campaign', 'sent', now()) RETURNING id`,
+            [workspaceA, campaignRows[0].id, contactAId]
+          );
+          return sendRows[0].id;
+        })
+      );
+      await withTenant(workspaceA, () =>
+        withTenantTransaction((client) =>
+          client.query(
+            `INSERT INTO send_events (id, workspace_id, sg_event_id, send_id, event_type, payload, occurred_at)
+             VALUES (gen_random_uuid(), $1, 'sg-negative-suite-1', $2, 'delivered', $3::jsonb, now())`,
+            [workspaceA, sendId, JSON.stringify({ email: "erased-negative-suite@example.test", event: "delivered" })]
+          )
+        )
+      );
+      const erasureRecordAId = await withTenant(workspaceA, () =>
+        withTenantTransaction(async (client) => {
+          const { rows } = await client.query<{ id: string }>(
+            `INSERT INTO erasure_records (workspace_id, contact_id, anonymized_at, status)
+             VALUES ($1, $2, now(), 'pending') RETURNING id`,
+            [workspaceA, contactAId]
+          );
+          return rows[0].id;
+        })
+      );
+
+      // Hostile/malformed job: names workspace B, but the contactId and
+      // erasureRecordId both actually belong to workspace A. runErasureScrub
+      // opens withTenant(workspaceB, ...), so RLS scopes every query inside
+      // it to workspace B -- the WHERE workspace_id = $1 AND id = $2 lookup
+      // against erasure_records can never see workspace A's row under that
+      // session, regardless of the ids named in the payload.
+      await runErasureScrub({ workspaceId: workspaceB, contactId: contactAId, erasureRecordId: erasureRecordAId });
+
+      const recordAfter = await withTenant(workspaceA, () =>
+        withTenantTransaction(async (client) => {
+          const { rows } = await client.query<{ status: string }>(
+            `SELECT status FROM erasure_records WHERE workspace_id = $1 AND id = $2`,
+            [workspaceA, erasureRecordAId]
+          );
+          return rows[0]?.status;
+        })
+      );
+      expect(recordAfter, "workspace A's erasure record must be untouched -- still pending, never scrubbing/complete").toBe(
+        "pending"
+      );
+
+      const payloadAfter = await withTenant(workspaceA, () =>
+        withTenantTransaction(async (client) => {
+          const { rows } = await client.query<{ payload: Record<string, unknown> }>(
+            `SELECT payload FROM send_events WHERE workspace_id = $1 AND send_id = $2`,
+            [workspaceA, sendId]
+          );
+          return rows[0]?.payload;
+        })
+      );
+      expect(
+        payloadAfter,
+        "workspace A's send_events.payload must be untouched -- the hostile job under workspace B's tenant scope never saw this row"
+      ).toHaveProperty("email");
     });
   });
 
@@ -912,6 +997,13 @@ describe("Negative cross-tenant suite: background-job families (SEC-16)", () => 
       // its own fresh withTenant/withTenantTransaction scope, never mixing
       // a sibling workspace's sends into its ratio.
       "ReputationTick",
+      // Phase 13 (CMP-04, D-01/D-04, plan 13-13): covered by the
+      // dedicated describe block above -- a job naming workspace B whose
+      // contactId/erasureRecordId both belong to workspace A is a no-op,
+      // because runErasureScrub's own withTenant(workspaceB, ...) scope
+      // makes workspace A's erasure_records row and send_events rows
+      // invisible under RLS, never merely unmodified by choice.
+      "ErasureScrub",
     ]);
 
     const EXCLUDED_FAMILIES: Record<string, string> = {
