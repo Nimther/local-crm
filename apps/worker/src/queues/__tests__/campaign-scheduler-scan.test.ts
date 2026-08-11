@@ -1,9 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Pool } from "pg";
-import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { getScanTestDatabaseUrl } from "@mega-crm/test-support";
 import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool } from "../../test/db-fixture.js";
-import { insertFixtureOrganization } from "../../test/failure-fixtures.js";
+import { seedDueCampaign, readDueCampaignState } from "../../test/failure-fixtures.js";
 import { findDueCampaignCandidates, transitionToSending } from "../campaign-scheduler.worker.js";
 
 /**
@@ -29,44 +28,6 @@ describe("campaign-scheduler due-campaign scan (Phase 10 SEC-01/SEC-02)", () => 
     await pool.end();
   });
 
-  async function seedDueCampaign(nameSeed: string): Promise<{ workspaceId: string; campaignId: string }> {
-    // 10-09 (SEC-05): delegates to the mega_crm_auth-backed INSERT in
-    // failure-fixtures.ts -- mega_crm_app holds only SELECT on organization
-    // post-migration-0045.
-    const workspaceId = await insertFixtureOrganization(nameSeed);
-
-    const campaignId = await withTenant(workspaceId, () =>
-      withTenantTransaction(async (client) => {
-        const { rows: segmentRows } = await client.query<{ id: string }>(
-          `INSERT INTO segments (workspace_id, name, definition, created_by_user_id)
-           VALUES ($1, 'Scheduler scan fixture segment', $2, 'test-user') RETURNING id`,
-          [workspaceId, { operator: "and", conditions: [] }],
-        );
-        const { rows: campaignRows } = await client.query<{ id: string }>(
-          `INSERT INTO campaigns (workspace_id, name, status, segment_id, scheduled_at, created_by_user_id)
-           VALUES ($1, 'Scheduler scan fixture campaign', 'scheduled', $2, now() - interval '1 minute', 'test-user')
-           RETURNING id`,
-          [workspaceId, segmentRows[0].id],
-        );
-        return campaignRows[0].id;
-      }),
-    );
-
-    return { workspaceId, campaignId };
-  }
-
-  async function campaignStatus(workspaceId: string, campaignId: string): Promise<string> {
-    return withTenant(workspaceId, () =>
-      withTenantTransaction(async (client) => {
-        const { rows } = await client.query<{ status: string }>(
-          `SELECT status FROM campaigns WHERE id = $1`,
-          [campaignId],
-        );
-        return rows[0].status;
-      }),
-    );
-  }
-
   it("discovers due campaigns across two workspaces and transitions each via the unchanged per-tenant path", async () => {
     const a = await seedDueCampaign("scheduler-scan-a");
     const b = await seedDueCampaign("scheduler-scan-b");
@@ -86,7 +47,7 @@ describe("campaign-scheduler due-campaign scan (Phase 10 SEC-01/SEC-02)", () => 
     expect(transitionedA).toBe(true);
     expect(transitionedB).toBe(true);
 
-    expect(await campaignStatus(a.workspaceId, a.campaignId)).toBe("sending");
-    expect(await campaignStatus(b.workspaceId, b.campaignId)).toBe("sending");
+    expect((await readDueCampaignState(a.workspaceId, a.campaignId)).status).toBe("sending");
+    expect((await readDueCampaignState(b.workspaceId, b.campaignId)).status).toBe("sending");
   });
 });
