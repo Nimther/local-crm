@@ -1,8 +1,8 @@
 ---
-status: diagnosed
+status: resolved
 trigger: "G-12-3 (Phase 12, UAT test 43) — burst-absorption test's dedup assertion passes vacuously against an empty database"
 created: 2026-08-11T07:30:00Z
-updated: 2026-08-11T07:55:00Z
+updated: 2026-08-11T07:15:00Z
 goal: find_root_cause_only
 symptoms_prefilled: true
 ---

@@ -1,9 +1,9 @@
 ---
-status: diagnosed
+status: resolved
 phase: 12-worker-reliability-tenant-fairness
 source: 12-01-SUMMARY.md, 12-02-SUMMARY.md, 12-03-SUMMARY.md, 12-04-SUMMARY.md, 12-05-SUMMARY.md, 12-06-SUMMARY.md, 12-07-SUMMARY.md, 12-08-SUMMARY.md, 12-09-SUMMARY.md, 12-10-SUMMARY.md, 12-11-SUMMARY.md, 12-12-SUMMARY.md, 12-13-SUMMARY.md, 12-VERIFICATION.md
 started: 2026-08-11T02:49:33Z
-updated: 2026-08-11T07:05:00Z
+updated: 2026-08-11T07:15:00Z
 ---
 
 ## Current Test
@@ -337,7 +337,8 @@ blocked: 0
 
 - gap_id: G-12-3
   truth: "The burst-absorption scenario proves scheduler-tick burst dedup end to end: with exactly one past-due scheduled campaign seeded, a 20-job tick burst produces exactly one kickoff job and one campaign state transition, with no duplicate kickoff in waiting/active/completed"
-  status: failed
+  status: resolved
+  resolved_by: "12-14 (gap-closure plan, commits 07c7205/28b99e2/2fb8142; verified 16/16 in 12-VERIFICATION.md with RED evidence 'expected +0 to be 1' recorded in 12-14-SUMMARY.md)"
   reason: "User reported: Test-design gap: seed exactly one past-due scheduled campaign before the 20-job burst, then assert that exactly one kickoff job is produced/processed and the campaign transitions only once. Also assert no duplicate kickoff remains in waiting/active/completed state. The current empty-database result is vacuous; separate jobId and row-lock tests do not replace this end-to-end burst assertion."
   severity: major
   test: 43
@@ -356,4 +357,4 @@ blocked: 0
     - "Assert campaign readback via withTenant shows status === 'sending' (combined with kickoff-count 1 proves exactly one transition)"
     - "Enqueue one extra manual scan-due-campaigns job as a post-transition re-check tick (avoids waiting for 60s SCAN_INTERVAL_MS)"
     - "Optionally keep the empty-DB variant as an honestly-named control case (no due campaigns → no kickoff jobs)"
-  debug_session: ".planning/debug/burst-absorption-vacuous-dedup.md"
+  debug_session: ".planning/debug/resolved/burst-absorption-vacuous-dedup.md"
