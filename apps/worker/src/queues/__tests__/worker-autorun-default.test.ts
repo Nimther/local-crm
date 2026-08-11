@@ -129,6 +129,24 @@ interface AutorunFixture {
   waitForRegistration: (worker: Worker) => Promise<void>;
 }
 
+function waitForJobActive(worker: Worker, jobId: string, timeoutMs = 15_000): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      worker.off("active", onActive);
+      reject(new Error(`timed out waiting for job ${jobId} to reach active`));
+    }, timeoutMs);
+
+    const onActive = (job: Job): void => {
+      if (job.id !== jobId) return;
+      clearTimeout(timeout);
+      worker.off("active", onActive);
+      resolve();
+    };
+
+    worker.on("active", onActive);
+  });
+}
+
 const FIXTURES: AutorunFixture[] = [
   {
     label: "campaign-scheduler",
@@ -188,6 +206,7 @@ describe("repeatable-tick worker autorun default (G-12-1, WRK-13)", () => {
       const connection = buildRedisConnectionOptions(redis.url);
       const worker = fixture.createProductionWorker(connection);
       const queue = new Queue(fixture.tickQueueName, { connection });
+      const campaignKickoffQueue = getCampaignSchedulerKickoffQueueForTest(worker);
 
       try {
         // BullMQ's Worker sets `running` synchronously inside `run()`, which
@@ -204,6 +223,7 @@ describe("repeatable-tick worker autorun default (G-12-1, WRK-13)", () => {
       } finally {
         await worker.close();
         await queue.close();
+        await campaignKickoffQueue?.close();
       }
     });
   });
@@ -212,14 +232,11 @@ describe("repeatable-tick worker autorun default (G-12-1, WRK-13)", () => {
     const connection = buildRedisConnectionOptions(redis.url);
     const worker = createCampaignSchedulerWorker(connection);
     const queue = new Queue("campaign-scheduler", { connection });
+    const kickoffQueue = getCampaignSchedulerKickoffQueueForTest(worker);
 
     try {
       const activeJobId = "pickup-probe";
-      const activePromise = new Promise<void>((resolve) => {
-        worker.on("active", (job: Job) => {
-          if (job.id === activeJobId) resolve();
-        });
-      });
+      const activePromise = waitForJobActive(worker, activeJobId);
 
       await queue.add("scan-due-campaigns", {}, { jobId: activeJobId });
 
@@ -235,6 +252,7 @@ describe("repeatable-tick worker autorun default (G-12-1, WRK-13)", () => {
     } finally {
       await worker.close();
       await queue.close();
+      await kickoffQueue?.close();
     }
   });
 

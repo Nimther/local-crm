@@ -22,7 +22,8 @@ try {
 // lifecycle early enough to decide what database the API server boots against.
 // See e2e/provision-database.ts for the ordering this replaced and the
 // evidence that it was wrong.
-const e2eDatabaseUrl = await provisionE2eDatabase();
+const { databaseUrl: e2eDatabaseUrl, authDatabaseUrl: e2eAuthDatabaseUrl } =
+  await provisionE2eDatabase();
 
 /**
  * 08-10 (QG-04): the E2E lane runs against an ephemeral database of its own.
@@ -76,6 +77,11 @@ export default defineConfig({
         // value is now correct precisely because provisioning happens at
         // config load.
         DATABASE_URL: e2eDatabaseUrl,
+        // Phase 10 split better-auth onto its own least-privilege login role.
+        // Point that role at the SAME ephemeral database explicitly; inheriting
+        // a developer/CI AUTH_DATABASE_URL would split auth rows away from the
+        // application data and make the isolation check fail.
+        AUTH_DATABASE_URL: e2eAuthDatabaseUrl,
         //
         // Everything else is enumerated from apps/api/src/env.ts's boot schema
         // and mirrors apps/api/vitest.config.ts's values so the two test lanes
@@ -87,6 +93,7 @@ export default defineConfig({
         WEB_URL: "http://localhost:5173",
         PLATFORM_SENDGRID_API_KEY: "SG.test_platform_key_0000000000000000",
         PLATFORM_MAIL_FROM: "noreply@megacrm.test",
+        OPERATOR_ALERT_EMAIL: "ops@megacrm.test",
         KMS_PROVIDER: "local",
         KMS_LOCAL_KEK: "grdVCb1fxmhPzylKEPqafcPW4xOMaynE0UwaFUo2OUE=",
         UNSUBSCRIBE_TOKEN_SECRET: "test-only-unsubscribe-secret-at-least-32-bytes",
