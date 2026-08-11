@@ -100,3 +100,130 @@ Plus MEDIUM: the apps/api ↔ apps/worker import boundary is hit un-anticipated 
 (n/a — single reviewer.)
 
 **Overall risk: MEDIUM** — architecturally sound and exceptionally well-sourced, but three HIGH integration gaps would ship real broken behavior if executed verbatim. All are cheap plan-level fixes (one migration grant, one completion-mark restructure, one extra column in the anonymizing UPDATE + upsert semantics, two cursor columns, one cross-app placement decision); with them, the phase drops to LOW risk.
+
+---
+
+## Codex follow-up review
+
+**Reviewer:** codex — follow-up pass, 2026-08-11, run against the Phase 13 plan set after the Claude review above had already been incorporated.
+
+**Status of the Claude review above:** incorporated and closed. Its 3 HIGH / 5 MEDIUM / 5 LOW findings were addressed by the replan at commits `f20ea79` and `967d978`; treat them as history, not as work.
+
+**Status of this section:** the six findings below postdate that replan and are the **open, current, actionable** review set for Phase 13. Each one must be closed in the relevant PLAN.md — or explicitly deferred/rejected there with a written rationale — by the next `/gsd-plan-phase 13 --reviews` run. None of them is addressed by the plan set as it stands.
+
+**Severity legend:** BLOCKER — must be closed in the plan text before Phase 13 executes. WARNING — must be decided in the plan text before execution, never left to executor discretion.
+
+### Finding 1 — BLOCKER: Suppression evidence missing for previously subscribed contacts (13-10)
+
+**Finding (verbatim):**
+
+> 1. BLOCKER — 13-10 must create suppression evidence for every contact erasure, including previously subscribed contacts. 13-CONTEXT.md says erasure must not weaken suppression and every erased address must remain unmailable after re-import.
+
+**Affected plan(s):** 13-10-PLAN.md Task 2, step 2 (line 194: "Keep the existing conditional suppression insert exactly as it is, including ... its unsubscribed-or-suppressed status gate") and the acceptance criterion at line 208 ("After deleting a seeded subscribed contact, `workspace_suppressions` contains no row for that address"), which currently asserts the opposite of what this finding requires — that a previously subscribed contact's erasure writes no suppression row at all. Plan 13-12 later converts `workspace_suppressions.email` to a hash across all four call sites (13-10's insert among them), so the fix must be expressed in terms that survive that conversion — an unconditional insert keyed by email, not gated on pre-erasure subscription status.
+
+**Required acceptance tests:**
+
+- Erasing a previously *subscribed* contact writes a `workspace_suppressions` row for that address (replacing, not supplementing, the current line-208 criterion that asserts no row is written).
+- The suppression reason distinguishes erasure (`contact_deleted` or an erasure-specific reason) from a genuine unsubscribe, so consent history is not falsified by conflating "asked to leave" with "asked to be forgotten."
+- Re-importing the erased address after erasure — through both the CSV import path and the shared `contacts-core` upsert — produces a contact that the pre-send suppression gate still refuses to mail.
+
+**Threat-model update:** amends 13-10's `T-13-10-04` ("Mail continuing to an erased address", high/mitigate) — its mitigation text ("Suppression and status are resolved synchronously in the delete request") is false for the previously-subscribed case as the plan is currently written, since step 2's insert is conditional on prior unsubscribed-or-suppressed status. Also amends `T-13-10-05` ("Resurrecting an erased contact via re-import or update", medium/mitigate) — the re-import protection via the identity-lookup filter (Task 3) prevents PII repopulation but does not by itself guarantee the address stays unmailable, since a newly-created contact from re-import has no suppression row unless one was written unconditionally at erasure time. Corrected mitigation: the suppression insert in Task 2 step 2 must be unconditional on erasure, independent of the contact's subscription status at the time of deletion.
+
+**Suggested fix:** In 13-10-PLAN.md Task 2 step 2, make the `workspace_suppressions` insert unconditional whenever a contact is erased (drop the unsubscribed-or-suppressed status gate for the erasure path specifically, while leaving the genuine-unsubscribe insert path elsewhere unchanged), give it an erasure-specific reason, delete the acceptance criterion at line 208 that asserts no suppression row for a subscribed contact's erasure, and add the re-import assertions from the Required acceptance tests above to the behavior list and acceptance criteria.
+
+### Finding 2 — BLOCKER: UPDATE ... RETURNING cannot capture the pre-update email (13-10)
+
+**Finding (verbatim):**
+
+> 2. BLOCKER — 13-10 cannot capture the old email using a normal UPDATE ... RETURNING after setting email = NULL; PostgreSQL returns the updated row. Read and lock the contact first with SELECT ... FOR UPDATE, or use a CTE that explicitly preserves pre-update values.
+
+**Affected plan(s):** 13-10-PLAN.md Task 2, step 1 (line 191). The step directs an anonymizing UPDATE that sets `email = NULL` (among other columns) in the same statement and states it is "returning the pre-update `email` and `subscription_status`" via "the UPDATE's own returning clause." A single `UPDATE ... RETURNING` in PostgreSQL yields the row's post-update values, so as written the RETURNING clause yields `email = NULL`, not the address step 2's suppression insert needs. This interacts with Finding 1: once the suppression insert becomes unconditional (Finding 1's fix), a correct capture mechanism becomes mandatory on every erasure, not only the previously-unsubscribed path the plan currently exercises.
+
+**Required acceptance tests:**
+
+- Erasing a contact writes a `workspace_suppressions` row whose stored value corresponds to the address the contact actually had before erasure (asserting the captured value itself, not merely that a row was inserted).
+- The capture mechanism is exercised by a test that would fail under a naive `UPDATE ... RETURNING email` after setting `email = NULL` in the same statement — the test must assert against the real pre-update address, not null or empty.
+- The erasure record's insert (step 3) and the suppression insert (step 2) both use the same correctly-captured pre-update email, so neither one silently drifts from the other.
+
+**Threat-model update:** amends `T-13-10-01` ("Incomplete PII scrub on the contacts row", high/mitigate) and `T-13-10-04` ("Mail continuing to an erased address", high/mitigate) — both currently assert the capture is "resolved synchronously in the delete request," which is unachievable if the RETURNING clause yields null. Corrected mitigation for T-13-10-04: capture the pre-update email via `SELECT ... FOR UPDATE` (lock and read before the anonymizing UPDATE) or a CTE that explicitly preserves pre-update column values across the UPDATE, then use that captured value for both the suppression insert and any erasure-record fields that reference the address.
+
+**Suggested fix:** rewrite 13-10-PLAN.md Task 2 step 1 to either (a) `SELECT email, subscription_status FROM contacts WHERE ... FOR UPDATE` first, holding the row lock, then run the anonymizing UPDATE using the already-captured values for steps 2/3, or (b) use a single statement built as a CTE (e.g. a `WITH old AS (SELECT email, subscription_status FROM contacts WHERE ... FOR UPDATE) UPDATE contacts SET ... FROM old WHERE contacts.id = old.id RETURNING old.email, old.subscription_status`) that explicitly selects the pre-update values into a separate CTE before the UPDATE touches them. Remove the plan's current claim that "the UPDATE's own returning clause" yields the pre-update email.
+
+### Finding 3 — BLOCKER: erasure_records needs a durable outbox with a reclaimer (13-10)
+
+**Finding (verbatim):**
+
+> 3. BLOCKER — Make erasure_records a durable outbox. Commit anonymization, suppression and the pending erasure record atomically; enqueue only after commit. Add a scheduled or boot-time reclaimer for pending and lease-expired records using deterministic job IDs. Test a crash after database commit but before BullMQ enqueue.
+
+**Affected plan(s):** 13-10-PLAN.md Task 2, step 3 (line 195: the `erasure_records` insert in the same transaction as anonymization) and step 4 (line 196: the enqueue, "Enqueue after the transaction commits, or inside it if the existing codebase convention for API-side enqueues does so ... State which you did and why in the SUMMARY"). The atomicity half — steps 1-3 in one transaction — is already correct; what is missing is that step 4 leaves the commit/enqueue ordering to executor discretion, with no reclaimer defined anywhere in the plan set for a `pending` `erasure_records` row whose enqueue never happened after a crash.
+
+**Required acceptance tests:**
+
+- A crash injected after the erasure transaction (anonymization + suppression + `erasure_records` insert) commits, but before the BullMQ enqueue call completes, leaves an `erasure_records` row in `pending` state.
+- A subsequent reclaimer pass (scheduled tick or boot-time sweep) finds that pending row and enqueues the scrub job for it.
+- The reclaimer's job id is deterministically derived from the erasure record (matching Task 2 step 4's existing deterministic-jobId requirement), so a duplicate reclaim of the same row is a no-op rather than a second scrub.
+- A `pending` `erasure_records` row that is not yet lease-expired (recently created, enqueue may simply be in flight) is not reclaimed prematurely.
+
+**Threat-model update:** `T-13-10-02` ("Erasure with no auditable proof it occurred", high/mitigate) stays valid as written — the transactional write of `erasure_records` is the correct fix for that threat. But `T-13-10-06` ("Duplicate scrub jobs from a retried request", medium/mitigate) needs the reclaimer's job-id derivation folded into its mitigation text, and a new row is needed for the un-enqueued-pending-record class of failure — a committed erasure whose scrub was never queued and nothing currently notices. Note that 13-11's ingestion-health watchdog covers the webhook ingress journal, not `erasure_records`; nothing in the current plan set surfaces a stuck erasure record.
+
+**Suggested fix:** pin the commit/enqueue ordering explicitly in 13-10-PLAN.md Task 2 step 4 (commit first, enqueue after — the plan's own text already leans this way but currently offers it as one of two options), and add, either to 13-10 or 13-13, a scheduled or boot-time reclaimer that scans `erasure_records` for `pending` rows past a lease/age threshold and re-enqueues their scrub job using the same deterministic-jobId convention Task 2 step 4 already establishes. Add the crash-after-commit-before-enqueue test to the acceptance criteria of whichever plan owns the reclaimer.
+
+### Finding 4 — BLOCKER: REDACTION_RULES denylist cannot bound arbitrary tenant-defined PII (13-13)
+
+**Finding (verbatim):**
+
+> 4. BLOCKER — 13-13 must not rely on REDACTION_RULES or a denylist to remove arbitrary PII. Reconstruct send_events.payload from a strict evidence allowlist. Clear events.properties to {} unless an explicit evidence allowlist is defined. Add tests for PII stored under unknown tenant-defined keys.
+
+**Affected plan(s):** 13-13-PLAN.md Task 1 (line 106: "implemented over `@mega-crm/redaction`'s `REDACTION_RULES` rather than any new pattern. Do not write a new ... heuristic") and its key_link at line 37 ("`@mega-crm/redaction`'s `REDACTION_RULES` -> the JSONB field-matching: reusing the tuned vocabulary avoids reintroducing the false positives ..."), both of which mandate reuse of the denylist-style redaction vocabulary for scrubbing `send_events.payload` and `events.properties`. This finding contradicts the plan's current direction rather than refining it: a key/value denylist tuned for log-scrubbing cannot bound PII in tenant-defined `events.properties`, where key names are arbitrary and unenumerable in advance — the plan's own `flagged_assumptions` section (line 264) already concedes "a tenant storing PII under an unusual key name would survive the scrub," but treats that as an accepted residual risk rather than the BLOCKER-level defect this finding identifies it as.
+
+**Required acceptance tests:**
+
+- PII stored under an unknown tenant-defined key (a key name matching no rule in `REDACTION_RULES`) does not survive the scrub for `events.properties`.
+- `send_events.payload` after a scrub contains only fields present on a defined evidence allowlist (e.g. `event`, `type`, `timestamp`, `sg_event_id`, and other non-PII correlation ids) — no field outside that allowlist survives, regardless of whether the redaction vocabulary flags it.
+- `events.properties` is rewritten to `{}` after a scrub unless an explicit evidence allowlist is defined for that table, in which case only the allowlisted fields survive.
+- A payload field containing PII under a key name never seen before by `REDACTION_RULES` is removed exactly as reliably as a known PII key.
+
+**Threat-model update:** amends `T-13-13-01` ("PII surviving in `send_events.payload` after erasure", high/mitigate) — satisfiable only under an allowlist reconstruction, not a denylist scrub, since a denylist's completeness claim depends on an enumerable set of PII key names that tenant-defined `properties` does not have. Amends `T-13-13-06` ("A new PII heuristic reintroducing known false positives", medium/mitigate) — its stated mitigation ("the existing `REDACTION_RULES` vocabulary is reused rather than re-derived") is itself the defect this finding identifies, not a valid mitigation; the false-positive concern that mitigation protects against becomes moot once payloads are reconstructed from an allowlist rather than filtered by a denylist. The surviving obligation from `T-13-13-03` ("Rows are rewritten, never deleted", high/mitigate) still applies: `event_type`, `occurred_at`, and `received_at` (or their `send_events`/`events`-specific equivalents) must be named on whatever allowlist is chosen, or the evidence guarantee this plan exists to preserve breaks.
+
+**Suggested fix:** rewrite 13-13-PLAN.md Task 1 to define an explicit evidence-field allowlist per table (`send_events.payload`: event type, timestamp(s), `sg_event_id`, and any other fields the plan's own behavior list already requires to survive; `events.properties`: none, unless a specific tenant-defined field is later proven necessary as evidence) and reconstruct each scrubbed JSONB value by copying only allowlisted fields forward, rather than walking the existing value and removing keys `REDACTION_RULES` flags. Delete the `REDACTION_RULES`-reuse instruction at line 106 and the corresponding key_link at line 37, and add the unknown-tenant-key test to Task 1's acceptance criteria.
+
+### Finding 5 — WARNING: Dedup-index migration mechanism left to executor discretion (13-07)
+
+**Finding (verbatim):**
+
+> 5. WARNING — 13-07 must choose an executable dedup-index migration mechanism before execution. Do not leave CREATE INDEX CONCURRENTLY compatibility or the non-concurrent fallback to executor discretion. Use an explicit operator/pre-deploy script plus a fail-closed contract migration, or document one concrete tested non-concurrent path.
+
+**Affected plan(s):** 13-07-PLAN.md Task 2, Step 2 (lines 180-182: the per-partition `CREATE UNIQUE INDEX CONCURRENTLY` build, the `ALTER INDEX ... ATTACH PARTITION` step, and the explicit hand-off — "Check how this project's migration runner wraps statements ... If the runner cannot express that, fall back to a non-concurrent per-partition `CREATE UNIQUE INDEX` and record the trade in the SUMMARY"). The plan already resolved the duplicate-row question (T-13-07-03: a bounded operator script rather than an in-migration DELETE) but leaves the index-build mechanism itself as a conditional the executor discovers at apply time, including a silent fallback to a non-concurrent build that takes a write lock per partition.
+
+**Required acceptance tests:**
+
+- The chosen index-build mechanism (concurrent-with-pre-deploy-script, or documented non-concurrent) is named in the migration/plan text before execution, not discovered by the executor at apply time.
+- `npm run test:migrations` exercises the chosen mechanism end to end against a database with the real attached-partition set, not a single-partition toy case.
+- After the migration runs, `pg_index.indisvalid` is asserted `true` for the parent index (`send_events_dedup_v2_idx`).
+- A migration that would emit `CREATE INDEX CONCURRENTLY` inside a transaction block fails closed (at migration-authoring/lint time or a pre-flight check), rather than failing only when Postgres rejects it at apply time.
+
+**Threat-model update:** amends `T-13-07-02` ("Non-enforcing invalid index after a partial build", high/mitigate) — its mitigation ("assert `pg_index.indisvalid` ... rather than assuming the build succeeded") is necessary but not sufficient if the build *route* itself is still undetermined; the mitigation must name which route (operator/pre-deploy script vs. documented non-concurrent path) produces that valid index. `T-13-07-03`'s bounded-operator-script precedent (the duplicate-resolution decision already made in this same plan) is the model the index build should follow — the plan solved one hazard this way and left the structurally similar one undecided.
+
+Note the STATE.md environment fact this decision has to survive: `npm run db:migrate` (drizzle-kit CLI) hangs in the dev sandbox under Node v26, so "we will find out whether CONCURRENTLY works at apply time" is not a viable strategy in this environment — `npm run test:migrations` against the ephemeral-database harness is the only available proof mechanism, and it must exercise whichever mechanism is chosen.
+
+**Suggested fix:** in 13-07-PLAN.md Task 2 Step 2, pick one of the two options now rather than leaving it conditional: (a) an explicit operator/pre-deploy script that builds and attaches the per-partition indexes outside the migration transaction, followed by a fail-closed contract migration (mirroring Step 0's zero-duplicates guard) that verifies `pg_index.indisvalid` and refuses to proceed otherwise; or (b) commit to one concrete, tested non-concurrent `CREATE UNIQUE INDEX` path per partition, documented with its lock-duration cost and proven by `test:migrations` against the full partition set. Remove the "if the runner cannot express that, fall back to ..." hand-off language and replace it with the chosen path stated as a decision.
+
+### Finding 6 — WARNING: Expired journal rows must not vanish without evidence (13-06)
+
+**Finding (verbatim):**
+
+> 6. WARNING — 13-06 must not silently delete an expired incomplete or attempt-capped journal row. Before pruning it, persist a non-PII failure tombstone or durable health state that remains alertable. Test that an incomplete batch cannot disappear without evidence.
+
+**Affected plan(s):** 13-06-PLAN.md's must-have truth (line 26: "Journal rows older than the retention horizon are deleted by the prune step, whether or not they were ingested") and Task 2's prune step (line 172: `pruneIngressJournal` called after the replay step in the same tick). The current design deletes journal rows past the retention horizon unconditionally, and Task 1's `WEBHOOK_REPLAY_MAX_ATTEMPTS` cap (line 126) stops re-enqueueing a poison batch once it is attempt-capped — so a row that is either still incomplete or attempt-capped when it reaches the retention horizon eventually vanishes, taking its own evidence of having failed with it. The plan's own safety argument for the attempt cap (line 126: "let the ingestion-health watchdog in plan 13-11 surface it") holds only while the row still exists to be surfaced; the unconditional prune silently ends that window once the retention horizon passes.
+
+**Required acceptance tests:**
+
+- A journal row that reaches the retention horizon while still incomplete (`ingestion_completed_at` still null) leaves behind a durable non-PII record (a tombstone row or equivalent health-state entry) after pruning, rather than disappearing with no trace.
+- A journal row that reaches the retention horizon while attempt-capped (`replay_count` at `WEBHOOK_REPLAY_MAX_ATTEMPTS`) leaves behind the same kind of durable record.
+- That tombstone/health-state record is visible to the ingestion-health watchdog (plan 13-11) and remains alertable — it is not itself silently pruned on the same horizon.
+- An incomplete or attempt-capped batch cannot transition from "present in the journal" to "absent" without such a record existing first.
+- A journal row that completed successfully before the retention horizon is pruned with no tombstone (the current unconditional-deletion behavior is correct and unchanged for the success case).
+
+**Threat-model update:** amends `T-13-06-06` ("Journal PII retention", medium/mitigate) — its current mitigation ("`pruneIngressJournal` runs every tick against the ~7-day horizon") conflates PII disposal with evidence disposal; it must be split so the raw payload (the PII-bearing part) can still be dropped at the horizon while the fact that a row failed does not disappear with it. Also amends `T-13-06-02` ("Mass re-enqueue flooding the live webhook lane", high/mitigate) — its attempt-cap mitigation currently assumes plan 13-11's watchdog has something to observe indefinitely; that assumption breaks once the capped row is pruned, so the mitigation text must acknowledge the tombstone dependency.
+
+**Suggested fix:** split the prune step in 13-06-PLAN.md Task 2 into two behaviors: (1) always clear/null the raw payload (`raw_batch` or equivalent PII-bearing column) once a row passes the retention horizon, regardless of ingestion status, and (2) for a row that never reached `ingestion_completed_at` (incomplete or attempt-capped), write a small non-PII tombstone or health-state record before or instead of deleting the row outright, so the watchdog still has something to alert on. Replace the current must-have truth at line 26 ("deleted ... whether or not they were ingested") with a truth that distinguishes the successful-completion case (deleted outright) from the incomplete/capped case (payload cleared, evidence tombstone retained), and add the corresponding acceptance test to Task 2.
