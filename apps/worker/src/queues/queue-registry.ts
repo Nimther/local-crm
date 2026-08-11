@@ -32,6 +32,15 @@ import { scrubbedConsole } from "@mega-crm/redaction";
  * produces onto) IS a genuinely long-lived producer used on every tick, and
  * IS registered here via `registerTrackedQueue` on first construction, same
  * as `campaign-broadcast-producer.ts`'s/`flow-queues.ts`'s producers.
+ *
+ * Phase 13 (CMP-04, D-04, plan 13-15): `erasure-scrub-reclaim.worker.ts`
+ * follows the identical split -- its own `erasure-scrub-reclaim`
+ * tick-registration `Queue` self-closes in its `finally` (not tracked here),
+ * while its lazily-created producer `Queue` for `ERASURE_SCRUB_QUEUE` (the
+ * queue `erasure-scrub` -- the same one `apps/api/src/modules/contacts/
+ * contact.repository.ts`'s `deleteContact` already produces onto) IS a
+ * genuinely long-lived producer used on every tick, and IS registered here
+ * via `registerTrackedQueue` on first construction.
  */
 
 const trackedQueues: Queue[] = [];

@@ -24,6 +24,7 @@ import { createSendReconcilerWorker } from "./queues/send-reconciler.worker.js";
 import { createWebhookReplaySweepWorker } from "./queues/webhook-replay-sweep.worker.js";
 import { createReputationTickWorker } from "./queues/reputation-tick.worker.js";
 import { createErasureScrubWorker } from "./queues/erasure-scrub.worker.js";
+import { createErasureScrubReclaimWorker } from "./queues/erasure-scrub-reclaim.worker.js";
 
 /**
  * The worker process's runtime handle: a standalone shared ioredis
@@ -229,6 +230,16 @@ export async function buildWorker(): Promise<WorkerRuntime> {
     // each JSONB value from an explicit evidence allowlist. Job-per-erasure,
     // not a repeatable tick -- registers no job scheduler.
     createErasureScrubWorker(buildRedisConnectionOptions(redisUrl)),
+    // CMP-04 (D-04, R-05, 13-15): closes the last gap in CMP-04's durability
+    // chain -- plan 13-10's deleteContact enqueues the scrub job AFTER its
+    // transaction commits, which leaves exactly one failure mode: a crash
+    // between the commit and the enqueue strands a durable pending
+    // erasure_records row with no job behind it. This scheduled tick finds
+    // such stranded pending/scrubbing records past a 15-minute lease and
+    // re-enqueues their scrub through the SAME shared job-id derivation the
+    // request path uses, so a reclaim of an already-queued record is a
+    // no-op rather than a second scrub.
+    createErasureScrubReclaimWorker(buildRedisConnectionOptions(redisUrl)),
   ];
 
   // Phase 12 (WRK-08/WRK-10): attach the shared error/failed listener,
@@ -260,7 +271,7 @@ async function main(): Promise<void> {
   process.on("SIGTERM", shutdown);
 
   scrubbedConsole.log(
-    `apps/worker started (${runtime.workers.length} BullMQ worker(s) registered: events:ingest, imports:csv, email-broadcast, email-triggered, campaign-kickoff, campaign-scheduler, webhook-events, analytics-reconciliation, flow-run-advance, flow-reconciliation, flow-trigger-evaluator, flow-segment-sweep, flow-segment-sweep-flow, flow-enroll-existing, partition-maintenance, send-reconciler, webhook-replay-sweep, reputation-tick, erasure-scrub)`
+    `apps/worker started (${runtime.workers.length} BullMQ worker(s) registered: events:ingest, imports:csv, email-broadcast, email-triggered, campaign-kickoff, campaign-scheduler, webhook-events, analytics-reconciliation, flow-run-advance, flow-reconciliation, flow-trigger-evaluator, flow-segment-sweep, flow-segment-sweep-flow, flow-enroll-existing, partition-maintenance, send-reconciler, webhook-replay-sweep, reputation-tick, erasure-scrub, erasure-scrub-reclaim)`
   );
 }
 

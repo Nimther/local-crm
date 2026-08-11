@@ -1004,6 +1004,15 @@ describe("Negative cross-tenant suite: background-job families (SEC-16)", () => 
       // makes workspace A's erasure_records row and send_events rows
       // invisible under RLS, never merely unmodified by choice.
       "ErasureScrub",
+      // Phase 13 (CMP-04, D-04, plan 13-15): covered by
+      // erasure-scrub-reclaim.test.ts's own "reclaimable records in two
+      // different workspaces" case -- discovery via withCrossWorkspaceScan
+      // proven to see every seeded workspace, then each workspace's own
+      // reclaimable erasure_records rows are found and enqueued from inside
+      // its own fresh withTenant/withTenantTransaction scope, with the
+      // enqueued job's payload carrying only that workspace's own
+      // workspaceId/contactId/erasureRecordId -- never a sibling's.
+      "ErasureScrubReclaim",
     ]);
 
     const EXCLUDED_FAMILIES: Record<string, string> = {
