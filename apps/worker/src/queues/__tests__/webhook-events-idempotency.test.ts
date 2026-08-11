@@ -36,13 +36,19 @@ describe("webhook-events worker (WBHK-03, D-14)", () => {
     return insertFixtureOrganization(nameSeed);
   }
 
+  // Phase 13 (CMP-05, plan 13-04): a fixed 2023-era timestamp is now OLD
+  // ENOUGH to fall outside classifyOccurredAt's [now-7d, now+5min] window and
+  // get quarantined instead of inserted -- module-scoped so every replay call
+  // in this file reuses the identical value (dedup determinism preserved).
+  const FIXED_TIMESTAMP = Math.floor(Date.now() / 1000) - 3600;
+
   function sendgridEvent(overrides: Record<string, unknown> = {}): Record<string, unknown> {
     return {
       email: "hello@world.com",
       event: "delivered",
       sg_event_id: `sg-${randomUUID()}`,
       sg_message_id: "abc.filterdrecv-x",
-      timestamp: 1_700_000_000,
+      timestamp: FIXED_TIMESTAMP,
       ...overrides,
     };
   }

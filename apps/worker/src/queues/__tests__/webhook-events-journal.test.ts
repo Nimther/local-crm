@@ -130,13 +130,20 @@ describe("webhook-events worker: journal completion (CMP-08, D-05, 13-01)", () =
     );
   }
 
+  // Phase 13 (CMP-05, plan 13-04): a fixed 2023-era timestamp is now OLD
+  // ENOUGH to fall outside classifyOccurredAt's [now-7d, now+5min] window and
+  // get quarantined instead of inserted -- Tests 1/4 below assert
+  // `inserted: 1` on the normal insert path, which requires an in-window
+  // timestamp.
+  const FIXED_TIMESTAMP = Math.floor(Date.now() / 1000) - 3600;
+
   function flattenedSendgridEvent(sendId: string | undefined, overrides: Record<string, unknown> = {}) {
     return {
       email: "hello@fixture.test",
       event: "delivered",
       sg_event_id: `sg-${randomUUID()}`,
       sg_message_id: "abc.filterdrecv-x",
-      timestamp: 1_700_000_000,
+      timestamp: FIXED_TIMESTAMP,
       ...(sendId !== undefined ? { send_id: sendId } : {}),
       ...overrides,
     };

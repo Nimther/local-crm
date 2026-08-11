@@ -144,6 +144,13 @@ describe("webhook-events worker: sibling-workspace event drop (SEC-09, WR-01)", 
     );
   }
 
+  // Phase 13 (CMP-05, plan 13-04): a fixed 2023-era timestamp is now OLD
+  // ENOUGH to fall outside classifyOccurredAt's [now-7d, now+5min] window --
+  // a stale value here would silently exercise the quarantine path instead
+  // of the sibling-drop path this file is named for, while assertions on
+  // `inserted: 0` would still go green for the wrong reason.
+  const FIXED_TIMESTAMP = Math.floor(Date.now() / 1000) - 3600;
+
   /** The VERBATIM flattened shape SendGrid's Event Webhook posts (05-13). */
   function flattenedSendgridEvent(
     workspaceId: string,
@@ -155,7 +162,7 @@ describe("webhook-events worker: sibling-workspace event drop (SEC-09, WR-01)", 
       event: "delivered",
       sg_event_id: `sg-${randomUUID()}`,
       sg_message_id: "abc.filterdrecv-x",
-      timestamp: 1_700_000_000,
+      timestamp: FIXED_TIMESTAMP,
       workspace_id: workspaceId,
       ...(sendId !== undefined ? { send_id: sendId } : {}),
       ...overrides,

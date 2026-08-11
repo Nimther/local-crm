@@ -145,6 +145,12 @@ describe("webhook-events worker: suppression state machine (SUBS-02, D-10/D-11/D
     );
   }
 
+  // Phase 13 (CMP-05, plan 13-04): a fixed 2023-era timestamp is now OLD
+  // ENOUGH to fall outside classifyOccurredAt's [now-7d, now+5min] window and
+  // get quarantined instead of inserted -- module-scoped so every call site
+  // in this file reuses the identical value.
+  const FIXED_TIMESTAMP = Math.floor(Date.now() / 1000) - 3600;
+
   // SendGrid's Event Webhook flattens the mail/send markers directly onto
   // the event object's TOP LEVEL (no nested wrapper) -- this fixture
   // matches the real shape the corrected worker reads.
@@ -158,7 +164,7 @@ describe("webhook-events worker: suppression state machine (SUBS-02, D-10/D-11/D
       email: "hello@world.com",
       event: "delivered",
       sg_event_id: `sg-${randomUUID()}`,
-      timestamp: 1_700_000_000,
+      timestamp: FIXED_TIMESTAMP,
       send_id: sendId,
       workspace_id: workspaceId,
       campaign_id: campaignId,
@@ -358,7 +364,7 @@ describe("webhook-events worker: suppression state machine (SUBS-02, D-10/D-11/D
         type: "bounce",
         reason: "550 hard fail",
         sg_event_id: `sg-${randomUUID()}`,
-        timestamp: 1_700_000_000,
+        timestamp: FIXED_TIMESTAMP,
         send_id: sendId,
         workspace_id: workspaceId,
         campaign_id: campaignId,
@@ -395,7 +401,7 @@ describe("webhook-events worker: suppression state machine (SUBS-02, D-10/D-11/D
         type: "bounce",
         reason: "550 hard fail",
         sg_event_id: `sg-${randomUUID()}`,
-        timestamp: 1_700_000_000,
+        timestamp: FIXED_TIMESTAMP,
         send_id: orphanSendId,
         workspace_id: workspaceId,
       },
