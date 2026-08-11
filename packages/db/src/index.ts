@@ -164,4 +164,10 @@ export * from "./schema/dead-letter-jobs.js";
 export * from "./schema/reputation-alert-state.js";
 export * from "./schema/ingestion-alert-state.js";
 export * from "./schema/workspace-suppression-keys.js";
+// Phase 13 (CMP-04, plan 13-13, Rule 3 -- blocking): erasure-records.ts was
+// imported into the merged `schema` object above (plan 13-10) but never
+// re-exported from this module's public surface, so `ErasureRecordStatus`
+// and the `erasureRecords` table were unreachable from any consumer of
+// `@mega-crm/db` -- this plan is the first to need them.
+export * from "./schema/erasure-records.js";
 export { TENANT_GUC_KEY } from "./rls.js";

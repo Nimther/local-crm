@@ -29,6 +29,8 @@ import {
   REPUTATION_TICK_INTERVAL_MS,
   REPUTATION_TICK_QUEUE,
 } from "../reputation-tick.worker.js";
+import { createErasureScrubWorker } from "../erasure-scrub.worker.js";
+import { ERASURE_SCRUB_QUEUE } from "@mega-crm/shared-schemas";
 
 /**
  * Phase 12 (WRK-13), Task 1: `campaign-scheduler.worker.ts`,
@@ -669,5 +671,50 @@ describe("reputation-tick scheduler (CMP-09, plan 13-09)", () => {
     expect(source).toContain("upsertJobScheduler");
     expect(source).toMatch(/finally\s*\{[\s\S]*?queue\.close\(\)/);
     expect(source).toMatch(/catch\s*\(err\)\s*\{\s*scrubbedConsole\.error/);
+  });
+});
+
+/**
+ * Phase 13 (CMP-04, D-01/D-04, plan 13-13), Task 2: `erasure-scrub.worker.ts`
+ * is a job-PER-ERASURE queue, not a repeatable tick -- unlike every fixture
+ * above (each either migrates away from a legacy `tickQueue.add({repeat})`
+ * form, or was built directly on `upsertJobScheduler` from day one), this
+ * worker registers NO job scheduler at all. That absence is itself the
+ * property worth pinning: a future change that accidentally wired this
+ * queue up as a periodic tick (easy to do by copy-pasting a sibling
+ * worker's registration block) would silently re-scrub every erasure record
+ * on an interval instead of running exactly once per `deleteContact` call --
+ * this test fails the moment that happens.
+ */
+describe("erasure-scrub worker registers no job scheduler (CMP-04, plan 13-13)", () => {
+  let redis: TempRedis;
+
+  beforeAll(async () => {
+    redis = await startTempRedis({});
+  });
+
+  afterAll(async () => {
+    await redis?.stop();
+  });
+
+  it("constructing the worker registers zero job schedulers and zero repeatable jobs", async () => {
+    const connection = buildRedisConnectionOptions(redis.url);
+    const worker = createErasureScrubWorker(connection, { autorun: false });
+    const queue = new Queue(ERASURE_SCRUB_QUEUE, { connection });
+
+    try {
+      // No registration promise to await (this worker registers nothing) --
+      // give any accidental async registration a moment to land before
+      // asserting its absence, so this test would actually catch a
+      // regression rather than racing it.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      expect(await queue.getJobSchedulersCount()).toBe(0);
+      expect(await queue.getRepeatableJobs()).toHaveLength(0);
+    } finally {
+      await worker.close();
+      await queue.obliterate({ force: true }).catch(() => undefined);
+      await queue.close();
+    }
   });
 });
