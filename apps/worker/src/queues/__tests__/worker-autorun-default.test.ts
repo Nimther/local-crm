@@ -1,6 +1,11 @@
 import { Queue, Worker, type ConnectionOptions, type Job } from "bullmq";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { startTempRedis, ensureTestDbMigrated, type TempRedis } from "@mega-crm/test-support";
+import {
+  createTestPool,
+  startTempRedis,
+  ensureTestDbMigrated,
+  type TempRedis,
+} from "@mega-crm/test-support";
 import { buildRedisConnectionOptions } from "@mega-crm/queue-core";
 import { FLOW_RECONCILIATION_QUEUE, SEND_RECONCILER_QUEUE } from "@mega-crm/shared-schemas";
 import {
@@ -229,16 +234,34 @@ describe("repeatable-tick worker autorun default (G-12-1, WRK-13)", () => {
   });
 
   it("campaign-scheduler: a job sitting on its tick queue is picked up and reaches 'active' on a production-shape worker", async () => {
+    const dbPool = createTestPool();
+    const lockClient = await dbPool.connect();
     const connection = buildRedisConnectionOptions(redis.url);
-    const worker = createCampaignSchedulerWorker(connection);
     const queue = new Queue("campaign-scheduler", { connection });
-    const kickoffQueue = getCampaignSchedulerKickoffQueueForTest(worker);
+    const activeJobId = "pickup-probe";
+    let worker: Worker | undefined;
+    let kickoffQueue: ReturnType<typeof getCampaignSchedulerKickoffQueueForTest> = undefined;
 
     try {
-      const activeJobId = "pickup-probe";
-      const activePromise = waitForJobActive(worker, activeJobId);
+      await lockClient.query("BEGIN");
+      await lockClient.query("LOCK TABLE campaigns IN ACCESS EXCLUSIVE MODE");
 
-      await queue.add("scan-due-campaigns", {}, { jobId: activeJobId });
+      // Queue the probe BEFORE constructing the production-shape factory. The
+      // factory registers its own boot job asynchronously; if that boot scan is
+      // queued first and stalls on a contended database, BullMQ concurrency=1
+      // correctly leaves this probe waiting even though autorun works. That was
+      // the aggregate-only false negative. Pre-seeding makes the probe the first
+      // consumable job, so the assertion below measures autorun itself rather
+      // than the latency of an unrelated bootstrap scan.
+      const probeJob = await queue.add("scan-due-campaigns", {}, { jobId: activeJobId });
+      expect(await probeJob.getState()).toBe("waiting");
+
+      // JavaScript cannot run the Worker's asynchronous Redis handshake between
+      // this constructor returning and the listener registration below, so the
+      // listener is installed before the already-waiting job can become active.
+      worker = createCampaignSchedulerWorker(connection);
+      kickoffQueue = getCampaignSchedulerKickoffQueueForTest(worker);
+      const activePromise = waitForJobActive(worker, activeJobId);
 
       // Pickup is the assertion here -- NOT what the processor subsequently
       // does with the job. `findDueCampaignCandidates()` hits a real
@@ -250,9 +273,15 @@ describe("repeatable-tick worker autorun default (G-12-1, WRK-13)", () => {
 
       await waitForCampaignSchedulerRegistration(worker);
     } finally {
-      await worker.close();
+      try {
+        await lockClient.query("ROLLBACK");
+      } finally {
+        lockClient.release();
+      }
+      await worker?.close();
       await queue.close();
       await kickoffQueue?.close();
+      await dbPool.end();
     }
   });
 

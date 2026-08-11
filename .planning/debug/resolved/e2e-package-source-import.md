@@ -40,8 +40,8 @@ DATA_END
 
 ## Current Focus
 
-hypothesis: confirmed and fixed
-test: complete
+hypothesis: confirmed — the test allowed the factory's unrelated boot scan to become the worker's first active job; with concurrency 1, a slow/blocked boot scan kept the autorun probe waiting even though autorun was healthy.
+test: complete — an ACCESS EXCLUSIVE campaigns-table lock makes boot-first ordering fail deterministically and probe-first ordering pass with the same production-shape factory.
 expecting: verified
 next_action: archived
 
@@ -79,6 +79,30 @@ next_action: archived
 - GREEN builds: `apps/web`, `packages/db`, and `packages/test-support`.
 - GREEN lint for all touched lint-configured files (the E2E provisioning file
   remains outside the repository's ESLint include, as before).
+- REOPENED: GitHub aggregate coverage on merged-with-master SHA `e253cd9`
+  deterministically failed the same probe through the new 15s fail-fast:
+  `timed out waiting for job pickup-probe to reach active` at line 136. The
+  other 172 files / 1241 tests passed. This falsifies the claim that leaked
+  kickoff Queue handles were the aggregate pickup root cause.
+- The exact aggregate command on `e253cd9` remained locally green before the
+  incremental fix (173/173, 1242/1242), confirming the symptom depends on
+  runner contention rather than being a universally reproducible production
+  failure.
+- Deterministic RED harness: hold `LOCK TABLE campaigns IN ACCESS EXCLUSIVE
+  MODE`, construct the production-shape scheduler, await its registration/boot
+  enqueue, then add `pickup-probe`. The boot job becomes active and blocks in
+  the campaign scan; BullMQ concurrency 1 leaves the probe waiting, producing
+  the exact `timed out waiting for job pickup-probe to reach active` failure in
+  15.2s (1 failed, 8 passed).
+- Deterministic GREEN harness: under the same database lock, enqueue and assert
+  the probe is `waiting` before constructing the exact single-argument
+  production factory. The probe is therefore the first consumable job; the
+  Worker's exact `active` event fires, proving autorun consumption independent
+  of the later boot scan. Targeted suite: 9/9 in 3.38s and 9/9 in 4.56s on the
+  cleanup-finalized version.
+- Final exact aggregate after the incremental fix: `npm run coverage` passed
+  173/173 files and 1242/1242 tests in 143.81s; statements 85.15%, branches
+  74.78%, functions 84.00%, lines 86.57%.
 
 ## Eliminated
 
@@ -94,10 +118,16 @@ next_action: archived
   lifecycle debt, not a disabled processing loop.
 - Weakening the pickup assertion to queue-state polling: rejected. The guard
   continues to require the worker's `active` event for the exact job id.
+- Leaked kickoff Queue handles as the pickup timeout root cause: falsified by
+  the same deterministic GitHub failure after both handles were explicitly
+  closed. The cleanup remains correct test hygiene but is not causal.
+- Worker readiness/autorun itself: eliminated by the deterministic probe-first
+  test. The same factory and Redis instance emit `active` promptly even while
+  the campaigns table prevents the processor from completing.
 
 ## Resolution
 
-root_cause: `@mega-crm/db` exposed TypeScript source through `main` but had no `exports` rule mapping the repository's `.js` deep-import convention to `.ts`, which Playwright's native ESM config loader requires. Once that was fixed, E2E also revealed that its webServer environment carried only the ephemeral app-role DSN, while better-auth inherited a different auth-role DSN. Independently, two campaign-scheduler tests leaked the factory-created kickoff Queue into an aggregate run, and the active pickup promise had no bounded diagnostic timeout.
-fix: Added `@mega-crm/db` export mappings for the root and `./src/*.js` to source `.ts`; added a minimal Playwright config-load regression executed from the web Vitest suite; derived and explicitly passed the matching ephemeral auth-role DSN plus the clean-CI operator alert value; closed both leaked kickoff Queue handles; wrapped the exact active-event assertion in a 15s fail-fast helper.
-verification: Playwright resolution regression 1/1; worker autorun 9/9; aggregate coverage 1242/1242; full E2E 8/8; touched workspace builds and lint green.
+root_cause: `@mega-crm/db` exposed TypeScript source through `main` but had no `exports` rule mapping the repository's `.js` deep-import convention to `.ts`, which Playwright's native ESM config loader requires. E2E also inherited an auth-role DSN for another database instead of deriving it from the ephemeral app DSN. Independently, the aggregate autorun test constructed the scheduler before enqueueing its probe; the factory concurrently registers an unrelated boot job. Under CI database contention that boot scan could become active first and occupy BullMQ's sole concurrency slot, so the probe remained waiting even though the production run loop was healthy. Queue-handle leaks were real cleanup debt but not the timeout cause.
+fix: Kept the prior package export, E2E DSN, Queue cleanup and bounded-wait fixes. Hardened the autorun test by pre-seeding `pickup-probe` and asserting it is waiting before constructing the exact single-argument production factory. Added a real Postgres table lock so a boot job overtaking the probe would fail deterministically; release and all Worker/Queue/Pool handles are unconditional in `finally`. The assertion still requires the Worker's exact `active` event for the probe id.
+verification: Deterministic boot-first RED reproduced the exact 15s error; probe-first targeted suite passed 9/9 twice; exact `npm run coverage` passed 173/173 files and 1242/1242 tests in 143.81s. Prior E2E verification remains 8/8 and package-resolution regression 1/1.
 files_changed: packages/db/package.json; apps/web/e2e/package-source-import.config.ts; apps/web/src/__tests__/playwright-package-source-import.test.ts; apps/web/src/__tests__/fixtures/playwright-source-import/source-import.spec.ts; apps/web/e2e/provision-database.ts; apps/web/playwright.config.ts; apps/worker/src/queues/__tests__/worker-autorun-default.test.ts
