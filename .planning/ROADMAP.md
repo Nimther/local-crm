@@ -354,7 +354,7 @@ Plans:
   4. SIGTERM drains in-flight jobs and closes every Queue handle without losing the job in progress; every worker — including the repeatable ticks — reports errors through one shared listener, and the multi-instance-safety assumptions are written down.
   5. Failed jobs age out under a per-queue retention policy instead of accumulating forever, terminal failures land in an observable dead-letter path, and Redis connection options, `defaultJobOptions` and TTL values have exactly one definition.
 
-**Plans**: 13/13 plans executed
+**Plans**: 14 plans (13 executed, 12-14 planned)
 
 Plans:
 **Wave 1**
@@ -396,6 +396,10 @@ Plans:
 **Wave 9** *(gap closure — UAT G-12-2; blocked on Wave 8 completion)*
 
 - [x] 12-13-PLAN.md — ARCHITECTURE.md forward-looking entry reduced to genuinely-open work; SPECIFICATION.md §5.1/§5.2 re-verified against observed consumption (WRK-09/WRK-13)
+
+**Wave 10** *(gap closure — UAT G-12-3; blocked on Wave 8 completion)*
+
+- [ ] 12-14-PLAN.md — burst-absorption dedup assertion made non-vacuous: seed one past-due scheduled campaign, assert exactly one kickoff job and one transition, add an honest empty-scan control case, single shared seeding fixture (WRK-13)
 
 **UI hint**: no
 
