@@ -241,3 +241,9 @@ None — no external service configuration required.
 ---
 *Phase: 13-compliance-analytics-integrity*
 *Completed: 2026-08-11*
+
+## Self-Check: PASSED
+
+- All 8 created files confirmed present on disk (migration, 2 schema files, 2 webhook query-helper modules, 3 new test files) plus this SUMMARY.md.
+- All 4 task/docs commits (`e479654`, `0610ea5`, `ae327a5`, `2ce6579`) confirmed present in `git log --oneline --all`.
+- Full plan `<verification>` block re-run clean: `npm run lint:migrations`, `npm run test:migrations` (11 files, 66 tests), the three named vitest suites (8 + 10 + 10 tests), and `npm run lint` (repo-wide eslint, 0 warnings).
