@@ -6,10 +6,28 @@ import { buildJobOptions, STANDARD_JOB_RETENTION } from "@mega-crm/queue-core";
 
 /** The reconciliation job's own repeatable-tick queue -- self-produced and self-consumed within this file/process only. */
 const ANALYTICS_RECONCILE_QUEUE = "analytics-reconcile";
-/** A few minutes, per D-08b's stated freshness bound for the "correctness backstop" path. */
-const RECONCILE_INTERVAL_MS = 3 * 60_000;
+/**
+ * A few minutes, per D-08b's stated freshness bound for the "correctness
+ * backstop" path. Exported (test-only consumer: `scheduler-registration.test.ts`)
+ * so the recurring-schedule regression test asserts against this literal
+ * rather than a duplicated magic number that could silently drift from it.
+ */
+export const RECONCILE_INTERVAL_MS = 3 * 60_000;
 /** Bounded recent window -- a rolling reconcile of "today" and "yesterday" (UTC) is enough to correct any drift from a crashed increment or a race without re-scanning a workspace's entire send history on every tick. */
 const RECONCILE_WINDOW_DAYS = 2;
+
+/**
+ * CMP-02 (D-13) day-semantics authority: `sends.sent_at` is the single
+ * documented field that decides which UTC calendar day a send counts toward
+ * for `sent_count`. This is SendGrid-acceptance time, not a change from the
+ * reconciler's existing behavior -- it makes explicit what the query below
+ * already computes. Event-derived counters (`delivered_count`,
+ * `opened_count`, `clicked_count`, `bounced_count`, `unsubscribed_count`) key
+ * off the provider event's own `occurred_at` UTC day instead (see
+ * `incrementWorkspaceDailyRollup` in `analytics-rollup.ts` for the
+ * incremental-path half of that contract).
+ */
+export const SEND_DAY_FIELD = "sent_at";
 
 /**
  * The stable id `upsertJobScheduler` dedupes by (Phase 12, WRK-13) --
@@ -61,6 +79,19 @@ interface WorkspaceRow {
  * value to the freshly-computed one (that would be the additive bug
  * described in Pitfall 2). Running this twice with zero new sends must
  * leave every count byte-identical.
+ *
+ * CMP-02 (D-13) day-semantics fix: `sends.*_at` columns are `timestamptz`
+ * (packages/db/src/schema/sends.ts), and Postgres converts a `timestamptz`
+ * to the session's `TimeZone` GUC before truncating it to a `date` -- a bare
+ * `<col>::date` cast therefore makes the daily number depend on which pooled
+ * connection served this query (an operator-settable, session-level GUC),
+ * not on any fact about the send itself. Every one of the eight FILTER casts
+ * below wraps its column in `AT TIME ZONE 'UTC'` first, forcing the
+ * conversion to UTC regardless of the session `TimeZone` GUC, so
+ * `reconcileWorkspaceDay` produces byte-identical counts under any session
+ * timezone. This same pitfall applies to ANY future query in this codebase
+ * that buckets a `timestamptz` column by calendar day -- bucket in UTC
+ * explicitly, never rely on the bare cast.
  */
 export async function reconcileWorkspaceDay(client: PoolClient, workspaceId: string, day: string): Promise<void> {
   await client.query(
@@ -70,16 +101,16 @@ export async function reconcileWorkspaceDay(client: PoolClient, workspaceId: str
      )
      SELECT
        $1, $2::date,
-       count(*) FILTER (WHERE sent_at IS NOT NULL AND sent_at::date = $2::date),
-       count(*) FILTER (WHERE delivered_at IS NOT NULL AND delivered_at::date = $2::date),
-       count(*) FILTER (WHERE first_opened_at IS NOT NULL AND first_opened_at::date = $2::date),
-       count(*) FILTER (WHERE first_clicked_at IS NOT NULL AND first_clicked_at::date = $2::date),
+       count(*) FILTER (WHERE sent_at IS NOT NULL AND (sent_at AT TIME ZONE 'UTC')::date = $2::date),
+       count(*) FILTER (WHERE delivered_at IS NOT NULL AND (delivered_at AT TIME ZONE 'UTC')::date = $2::date),
+       count(*) FILTER (WHERE first_opened_at IS NOT NULL AND (first_opened_at AT TIME ZONE 'UTC')::date = $2::date),
+       count(*) FILTER (WHERE first_clicked_at IS NOT NULL AND (first_clicked_at AT TIME ZONE 'UTC')::date = $2::date),
        count(*) FILTER (
-         WHERE (bounced_at IS NOT NULL AND bounced_at::date = $2::date)
-            OR (dropped_at IS NOT NULL AND dropped_at::date = $2::date)
-            OR (spam_reported_at IS NOT NULL AND spam_reported_at::date = $2::date)
+         WHERE (bounced_at IS NOT NULL AND (bounced_at AT TIME ZONE 'UTC')::date = $2::date)
+            OR (dropped_at IS NOT NULL AND (dropped_at AT TIME ZONE 'UTC')::date = $2::date)
+            OR (spam_reported_at IS NOT NULL AND (spam_reported_at AT TIME ZONE 'UTC')::date = $2::date)
        ),
-       count(*) FILTER (WHERE unsubscribed_at IS NOT NULL AND unsubscribed_at::date = $2::date)
+       count(*) FILTER (WHERE unsubscribed_at IS NOT NULL AND (unsubscribed_at AT TIME ZONE 'UTC')::date = $2::date)
      FROM sends
      WHERE workspace_id = $1
      ON CONFLICT (workspace_id, day) DO UPDATE SET

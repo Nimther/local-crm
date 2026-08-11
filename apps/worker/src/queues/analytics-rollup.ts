@@ -32,6 +32,14 @@ const METRIC_COLUMN: Record<RollupMetric, string> = {
  * bucket, matching the rest of this codebase's UTC-first timestamp
  * convention.
  *
+ * CMP-02 (D-13): `occurredAt.slice(0, 10)` is UTC-correct PRECISELY because
+ * every caller passes an ISO-8601 `Z`-suffixed string produced from the
+ * provider timestamp -- `.slice(0, 10)` on a non-`Z`-suffixed (e.g. an
+ * offset-suffixed or local, timezone-naive) string would silently bucket
+ * into the wrong day with no error. The input contract for `occurredAt` is
+ * therefore "a UTC ISO-8601 string", not merely "a date-ish string" -- a
+ * caller must not pass any other timestamp shape.
+ *
  * `ON CONFLICT (workspace_id, day) DO UPDATE SET <col> = workspace_daily_rollup.<col> + 1`
  * is the ADDITIVE upsert appropriate for an incremental per-event
  * increment -- this is intentionally the OPPOSITE of the reconciliation
