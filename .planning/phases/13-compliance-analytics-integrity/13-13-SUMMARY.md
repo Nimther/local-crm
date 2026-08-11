@@ -35,6 +35,7 @@ key-files:
   modified:
     - apps/worker/src/server.ts
     - apps/worker/src/queues/__tests__/scheduler-registration.test.ts
+    - apps/worker/src/queues/__tests__/negative-cross-tenant-jobs.test.ts
     - packages/db/src/index.ts
     - package.json
     - SPECIFICATION.md
@@ -83,8 +84,16 @@ coverage:
         ref: "npm run failure:erasure-scrub-resume (apps/worker/src/queues/__tests__/failure-injection/erasure-scrub-resume.test.ts)"
         status: pass
     human_judgment: false
+  - id: D5
+    description: "A hostile job naming a sibling workspace with this workspace's contactId/erasureRecordId cannot read or mutate this workspace's erasure record or send_events rows (SEC-16 cross-tenant coverage)"
+    requirement: "CMP-04"
+    verification:
+      - kind: integration
+        ref: "apps/worker/src/queues/__tests__/negative-cross-tenant-jobs.test.ts#erasure-scrub (runErasureScrub, plan 13-13)"
+        status: pass
+    human_judgment: false
 
-duration: ~45min
+duration: ~50min
 completed: 2026-08-12
 status: complete
 ---
@@ -98,7 +107,7 @@ status: complete
 - **Duration:** ~45 min
 - **Completed:** 2026-08-12
 - **Tasks:** 3
-- **Files modified:** 9 (4 created, 5 modified)
+- **Files modified:** 10 (4 created, 6 modified)
 
 ## Accomplishments
 
@@ -124,6 +133,7 @@ status: complete
 - `apps/worker/src/queues/__tests__/failure-injection/erasure-scrub-resume.test.ts` - the two-boundary kill-resume scenario
 - `apps/worker/src/server.ts` - registers `createErasureScrubWorker` as the 19th worker
 - `apps/worker/src/queues/__tests__/scheduler-registration.test.ts` - new describe block asserting zero job schedulers/repeatables for this queue
+- `apps/worker/src/queues/__tests__/negative-cross-tenant-jobs.test.ts` - new ErasureScrub cross-tenant case + `COVERED_FAMILIES` entry (Rule 2 fix, see below)
 - `packages/db/src/index.ts` - added the missing `export * from "./schema/erasure-records.js"` (Rule 3 fix, see below)
 - `package.json` - `failure:erasure-scrub-resume` script, added to `failure:all`
 - `SPECIFICATION.md` - §5.2 worker count (18 -> 19), new §5.15 documenting the queue/worker
@@ -157,10 +167,18 @@ status: complete
 - **Verification:** `npm run failure:erasure-scrub-resume` passes (both boundaries); the full Task 2 suite (`erasure-scrub.test.ts`, `queue-core-single-definition.test.ts`, `scheduler-registration.test.ts`, `shared-error-listener.test.ts`) still passes (99/99); `npm run failure:all`, `npm run lint`, and `npm run build` all pass.
 - **Committed in:** `3276db7` (Task 3 commit)
 
+**3. [Rule 2 - Missing critical functionality] SEC-16 cross-tenant coverage gate did not know about the new worker family**
+- **Found during:** post-Task-3 full-suite verification (`npx vitest run --root apps/worker`)
+- **Issue:** `negative-cross-tenant-jobs.test.ts`'s Test 5 asserts every `create*Worker` family registered in `server.ts`'s `buildWorker()` is either covered by a dedicated cross-tenant proof or has a documented exclusion reason. Wiring `createErasureScrubWorker` into `server.ts` (Task 2) left `ErasureScrub` in neither set -- the gate failed with "job family(ies) registered in buildWorker but neither covered nor excluded: ErasureScrub".
+- **Fix:** Added a dedicated cross-tenant case mirroring `flow-enroll-existing`'s shape (a direct job handler taking `workspaceId` from job data, not a scan-discovery family): a job naming workspace B whose `contactId`/`erasureRecordId` both belong to workspace A is a no-op, because `runErasureScrub`'s own `withTenant(workspaceB, ...)` scope makes workspace A's `erasure_records` row and `send_events` rows invisible under RLS -- proven by reading both back afterward under workspace A's own tenant scope. Added `"ErasureScrub"` to `COVERED_FAMILIES`.
+- **Files modified:** `apps/worker/src/queues/__tests__/negative-cross-tenant-jobs.test.ts`
+- **Verification:** `npx vitest run --root apps/worker src/queues/__tests__/negative-cross-tenant-jobs.test.ts` (17/17 pass); full `npx vitest run --root apps/worker` (524/524 pass); `npm run lint` and `npm run build` both pass.
+- **Committed in:** `7ec0b97`
+
 ---
 
-**Total deviations:** 2 auto-fixed (1 blocking, 1 bug)
-**Impact on plan:** Both auto-fixes were necessary for correctness. Neither changes the plan's specified behavior, allowlist, checkpoint storage, or page limit -- the first restores a missing export the plan's own dependency (13-10) should have added, and the second closes a latent precision bug that Task 2's own fixtures happened not to exercise. No scope creep.
+**Total deviations:** 3 auto-fixed (1 blocking, 1 bug, 1 missing critical functionality)
+**Impact on plan:** All three auto-fixes were necessary for correctness or an existing security gate the plan's own changes would otherwise have silently weakened. None changes the plan's specified allowlist, checkpoint storage, or page limit. No scope creep.
 
 ## Issues Encountered
 
@@ -191,4 +209,5 @@ None - no external service configuration required.
 - FOUND commit fb4e141 (Task 1)
 - FOUND commit 3d30ec9 (Task 2)
 - FOUND commit 3276db7 (Task 3)
+- FOUND commit 7ec0b97 (Rule 2 fix: SEC-16 coverage gap)
 - FOUND commit 0aaceb5 (docs: SUMMARY)
