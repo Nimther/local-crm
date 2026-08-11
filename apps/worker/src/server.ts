@@ -23,6 +23,7 @@ import { createPartitionMaintenanceWorker } from "./queues/partition-maintenance
 import { createSendReconcilerWorker } from "./queues/send-reconciler.worker.js";
 import { createWebhookReplaySweepWorker } from "./queues/webhook-replay-sweep.worker.js";
 import { createReputationTickWorker } from "./queues/reputation-tick.worker.js";
+import { createErasureScrubWorker } from "./queues/erasure-scrub.worker.js";
 
 /**
  * The worker process's runtime handle: a standalone shared ioredis
@@ -221,6 +222,13 @@ export async function buildWorker(): Promise<WorkerRuntime> {
     // observation per workspace per metric. Measurement only -- nothing here
     // pauses, throttles, or blocks sending; plan 13-11 carries the alert.
     createReputationTickWorker(buildRedisConnectionOptions(redisUrl)),
+    // CMP-04 (D-01/D-04, 13-13): the asynchronous evidence-hygiene half of
+    // contact erasure -- consumes the job plan 13-10's deleteContact
+    // enqueues, walking the erased contact's linked send_events.payload and
+    // events.properties rows in bounded, checkpointed pages and rewriting
+    // each JSONB value from an explicit evidence allowlist. Job-per-erasure,
+    // not a repeatable tick -- registers no job scheduler.
+    createErasureScrubWorker(buildRedisConnectionOptions(redisUrl)),
   ];
 
   // Phase 12 (WRK-08/WRK-10): attach the shared error/failed listener,
@@ -252,7 +260,7 @@ async function main(): Promise<void> {
   process.on("SIGTERM", shutdown);
 
   scrubbedConsole.log(
-    `apps/worker started (${runtime.workers.length} BullMQ worker(s) registered: events:ingest, imports:csv, email-broadcast, email-triggered, campaign-kickoff, campaign-scheduler, webhook-events, analytics-reconciliation, flow-run-advance, flow-reconciliation, flow-trigger-evaluator, flow-segment-sweep, flow-segment-sweep-flow, flow-enroll-existing, partition-maintenance, send-reconciler, webhook-replay-sweep, reputation-tick)`
+    `apps/worker started (${runtime.workers.length} BullMQ worker(s) registered: events:ingest, imports:csv, email-broadcast, email-triggered, campaign-kickoff, campaign-scheduler, webhook-events, analytics-reconciliation, flow-run-advance, flow-reconciliation, flow-trigger-evaluator, flow-segment-sweep, flow-segment-sweep-flow, flow-enroll-existing, partition-maintenance, send-reconciler, webhook-replay-sweep, reputation-tick, erasure-scrub)`
   );
 }
 
