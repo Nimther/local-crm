@@ -118,7 +118,20 @@ export async function listContactEvents(
 export class ContactConflictError extends Error {
   constructor(
     message: string,
-    public readonly code: "email_taken" | "invalid_status_transition" | "cannot_set_suppressed"
+    public readonly code:
+      | "email_taken"
+      | "invalid_status_transition"
+      | "cannot_set_suppressed"
+      // CMP-04 (plan 13-10, Task 3): thrown by updateContact when the
+      // targeted row has already been anonymized. contacts.routes.ts
+      // deliberately maps THIS code to 404 (not the usual 409) -- an
+      // anonymized contact must never be presented to a tenant as a live
+      // contact (threat T-13-10-03's prohibition), so the wire-visible
+      // outcome is identical to "contact not found", the same as if the
+      // row had been hard-deleted. The typed error/code still exists so
+      // the refusal is explicit internally (logging, tests) rather than a
+      // silent zero-row UPDATE or an accidental PII repopulation.
+      | "contact_anonymized"
   ) {
     super(message);
     this.name = "ContactConflictError";
@@ -149,11 +162,17 @@ function assertValidTimezone(timezone: string | null | undefined): void {
   }
 }
 
-/** D-13: search (email/first_name/last_name/external_id) + status/tag filters, sort, offset/limit pagination. */
+/**
+ * D-13: search (email/first_name/last_name/external_id) + status/tag filters,
+ * sort, offset/limit pagination. `anonymized_at IS NULL` (CMP-04, plan
+ * 13-10, Task 3) is a tenant-visibility filter, not a soft-delete
+ * convention -- evidence queries over sends/send_events/
+ * subscription_status_history deliberately do NOT apply it.
+ */
 export async function listContacts(query: ListContactsQuery): Promise<ListContactsResult> {
   return withTenantTransaction(async (client) => {
     const workspaceId = getWorkspaceId();
-    const conditions: string[] = ["workspace_id = $1"];
+    const conditions: string[] = ["workspace_id = $1", "anonymized_at IS NULL"];
     const params: unknown[] = [workspaceId];
 
     if (query.search) {
@@ -305,12 +324,22 @@ export async function updateContact(id: string, patch: UpdateContactInput): Prom
 
   return withTenantTransaction(async (client) => {
     const workspaceId = getWorkspaceId();
-    const { rows: existingRows } = await client.query<ContactRow>(
-      `SELECT ${CONTACT_COLUMNS} FROM contacts WHERE workspace_id = $1 AND id = $2 FOR UPDATE`,
+    // CMP-04 (plan 13-10, Task 3): reads `anonymized_at` too, in addition to
+    // CONTACT_COLUMNS -- deliberately NOT filtered by `anonymized_at IS
+    // NULL` here (unlike every OTHER read in this file), because this
+    // function needs to tell "no such contact" (existing is undefined)
+    // apart from "found, but anonymized" (existing.anonymizedAt is set) so
+    // it can refuse the second case explicitly rather than silently
+    // updating zero rows or repopulating a scrubbed column.
+    const { rows: existingRows } = await client.query<ContactRow & { anonymizedAt: Date | null }>(
+      `SELECT ${CONTACT_COLUMNS}, anonymized_at as "anonymizedAt" FROM contacts WHERE workspace_id = $1 AND id = $2 FOR UPDATE`,
       [workspaceId, id]
     );
     const existing = existingRows[0];
     if (!existing) return null;
+    if (existing.anonymizedAt !== null) {
+      throw new ContactConflictError(`Contact ${id} has been anonymized and cannot be modified`, "contact_anonymized");
+    }
 
     let nextEmail = existing.email;
     if (patch.email !== undefined && patch.email !== existing.email) {
