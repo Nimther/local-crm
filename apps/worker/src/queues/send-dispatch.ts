@@ -114,6 +114,15 @@ function getDefaultRedisClient(): Redis {
       throw new Error("REDIS_URL is required for apps/worker's send-dispatch rate limiter");
     }
     defaultRedisClient = new Redis(redisUrl);
+    // 12-REVIEW.md WR-01: without this listener, a connection error on this
+    // client bypasses scrubbedConsole entirely -- ioredis 5.x's own internal
+    // fallback logs it unredacted via raw `console.error` (it does not crash
+    // the process the way an unhandled `pg.Pool` error would), which is both
+    // an unredacted-log risk and invisible to every other error/log path in
+    // this codebase.
+    defaultRedisClient.on("error", (err) => {
+      scrubbedConsole.error("send-dispatch: default rate-limiter/semaphore Redis client error", err);
+    });
   }
   return defaultRedisClient;
 }

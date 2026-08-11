@@ -1,4 +1,5 @@
 import { Redis, type RedisOptions } from "ioredis";
+import { scrubbedConsole } from "@mega-crm/redaction";
 
 /**
  * Decodes a percent-encoded Redis URL credential, re-throwing a
@@ -51,7 +52,17 @@ export function buildRedisConnectionOptions(redisUrl: string): RedisOptions {
   };
 }
 
-/** Constructs a shared ioredis connection for BullMQ Queue/Worker instances. */
+/**
+ * Constructs a shared ioredis connection for BullMQ Queue/Worker instances.
+ * Registers an `'error'` listener (12-REVIEW.md WR-01) so connection errors
+ * route through `scrubbedConsole` -- like every other long-lived connection
+ * in this codebase -- instead of ioredis's own unredacted internal fallback
+ * logger.
+ */
 export function createRedisConnection(redisUrl: string): Redis {
-  return new Redis(buildRedisConnectionOptions(redisUrl));
+  const client = new Redis(buildRedisConnectionOptions(redisUrl));
+  client.on("error", (err) => {
+    scrubbedConsole.error("queue-core: shared ioredis connection error", err);
+  });
+  return client;
 }
