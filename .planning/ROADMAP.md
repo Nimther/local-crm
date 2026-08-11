@@ -354,7 +354,7 @@ Plans:
   4. SIGTERM drains in-flight jobs and closes every Queue handle without losing the job in progress; every worker — including the repeatable ticks — reports errors through one shared listener, and the multi-instance-safety assumptions are written down.
   5. Failed jobs age out under a per-queue retention policy instead of accumulating forever, terminal failures land in an observable dead-letter path, and Redis connection options, `defaultJobOptions` and TTL values have exactly one definition.
 
-**Plans**: 14 plans (13 executed, 12-14 planned)
+**Plans**: 14/14 plans executed
 
 Plans:
 **Wave 1**
@@ -399,7 +399,7 @@ Plans:
 
 **Wave 10** *(gap closure — UAT G-12-3; blocked on Wave 8 completion)*
 
-- [ ] 12-14-PLAN.md — burst-absorption dedup assertion made non-vacuous: seed one past-due scheduled campaign, assert exactly one kickoff job and one transition, add an honest empty-scan control case, single shared seeding fixture (WRK-13)
+- [x] 12-14-PLAN.md — burst-absorption dedup assertion made non-vacuous: seed one past-due scheduled campaign, assert exactly one kickoff job and one transition, add an honest empty-scan control case, single shared seeding fixture (WRK-13)
 
 **UI hint**: no
 
@@ -581,7 +581,7 @@ Phase 9 has no dependents and may be scheduled in parallel at any point after Ph
 | 9. Partition Automation & Boundary Safety | v1.1 | 5/5 | Complete    | 2026-08-07 |
 | 10. Tenant Isolation & Trust Boundaries | v1.1 | 15/15 | Complete    | 2026-08-09 |
 | 11. Delivery Correctness | v1.1 | 11/11 | Complete    | 2026-08-09 |
-| 12. Worker Reliability & Tenant Fairness | v1.1 | 13/13 | In Progress|  |
+| 12. Worker Reliability & Tenant Fairness | v1.1 | 14/14 | In Progress|  |
 | 13. Compliance & Analytics Integrity | v1.1 | 0/TBD | Not started | - |
 | 14. Deployment & Database Durability | v1.1 | 0/TBD | Not started | - |
 | 15. Observability, Alerting & Frontend Resilience | v1.1 | 0/TBD | Not started | - |
