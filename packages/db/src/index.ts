@@ -27,6 +27,7 @@ import * as partitionMaintenanceRunsSchema from "./schema/partition-maintenance-
 import * as sendReconcilerRunsSchema from "./schema/send-reconciler-runs.js";
 import * as deadLetterJobsSchema from "./schema/dead-letter-jobs.js";
 import * as ingressJournalSchema from "./schema/ingress-journal.js";
+import * as sendEventQuarantineSchema from "./schema/send-event-quarantine.js";
 
 const schema = {
   ...authSchema,
@@ -56,6 +57,7 @@ const schema = {
   ...sendReconcilerRunsSchema,
   ...deadLetterJobsSchema,
   ...ingressJournalSchema,
+  ...sendEventQuarantineSchema,
 };
 
 const databaseUrl = process.env.DATABASE_URL;

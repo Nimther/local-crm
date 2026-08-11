@@ -117,3 +117,39 @@ ALTER POLICY workspace_isolation ON ingress_journal TO mega_crm_app;
 -- this phase reads it cross-workspace. Mirrors flow_segment_sweep_checkpoint's
 -- (0053) "granted NOTHING" precedent: discovery-role access is added only
 -- when a real cross-workspace consumer exists, never speculatively.
+
+-- Phase 13 (CMP-08, D-05, plan 13-01, Task 2) -- send_event_quarantine: a
+-- dedicated table for a rejected SendGrid event row (bad/untrustworthy
+-- occurred_at candidate, or any other future rejection reason), rather than
+-- a `quarantined` column on `send_events`. Deliberately NOT folded into that
+-- hot, partitioned table -- widening its rows with a rarely-populated
+-- quarantine column would cost every read of the table's common case, and
+-- quarantine retention needs to be pruneable independently of the
+-- partitioned table's own retention policy.
+--
+-- `occurred_at_candidate` is TEXT, not timestamptz, and this is deliberate:
+-- the value being quarantined is EXACTLY the one the platform refuses to
+-- trust as a timestamp, so coercing it into a typed column would let it
+-- route a partition decision -- the opposite of what quarantining it means.
+CREATE TABLE send_event_quarantine (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  workspace_id uuid NOT NULL REFERENCES organization(id) ON DELETE CASCADE,
+  sg_event_id text,
+  event_type text,
+  raw_event jsonb NOT NULL,
+  reason text NOT NULL,
+  occurred_at_candidate text,
+  received_at timestamptz NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE send_event_quarantine IS
+  'Rejected SendGrid event rows (Phase 13, CMP-08, D-05, plan 13-01), kept as a DEDICATED table rather than a quarantined column on send_events, so the hot partitioned table is not widened and quarantine retention can be pruned independently. No mega_crm_scan grant and no scan policy exist for this table -- nothing in this phase reads it cross-workspace (see this migration''s ingress_journal section for the contrasting case that DOES need scan access).';
+
+ALTER TABLE send_event_quarantine ENABLE ROW LEVEL SECURITY;
+ALTER TABLE send_event_quarantine FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY workspace_isolation ON send_event_quarantine TO mega_crm_app
+  USING (workspace_id = current_setting('app.current_workspace_id')::uuid)
+  WITH CHECK (workspace_id = current_setting('app.current_workspace_id')::uuid);
+
+CREATE INDEX send_event_quarantine_workspace_received_at_idx ON send_event_quarantine (workspace_id, received_at);
