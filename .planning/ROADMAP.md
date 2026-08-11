@@ -581,7 +581,7 @@ Phase 9 has no dependents and may be scheduled in parallel at any point after Ph
 | 9. Partition Automation & Boundary Safety | v1.1 | 5/5 | Complete    | 2026-08-07 |
 | 10. Tenant Isolation & Trust Boundaries | v1.1 | 15/15 | Complete    | 2026-08-09 |
 | 11. Delivery Correctness | v1.1 | 11/11 | Complete    | 2026-08-09 |
-| 12. Worker Reliability & Tenant Fairness | v1.1 | 14/14 | In Progress|  |
+| 12. Worker Reliability & Tenant Fairness | v1.1 | 14/14 | Complete    | 2026-08-11 |
 | 13. Compliance & Analytics Integrity | v1.1 | 0/TBD | Not started | - |
 | 14. Deployment & Database Durability | v1.1 | 0/TBD | Not started | - |
 | 15. Observability, Alerting & Frontend Resilience | v1.1 | 0/TBD | Not started | - |
