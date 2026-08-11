@@ -180,3 +180,15 @@ None - no external service configuration required.
 ---
 *Phase: 13-compliance-analytics-integrity*
 *Completed: 2026-08-12*
+
+## Self-Check: PASSED
+
+- FOUND: apps/worker/src/queues/erasure-scrub.worker.ts
+- FOUND: apps/worker/src/queues/erasure-scrub-checkpoint.ts
+- FOUND: apps/worker/src/queues/__tests__/erasure-scrub.test.ts
+- FOUND: apps/worker/src/queues/__tests__/failure-injection/erasure-scrub-resume.test.ts
+- FOUND: .planning/phases/13-compliance-analytics-integrity/13-13-SUMMARY.md
+- FOUND commit fb4e141 (Task 1)
+- FOUND commit 3d30ec9 (Task 2)
+- FOUND commit 3276db7 (Task 3)
+- FOUND commit 0aaceb5 (docs: SUMMARY)
