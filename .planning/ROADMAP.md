@@ -429,7 +429,7 @@ Plans:
   4. A provider event carrying an out-of-range or manipulated timestamp cannot bypass deduplication or land outside its partition, and a redelivered event is counted once even when `sg_event_id` is not stable across retries.
   5. Metric drift is corrected by a scheduled reconciliation job rather than a one-off fix, events missed while the webhook endpoint was unreachable are recovered by backfill, and a tenant approaching the spam-complaint threshold raises an alert.
 
-**Plans**: 14 plans across 8 waves
+**Plans**: 15 plans across 9 waves
 
 Plans:
 **Wave 1**
@@ -442,7 +442,7 @@ Plans:
 
 - [ ] 13-04-PLAN.md — Bound provider `occurred_at` before partition routing and dedup; quarantine out-of-range events per event (CMP-05)
 - [ ] 13-05-PLAN.md — Dirty-day marking and sweep so a late event is re-verified against a fresh scan (CMP-03)
-- [ ] 13-06-PLAN.md — Journal replay sweep, operator range-replay CLI, and journal pruning (CMP-08)
+- [ ] 13-06-PLAN.md — Journal replay sweep, operator range-replay CLI, and split retention: completed rows pruned, incomplete ones tombstoned (CMP-08)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -464,9 +464,13 @@ Plans:
 
 **Wave 7** *(blocked on Wave 6 completion)*
 
-- [ ] 13-13-PLAN.md — Bounded resumable JSONB PII scrub over linked event rows, with completion tracking (CMP-04)
+- [ ] 13-13-PLAN.md — Bounded resumable JSONB scrub over linked event rows, rebuilt from an evidence allowlist, with completion tracking (CMP-04)
 
 **Wave 8** *(blocked on Wave 7 completion)*
+
+- [ ] 13-15-PLAN.md — Erasure-record reclaim tick: a committed erasure whose scrub was never enqueued is recovered, proven by a crash-in-the-gap scenario (CMP-04)
+
+**Wave 9** *(blocked on Wave 8 completion)*
 
 - [ ] 13-14-PLAN.md — SPECIFICATION/ARCHITECTURE/CONVENTIONS as-built update, coverage matrix, human phase verification (CMP-01…CMP-09)
 

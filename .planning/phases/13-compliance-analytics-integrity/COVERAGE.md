@@ -32,7 +32,7 @@ This phase changes how the platform ingests, bounds, dedupes, journals and repla
 | Per-event `timestamp` field bounding | INTEGRATE | This phase's CMP-05 — bounded before partition routing and before dedup. |
 | Batch POST (multi-event body) | INTEGRATE | Whole verified batch journaled and enqueued as one job. |
 | Provider retry window (~24h) | INTEGRATE | Relied on as the recovery path for true endpoint unreachability (D-05); no code integration needed beyond fail-closed 5xx on journal-write failure so SendGrid actually retries. |
-| `custom_args` correlation (`send_id`, `test`) | INTEGRATE | `send_id` becomes part of the CMP-07 dedup identity; `test` gates side effects. |
+| `custom_args` correlation (`send_id`, `test`) | INTEGRATE | `send_id` becomes part of the CMP-07 dedup identity; `test` gates side effects. Note the retention nuance, which is not a coverage change: the capability is fully consumed at ingest, but custom args are a tenant-defined key space and so are NOT on plan 13-13's post-erasure evidence allowlist — after a contact is erased, that contact's stored payload copies keep the provider's own ids rather than the tenant's custom args. Ingest-time integration and post-erasure retention are separate decisions. |
 
 ## Other SendGrid API surfaces
 
