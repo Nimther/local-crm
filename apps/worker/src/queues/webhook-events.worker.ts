@@ -3,8 +3,9 @@ import { Worker, type Job, type ConnectionOptions } from "bullmq";
 import type { PoolClient } from "pg";
 import { scrubbedConsole } from "@mega-crm/redaction";
 import { withCrossWorkspaceScan, withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
-import { recordSubscriptionStatusChange } from "@mega-crm/contacts-core";
+import { recordSubscriptionStatusChange, applyUnsubscribeWithSendFact } from "@mega-crm/contacts-core";
 import { incrementWorkspaceDailyRollup } from "@mega-crm/db/src/analytics/daily-rollup.js";
+import { setFactColumnOnce, incrementCampaignCounter } from "@mega-crm/db/src/sends/fact-columns.js";
 import {
   classifyOccurredAt,
   normalizeEventType,
@@ -176,35 +177,6 @@ function extractEventRow(raw: unknown, now: Date): ExtractEventOutcome {
 }
 
 /**
- * Idempotent "first write wins" fact-column update (D-06 Pattern 4):
- * `WHERE <column> IS NULL` gates the write so a replayed or out-of-order
- * event can never overwrite an already-set fact. Returns whether THIS call
- * was the one that set the column -- the exactly-once counter-increment gate
- * (D-09).
- */
-async function setFactColumnOnce(
-  client: PoolClient,
-  sendId: string,
-  column: string,
-  occurredAt: string,
-  reasonWrite?: { reasonColumn: string; reason: string | null }
-): Promise<boolean> {
-  const sql = reasonWrite
-    ? `UPDATE sends SET ${column} = $2, ${reasonWrite.reasonColumn} = $3 WHERE id = $1 AND ${column} IS NULL RETURNING id`
-    : `UPDATE sends SET ${column} = $2 WHERE id = $1 AND ${column} IS NULL RETURNING id`;
-  const params = reasonWrite ? [sendId, occurredAt, reasonWrite.reason] : [sendId, occurredAt];
-  const { rows } = await client.query(sql, params);
-  return rows.length > 0;
-}
-
-/** Unique-recipient campaign counter increment (D-07/D-09), only ever called after a `setFactColumnOnce` just-set. */
-async function incrementCampaignCounter(client: PoolClient, campaignId: string, column: string): Promise<void> {
-  await client.query(`UPDATE campaigns SET ${column} = ${column} + 1, updated_at = now() WHERE id = $1`, [
-    campaignId,
-  ]);
-}
-
-/**
  * 07-09 (D-08 OR-combined per-send terminal count): returns `true` iff
  * exactly one of `bounced_at`/`dropped_at`/`spam_reported_at` is currently
  * non-null on the send -- i.e. the terminal the caller's `setFactColumnOnce`
@@ -275,30 +247,6 @@ async function applySuppression(
       newStatus: "suppressed",
       source: "webhook_suppression",
       reason,
-    });
-  }
-}
-
-/** Unsubscribe outcome (D-11/D-13): status change ONLY -- never a `workspace_suppressions` row. */
-async function applyUnsubscribe(client: PoolClient, workspaceId: string, contactId: string): Promise<void> {
-  // D-09 (07-01): same capture-before-write pattern as applySuppression.
-  const { rows: priorRows } = await client.query<{ subscriptionStatus: string }>(
-    `SELECT subscription_status as "subscriptionStatus" FROM contacts WHERE id = $1`,
-    [contactId]
-  );
-  const priorStatus = priorRows[0]?.subscriptionStatus ?? null;
-
-  await client.query(`UPDATE contacts SET subscription_status = 'unsubscribed', updated_at = now() WHERE id = $1`, [
-    contactId,
-  ]);
-
-  if (priorStatus !== null && priorStatus !== "unsubscribed") {
-    await recordSubscriptionStatusChange(client, {
-      workspaceId,
-      contactId,
-      oldStatus: priorStatus,
-      newStatus: "unsubscribed",
-      source: "webhook_unsubscribe",
     });
   }
 }
@@ -451,7 +399,29 @@ async function applyEventSideEffects(
         if (outcome?.status === "suppressed") {
           await applySuppression(client, workspaceId, send.contactId, outcome.reason);
         } else if (outcome?.status === "unsubscribed") {
-          await applyUnsubscribe(client, workspaceId, send.contactId);
+          // Phase 13 (CMP-01, plan 13-08): a deliberate behavior change, not
+          // a refactor -- this branch previously wrote status + history only
+          // and never touched `sends.unsubscribed_at`. The platform learned
+          // from the provider that this address is unsubscribed, and the
+          // originating send is the evidence for that consent change, so it
+          // now goes through the same shared helper as the other two
+          // unsubscribe-producing sites. Gated on `sendFactJustSet` (the
+          // helper's own `WHERE unsubscribed_at IS NULL` gate), so this
+          // cannot double-count against a subsequent explicit `unsubscribe`
+          // event for the same send. The campaign's `unsubscribed_count` for
+          // a dropped-unsubscribed send will therefore now increment where
+          // it previously did not -- no corresponding daily-rollup increment
+          // is added here, matching the plan's stated scope.
+          const dropUnsubResult = await applyUnsubscribeWithSendFact(client, {
+            workspaceId,
+            contactId: send.contactId,
+            sendId: send.id,
+            occurredAt: event.occurredAt,
+            source: "webhook_unsubscribe",
+          });
+          if (dropUnsubResult.sendFactJustSet && dropUnsubResult.campaignId) {
+            await incrementCampaignCounter(client, dropUnsubResult.campaignId, "unsubscribed_count");
+          }
         }
       }
       break;
@@ -473,10 +443,23 @@ async function applyEventSideEffects(
     }
     case "unsubscribe":
     case "group_unsubscribe": {
-      const justSet = await setFactColumnOnce(client, send.id, "unsubscribed_at", event.occurredAt);
-      if (justSet) {
-        await applyUnsubscribe(client, workspaceId, send.contactId);
-        if (send.campaignId) await incrementCampaignCounter(client, send.campaignId, "unsubscribed_count");
+      // Phase 13 (CMP-01, plan 13-08): routed through the shared helper,
+      // which performs the status change, the consent-history write, and the
+      // `sends.unsubscribed_at` fact write in one call on this transaction's
+      // client -- no more separate outer `setFactColumnOnce` gate here, since
+      // the helper owns that gate internally and reports it via
+      // `sendFactJustSet`. Counter increments stay the caller's
+      // responsibility (gated on `sendFactJustSet`), matching the route
+      // side's identical gating.
+      const result = await applyUnsubscribeWithSendFact(client, {
+        workspaceId,
+        contactId: send.contactId,
+        sendId: send.id,
+        occurredAt: event.occurredAt,
+        source: "webhook_unsubscribe",
+      });
+      if (result.sendFactJustSet) {
+        if (result.campaignId) await incrementCampaignCounter(client, result.campaignId, "unsubscribed_count");
         await incrementWorkspaceDailyRollup(client, workspaceId, event.occurredAt, "unsubscribed");
       }
       break;

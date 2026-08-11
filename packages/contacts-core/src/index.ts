@@ -22,3 +22,8 @@ export {
   type RecordSubscriptionStatusChangeParams,
   type SubscriptionStatusChangeSource,
 } from "./subscription-status-history.js";
+export {
+  applyUnsubscribeWithSendFact,
+  type ApplyUnsubscribeInput,
+  type ApplyUnsubscribeResult,
+} from "./unsubscribe-apply.js";
