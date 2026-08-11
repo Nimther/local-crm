@@ -262,6 +262,59 @@ export async function arrangeCrashedBeforeResultWrite(
   return { sendId, providerResponse };
 }
 
+/**
+ * G-12-3 (12-14, gap closure): the campaign-scheduler due-campaign seeding +
+ * readback recipe, lifted verbatim (SQL unchanged, parameterised only by
+ * `nameSeed`) from `campaign-scheduler-scan.test.ts`'s own local
+ * `seedDueCampaign`/`campaignStatus` helpers -- this file's own header above
+ * documents that a third copy of an INSERT is exactly the drift this module
+ * exists to prevent. `worker-autorun-default.test.ts`'s burst-absorption case
+ * and `campaign-scheduler-scan.test.ts` both import these instead of each
+ * defining their own.
+ */
+export async function seedDueCampaign(nameSeed: string): Promise<{ workspaceId: string; campaignId: string }> {
+  const workspaceId = await insertFixtureOrganization(nameSeed);
+
+  const campaignId = await withTenant(workspaceId, () =>
+    withTenantTransaction(async (client) => {
+      const { rows: segmentRows } = await client.query<{ id: string }>(
+        `INSERT INTO segments (workspace_id, name, definition, created_by_user_id)
+         VALUES ($1, 'Scheduler scan fixture segment', $2, 'test-user') RETURNING id`,
+        [workspaceId, { operator: "and", conditions: [] }],
+      );
+      const { rows: campaignRows } = await client.query<{ id: string }>(
+        `INSERT INTO campaigns (workspace_id, name, status, segment_id, scheduled_at, created_by_user_id)
+         VALUES ($1, 'Scheduler scan fixture campaign', 'scheduled', $2, now() - interval '1 minute', 'test-user')
+         RETURNING id`,
+        [workspaceId, segmentRows[0].id],
+      );
+      return campaignRows[0].id;
+    }),
+  );
+
+  return { workspaceId, campaignId };
+}
+
+/**
+ * Widened readback of `seedDueCampaign`'s row -- also selects
+ * `sending_started_at` so callers can pin "transitions only once" by
+ * comparing it across a further scan tick, not just re-checking `status`.
+ */
+export async function readDueCampaignState(
+  workspaceId: string,
+  campaignId: string,
+): Promise<{ status: string; sendingStartedAt: Date | null }> {
+  return withTenant(workspaceId, () =>
+    withTenantTransaction(async (client) => {
+      const { rows } = await client.query<{ status: string; sendingStartedAt: Date | null }>(
+        `SELECT status, sending_started_at as "sendingStartedAt" FROM campaigns WHERE id = $1`,
+        [campaignId],
+      );
+      return rows[0];
+    }),
+  );
+}
+
 export async function sendsRowCountFor(
   workspaceId: string,
   campaignId: string,
