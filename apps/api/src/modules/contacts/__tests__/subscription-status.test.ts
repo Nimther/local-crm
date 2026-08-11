@@ -183,15 +183,24 @@ describe("Contact subscription status & suppression (SUBS-01)", () => {
     });
 
     // Re-creating the same email is the observable proxy for "is this email
-    // now in workspace_suppressions" (asserted via D-08/D-11 above), but we
-    // additionally prove it here for a contact that was deleted while still
-    // subscribed vs. unsubscribed to make sure ONLY unsubscribed/suppressed
-    // trigger the suppression write.
+    // now in workspace_suppressions" (asserted via D-08/D-11 above). CMP-04
+    // (plan 13-10) made the suppression write unconditional on every
+    // erasure -- the sibling test below proves the SAME outcome for a
+    // contact that was still subscribed at delete time, which pre-13-10
+    // did NOT suppress.
     const recreated = await createContact(cookie, workspace.slug, { email });
     expect(recreated.subscriptionStatus).toBe("suppressed");
   });
 
-  it("D-08: deleting a still-subscribed contact does NOT add its email to the suppression list", async () => {
+  it("CMP-04 (plan 13-10, Codex BLOCKER finding 1): deleting a still-subscribed contact ALSO suppresses its email -- erasure must not weaken suppression", async () => {
+    // Pre-13-10 this contact recreated as "subscribed" (the suppression
+    // insert was gated on the pre-erasure status, so a still-subscribed
+    // contact left NO suppression row). CMP-04 removed that gate: 13-CONTEXT.md
+    // states "Erasure must not weaken suppression: the deleted person's
+    // address must remain unmailable" -- an erased address is suppressed
+    // regardless of the status it held, so re-creating it now yields
+    // "suppressed", the same outcome an unsubscribed-at-delete-time contact
+    // already produced.
     const { cookie, workspace } = await owner("subs-delete-subscribed-no-suppress");
     const email = `still-subscribed-${Date.now()}@example.com`;
 
@@ -205,6 +214,6 @@ describe("Contact subscription status & suppression (SUBS-01)", () => {
     });
 
     const recreated = await createContact(cookie, workspace.slug, { email });
-    expect(recreated.subscriptionStatus).toBe("subscribed");
+    expect(recreated.subscriptionStatus).toBe("suppressed");
   });
 });
