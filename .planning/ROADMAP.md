@@ -432,19 +432,42 @@ Plans:
 **Plans**: 14 plans across 8 waves
 
 Plans:
+**Wave 1**
+
 - [ ] 13-01-PLAN.md — [tracer] Ingress journal end-to-end: verified batch journaled before enqueue, worker marks it ingested; quarantine table DDL (CMP-08)
 - [ ] 13-02-PLAN.md — UTC day semantics: force `AT TIME ZONE 'UTC'` on every reconciliation cast, pin `sent_at` as the day authority, assert the recurring schedule (CMP-02, CMP-06)
 - [ ] 13-03-PLAN.md — `unknown`/`reconciling` sends get their own visible count in campaign stats; ledger provably sums to total sends (CMP-02 / D-16)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 13-04-PLAN.md — Bound provider `occurred_at` before partition routing and dedup; quarantine out-of-range events per event (CMP-05)
 - [ ] 13-05-PLAN.md — Dirty-day marking and sweep so a late event is re-verified against a fresh scan (CMP-03)
 - [ ] 13-06-PLAN.md — Journal replay sweep, operator range-replay CLI, and journal pruning (CMP-08)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 13-07-PLAN.md — Dedup re-base to `(workspace_id, send_id, event_type, occurred_at)`; partitioned unique-index migration with duplicate pre-check (CMP-07)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 13-08-PLAN.md — One shared atomic unsubscribe helper across route, webhook and dropped paths, with a crash test (CMP-01)
 - [ ] 13-09-PLAN.md — Per-tenant complaint and hard-bounce rates, tiered, into a keyed alert-state table (CMP-09)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
 - [ ] 13-10-PLAN.md — Contact erasure: anonymize in place, keep evidence FKs, write an auditable erasure record, queue the scrub (CMP-04)
 - [ ] 13-11-PLAN.md — Ingestion-health and reputation watchdogs, operator plus tenant alerts, boot wiring (CMP-08, CMP-09)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
 - [ ] 13-12-PLAN.md — Suppression list converted to a per-workspace HMAC; no plaintext address survives erasure (CMP-04)
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
 - [ ] 13-13-PLAN.md — Bounded resumable JSONB PII scrub over linked event rows, with completion tracking (CMP-04)
+
+**Wave 8** *(blocked on Wave 7 completion)*
+
 - [ ] 13-14-PLAN.md — SPECIFICATION/ARCHITECTURE/CONVENTIONS as-built update, coverage matrix, human phase verification (CMP-01…CMP-09)
 
 **Sequencing and pitfall notes:**
