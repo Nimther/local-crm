@@ -12,6 +12,7 @@ import {
 import {
   createAnalyticsReconciliationWorker,
   waitForAnalyticsReconciliationRegistration,
+  RECONCILE_INTERVAL_MS,
 } from "../analytics-reconciliation.worker.js";
 import {
   createFlowReconciliationWorker,
@@ -306,5 +307,64 @@ describe("scheduler-registration migration (Phase 12, WRK-13)", () => {
     expect(offenders, `these files still contain a "repeat: {" registration argument: ${offenders.join(", ")}`).toEqual(
       []
     );
+  });
+});
+
+/**
+ * CMP-06 (Phase 13, plan 13-02), Task 3: converts "the recurring reconciliation
+ * job exists" into "a test fails if it stops existing". The FIXTURES loop
+ * above already proves two of the three CMP-06 behaviors for
+ * analytics-reconciliation specifically:
+ * - "constructing the worker twice still leaves exactly one scheduler with
+ *   that id" -- the scheduler id (`analytics-reconcile-tick`) is stable
+ *   across boots (pre-existing coverage, unchanged by this task).
+ * - the "production single-argument call shape" leaves BullMQ's own
+ *   `autorun` default in effect -- covered by
+ *   `worker-autorun-default.test.ts`'s `analytics-reconciliation` fixture
+ *   case ("constructed with the production single-argument call shape, its
+ *   processing loop is running"), a SEPARATE file because that behavior
+ *   needs a real (autorun-on) worker and its own per-test Redis, unlike this
+ *   file's shared-Redis/`autorun: false` suite (pre-existing coverage in a
+ *   sibling file, not duplicated here).
+ *
+ * The one behavior neither file asserted: the registered scheduler's `every`
+ * interval actually equals `RECONCILE_INTERVAL_MS`, not merely that A
+ * scheduler exists under the right id. A regression that registered the
+ * right id under the wrong interval (e.g. an accidental edit to the literal
+ * passed to `upsertJobScheduler`) would pass every existing assertion and
+ * still silently change how often the correctness backstop runs.
+ */
+describe("analytics-reconciliation scheduler interval (CMP-06)", () => {
+  let redis: TempRedis;
+
+  beforeAll(async () => {
+    redis = await startTempRedis({});
+  });
+
+  afterAll(async () => {
+    await redis?.stop();
+  });
+
+  it("the registered job scheduler's every interval equals RECONCILE_INTERVAL_MS", async () => {
+    const connection = buildRedisConnectionOptions(redis.url);
+    const worker = createAnalyticsReconciliationWorker(connection, { autorun: false });
+    const queue = new Queue("analytics-reconcile", { connection });
+
+    try {
+      await vi.waitFor(async () => {
+        expect(await queue.getJobSchedulersCount()).toBe(1);
+      });
+
+      const schedulers = await queue.getJobSchedulers();
+      expect(schedulers).toHaveLength(1);
+      expect(schedulers[0].key).toBe("analytics-reconcile-tick");
+      expect(schedulers[0].every).toBe(RECONCILE_INTERVAL_MS);
+
+      await waitForAnalyticsReconciliationRegistration(worker);
+    } finally {
+      await worker.close();
+      await queue.obliterate({ force: true });
+      await queue.close();
+    }
   });
 });
