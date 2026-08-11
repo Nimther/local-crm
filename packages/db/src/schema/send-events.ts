@@ -30,6 +30,18 @@ import { sends } from "./sends.js";
  * sg_event_id, occurred_at) DO NOTHING` insert in webhook-events.worker.ts
  * still dedupes correctly on the sole natural key that matters
  * (`sg_event_id`).
+ *
+ * Phase 13 (CMP-05, D-15, plan 13-04): `occurredAt` is now a BOUNDED value
+ * on the write path -- `classifyOccurredAt` (`@mega-crm/delivery-core`)
+ * rejects any provider timestamp outside `[now - 7d, now + 5min]` before a
+ * row is ever constructed, so a manipulated or clock-skewed value can no
+ * longer choose a partition or enter this table's dedup key. A rejected
+ * event is written to `send_event_quarantine` instead (migration 0055).
+ * `receivedAt` remains the separate SERVER-SIDE authority: it is always
+ * `now()` at insert time, un-bounded and never derived from provider
+ * input -- the two columns answer different questions ("when did this
+ * happen, per the provider" vs. "when did we receive it") and neither is
+ * a substitute for the other.
  */
 export const sendEvents = pgTable("send_events", {
   id: uuid("id").notNull(),
