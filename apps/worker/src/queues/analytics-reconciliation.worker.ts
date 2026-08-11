@@ -24,8 +24,8 @@ const RECONCILE_WINDOW_DAYS = 2;
  * already computes. Event-derived counters (`delivered_count`,
  * `opened_count`, `clicked_count`, `bounced_count`, `unsubscribed_count`) key
  * off the provider event's own `occurred_at` UTC day instead (see
- * `incrementWorkspaceDailyRollup` in `analytics-rollup.ts` for the
- * incremental-path half of that contract).
+ * `incrementWorkspaceDailyRollup` in `packages/db/src/analytics/daily-rollup.ts`
+ * for the incremental-path half of that contract).
  */
 export const SEND_DAY_FIELD = "sent_at";
 

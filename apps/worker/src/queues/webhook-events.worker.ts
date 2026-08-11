@@ -4,7 +4,7 @@ import type { PoolClient } from "pg";
 import { scrubbedConsole } from "@mega-crm/redaction";
 import { withCrossWorkspaceScan, withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { recordSubscriptionStatusChange } from "@mega-crm/contacts-core";
-import { incrementWorkspaceDailyRollup } from "./analytics-rollup.js";
+import { incrementWorkspaceDailyRollup } from "@mega-crm/db/src/analytics/daily-rollup.js";
 import {
   normalizeEventType,
   resolveSuppression,
