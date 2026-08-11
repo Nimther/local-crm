@@ -2,16 +2,86 @@
 phase: 12-worker-reliability-tenant-fairness
 reviewed: 2026-08-11T00:00:00Z
 depth: standard
-files_reviewed: 3
+files_reviewed: 73
 files_reviewed_list:
+  - .github/workflows/ci.yml
+  - apps/api/package.json
+  - apps/api/src/modules/campaigns/campaign-queues.ts
+  - apps/api/src/modules/contacts/imports-csv-queue.ts
+  - apps/api/src/modules/events/events-queue.ts
+  - apps/api/src/modules/flows/flow-queues.ts
+  - apps/api/src/modules/ops/__tests__/dead-letter-watchdog.test.ts
+  - apps/api/src/modules/ops/dead-letter-watchdog.ts
+  - apps/api/src/modules/webhooks/enqueue.ts
+  - apps/api/src/server.ts
+  - apps/worker/package.json
+  - apps/worker/src/__tests__/graceful-shutdown.test.ts
   - apps/worker/src/queues/__tests__/campaign-scheduler-scan.test.ts
+  - apps/worker/src/queues/__tests__/connection.test.ts
+  - apps/worker/src/queues/__tests__/dead-letter-writer.test.ts
+  - apps/worker/src/queues/__tests__/failed-job-retention.test.ts
+  - apps/worker/src/queues/__tests__/failure-injection/rate-limit-429.test.ts
+  - apps/worker/src/queues/__tests__/failure-injection/redis-restart.test.ts
+  - apps/worker/src/queues/__tests__/failure-injection/segment-sweep-kill-resume.test.ts
+  - apps/worker/src/queues/__tests__/failure-injection/tenant-fairness.test.ts
+  - apps/worker/src/queues/__tests__/flow-run-advance-integration.test.ts
+  - apps/worker/src/queues/__tests__/flow-segment-trigger.test.ts
+  - apps/worker/src/queues/__tests__/loadtest/tenant-rps-sustained.test.ts
+  - apps/worker/src/queues/__tests__/negative-cross-tenant-jobs.test.ts
+  - apps/worker/src/queues/__tests__/partition-maintenance.worker.test.ts
+  - apps/worker/src/queues/__tests__/queue-core-single-definition.test.ts
+  - apps/worker/src/queues/__tests__/scheduler-registration.test.ts
+  - apps/worker/src/queues/__tests__/send-timing-invariant.test.ts
+  - apps/worker/src/queues/__tests__/shared-error-listener.test.ts
+  - apps/worker/src/queues/__tests__/tenant-concurrency-cap.test.ts
+  - apps/worker/src/queues/__tests__/tenant-deferral.test.ts
+  - apps/worker/src/queues/__tests__/tenant-lane-semaphore.test.ts
   - apps/worker/src/queues/__tests__/worker-autorun-default.test.ts
+  - apps/worker/src/queues/analytics-reconciliation.worker.ts
+  - apps/worker/src/queues/campaign-broadcast-producer.ts
+  - apps/worker/src/queues/campaign-scheduler.worker.ts
+  - apps/worker/src/queues/dead-letter/dead-letter-writer.ts
+  - apps/worker/src/queues/email-broadcast.worker.ts
+  - apps/worker/src/queues/email-triggered.worker.ts
+  - apps/worker/src/queues/flows/flow-queues.ts
+  - apps/worker/src/queues/flows/flow-reconciliation.worker.ts
+  - apps/worker/src/queues/flows/flow-segment-sweep-checkpoint.ts
+  - apps/worker/src/queues/flows/flow-segment-sweep-flow.worker.ts
+  - apps/worker/src/queues/flows/flow-segment-sweep.worker.ts
+  - apps/worker/src/queues/partition-maintenance.worker.ts
+  - apps/worker/src/queues/queue-registry.ts
+  - apps/worker/src/queues/rate-limiter.ts
+  - apps/worker/src/queues/send-dispatch.ts
+  - apps/worker/src/queues/send-reconciler.worker.ts
+  - apps/worker/src/queues/tenant-deferral.ts
+  - apps/worker/src/queues/tenant-lane-semaphore.ts
+  - apps/worker/src/server.ts
+  - apps/worker/src/shutdown-budget.ts
   - apps/worker/src/test/failure-fixtures.ts
+  - apps/worker/src/test/fairness-constants.ts
+  - packages/db/migrations/0053_flow_segment_sweep_checkpoint.sql
+  - packages/db/migrations/0054_dead_letter_jobs.sql
+  - packages/db/migrations/meta/_journal.json
+  - packages/db/src/index.ts
+  - packages/db/src/schema/dead-letter-jobs.ts
+  - packages/db/src/schema/flow-segment-sweep-checkpoint.ts
+  - packages/queue-core/package.json
+  - packages/queue-core/src/__tests__/error-listeners.test.ts
+  - packages/queue-core/src/__tests__/queue-options.test.ts
+  - packages/queue-core/src/connection.ts
+  - packages/queue-core/src/dead-letter-writer.ts
+  - packages/queue-core/src/error-listeners.ts
+  - packages/queue-core/src/index.ts
+  - packages/queue-core/src/queue-options.ts
+  - packages/queue-core/tsconfig.json
+  - packages/queue-core/vitest.config.ts
+  - packages/shared-schemas/src/queues.ts
+  - packages/tenant-context/src/__tests__/tenant-context.test.ts
 findings:
   critical: 0
-  warning: 3
-  info: 3
-  total: 6
+  warning: 1
+  info: 1
+  total: 2
 status: issues_found
 ---
 
@@ -19,134 +89,104 @@ status: issues_found
 
 **Reviewed:** 2026-08-11T00:00:00Z
 **Depth:** standard
-**Files Reviewed:** 3
+**Files Reviewed:** 73
 **Status:** issues_found
-
-## Scope note
-
-This report is scoped to plan 12-14 (gap closure for UAT gap G-12-3), commits `07c7205`, `28b99e2`, `2fb8142` on top of `f9a44c1`. It overwrites the prior `12-REVIEW.md` at this path (git history preserves that earlier report, which covered plans 12-12/12-13). Per the reviewing instructions, findings are drawn from these three files' **current** contents, not restricted to the 12-14 diff hunks alone — `worker-autorun-default.test.ts` in particular contains code untouched by 12-14 that was flagged in the prior review round and never fixed; those items are carried forward below (renumbered) since they remain true of the file as it stands today, alongside new findings specific to this round's changes.
-
-As instructed: the burst-absorption test's kickoff-queue assertion (`kickoffTotal` summed across `waiting/active/delayed/completed/failed`, `worker-autorun-default.test.ts:331-337` and `:376-382`) is **not** re-flagged — it correctly replaces the prior review's vacuous `WR-03` with a non-vacuous, seeded-data assertion, backed by a genuine control case (`:405-461`) proving the assertion actually discriminates dedup-worked from nothing-happened.
 
 ## Summary
 
-`campaign-scheduler-scan.test.ts` was rewritten to import `seedDueCampaign`/`readDueCampaignState` from `failure-fixtures.ts` instead of defining local copies; I diffed it against the pre-gap-closure version and confirmed the migrated SQL is byte-for-byte unchanged — no regression there. `failure-fixtures.ts` gained two new exports (`seedDueCampaign`, `readDueCampaignState`) that both `campaign-scheduler-scan.test.ts` and `worker-autorun-default.test.ts` now share, closing the "third copy" drift risk the file's own header warns about. `worker-autorun-default.test.ts`'s burst-absorption case now seeds one real due campaign and asserts a non-vacuous dedup outcome (both on the initial burst and on a subsequent re-check tick), plus an honest zero-campaign control case — this is a real strengthening of the regression guard for G-12-1/G-12-3.
+Phase 12 (worker reliability & tenant fairness) is unusually thorough: every source file carries load-bearing rationale comments, the failure-injection/negative-cross-tenant/fairness test suites are extensive, and several findings from prior review iterations (visible in comments referencing "12-REVIEW.md iteration 2, IN-02", CR-03, CR-04, WR-01, WR-03 etc.) have already been fixed and are now pinned by regression tests. The tenant-lane semaphore, tenant-scoped RPS limiter, dead-letter pipeline, and scheduler-registration migration are all internally consistent and cross-checked by tests that assert against the real exported constants rather than restated literals.
 
-Two issues from the prior review round (`WR-01`/`WR-02` in the superseded report, re-numbered below) remain present and unaddressed in the untouched parts of `worker-autorun-default.test.ts` — the `describe.each` loop-running case and the standalone pickup-probe case still leak `campaign-scheduler`'s long-lived kickoff producer `Queue`, and the pickup-probe test still has no explicit `testTimeout` despite doing real DB-backed work. One new issue was introduced in this round: `readDueCampaignState`'s declared return type promises a non-optional object while its implementation can silently return `undefined`, unlike every sibling reader in the same file. No critical/security findings.
+Two of the module's own lazily-constructed `ioredis` clients (the shared worker-process connection in `apps/worker/src/server.ts`, and the rate-limiter/semaphore client in `apps/worker/src/queues/send-dispatch.ts`) never register an `'error'` listener, unlike every other long-lived Postgres `Pool` and the API's own rate-limiter Redis client in this same codebase, which is the same crash class the phase's own `partition-maintenance.worker.ts`/`dead-letter-writer.ts` comments explicitly defend against for `pg.Pool`. Empirically verified against the installed `ioredis@5.11.0`: an unhandled `'error'` event on a client with zero listeners does **not** crash the process (ioredis has its own internal fallback that logs `"[ioredis] Unhandled error event: ..."` and continues) — so this is a pattern inconsistency and an observability gap (the error bypasses this codebase's `scrubbedConsole` redaction wrapper and is invisible to every other logging/alerting path), not a proven process-crash. Recorded as a Warning below, not a Blocker.
+
+A secondary, cosmetic issue was found in a pre-existing (Phase 6) test file that Phase 12's segment-sweep rewrite now exercises: stale "RED under current code" comments that no longer match the (passing) assertions they annotate.
 
 ## Warnings
 
-### WR-01: `campaign-scheduler`'s kickoff producer queue is still leaked by two test cases (carried forward, unaddressed)
+### WR-01: Worker-side ioredis clients have no `'error'` listener — errors bypass the codebase's logging/redaction convention
 
-**File:** `apps/worker/src/queues/__tests__/worker-autorun-default.test.ts:186-209` (the `describe.each(FIXTURES)` case, for the `"campaign-scheduler"` fixture) and `:211-239` (the pickup-probe test)
-
-**Issue:** `createCampaignSchedulerWorker` constructs a long-lived kickoff producer `Queue<CampaignKickoffJob>` internally (`campaign-scheduler.worker.ts:189-194`, registered via `registerTrackedQueue`, by design not closed by `worker.close()` — that queue's lifecycle is tied to process-wide shutdown, not this worker's). Both of these test cases close only `worker` and `queue`:
-
-```ts
-} finally {
-  await worker.close();
-  await queue.close();
-}
-```
-
-Neither retrieves nor closes the kickoff queue via `getCampaignSchedulerKickoffQueueForTest(worker)`, even though that helper is already imported into this file and used correctly by the burst-absorption and control cases later in the same file (`:283-292`, `:412-423`). Each test's `TempRedis` instance is killed via SIGTERM in `afterEach` (confirmed in `packages/test-support/src/harness/temp-redis.ts:stop()` — it only terminates the server process, it has no knowledge of client-side ioredis connections), so the leaked kickoff-queue's ioredis client is left retrying against a now-dead port indefinitely for the rest of the process lifetime. This was identified as a plausible contributor to an observed full-suite flake in the prior review round and was not fixed by this gap-closure diff (`git diff f9a44c1..HEAD` touches neither of these two blocks).
-
-**Fix:**
-```ts
-// describe.each case (only campaign-scheduler produces one; optional chaining
-// makes this a no-op for the other four fixtures):
-} finally {
-  await worker.close();
-  await queue.close();
-  await getCampaignSchedulerKickoffQueueForTest(worker)?.close();
-}
-
-// pickup-probe test:
-} finally {
-  await worker.close();
-  await queue.close();
-  await getCampaignSchedulerKickoffQueueForTest(worker)?.close();
-}
-```
-
-### WR-02: Pickup-probe test has no explicit timeout despite real DB-backed work (carried forward, unaddressed)
-
-**File:** `apps/worker/src/queues/__tests__/worker-autorun-default.test.ts:211-239`
-
-**Issue:** This test waits on a real `active` event from a worker whose processor calls `findDueCampaignCandidates()` (a real database round-trip) and relies on vitest's default 20s `testTimeout` (`apps/worker/vitest.config.ts:31`). The prior review round observed this specific test time out once in three full-suite runs. The burst-absorption test in this same file was given an explicit `30_000` timeout as part of this gap-closure round (`:393`) precisely because it now does comparable real DB + Redis work — the pickup-probe test does the same class of work but was not given the same treatment.
-
-**Fix:** Pass an explicit timeout longer than the 20s default, e.g. `it("...", async () => { ... }, 30_000);`, consistent with the treatment the burst test just received in this same diff.
-
-### WR-03: `readDueCampaignState` can return `undefined` despite a non-optional declared return type
-
-**File:** `apps/worker/src/test/failure-fixtures.ts:303-316`
+**File:** `apps/worker/src/queues/send-dispatch.ts:110-119` (also `apps/worker/src/server.ts:153`, via `packages/queue-core/src/connection.ts:55-57`)
 
 **Issue:**
+
+`getDefaultRedisClient()` in `send-dispatch.ts` lazily constructs the singleton `ioredis` client used by **every** production call to `processSendJob` for the per-tenant RPS token bucket (`rate-limiter.ts`) and the tenant-lane semaphore (`tenant-lane-semaphore.ts`) — both `email-broadcast.worker.ts` and `email-triggered.worker.ts` call their handlers with `deps = {}`, so `deps.redisClient ?? getDefaultRedisClient()` resolves to this module-level client in every real deployment:
+
 ```ts
-export async function readDueCampaignState(
-  workspaceId: string,
-  campaignId: string,
-): Promise<{ status: string; sendingStartedAt: Date | null }> {
-  return withTenant(workspaceId, () =>
-    withTenantTransaction(async (client) => {
-      const { rows } = await client.query<{ status: string; sendingStartedAt: Date | null }>(
-        `SELECT status, sending_started_at as "sendingStartedAt" FROM campaigns WHERE id = $1`,
-        [campaignId],
-      );
-      return rows[0];
-    }),
-  );
+let defaultRedisClient: Redis | null = null;
+
+function getDefaultRedisClient(): Redis {
+  if (!defaultRedisClient) {
+    const redisUrl = process.env.REDIS_URL;
+    if (!redisUrl) {
+      throw new Error("REDIS_URL is required for apps/worker's send-dispatch rate limiter");
+    }
+    defaultRedisClient = new Redis(redisUrl);
+  }
+  return defaultRedisClient;
 }
 ```
-`rows[0]` is `undefined` when no row matches `campaignId` (or when it's scoped to the wrong `workspaceId` under RLS), but the function's declared return type claims a guaranteed non-optional object. The project's `tsconfig.base.json` does not set `noUncheckedIndexedAccess`, so this type lie compiles cleanly, and a caller doing `(await readDueCampaignState(...)).status` on a bad id gets a runtime `TypeError: Cannot read properties of undefined` at the call site rather than a clear, attributable failure. This is inconsistent with sibling helpers in the same file: `sendsStatusFor` (`:178-192`) correctly declares `Promise<string | undefined>` and uses `rows[0]?.status`, and `arrangeCrashedBeforeResultWrite` (`:244-263`) explicitly throws a named error when its own row lookup comes back empty. `readDueCampaignState` is a new export in this diff and is now called from two files (`campaign-scheduler-scan.test.ts:50-51`, `worker-autorun-default.test.ts:343,363`), so a future typo'd `campaignId` in either would fail confusingly rather than loudly.
+
+No `.on("error", ...)` is ever attached to `defaultRedisClient`. `apps/worker/src/server.ts`'s own shared connection (`createRedisConnection(redisUrl)`, `packages/queue-core/src/connection.ts`) has the identical gap.
+
+Verified empirically against the exact installed version (`ioredis@5.11.0`, matching `apps/worker/package.json`): a connection error on a client with zero `'error'` listeners does **not** throw/crash the process — ioredis 5.x's own client-level fallback intercepts it and prints `"[ioredis] Unhandled error event: <err>"` directly to `console`, then continues retrying. So this is **not** the process-crash scenario the codebase's own `pool.on("error", ...)` comments describe for `pg.Pool` (those really do crash on an unhandled `'error'`, since `pg.Pool` has no equivalent internal fallback) — but it is still a real, confirmed gap:
+
+1. **It bypasses `scrubbedConsole`.** Every other error path in this codebase — `worker.on("error", ...)` (`packages/queue-core/src/error-listeners.ts`), every dedicated `pg.Pool`'s `.on("error", ...)`, `apps/api/src/server.ts`'s `rateLimitRedis.on("error", ...)` — routes through `scrubbedConsole.error(...)` so a leaked credential or contact address in an error message is redacted before it reaches logs. ioredis's own built-in fallback logs via raw `console.error`, unredacted, unlabeled, and untestable by this codebase's own conventions.
+2. **It is invisible to operators.** Every other connection-error path in this file's own review scope is deliberately loud and consistent ("without this listener, an idle-connection termination surfaces as an uncaught 'error' event and crashes the whole apps/worker process" — the stated rationale in `partition-maintenance.worker.ts`/`dead-letter/dead-letter-writer.ts`). This client's failures instead show up only as an ad hoc `[ioredis] Unhandled error event` line an operator has to know to grep for, with no queue name, no correlation to the rate limiter/semaphore it backs, and no `dead_letter_jobs`/watchdog visibility.
+3. **It is untested.** `failure-injection/redis-restart.test.ts` exercises a plain `Queue`/`Worker` pair whose connection is BullMQ-internal (BullMQ manages its own reconnection/error handling for that), never `getDefaultRedisClient()`'s client or `server.ts`'s shared `connection`; every test in `tenant-lane-semaphore.test.ts`, `tenant-concurrency-cap.test.ts`, and the fairness suite injects its own `redisClient` via `deps`, bypassing this code path entirely.
 
 **Fix:**
+
 ```ts
-export async function readDueCampaignState(
-  workspaceId: string,
-  campaignId: string,
-): Promise<{ status: string; sendingStartedAt: Date | null }> {
-  return withTenant(workspaceId, () =>
-    withTenantTransaction(async (client) => {
-      const { rows } = await client.query<{ status: string; sendingStartedAt: Date | null }>(
-        `SELECT status, sending_started_at as "sendingStartedAt" FROM campaigns WHERE id = $1`,
-        [campaignId],
-      );
-      const row = rows[0];
-      if (!row) {
-        throw new Error(`readDueCampaignState: no campaign row for workspace=${workspaceId} campaign=${campaignId}`);
-      }
-      return row;
-    }),
-  );
+// apps/worker/src/queues/send-dispatch.ts
+function getDefaultRedisClient(): Redis {
+  if (!defaultRedisClient) {
+    const redisUrl = process.env.REDIS_URL;
+    if (!redisUrl) {
+      throw new Error("REDIS_URL is required for apps/worker's send-dispatch rate limiter");
+    }
+    defaultRedisClient = new Redis(redisUrl);
+    defaultRedisClient.on("error", (err) => {
+      scrubbedConsole.error("send-dispatch: default rate-limiter/semaphore Redis client error", err);
+    });
+  }
+  return defaultRedisClient;
 }
 ```
+
+```ts
+// packages/queue-core/src/connection.ts
+export function createRedisConnection(redisUrl: string): Redis {
+  const client = new Redis(buildRedisConnectionOptions(redisUrl));
+  client.on("error", (err) => {
+    scrubbedConsole.error("queue-core: shared ioredis connection error", err);
+  });
+  return client;
+}
+```
+(`connection.ts` would need to import `scrubbedConsole` from `@mega-crm/redaction`, already a dependency of `packages/queue-core`.) Add a regression test mirroring the existing `pool.on("error", ...)` proofs: emit `"error"` on the constructed client and assert it routes through `scrubbedConsole.error`, the same way `shared-error-listener.test.ts` and `error-listeners.test.ts` already prove for `worker.on("error", ...)`.
 
 ## Info
 
-### IN-01: Unused `queue` handle in the `describe.each` loop-running test (carried forward)
+### IN-01: Stale "RED under current code" comments no longer match the (passing) assertions they annotate
 
-**File:** `apps/worker/src/queues/__tests__/worker-autorun-default.test.ts:186-209`
+**File:** `apps/worker/src/queues/__tests__/flow-segment-trigger.test.ts:472-474, 479-481`
 
-**Issue:** Each iteration constructs `const queue = new Queue(fixture.tickQueueName, { connection })` (`:190`) but never queries it — the test asserts only `worker.isRunning()` and `fixture.waitForRegistration(worker)`. Harmless, but it's dead weight in all five `describe.each` iterations and slightly obscures that no queue handle is actually needed here.
+**Issue:** The test "06-19/WR-04/FLOW-04: a contact who leaves the trigger segment (sweep-detected) and rejoins re-enters..." carries two comments claiming the test is currently failing under a known-bad implementation:
 
-**Fix:** Drop the unused `queue` construction/close, or use it to assert something (e.g. `queue.getJobSchedulers()` count) so its presence is self-explanatory.
+```ts
+// RED under current code: the snapshot row is never cleared on segment
+// exit, so this stays true instead of false.
+expect(await getSnapshotSeen(...)).toBe(false);
+...
+// RED under current code: the rejoin never re-enters, so this stays at
+// length 1 instead of 2.
+expect(await getRunsForContact(...)).toHaveLength(2);
+```
 
-### IN-02: Module-level `authPool` in `failure-fixtures.ts` is never closed
+The assertions themselves already expect the *fixed* behavior (`false`, length `2`), and Phase 12's rewritten `flow-segment-sweep-flow.worker.ts` implements exactly that fix via `drainStaleSnapshotBatches`/`deleteStaleSnapshotBatch`, which anti-joins and deletes a flow's stale `flow_segment_membership_snapshot` rows for contacts no longer matching the trigger segment before every page loop runs. Given the phase's stated verification result (16/16 passing), this test passes today — the "RED under current code" comments are leftover TDD-red documentation that was never updated once the fix landed.
 
-**File:** `apps/worker/src/test/failure-fixtures.ts:38-48`
+**Risk:** A future maintainer who sees a regression here (e.g. someone modifies `drainStaleSnapshotBatches` and only skims the comment, not the assertion) could "fix" it by reverting the assertions to match the stale comment instead of investigating the actual regression, silently reintroducing the FLOW-04 leave/rejoin bug this test exists to catch.
 
-**Issue:** `getAuthTestPool()` lazily creates a singleton `Pool` and caches it in a module-level `let authPool`, but no function in this file (or, per grep, anywhere in `apps/worker/src`) ever calls `authPool.end()`. This predates the current gap-closure round (10-09), but its reach has grown: `seedDueCampaign` (new in this diff) now routes both `campaign-scheduler-scan.test.ts` and `worker-autorun-default.test.ts` through `insertFixtureOrganization` → `getAuthTestPool()`, so more test files now open this pool without ever closing it. In practice this is reclaimed by process exit at the end of the vitest run and doesn't corrupt test correctness — flagging for visibility, not urgency.
-
-**Fix:** Export a `closeAuthTestPool()` alongside `getAuthTestPool()` and call it from a `globalTeardown`/shared `afterAll`, if/when this becomes a real resource-pressure problem in CI.
-
-### IN-03: Cross-workspace "empty scan" arrange guards are a suite-wide invariant, not a per-test one
-
-**File:** `apps/worker/src/queues/__tests__/worker-autorun-default.test.ts:266`, `:410`
-
-**Issue:** `expect(await findDueCampaignCandidates()).toEqual([])` asserts that **no workspace in the entire ephemeral database** has a due `scheduled` campaign at that instant — not just that this test's own fixtures are clean. `findDueCampaignCandidates()` is a genuinely cross-tenant scan (Phase 10 SEC-01/SEC-02) by design, so this guard is only as reliable as every other test file in the `apps/worker` suite never leaving a `scheduled` campaign with a past `scheduled_at` uncommitted-to-`sending` at the moment these two tests run. Today that holds (grep confirms no other `*.test.ts` file under `apps/worker/src` inserts `status = 'scheduled'`), and the in-file comments show the authors deliberately chose "fail loud here" over "produce a confusing count mismatch elsewhere" as the trade-off. Noting this only so a future test file that seeds a due campaign and fails before transitioning it out of `scheduled` knows this guard is where that leak will surface as an unrelated-looking failure.
-
-**Fix:** No action needed now; if this guard ever starts flaking, the first thing to check is a `scheduled`-status leftover row from a different, unrelated test file rather than a defect in `campaign-scheduler.worker.ts` itself.
+**Fix:** Update the two comments to state the current, passing expectation (e.g. "the sweep's stale-snapshot cleanup clears this on segment exit, so a rejoin re-enters") and drop the "RED under current code" framing now that the fix is in place.
 
 ---
 
