@@ -12,6 +12,7 @@ import {
   type NormalizedEventType,
 } from "@mega-crm/delivery-core";
 import { WEBHOOK_EVENTS_QUEUE, webhookEventsJobSchema, type WebhookEventsJob } from "@mega-crm/shared-schemas";
+import { markIngestionComplete } from "@mega-crm/db/src/webhooks/ingress-journal.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -489,6 +490,21 @@ async function dropSiblingWorkspaceEvents(
 }
 
 /**
+ * Marks `journalId` complete (Phase 13, CMP-08, D-05, T-13-01-08) when one is
+ * present -- opens its OWN small `withTenant`/`withTenantTransaction`, since
+ * this is called from both the two zero-row early-return sites below (which
+ * never open the main tenant transaction at all) and, implicitly via that
+ * transaction's own tail, the normal insert path. `journalId` absent means a
+ * legacy (pre-13-01) payload -- there is no journal row to mark, and this is
+ * a silent no-op rather than a defensive throw, since an absent id is the
+ * EXPECTED shape for such a payload, not an error.
+ */
+async function markJournalCompleteIfPresent(workspaceId: string, journalId: string | undefined): Promise<void> {
+  if (journalId === undefined) return;
+  await withTenant(workspaceId, () => withTenantTransaction((client) => markIngestionComplete(client, journalId)));
+}
+
+/**
  * The webhook-events job handler (WBHK-01/02/03/04, SUBS-02, D-14, SEC-09):
  * re-derives `workspaceId` from `job.data` (never ambient state). Before
  * opening the tenant transaction, resolves and drops sibling-workspace
@@ -503,15 +519,51 @@ async function dropSiblingWorkspaceEvents(
  * SAME tenant-scoped transaction as the dedup insert. Finishes with a
  * debounced webhook-health timestamp write.
  *
+ * Phase 13 (CMP-08, D-05): validates the payload with `safeParse` rather than
+ * `parse` -- REVIEWS.md LOW finding. With `schemaVersion: z.literal(1).optional()`,
+ * a future version-2 payload fails `.parse()` and throws into BullMQ
+ * retries, the opposite of the "defer by logging and returning" the
+ * schema's own doc comment promises. A failed parse whose every issue is
+ * about `schemaVersion` is DEFERRED (logged via `scrubbedConsole`, returns
+ * `{ inserted: 0 }`, marks no journal row); a failed parse for any other
+ * reason (e.g. a missing/malformed `workspaceId`) keeps throwing -- a
+ * structurally broken payload is a real error, not a forward-compatibility
+ * case.
+ *
+ * Also restructures the two zero-row early returns (a batch with no
+ * extractable events, a batch whose every event belongs to a sibling
+ * workspace) to mark a supplied `journalId` complete before returning --
+ * REVIEWS.md HIGH finding 1. A journaled batch that reached a terminal
+ * outcome is marked ingested, INCLUDING when the correct outcome was to
+ * insert nothing: sibling-only batches are not a hypothetical
+ * (`dropSiblingWorkspaceEvents` exists precisely because one BYO SendGrid
+ * key backing multiple workspaces makes them a proven production shape,
+ * Phase 10 SEC-09/WR-01), and left unmarked, every such batch's journal row
+ * would be re-enqueued by plan 13-06's sweep until the attempt cap, then
+ * surface through plan 13-11's watchdog as a poison batch -- for deliveries
+ * the platform handled exactly right.
+ *
  * Exported standalone (not only inside the Worker's inline processor) so
  * the webhook-events-*.test.ts suites can invoke it directly without a live
  * BullMQ Queue/Redis round-trip (mirrors processEventIngestJob's rationale).
  */
-export async function processWebhookEventBatch(data: WebhookEventsJob): Promise<{ inserted: number }> {
-  const { workspaceId, events } = webhookEventsJobSchema.parse(data);
+export async function processWebhookEventBatch(data: unknown): Promise<{ inserted: number }> {
+  const parsed = webhookEventsJobSchema.safeParse(data);
+  if (!parsed.success) {
+    const isUnrecognizedSchemaVersion = parsed.error.issues.every((issue) => issue.path[0] === "schemaVersion");
+    if (isUnrecognizedSchemaVersion) {
+      scrubbedConsole.error("webhook-events: deferring job with an unrecognized schemaVersion", {
+        issues: parsed.error.issues,
+      });
+      return { inserted: 0 };
+    }
+    throw parsed.error;
+  }
+  const { workspaceId, events, journalId } = parsed.data;
 
   const extractedRows = events.map(extractEventRow).filter((row): row is ExtractedEventRow => row !== null);
   if (extractedRows.length === 0) {
+    await markJournalCompleteIfPresent(workspaceId, journalId);
     return { inserted: 0 };
   }
 
@@ -520,6 +572,7 @@ export async function processWebhookEventBatch(data: WebhookEventsJob): Promise<
     // Every surviving row was a sibling-workspace event -- nothing left to
     // insert. Returning here also avoids an empty `VALUES ()` clause below,
     // which the insert's placeholder-join would otherwise produce.
+    await markJournalCompleteIfPresent(workspaceId, journalId);
     return { inserted: 0 };
   }
 
@@ -615,6 +668,17 @@ export async function processWebhookEventBatch(data: WebhookEventsJob): Promise<
 
       // D-03: debounced once per batch, not once per event.
       await debounceWebhookHealth(client, workspaceId);
+
+      // Phase 13 (CMP-08, D-05, T-13-01-08): a journaled batch that reached
+      // a terminal outcome is marked ingested, including when the correct
+      // outcome was to insert nothing -- completion means the batch was
+      // PROCESSED, not that rows were written. Kept in the SAME transaction
+      // as the insert above (rather than a separate withTenantTransaction
+      // call like the two zero-row early returns) so the completion mark
+      // and the rows it covers commit or roll back together.
+      if (journalId !== undefined) {
+        await markIngestionComplete(client, journalId);
+      }
 
       return { inserted: insertedRows.length };
     })
