@@ -214,9 +214,26 @@ describe("P3 -- apps/api holds no scan-role credential or entry point", () => {
     return files;
   }
 
-  it("no file under apps/api/src (outside __tests__) imports withCrossWorkspaceScan", () => {
-    const offenders = collectTsFiles(API_SRC_DIR).filter((file) =>
-      readFileSync(file, "utf8").includes("withCrossWorkspaceScan"),
+  /**
+   * Phase 13 (CMP-08, plan 13-11): narrowed from a blanket "zero files" ban
+   * to an explicit one-file allowlist. `ingestion-health-watchdog.ts` is the
+   * first (and, by this test, the ONLY permitted) apps/api consumer of
+   * `withCrossWorkspaceScan` -- `ingress_journal` is the first RLS-forced,
+   * tenant-scoped table an apps/api-resident watchdog needs to read
+   * platform-wide, and migration 0055 (plan 13-01) grants the dedicated
+   * `mega_crm_scan` role exactly that read (GRANT SELECT + `ingress_journal_scan`
+   * policy). This is a plan-time architectural decision, not an ad hoc
+   * relaxation: 13-11-PLAN.md's `key_links` names "readIngestionHealth under
+   * withCrossWorkspaceScan" explicitly, threat T-13-11-08 depends on it, and
+   * 13-REVIEWS.md HIGH finding 2 directed it. Any OTHER file importing
+   * `withCrossWorkspaceScan` still fails this test -- P3's original intent
+   * (apps/api holds no BROAD scan-role membership) is preserved by keeping
+   * the allowlist to this single, narrowly-scoped consumer.
+   */
+  it("only modules/ops/ingestion-health-watchdog.ts under apps/api/src (outside __tests__) imports withCrossWorkspaceScan", () => {
+    const ALLOWED = [path.join(API_SRC_DIR, "modules", "ops", "ingestion-health-watchdog.ts")];
+    const offenders = collectTsFiles(API_SRC_DIR).filter(
+      (file) => readFileSync(file, "utf8").includes("withCrossWorkspaceScan") && !ALLOWED.includes(file),
     );
     expect(offenders).toEqual([]);
   });
