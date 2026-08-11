@@ -167,3 +167,16 @@ G-12-3 is closed: the burst-absorption case can now distinguish working dedup fr
 *Phase: 12-worker-reliability-tenant-fairness*
 *Plan: 14*
 *Completed: 2026-08-11*
+
+## Self-Check: PASSED
+
+All created/modified files verified present on disk:
+- `apps/worker/src/test/failure-fixtures.ts` — FOUND
+- `apps/worker/src/queues/__tests__/worker-autorun-default.test.ts` — FOUND
+- `apps/worker/src/queues/__tests__/campaign-scheduler-scan.test.ts` — FOUND
+- `.planning/phases/12-worker-reliability-tenant-fairness/12-14-SUMMARY.md` — FOUND
+
+All task commits verified present in git log:
+- `07c7205` (Task 1) — FOUND
+- `28b99e2` (Task 2) — FOUND
+- `2fb8142` (Task 3) — FOUND
