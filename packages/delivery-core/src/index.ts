@@ -103,3 +103,16 @@ export {
   OCCURRED_AT_MAX_FUTURE_SKEW_MINUTES,
   type OccurredAtVerdict,
 } from "./occurred-at-bounds.js";
+
+export {
+  classifyReputationRate,
+  REPUTATION_WINDOW_DAYS,
+  REPUTATION_MIN_DELIVERED_FLOOR,
+  COMPLAINT_RATE_WARN,
+  COMPLAINT_RATE_CRITICAL,
+  HARD_BOUNCE_RATE_WARN,
+  HARD_BOUNCE_RATE_CRITICAL,
+  type ReputationMetric,
+  type ReputationTier,
+  type ReputationObservation,
+} from "./reputation-rates.js";
