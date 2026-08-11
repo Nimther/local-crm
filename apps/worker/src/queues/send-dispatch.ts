@@ -107,7 +107,7 @@ let defaultRedisClient: Redis | null = null;
  * connection, separate from BullMQ's internal one (RESEARCH.md Code
  * Examples / read_first `connection.ts` note).
  */
-function getDefaultRedisClient(): Redis {
+export function getDefaultRedisClient(): Redis {
   if (!defaultRedisClient) {
     const redisUrl = process.env.REDIS_URL;
     if (!redisUrl) {
@@ -125,6 +125,17 @@ function getDefaultRedisClient(): Redis {
     });
   }
   return defaultRedisClient;
+}
+
+/**
+ * 12-REVIEW.md IN-02: test-only hook clearing the lazily-created singleton so
+ * a fresh `getDefaultRedisClient()` call constructs (and wires the `'error'`
+ * listener onto) a brand-new client instead of returning a client a prior
+ * test already disconnected. Never called from production code -- the
+ * production path always wants exactly one long-lived singleton per process.
+ */
+export function __resetDefaultRedisClientForTests(): void {
+  defaultRedisClient = null;
 }
 
 /**
