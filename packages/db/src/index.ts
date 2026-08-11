@@ -2,8 +2,33 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import * as authSchema from "./schema/auth.js";
 import * as sendgridKeysSchema from "./schema/sendgrid-keys.js";
+import * as contactsSchema from "./schema/contacts.js";
+import * as suppressionsSchema from "./schema/suppressions.js";
+import * as propertyRegistrySchema from "./schema/property-registry.js";
+import * as apiKeysSchema from "./schema/api-keys.js";
+import * as eventsSchema from "./schema/events.js";
+import * as csvImportsSchema from "./schema/csv-imports.js";
+import * as segmentsSchema from "./schema/segments.js";
+import * as campaignsSchema from "./schema/campaigns.js";
+import * as campaignRecipientsSchema from "./schema/campaign-recipients.js";
+import * as sendsSchema from "./schema/sends.js";
+import * as workspaceSendSettingsSchema from "./schema/workspace-send-settings.js";
 
-const schema = { ...authSchema, ...sendgridKeysSchema };
+const schema = {
+  ...authSchema,
+  ...sendgridKeysSchema,
+  ...contactsSchema,
+  ...suppressionsSchema,
+  ...propertyRegistrySchema,
+  ...apiKeysSchema,
+  ...eventsSchema,
+  ...csvImportsSchema,
+  ...segmentsSchema,
+  ...campaignsSchema,
+  ...campaignRecipientsSchema,
+  ...sendsSchema,
+  ...workspaceSendSettingsSchema,
+};
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -22,4 +47,15 @@ export const db = drizzle(pool, { schema });
 
 export * from "./schema/auth.js";
 export * from "./schema/sendgrid-keys.js";
+export * from "./schema/contacts.js";
+export * from "./schema/suppressions.js";
+export * from "./schema/property-registry.js";
+export * from "./schema/api-keys.js";
+export * from "./schema/events.js";
+export * from "./schema/csv-imports.js";
+export * from "./schema/segments.js";
+export * from "./schema/campaigns.js";
+export * from "./schema/campaign-recipients.js";
+export * from "./schema/sends.js";
+export * from "./schema/workspace-send-settings.js";
 export { TENANT_GUC_KEY } from "./rls.js";

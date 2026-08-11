@@ -1,4 +1,5 @@
 import Fastify from "fastify";
+import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import {
   serializerCompiler,
@@ -13,10 +14,27 @@ import { registerProfileRoutes } from "./modules/tenancy/profile.js";
 import { registerInviteRoutes } from "./modules/tenancy/invites.js";
 import { registerMemberRoutes } from "./modules/tenancy/members.js";
 import { registerSendgridKeyRoutes } from "./modules/tenancy/sendgrid-key.js";
+import { registerContactsRoutes } from "./modules/contacts/contacts.routes.js";
+import { registerContactsApiRoutes } from "./modules/contacts/contacts-api.routes.js";
+import { registerApiKeyRoutes } from "./modules/api-keys/api-keys.routes.js";
+import { registerEventsApiRoutes } from "./modules/events/events-api.routes.js";
+import { registerCsvImportRoutes } from "./modules/contacts/csv-import.routes.js";
+import { registerSegmentsRoutes } from "./modules/segments/segments.routes.js";
+import { registerUnsubscribeRoutes } from "./modules/delivery/unsubscribe.routes.js";
+import { registerCampaignsRoutes } from "./modules/campaigns/campaigns.routes.js";
+import { registerSendSettingsRoutes } from "./modules/campaigns/send-settings.routes.js";
 
 /** Assembles the Fastify app: zod type provider, better-auth handler, workspace/profile/invite/member routes. */
 export async function buildServer() {
-  const app = Fastify({ loggerInstance: logger }).withTypeProvider<ZodTypeProvider>();
+  const app = Fastify({
+    loggerInstance: logger,
+    // 04-03: find-my-way's default maxParamLength (100) is too small for the
+    // signed `:token` route param on /unsubscribe/:token -- the HMAC token
+    // (base64url JSON payload + '.' + base64url signature) runs ~230-260
+    // chars. Without this, find-my-way returns a 414 for every genuine
+    // token, defeating the endpoint entirely.
+    routerOptions: { maxParamLength: 1024 },
+  }).withTypeProvider<ZodTypeProvider>();
 
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
@@ -26,12 +44,44 @@ export async function buildServer() {
   // mitigation) -- every other route is unaffected.
   await app.register(rateLimit, { global: false });
 
+  // CR-01/WR-05: script-blocking CSP on every response, defense-in-depth on
+  // top of the token format guard + attribute escaping in
+  // unsubscribe.routes.ts. default-src 'none' blocks any script execution
+  // (script-src has no override, so it falls back to default-src);
+  // style-src allows 'unsafe-inline' because the public unsubscribe page
+  // (and better-auth's own pages, if any) render a plain in-file <style>
+  // block, matching this repo's no-template-engine convention -- there is
+  // no separate stylesheet to point script-src-style-nonce machinery at.
+  // This is the single registration for the whole app (previously
+  // registered a second time, with permissive defaults, nested inside
+  // authPlugin -- consolidated here so there is one source of truth for the
+  // CSP actually served).
+  await app.register(helmet, {
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'none'"],
+        styleSrc: ["'unsafe-inline'"],
+        baseUri: ["'none'"],
+        frameAncestors: ["'none'"],
+      },
+    },
+  });
+
   await app.register(authPlugin);
   await app.register(registerWorkspaceRoutes);
   await app.register(registerProfileRoutes);
   await app.register(registerInviteRoutes);
   await app.register(registerMemberRoutes);
   await app.register(registerSendgridKeyRoutes);
+  await app.register(registerContactsRoutes);
+  await app.register(registerContactsApiRoutes);
+  await app.register(registerApiKeyRoutes);
+  await app.register(registerEventsApiRoutes);
+  await app.register(registerCsvImportRoutes);
+  await app.register(registerSegmentsRoutes);
+  await app.register(registerUnsubscribeRoutes);
+  await app.register(registerCampaignsRoutes);
+  await app.register(registerSendSettingsRoutes);
 
   return app;
 }

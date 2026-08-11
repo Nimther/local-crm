@@ -2,7 +2,7 @@ import { Link } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import { Circle, CircleCheck } from "lucide-react";
 
-import type { SendgridKeyStatus } from "@mega-crm/shared-schemas";
+import type { ContactListResponse, SendgridKeyStatus } from "@mega-crm/shared-schemas";
 import { apiGet } from "@/lib/api";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -28,7 +28,8 @@ export interface OnboardingItem {
 function buildItems(
   slug: string,
   sendgridConnected: boolean,
-  hasSecondMember: boolean
+  hasSecondMember: boolean,
+  hasContacts: boolean
 ): OnboardingItem[] {
   return [
     {
@@ -42,6 +43,18 @@ function buildItems(
       label: "Пригласите команду",
       href: `/w/${slug}/team`,
       done: hasSecondMember,
+    },
+    {
+      id: "add-contacts",
+      label: "Добавьте контакты",
+      href: `/w/${slug}/contacts`,
+      done: hasContacts,
+    },
+    {
+      id: "import-contacts",
+      label: "Импортируйте контакты",
+      href: `/w/${slug}/contacts/import`,
+      done: hasContacts,
     },
   ];
 }
@@ -59,10 +72,17 @@ export function OnboardingChecklist({ slug }: { slug: string }) {
     enabled: Boolean(slug),
   });
 
+  const contactsQuery = useQuery({
+    queryKey: ["workspace", slug, "contacts", "onboarding-count"],
+    queryFn: () => apiGet<ContactListResponse>(`/api/workspaces/${slug}/contacts?page=1&pageSize=1`),
+    enabled: Boolean(slug),
+  });
+
   const items = buildItems(
     slug,
     Boolean(sendgridQuery.data?.connected),
-    (membersQuery.data?.length ?? 0) > 1
+    (membersQuery.data?.length ?? 0) > 1,
+    (contactsQuery.data?.total ?? 0) > 0
   );
 
   return (

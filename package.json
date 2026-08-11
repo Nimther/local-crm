@@ -10,8 +10,8 @@
     "packages/*"
   ],
   "scripts": {
-    "predev": "node scripts/check-env.mjs",
-    "dev": "concurrently -n api,web -c blue,green \"npm run dev -w apps/api\" \"npm run dev -w apps/web\"",
+    "predev": "node scripts/check-env.mjs && node scripts/migrate-dev.mjs",
+    "dev": "concurrently -n api,web,worker -c blue,green,yellow \"npm run dev -w apps/api\" \"npm run dev -w apps/web\" \"npm run dev -w apps/worker\"",
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "db:generate": "npm run db:generate -w packages/db",

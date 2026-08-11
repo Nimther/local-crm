@@ -52,6 +52,15 @@ export function apiPost<T>(path: string, data: unknown): Promise<T> {
   return apiFetch<T>(path, { method: "POST", body: JSON.stringify(data) });
 }
 
+export function apiPatch<T>(path: string, data: unknown): Promise<T> {
+  return apiFetch<T>(path, { method: "PATCH", body: JSON.stringify(data) });
+}
+
+/** PUT wrapper (04-08: /send-settings is a PUT, not PATCH -- no full-replace verb existed yet). */
+export function apiPut<T>(path: string, data: unknown): Promise<T> {
+  return apiFetch<T>(path, { method: "PUT", body: JSON.stringify(data) });
+}
+
 export function apiDelete<T>(path: string, data?: unknown): Promise<T> {
   return apiFetch<T>(path, {
     method: "DELETE",

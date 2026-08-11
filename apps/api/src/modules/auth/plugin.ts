@@ -1,7 +1,6 @@
 import fp from "fastify-plugin";
 import type { FastifyInstance } from "fastify";
 import cors from "@fastify/cors";
-import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import { toNodeHandler } from "better-auth/node";
 import { auth } from "./auth.js";
@@ -9,7 +8,9 @@ import { env } from "../../env.js";
 
 /**
  * Mounts better-auth's handler at /api/auth/* and registers the baseline
- * security plugins (CORS/helmet/rate-limit — RESEARCH.md Supporting stack).
+ * security plugins (CORS/rate-limit — RESEARCH.md Supporting stack).
+ * @fastify/helmet is registered once, app-wide, in server.ts (CR-01/WR-05)
+ * with an explicit script-blocking CSP -- not duplicated here.
  *
  * better-auth's Node handler needs the RAW, unparsed request body — it is
  * registered in its own encapsulated Fastify context so Fastify's default
@@ -22,7 +23,6 @@ export const authPlugin = fp(async function authPlugin(fastify: FastifyInstance)
     origin: [env.WEB_URL],
     credentials: true,
   });
-  await fastify.register(helmet);
 
   await fastify.register(async (scope) => {
     // Rate-limit only applies within this encapsulated scope — i.e. only to

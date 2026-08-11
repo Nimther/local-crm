@@ -1,0 +1,33 @@
+{
+  "name": "@mega-crm/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --env-file=../../.env src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@mega-crm/contacts-core": "0.1.0",
+    "@mega-crm/db": "0.1.0",
+    "@mega-crm/delivery-core": "0.1.0",
+    "@mega-crm/kms": "0.1.0",
+    "@mega-crm/segments-core": "0.1.0",
+    "@mega-crm/shared-schemas": "0.1.0",
+    "@mega-crm/tenant-context": "0.1.0",
+    "bullmq": "5.79.1",
+    "ioredis": "5.11.0",
+    "pg": "8.22.0",
+    "rate-limiter-flexible": "11.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "@types/pg": "^8.15.6",
+    "tsx": "^4.19.2",
+    "typescript": "^5.9.3",
+    "vitest": "4.1.9"
+  }
+}

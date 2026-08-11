@@ -28,6 +28,17 @@ interface SendGridVerifiedSendersResponse {
   results: Array<{ id: number; from_email: string; nickname?: string }>;
 }
 
+export interface SendGridDynamicTemplate {
+  id: string;
+  name: string;
+  generation: string;
+}
+
+interface SendGridTemplatesResponse {
+  result?: Array<{ id: string; name: string; generation: string }>;
+  templates?: Array<{ id: string; name: string; generation: string }>;
+}
+
 /** GET /v3/scopes then /v3/verified_senders (D-21): validates the key is live and has mail.send, then lists the tenant's verified senders. */
 export async function validateTenantSendGridKey(apiKey: string): Promise<ValidateTenantSendGridKeyResult> {
   const scopesRes = await fetch("https://api.sendgrid.com/v3/scopes", {
@@ -54,4 +65,32 @@ export async function validateTenantSendGridKey(apiKey: string): Promise<Validat
     : [];
 
   return { valid: true, scopes, verifiedSenders };
+}
+
+/**
+ * GET /v3/templates?generations=dynamic (D-16 "refresh list" source for the
+ * campaign builder's template picker). Same raw-fetch-with-`Bearer` key
+ * convention as `validateTenantSendGridKey` above -- never imports
+ * `@sendgrid/mail`'s module-level `sgMail` singleton. Always live, no local
+ * cache (RESEARCH.md Don't-Hand-Roll: matches the verified-senders read).
+ * Manual `template_id` entry remains the fallback if this returns `[]`
+ * (non-ok response, e.g. an invalid/revoked key) or the tenant has no
+ * dynamic templates yet.
+ */
+export async function listTenantSendGridTemplates(apiKey: string): Promise<SendGridDynamicTemplate[]> {
+  const templatesRes = await fetch(
+    "https://api.sendgrid.com/v3/templates?generations=dynamic&page_size=200",
+    { headers: { Authorization: `Bearer ${apiKey}` } }
+  );
+  if (!templatesRes.ok) {
+    return [];
+  }
+
+  const body = (await templatesRes.json()) as SendGridTemplatesResponse;
+  const templates = body.result ?? body.templates ?? [];
+  return templates.map((template) => ({
+    id: template.id,
+    name: template.name,
+    generation: template.generation,
+  }));
 }

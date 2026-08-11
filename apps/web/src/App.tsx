@@ -17,6 +17,18 @@ import { WorkspaceHome } from "@/features/workspace-home/WorkspaceHome";
 import ProfilePage from "@/features/profile/ProfilePage";
 import TeamPage from "@/features/team/TeamPage";
 import SendGridKeySettings from "@/features/sendgrid-key/SendGridKeySettings";
+import ApiKeysSettings from "@/features/api-keys/ApiKeysSettings";
+import ContactsListPage from "@/features/contacts/ContactsListPage";
+import ContactDetailPage from "@/features/contacts/ContactDetailPage";
+import CsvImportWizard from "@/features/contacts/CsvImportWizard";
+import CsvImportHistory from "@/features/contacts/CsvImportHistory";
+import SegmentsListPage from "@/features/segments/SegmentsListPage";
+import SegmentCreatePage from "@/features/segments/SegmentCreatePage";
+import SegmentDetailPage from "@/features/segments/SegmentDetailPage";
+import CampaignsListPage from "@/features/campaigns/CampaignsListPage";
+import CampaignBuilderPage from "@/features/campaigns/CampaignBuilderPage";
+import CampaignDetailPage from "@/features/campaigns/CampaignDetailPage";
+import SendSettingsPage from "@/features/campaigns/SendSettingsPage";
 
 /**
  * Resolves "/" for a signed-in user: no workspace yet -> /create-workspace
@@ -63,9 +75,22 @@ export default function App() {
           <Route path="/invite/:invitationId" element={<InviteAcceptPage />} />
           <Route path="/w/:slug" element={<AppShell />}>
             <Route index element={<WorkspaceHome />} />
+            <Route path="contacts" element={<ContactsListPage />} />
+            <Route path="contacts/imports" element={<CsvImportHistory />} />
+            <Route path="contacts/import" element={<CsvImportWizard />} />
+            <Route path="contacts/import/:id" element={<CsvImportWizard />} />
+            <Route path="contacts/:id" element={<ContactDetailPage />} />
+            <Route path="segments" element={<SegmentsListPage />} />
+            <Route path="segments/new" element={<SegmentCreatePage />} />
+            <Route path="segments/:id" element={<SegmentDetailPage />} />
+            <Route path="campaigns" element={<CampaignsListPage />} />
+            <Route path="campaigns/new" element={<CampaignBuilderPage />} />
+            <Route path="campaigns/:id" element={<CampaignDetailPage />} />
             <Route path="team" element={<TeamPage />} />
             <Route path="profile" element={<ProfilePage />} />
             <Route path="settings/sendgrid" element={<SendGridKeySettings />} />
+            <Route path="settings/api-keys" element={<ApiKeysSettings />} />
+            <Route path="settings/sending" element={<SendSettingsPage />} />
           </Route>
         </Routes>
       </BrowserRouter>

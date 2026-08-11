@@ -14,9 +14,9 @@ Mega CRM is a Klaviyo-class, multi-tenant email marketing automation platform de
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Workspace Foundation & Team Access** - Multi-tenant workspaces, team invites, roles, and a validated encrypted SendGrid key (completed 2026-07-03)
-- [ ] **Phase 2: Contacts & Event Ingestion** - Contact base via UI/CSV/API plus an async server-side event stream that upserts contacts
-- [ ] **Phase 3: Segmentation Engine** - Dynamic profile + behavioral segments with live preview, on one shared evaluation engine
-- [ ] **Phase 4: Broadcast Campaigns & Send Pipeline** - First complete send loop: throttled, idempotent, suppression-aware broadcasts via SendGrid
+- [x] **Phase 2: Contacts & Event Ingestion** - Contact base via UI/CSV/API plus an async server-side event stream that upserts contacts (completed 2026-07-04)
+- [x] **Phase 3: Segmentation Engine** - Dynamic profile + behavioral segments with live preview, on one shared evaluation engine (completed 2026-07-06)
+- [x] **Phase 4: Broadcast Campaigns & Send Pipeline** - First complete send loop: throttled, idempotent, suppression-aware broadcasts via SendGrid (verification: gaps found 2026-07-06) (completed 2026-07-06)
 - [ ] **Phase 5: Webhook Processing & Delivery Tracking** - Verified, deduplicated delivery events that update message status and auto-suppress contacts
 - [ ] **Phase 6: Flows (Triggered Chains)** - Visual canvas builder and versioned execution engine for automated triggered chains
 - [ ] **Phase 7: Analytics, Dashboard & Send Log** - End-to-end observability: campaign, flow-step, contact-timeline, dashboard, and per-message metrics
@@ -83,16 +83,47 @@ Plans:
   4. An event for an unknown contact automatically creates it via external_id/email upsert, and a later email change still resolves to the same contact.
   5. Every contact carries a 3-state subscription status (subscribed / unsubscribed / suppressed).
 
-**Plans**: TBD
+**Plans**: 14/14 plans complete
 **UI hint**: yes
 
 Plans:
+**Wave 1**
 
-- [ ] 02-01: Contact data model (external_id/email identity, custom properties) + CRUD UI
-- [ ] 02-02: Contacts CRUD API with upsert semantics
-- [ ] 02-03: CSV import — column mapping, preview, error/duplicate report
-- [ ] 02-04: Event ingestion API (fast 2xx) + async queue processor + upsert-from-event
-- [ ] 02-05: 3-state subscription status model + partition-ready events schema
+- [x] 02-01-PLAN.md — Contact model + suppression + property registry schema + session-authed CRUD API (CONT-01, CONT-05, SUBS-01)
+
+**Wave 2** *(parallel)*
+
+- [x] 02-03-PLAN.md — Workspace API keys: schema, crypto, Owner/Admin management routes/UI + runtime apiKeyAuth hook (CONT-03, EVNT-01)
+- [x] 02-05-PLAN.md — Queue foundation: Redis + BullMQ, tenant-context extraction to a shared package, apps/worker scaffold (EVNT-03) — includes blocking package-legitimacy checkpoint
+
+**Wave 3** *(parallel)*
+
+- [x] 02-02-PLAN.md — Contact CRUD UI: list (search/filter/sort/pagination), form + custom-property editor, tabbed detail (CONT-01, CONT-05, SUBS-01)
+- [x] 02-04-PLAN.md — Contacts integration API + prioritized two-key upsert (external_id→email, attach/conflict) (CONT-03, CONT-04, EVNT-02)
+
+**Wave 4**
+
+- [x] 02-06-PLAN.md — Event ingestion: partitioned events schema, fast-2xx /v1/events, idempotent async worker upsert-from-event (EVNT-01, EVNT-02, EVNT-03)
+
+**Wave 5**
+
+- [x] 02-07-PLAN.md — CSV import backend: staging, streamed upload, dry-run, background apply worker, error report (CONT-02)
+
+**Wave 6**
+
+- [x] 02-08-PLAN.md — CSV import wizard UI + history + live contact event feed (CONT-02, EVNT-01/D-14)
+
+**Wave 7** *(gap closure — verification gaps_found, 3/5)*
+
+- [x] 02-09-PLAN.md — Contact edit: property deletion + standard-field clearing (CR-04) (CONT-01, CONT-05)
+- [x] 02-10-PLAN.md — Event ingestion: workspace-scoped idempotency PK/jobId + DEFAULT partition + queue retries (CR-01, CR-03, WR-01) (EVNT-01, EVNT-03)
+- [x] 02-11-PLAN.md — Shared upsert robustness: SAVEPOINT race retry + status-on-update + dead-connection release (CR-02, WR-06, WR-09)
+- [x] 02-12-PLAN.md — CSV import robustness: validated status mapping + failed-upload path + no silent stuck-applying (WR-05, WR-04, WR-03)
+
+**Wave 8** *(gap closure — re-verification: UAT Test 2 + WR-09 follow-up; parallel)*
+
+- [x] 02-13-PLAN.md — Contact list search focus fix: keepPreviousData + toolbar-always-mounted + results-scoped skeleton + Playwright regression (UAT Test 2, CONT-01/D-13 hardening)
+- [x] 02-14-PLAN.md — WR-09 fault-injection test: terminate a pooled connection mid-transaction, assert withTenantTransaction destroys it and the pool recovers (UAT Test 11 follow-up, EVNT-03/CONT-04 hardening)
 
 ### Phase 3: Segmentation Engine
 
@@ -107,19 +138,42 @@ Plans:
   3. As the user edits segment conditions, a live count of matching contacts updates.
   4. The same saved segment definition resolves an identical membership set whether queried for a campaign audience or a flow trigger.
 
-**Plans**: TBD
+**Plans**: 8/8 plans complete
 **UI hint**: yes
 
 Plans:
+**Wave 1**
 
-- [ ] 03-01: Segment definition model + single unified evaluation engine
-- [ ] 03-02: Profile-attribute conditions
-- [ ] 03-03: Behavioral/event conditions (count/timeframe) + materialized membership at target scale
-- [ ] 03-04: Live preview count in the segment builder
+- [x] 03-01-PLAN.md — Pure SQL condition compiler (@mega-crm/segments-core) + shared Zod SegmentDefinition contract (SEGM-01, SEGM-02, SEGM-03)
+
+**Wave 2** *(blocked on Wave 1)*
+
+- [x] 03-02-PLAN.md — segments table + RLS/GIN migrations + evaluation engine (count/list/isMember) + CRUD + preview-count API + event-name picker (SEGM-01, SEGM-02, SEGM-03, SEGM-04)
+
+**Wave 3** *(blocked on Wave 2)*
+
+- [x] 03-03-PLAN.md — Segment builder UI (attribute + behavioral conditions) + live count + create/save + Segments nav & list (SEGM-01, SEGM-02, SEGM-04)
+
+**Wave 4** *(blocked on Wave 3)*
+
+- [x] 03-04-PLAN.md — Segment detail (edit + paginated member list) + delete + list enrichment (count/freshness/author) (SEGM-01, SEGM-03)
+
+**Wave 5** *(gap closure — blocked on Wave 4)*
+
+- [x] 03-05-PLAN.md — Contract + engine hardening: Zod standard-field allow-list (CR-01/WR-01 root cause) + prototype-safe fail-closed compiler + LIKE-wildcard escaping (WR-04) (SEGM-01, SEGM-03)
+
+**Wave 6** *(gap closure — blocked on Wave 5)*
+
+- [x] 03-06-PLAN.md — API hardening: statement_timeout on create/update/members (WR-03) + 57014→4xx mapping + HTTP tests (400 on unknown field, tags round-trip) (SEGM-01, SEGM-04)
+- [x] 03-07-PLAN.md — Web builder: reachable tags condition + CR-01 client validation/error UI + list pagination (WR-05) + detail not-found (WR-06) (SEGM-01)
+
+**Wave 7** *(gap closure — blocked on Wave 6)*
+
+- [x] 03-08-PLAN.md — E2E behavior coverage: tags slice + CR-01 regression + SEGM-02 behavioral inputs + SEGM-04 degraded state (SEGM-01, SEGM-02, SEGM-04)
 
 ### Phase 4: Broadcast Campaigns & Send Pipeline
 
-**Goal**: A marketer can send a real broadcast to a segment through a throttled, idempotent, suppression-aware queue — emails reliably reach inboxes via SendGrid Dynamic Templates.
+**Goal**: As a marketer, I want to send a real broadcast to a segment through a throttled, idempotent, suppression-aware queue, so that emails reliably reach inboxes via SendGrid Dynamic Templates.
 **Mode:** mvp
 **Depends on**: Phase 3
 **Requirements**: CAMP-01, CAMP-02, CAMP-03, CAMP-04, CAMP-05, SEND-01, SEND-02, SEND-03, SEND-04, SEND-05, SEND-06, SEND-07, SUBS-03, SUBS-04
@@ -131,17 +185,75 @@ Plans:
   4. Every delivered email goes through SendGrid v3 mail/send with a one-click List-Unsubscribe header, no contact exceeds the global frequency cap, and there are no duplicate emails on job retries.
   5. Sends are throttled per that tenant's RPS, ride a queue with a reserved triggered-priority lane, and survive SendGrid 429/5xx with backoff retries without losing emails.
 
-**Plans**: TBD
+**Plans**: 19/19 plans complete
 **UI hint**: yes
 
 Plans:
 
-- [ ] 04-01: Send queue infrastructure — triggered vs broadcast priority lanes (triggered reserved floor)
-- [ ] 04-02: Per-tenant RPS token-bucket throttle + 429/5xx backoff + idempotency keys
-- [ ] 04-03: SendGrid dispatch worker (mail/send v3, template_id + dynamic_template_data, List-Unsubscribe)
-- [ ] 04-04: Pre-send suppression/subscription filter + global frequency-cap ledger
-- [ ] 04-05: Campaign model + state machine + segment audience snapshot at send time
-- [ ] 04-06: Campaign UI — create, test send, schedule, live progress
+**Wave 1**
+
+- [x] 04-01-PLAN.md — Campaign data model: 4 RLS tables (campaigns/campaign_recipients/sends/workspace_send_settings) + migrations + BLOCKING push + shared Zod/queue schemas (CAMP-01, CAMP-03, SEND-04, SEND-06)
+- [x] 04-02-PLAN.md — Shared @mega-crm/kms package extraction + SendGrid tenant dynamic-template listing (CAMP-01, SEND-05)
+
+**Wave 2** *(blocked on Wave 1)*
+
+- [x] 04-03-PLAN.md — @mega-crm/delivery-core (HMAC unsubscribe token, mail/send builder, pre-send gate, send ledger, send-settings) + public RFC 8058 unsubscribe endpoint (SUBS-03, SUBS-04, SEND-04)
+
+**Wave 3** *(parallel — worker vs API)*
+
+- [x] 04-04-PLAN.md — Send dispatch engine: per-tenant token bucket + idempotent send-dispatch (mail/send + List-Unsubscribe + backoff) + broadcast/triggered workers + [SUS] package checkpoint (SEND-01, SEND-02, SEND-03, SEND-05, SEND-06, SEND-07, SUBS-04)
+- [x] 04-05-PLAN.md — Campaign backend: repository + state machine + routes + test-send + send-settings routes + D-14 segment-delete block (CAMP-01, CAMP-02, CAMP-03, CAMP-04, CAMP-05, SUBS-03)
+
+**Wave 4** *(parallel — worker kickoff vs UI list/builder)*
+
+- [x] 04-06-PLAN.md — Send kickoff: batched recipient snapshot + campaign-kickoff fan-out + repeatable due-campaign scheduler (CAMP-02, CAMP-05, SEND-01)
+- [x] 04-07-PLAN.md — Campaigns UI part 1: list + builder + api client + nav (CAMP-01)
+
+**Wave 5** *(blocked on Wave 4)*
+
+- [x] 04-08-PLAN.md — Campaigns UI part 2: launch/schedule/cancel/test-send dialogs + detail + live progress + send settings + segment warning (CAMP-02, CAMP-03, CAMP-04, CAMP-05)
+
+**Gap closure** *(from 04-VERIFICATION.md — CR-01..CR-07)*
+
+_Wave 1 (parallel):_
+
+- [x] 04-09-PLAN.md — Sender-email resolution: resolve fromSenderId → verified from_email at launch/schedule/test-send (CR-02, CAMP-01/02/04)
+- [x] 04-10-PLAN.md — Ledger integrity: guard recordExcluded from demoting sent/dispatching rows (CR-07, SEND-04/06)
+- [x] 04-11-PLAN.md — Public unsubscribe XSS fix + @fastify/helmet CSP (CR-01, SUBS-04)
+
+_Wave 2:_
+
+- [x] 04-12-PLAN.md — Dispatch correctness: 3-unit transaction split (no duplicate on crash) + 4xx→failed (CR-03/CR-04, SEND-06/07)
+
+_Wave 3:_
+
+- [x] 04-13-PLAN.md — Campaign completion + live progress counters + cancel enforcement (CR-05/CR-06, CAMP-02/03/05)
+
+**Gap closure round 2** *(from 04-VERIFICATION.md 2026-07-06 re-verify — SUBS-04 415 blocker)*
+
+_Wave 1:_
+
+- [x] 04-14-PLAN.md — Register application/x-www-form-urlencoded content-type parser scoped to registerUnsubscribeRoutes so RFC 8058 one-click + confirm-form POSTs reach the handler (no more 415) + explicit-Content-Type regression tests (SUBS-04)
+
+**Gap closure round 3** *(from 04-UAT.md 2026-07-06 — Test 3 segment-picker 400 blocker)*
+
+_Wave 1:_
+
+- [x] 04-15-PLAN.md — Fix pageSize client/server contract mismatch: shared EXHAUSTIVE_LOOKUP_PAGE_SIZE constant caps both segment/campaign list schemas and drives all three exhaustive-lookup call sites (segment picker + campaign-list name lookup + D-03 warning); regression test pins the bound (CAMP-01, CAMP-02)
+
+**Gap closure round 4** *(from 04-UAT.md 2026-07-06 — Tests 4/5 no delivery, Test 12 D-03 warning missing)*
+
+_Wave 1 (parallel):_
+
+- [x] 04-16-PLAN.md — Send-pipeline fail-fast: validate UNSUBSCRIBE_TOKEN_SECRET + PUBLIC_APP_URL in check-env/api-env/worker-boot + predev migration bootstrap (applies unapplied 0017–0019); user_setup handoff for the two .env values (SEND-05, SUBS-04, CAMP-05)
+- [x] 04-17-PLAN.md — Test-send 4xx observability: kind='test' branch reports SendGrid 4xx as failed (mirrors campaign branch) + regression test; clarify test-send sample-data copy as as-designed (SEND-07, CAMP-04)
+- [x] 04-18-PLAN.md — Segment editor save-time D-03 gate: pure save-gate helper + save-time refetch+confirm + isError surfacing + new web vitest unit lane (CAMP-05)
+
+**Gap closure round 5** *(from 04-VERIFICATION.md 2026-07-07 — CR-01 test-send unsubscribe token 500)*
+
+_Wave 1:_
+
+- [x] 04-19-PLAN.md — CR-01 fix: sign a real random UUID for test-send unsubscribe tokens (worker root cause) + guard the public unsubscribe POST against a non-UUID contactId (uniform response, no 500) + worker & API regression coverage (CAMP-04, SUBS-04)
 
 ### Phase 5: Webhook Processing & Delivery Tracking
 
@@ -221,9 +333,9 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Workspace Foundation & Team Access | 7/7 | Complete    | 2026-07-03 |
-| 2. Contacts & Event Ingestion | 0/5 | Not started | - |
-| 3. Segmentation Engine | 0/4 | Not started | - |
-| 4. Broadcast Campaigns & Send Pipeline | 0/6 | Not started | - |
+| 2. Contacts & Event Ingestion | 14/14 | Complete    | 2026-07-05 |
+| 3. Segmentation Engine | 8/8 | Complete    | 2026-07-06 |
+| 4. Broadcast Campaigns & Send Pipeline | 19/19 | Complete    | 2026-07-06 |
 | 5. Webhook Processing & Delivery Tracking | 0/3 | Not started | - |
 | 6. Flows (Triggered Chains) | 0/5 | Not started | - |
 | 7. Analytics, Dashboard & Send Log | 0/5 | Not started | - |

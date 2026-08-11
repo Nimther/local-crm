@@ -1,5 +1,5 @@
 import { KMSClient, GenerateDataKeyCommand, DecryptCommand } from "@aws-sdk/client-kms";
-import { env } from "../env.js";
+import { env } from "./env.js";
 
 /**
  * Real AWS KMS envelope-encryption provider (RESEARCH.md Pattern 3), used

@@ -47,6 +47,15 @@ const baseRequired = [
   "WEB_URL",
   "PLATFORM_SENDGRID_API_KEY",
   "PLATFORM_MAIL_FROM",
+  "REDIS_URL",
+  // 04-16 gap closure: read lazily (and thrown on) inside
+  // packages/delivery-core/src/unsubscribe-token.ts at send-time -- every
+  // broadcast/test send signs a List-Unsubscribe token, so a missing value
+  // here previously crashed per-job instead of failing loud at boot (the
+  // root cause of UAT Tests 4/5). Presence-only check; apps/api/src/env.ts
+  // and apps/worker/src/server.ts enforce the >=32-char strength contract.
+  "UNSUBSCRIBE_TOKEN_SECRET",
+  "PUBLIC_APP_URL",
 ];
 
 const required = [...baseRequired];

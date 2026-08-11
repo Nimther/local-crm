@@ -17,31 +17,31 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Contacts
 
-- [ ] **CONT-01**: Пользователь может создавать, просматривать, редактировать и удалять контакты в UI
-- [ ] **CONT-02**: Пользователь может импортировать контакты из CSV с маппингом колонок на атрибуты, превью перед применением и отчётом об ошибках/дубликатах
-- [ ] **CONT-03**: Разработчик тенанта может создавать/обновлять контакты через Contacts CRUD API
-- [ ] **CONT-04**: Контакт идентифицируется по external_id (основной ключ) с email как запасным; события и API выполняют upsert по этой паре
-- [ ] **CONT-05**: Контакт хранит произвольные кастомные свойства профиля, доступные в сегментации
+- [x] **CONT-01**: Пользователь может создавать, просматривать, редактировать и удалять контакты в UI
+- [x] **CONT-02**: Пользователь может импортировать контакты из CSV с маппингом колонок на атрибуты, превью перед применением и отчётом об ошибках/дубликатах
+- [x] **CONT-03**: Разработчик тенанта может создавать/обновлять контакты через Contacts CRUD API
+- [x] **CONT-04**: Контакт идентифицируется по external_id (основной ключ) с email как запасным; события и API выполняют upsert по этой паре
+- [x] **CONT-05**: Контакт хранит произвольные кастомные свойства профиля, доступные в сегментации
 
 ### Event Ingestion
 
-- [ ] **EVNT-01**: Бэкенд тенанта может отправлять события через HTTP API с API-ключом: произвольное имя события + JSON-свойства, без предварительной регистрации типов
-- [ ] **EVNT-02**: Событие для несуществующего контакта создаёт его автоматически (upsert по external_id/email)
-- [ ] **EVNT-03**: Event API отвечает быстро (2xx сразу), обработка события асинхронная через очередь
+- [x] **EVNT-01**: Бэкенд тенанта может отправлять события через HTTP API с API-ключом: произвольное имя события + JSON-свойства, без предварительной регистрации типов
+- [x] **EVNT-02**: Событие для несуществующего контакта создаёт его автоматически (upsert по external_id/email)
+- [x] **EVNT-03**: Event API отвечает быстро (2xx сразу), обработка события асинхронная через очередь
 
 ### Segmentation
 
-- [ ] **SEGM-01**: Пользователь может создать динамический сегмент по свойствам профиля (страна, теги, кастомные атрибуты)
-- [ ] **SEGM-02**: Пользователь может добавить поведенческие условия по событиям («сделал заказ за 30 дней», «не открывал письма за 90 дней») с count/timeframe
-- [ ] **SEGM-03**: Один и тот же движок оценки сегментов используется цепочками (триггеры входа, exit conditions) и кампаниями (аудитория) — единое определение «кто в сегменте»
-- [ ] **SEGM-04**: При построении сегмента пользователь видит live-превью количества подходящих контактов
+- [x] **SEGM-01**: Пользователь может создать динамический сегмент по свойствам профиля (страна, теги, кастомные атрибуты)
+- [x] **SEGM-02**: Пользователь может добавить поведенческие условия по событиям («сделал заказ за 30 дней», «не открывал письма за 90 дней») с count/timeframe
+- [x] **SEGM-03**: Один и тот же движок оценки сегментов используется цепочками (триггеры входа, exit conditions) и кампаниями (аудитория) — единое определение «кто в сегменте»
+- [x] **SEGM-04**: При построении сегмента пользователь видит live-превью количества подходящих контактов
 
 ### Subscription & Suppression
 
-- [ ] **SUBS-01**: Каждый контакт имеет 3-state статус: subscribed / unsubscribed / suppressed (bounce, spam complaint) — с разной семантикой повторной подписки
+- [x] **SUBS-01**: Каждый контакт имеет 3-state статус: subscribed / unsubscribed / suppressed (bounce, spam complaint) — с разной семантикой повторной подписки
 - [ ] **SUBS-02**: Unsubscribe/bounce/spam-события из SendGrid webhook автоматически обновляют статус контакта
-- [ ] **SUBS-03**: Перед каждой отправкой (цепочка или кампания) применяется pre-send фильтр по статусу подписки и suppression — недоставляемым и отписанным письма не отправляются
-- [ ] **SUBS-04**: Каждое отправляемое письмо содержит one-click List-Unsubscribe header (требование Gmail/Yahoo для bulk-senders)
+- [x] **SUBS-03**: Перед каждой отправкой (цепочка или кампания) применяется pre-send фильтр по статусу подписки и suppression — недоставляемым и отписанным письма не отправляются
+- [x] **SUBS-04**: Каждое отправляемое письмо содержит one-click List-Unsubscribe header (требование Gmail/Yahoo для bulk-senders)
 
 ### Flows (Triggered Chains)
 
@@ -55,21 +55,21 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Broadcast Campaigns
 
-- [ ] **CAMP-01**: Пользователь может создать broadcast-кампанию: выбрать сегмент-аудиторию и SendGrid Dynamic Template (template_id + переменные)
-- [ ] **CAMP-02**: Пользователь может запустить кампанию сразу или запланировать на дату/время
-- [ ] **CAMP-03**: Кампания имеет state machine: draft → scheduled → sending → sent; случайный запуск черновика невозможен
-- [ ] **CAMP-04**: Пользователь может отправить тестовое письмо кампании на свой адрес с тестовыми dynamic_template_data
-- [ ] **CAMP-05**: Во время отправки пользователь видит прогресс кампании (отправлено/всего)
+- [x] **CAMP-01**: Пользователь может создать broadcast-кампанию: выбрать сегмент-аудиторию и SendGrid Dynamic Template (template_id + переменные)
+- [x] **CAMP-02**: Пользователь может запустить кампанию сразу или запланировать на дату/время
+- [x] **CAMP-03**: Кампания имеет state machine: draft → scheduled → sending → sent; случайный запуск черновика невозможен
+- [x] **CAMP-04**: Пользователь может отправить тестовое письмо кампании на свой адрес с тестовыми dynamic_template_data
+- [x] **CAMP-05**: Во время отправки пользователь видит прогресс кампании (отправлено/всего)
 
 ### Send Pipeline
 
-- [ ] **SEND-01**: Все отправки — и триггерные, и broadcast — проходят через очередь; прямых отправок в обход очереди нет
-- [ ] **SEND-02**: Отправка троттлится по RPS отдельно на каждый тенант (под лимиты его SendGrid-плана)
-- [ ] **SEND-03**: Триггерные письма имеют приоритет над broadcast: массовая кампания не задерживает триггерные письма (SLO: триггерное письмо уходит за минуты, не часы)
-- [ ] **SEND-04**: Глобальный frequency cap на контакт применяется поверх всех цепочек и кампаний через единый журнал отправок
-- [ ] **SEND-05**: Письма отправляются через SendGrid v3 mail/send с template_id + dynamic_template_data; платформа не рендерит контент
-- [ ] **SEND-06**: Отправка идемпотентна: ретраи джобов и сбои воркеров не приводят к дублям писем
-- [ ] **SEND-07**: Ответы 429/5xx от SendGrid обрабатываются с backoff-ретраями без потери писем
+- [x] **SEND-01**: Все отправки — и триггерные, и broadcast — проходят через очередь; прямых отправок в обход очереди нет
+- [x] **SEND-02**: Отправка троттлится по RPS отдельно на каждый тенант (под лимиты его SendGrid-плана)
+- [x] **SEND-03**: Триггерные письма имеют приоритет над broadcast: массовая кампания не задерживает триггерные письма (SLO: триггерное письмо уходит за минуты, не часы)
+- [x] **SEND-04**: Глобальный frequency cap на контакт применяется поверх всех цепочек и кампаний через единый журнал отправок
+- [x] **SEND-05**: Письма отправляются через SendGrid v3 mail/send с template_id + dynamic_template_data; платформа не рендерит контент
+- [x] **SEND-06**: Отправка идемпотентна: ретраи джобов и сбои воркеров не приводят к дублям писем
+- [x] **SEND-07**: Ответы 429/5xx от SendGrid обрабатываются с backoff-ретраями без потери писем
 
 ### Webhook Processing
 
@@ -132,33 +132,33 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TENANT-03 | Phase 1 | Complete |
 | TENANT-04 | Phase 1 | Complete |
 | TENANT-05 | Phase 1 | Complete |
-| CONT-01 | Phase 2 | Pending |
-| CONT-02 | Phase 2 | Pending |
-| CONT-03 | Phase 2 | Pending |
-| CONT-04 | Phase 2 | Pending |
-| CONT-05 | Phase 2 | Pending |
-| EVNT-01 | Phase 2 | Pending |
-| EVNT-02 | Phase 2 | Pending |
-| EVNT-03 | Phase 2 | Pending |
-| SUBS-01 | Phase 2 | Pending |
-| SEGM-01 | Phase 3 | Pending |
-| SEGM-02 | Phase 3 | Pending |
-| SEGM-03 | Phase 3 | Pending |
-| SEGM-04 | Phase 3 | Pending |
-| CAMP-01 | Phase 4 | Pending |
-| CAMP-02 | Phase 4 | Pending |
-| CAMP-03 | Phase 4 | Pending |
-| CAMP-04 | Phase 4 | Pending |
-| CAMP-05 | Phase 4 | Pending |
-| SEND-01 | Phase 4 | Pending |
-| SEND-02 | Phase 4 | Pending |
-| SEND-03 | Phase 4 | Pending |
-| SEND-04 | Phase 4 | Pending |
-| SEND-05 | Phase 4 | Pending |
-| SEND-06 | Phase 4 | Pending |
-| SEND-07 | Phase 4 | Pending |
-| SUBS-03 | Phase 4 | Pending |
-| SUBS-04 | Phase 4 | Pending |
+| CONT-01 | Phase 2 | Complete |
+| CONT-02 | Phase 2 | Complete |
+| CONT-03 | Phase 2 | Complete |
+| CONT-04 | Phase 2 | Complete |
+| CONT-05 | Phase 2 | Complete |
+| EVNT-01 | Phase 2 | Complete |
+| EVNT-02 | Phase 2 | Complete |
+| EVNT-03 | Phase 2 | Complete |
+| SUBS-01 | Phase 2 | Complete |
+| SEGM-01 | Phase 3 | Complete |
+| SEGM-02 | Phase 3 | Complete |
+| SEGM-03 | Phase 3 | Complete |
+| SEGM-04 | Phase 3 | Complete |
+| CAMP-01 | Phase 4 | Complete |
+| CAMP-02 | Phase 4 | Complete |
+| CAMP-03 | Phase 4 | Complete |
+| CAMP-04 | Phase 4 | Complete |
+| CAMP-05 | Phase 4 | Complete |
+| SEND-01 | Phase 4 | Complete |
+| SEND-02 | Phase 4 | Complete |
+| SEND-03 | Phase 4 | Complete |
+| SEND-04 | Phase 4 | Complete |
+| SEND-05 | Phase 4 | Complete |
+| SEND-06 | Phase 4 | Complete |
+| SEND-07 | Phase 4 | Complete |
+| SUBS-03 | Phase 4 | Complete |
+| SUBS-04 | Phase 4 | Complete |
 | WBHK-01 | Phase 5 | Pending |
 | WBHK-02 | Phase 5 | Pending |
 | WBHK-03 | Phase 5 | Pending |
