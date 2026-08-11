@@ -11,7 +11,7 @@ import {
   webhookEventsJobSchema,
 } from "@mega-crm/shared-schemas";
 import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool } from "../../test/db-fixture.js";
-import { insertFixtureOrganization } from "../../test/failure-fixtures.js";
+import { createFixtureCampaign, createFixtureContact, insertFixtureOrganization } from "../../test/failure-fixtures.js";
 import { processWebhookEventBatch } from "../webhook-events.worker.js";
 import {
   runWebhookReplaySweep,
@@ -114,6 +114,20 @@ describe("webhook-replay-sweep.worker.ts (CMP-08, D-06, plan 13-06)", () => {
           [journalId]
         );
         return rows[0];
+      })
+    );
+  }
+
+  /** Phase 13 (CMP-07, plan 13-07) deviation: the orphan-replay test below needs a REAL send_id -- see its own comment. */
+  async function createFixtureSend(workspaceId: string, campaignId: string, contactId: string): Promise<string> {
+    return withTenant(workspaceId, () =>
+      withTenantTransaction(async (client) => {
+        const { rows } = await client.query<{ id: string }>(
+          `INSERT INTO sends (workspace_id, campaign_id, contact_id, kind, status, sent_at)
+           VALUES ($1, $2, $3, 'campaign', 'sent', now()) RETURNING id`,
+          [workspaceId, campaignId, contactId]
+        );
+        return rows[0].id;
       })
     );
   }
@@ -221,8 +235,27 @@ describe("webhook-replay-sweep.worker.ts (CMP-08, D-06, plan 13-06)", () => {
 
   it("processing the same journal row's batch twice leaves exactly one send_events row and the same campaign/rollup counts", async () => {
     const workspaceId = await freshWorkspaceId("replay-double");
+    // Phase 13 (CMP-07, plan 13-07) deviation: the dedup key is now
+    // (workspace_id, send_id, event_type, occurred_at) -- a null send_id
+    // (the orphan shape this event used before) is NEVER deduped against
+    // another null send_id (NULL is always distinct in a unique index), so
+    // replaying the identical event object would insert a SECOND row, not
+    // zero -- the opposite of what this test's own name asserts. A real
+    // send_id gives the new key something to dedupe on, preserving the
+    // "processing the same stored batch twice is at-most-once" intent this
+    // test exists to prove.
+    const campaignId = await createFixtureCampaign(workspaceId);
+    const contactId = await createFixtureContact(workspaceId);
+    const sendId = await createFixtureSend(workspaceId, campaignId, contactId);
     // In-window timestamp (see seedJournalRow's rawBatch note re plan 13-04).
-    const event = { sg_event_id: `sg-${randomUUID()}`, event: "delivered", timestamp: Math.floor(Date.now() / 1000) - 3600 };
+    const event = {
+      sg_event_id: `sg-${randomUUID()}`,
+      event: "delivered",
+      timestamp: Math.floor(Date.now() / 1000) - 3600,
+      send_id: sendId,
+      workspace_id: workspaceId,
+      campaign_id: campaignId,
+    };
     const journalId = await seedJournalRow(workspaceId, { receivedAtMinutesAgo: 30, rawBatch: [event] });
 
     await runWebhookReplaySweep({ workspaceIds: [workspaceId] });

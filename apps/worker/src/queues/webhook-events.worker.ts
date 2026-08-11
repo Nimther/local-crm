@@ -351,6 +351,25 @@ async function applyEventSideEffects(
       // counter, independent of `justSet` -- this is the ONLY remaining
       // per-event (non-unique-send) counter; it stays outside the justSet
       // gate on purpose.
+      //
+      // Phase 13 (CMP-07, T-13-07-06): "genuinely-new" is now bounded by the
+      // dedup key, and that bound has a real, accepted consequence here --
+      // RESEARCH.md's own A1 assumption ("open_count/click_count increment
+      // independently of the dedup insert") is only half right: they
+      // increment independently of the `justSet` FACT-COLUMN gate above, but
+      // they are still entirely gated on this row having been a genuinely
+      // NEW insert in the first place (the `newRows` loop this switch runs
+      // inside). Two opens on the SAME send in the SAME second (SendGrid's
+      // own timestamp granularity) now collapse to ONE `send_events` row
+      // under the new key and therefore ONE `open_count` increment, where
+      // the OLD key would have counted two if the provider happened to
+      // assign them different `sg_event_id` values. Accepted, and arguably
+      // the more correct reading of that input: two same-second opens are
+      // far more likely to be one open reported twice than two distinct
+      // human actions. Pinned by test (both halves -- same-second collapses
+      // to 1, one-second-apart counts 2) in
+      // apps/worker/src/queues/__tests__/webhook-events-dedup-rebase.test.ts,
+      // so this is not left to drift silently.
       await client.query(`UPDATE sends SET open_count = open_count + 1 WHERE id = $1`, [send.id]);
       break;
     }
@@ -362,7 +381,9 @@ async function applyEventSideEffects(
         await incrementWorkspaceDailyRollup(client, workspaceId, event.occurredAt, "clicked");
       }
       // A4/D-11: mirror the open case -- climbs on every new click,
-      // independent of justSet.
+      // independent of justSet. Phase 13 (CMP-07, T-13-07-06): the SAME
+      // same-second-collapse trade-off documented at the `open` case above
+      // applies here identically.
       await client.query(`UPDATE sends SET click_count = click_count + 1 WHERE id = $1`, [send.id]);
       break;
     }
@@ -575,13 +596,28 @@ async function markJournalCompleteIfPresent(workspaceId: string, journalId: stri
  * sibling-workspace events via `dropSiblingWorkspaceEvents` -- that
  * ownership fact cannot come from inside the tenant transaction (see that
  * function's doc comment). Then performs ONE multi-row parameterized INSERT
- * into `send_events` with `ON CONFLICT (workspace_id, sg_event_id,
+ * into `send_events` with `ON CONFLICT (workspace_id, send_id, event_type,
  * occurred_at) DO NOTHING RETURNING id` -- only rows Postgres actually
  * returns are "new" (RESEARCH.md Pattern 3). For each genuinely-new,
  * non-test event whose `custom_args.send_id` resolves to a live `sends`
  * row, applies the full fact-column + counter + suppression side-effect
  * contract, all inside the SAME tenant-scoped transaction as the dedup
  * insert. Finishes with a debounced webhook-health timestamp write.
+ *
+ * Phase 13 (CMP-07, D-15, plan 13-07): the dedup identity is `(workspace_id,
+ * send_id, event_type, occurred_at)` -- NOT `sg_event_id`, which migration
+ * 0057 demoted to a stored forensic-correlation column after verifying it
+ * unstable across SendGrid webhook retries (Pitfall 14 second half).
+ * CMP-05's bounding (below) and CMP-07's re-base COMPOSE: bounding closes
+ * the vary-the-timestamp bypass of this key, re-basing closes the
+ * vary-the-event-id bypass -- either fix alone leaves the other bypass
+ * open. The `ON CONFLICT` column list here MUST match
+ * `send_events_dedup_v2_idx` (migration 0057) exactly, in a form Postgres
+ * can match as an arbiter index, or every insert in this file fails at
+ * runtime with "no unique or exclusion constraint matching the ON CONFLICT
+ * specification" while every type check and build still passes -- there is
+ * no compile-time link between this SQL string and that index's column
+ * list.
  *
  * CMP-05 ordering guarantee (D-15, Pitfall 14 first half, plan 13-04): the
  * bound is applied at extraction (`extractEventRow`'s own doc comment),
@@ -729,7 +765,7 @@ export async function processWebhookEventBatch(data: unknown): Promise<{ inserte
         const { rows: insertedRows } = await client.query<{ id: string }>(
           `INSERT INTO send_events (id, workspace_id, sg_event_id, send_id, event_type, reason, payload, is_test, occurred_at, received_at)
            VALUES ${placeholders.join(", ")}
-           ON CONFLICT (workspace_id, sg_event_id, occurred_at) DO NOTHING
+           ON CONFLICT (workspace_id, send_id, event_type, occurred_at) DO NOTHING
            RETURNING id`,
           values
         );
