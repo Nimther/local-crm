@@ -31,7 +31,19 @@ const { databaseUrl: e2eDatabaseUrl, authDatabaseUrl: e2eAuthDatabaseUrl } =
  * `./e2e/provision-database.ts` provisions one through @mega-crm/test-support —
  * the same functions the vitest suites use — applies the schema, guards the
  * resolved DSN and prints it behind the `[e2e:database]` marker.
- * `./e2e/global-teardown.ts` drops it.
+ * `./e2e/run-e2e.ts` — the `test:e2e` entrypoint, which spawns this runner —
+ * drops it once the runner has exited.
+ *
+ * There is deliberately NO `globalTeardown` here. It used to hold the drop, and
+ * that was wrong for the same class of reason provisioning could not be a
+ * `globalSetup`: teardown tasks are `unshift`ed, so they run in reverse of setup
+ * order, which puts `globalTeardown` BEFORE the webServer plugin stops the
+ * servers. The drop's `pg_terminate_backend` therefore killed the live API
+ * server's pool connections and every run — green ones included — ended in
+ * `57P01: terminating connection due to administrator command`. The drop had to
+ * move outside Playwright's lifecycle entirely; see `./e2e/run-e2e.ts` for the
+ * source-level evidence. Run the suite through `npm run test:e2e`, not through
+ * `playwright test` directly, or nothing will drop the database.
  *
  * It is awaited above rather than registered as `globalSetup`, and that is the
  * whole correctness argument: 08-10 used the hook, and the hook runs AFTER the
@@ -56,7 +68,6 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   timeout: 30_000,
-  globalTeardown: "./e2e/global-teardown.ts",
   use: {
     baseURL: "http://localhost:5173",
     trace: "retain-on-failure",
