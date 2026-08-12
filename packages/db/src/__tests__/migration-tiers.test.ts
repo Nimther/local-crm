@@ -121,7 +121,7 @@ describe("newestAutoReversibleTier", () => {
     // otherwise the run should have included it too.
     const runStartIdx = journalTags.length - run.length;
     if (runStartIdx > 0) {
-      expect(tierFor(journalTags[runStartIdx - 1] as string)).toBe("forward-only");
+      expect(tierFor(journalTags[runStartIdx - 1])).toBe("forward-only");
     }
   });
 
