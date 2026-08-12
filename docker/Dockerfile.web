@@ -1,0 +1,78 @@
+# syntax=docker/dockerfile:1
+#
+# Phase 14 plan 06 (OPS-01, D-02, D-03). Multi-stage build for @mega-crm/web:
+# a Node 22 stage builds the SPA, a Caddy stage serves it plus routes every
+# server-side path to the api container -- ONE image per SHA, so a rollback
+# (OPS-03) rolls the frontend back with everything else. Caddy never serves a
+# host volume here on purpose; a volume outside the image would leave the old
+# SPA in place after an api/worker rollback, talking to a rolled-back API.
+
+########################################
+# Stage 1: deps -- same workspace-wide manifest-first install as
+# Dockerfile.api/Dockerfile.worker (every workspace's package.json must be
+# present before `npm ci` resolves the lockfile in this monorepo).
+########################################
+FROM node:22-slim AS deps
+WORKDIR /app
+COPY package.json package-lock.json ./
+COPY apps/api/package.json apps/api/package.json
+COPY apps/worker/package.json apps/worker/package.json
+COPY apps/web/package.json apps/web/package.json
+COPY packages/contacts-core/package.json packages/contacts-core/package.json
+COPY packages/db/package.json packages/db/package.json
+COPY packages/delivery-core/package.json packages/delivery-core/package.json
+COPY packages/flows-core/package.json packages/flows-core/package.json
+COPY packages/kms/package.json packages/kms/package.json
+COPY packages/queue-core/package.json packages/queue-core/package.json
+COPY packages/redaction/package.json packages/redaction/package.json
+COPY packages/segments-core/package.json packages/segments-core/package.json
+COPY packages/shared-schemas/package.json packages/shared-schemas/package.json
+COPY packages/tenant-context/package.json packages/tenant-context/package.json
+COPY packages/test-support/package.json packages/test-support/package.json
+RUN npm ci
+
+########################################
+# Stage 2: build -- `apps/web`'s own build script is `tsc --noEmit && vite
+# build`. Vite/esbuild resolve every `@mega-crm/*` TypeScript import directly
+# at bundle time (a bundler, unlike plain `node`, does not need the
+# dist-and-patch step Dockerfile.api/Dockerfile.worker require) and the
+# output is a static bundle with no server-side runtime at all -- confirmed
+# no `import.meta.env` usage anywhere in apps/web/src, so no build-time API
+# URL/build ARG is needed; the SPA calls `/api` relatively and reaches the
+# api container through THIS image's own Caddy same-origin proxy in
+# production.
+########################################
+FROM deps AS build
+COPY . .
+RUN npm run build -w apps/web
+
+########################################
+# Stage 3: runtime -- Caddy serving the built bundle, routed by
+# docker/Caddyfile. The `caddy:2` tag resolves to caddyserver/caddy-docker's
+# Alpine variant (verified against the docker-library/docs "Shared Tags"
+# listing at implementation time, not assumed) -- its own base Dockerfile
+# ALREADY runs `setcap cap_net_bind_service=+ep /usr/bin/caddy` on the binary,
+# so binding ports 80/443 needs no root, only the capability; no `setcap`
+# step is needed here. `adduser`/`addgroup` below are BusyBox's applets
+# (Alpine, not glibc/Debian's `adduser` package) -- their flags are
+# deliberately BusyBox syntax, not the GNU-style flags Dockerfile.web's
+# sibling images would use on node:22-slim (T-14-33: every process in every
+# image runs as a non-root user).
+########################################
+FROM caddy:2 AS runtime
+
+RUN addgroup -g 1000 caddyweb \
+ && adduser -D -H -u 1000 -G caddyweb caddyweb
+
+COPY docker/Caddyfile /etc/caddy/Caddyfile
+COPY --from=build --chown=caddyweb:caddyweb /app/apps/web/dist /srv/web
+
+USER caddyweb
+
+EXPOSE 80 443
+
+# Inherited from the base image -- exec form, "caddy" as the literal first
+# element, matching the "no npm wrapper, direct process exec" rule this
+# repo's other two images follow (caddy is not an npm-managed process at
+# all, so there is no npm wrapper to accidentally introduce here).
+CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
