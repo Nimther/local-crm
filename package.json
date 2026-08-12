@@ -21,6 +21,7 @@
     "verify:redis-config": "node scripts/verify-redis-config.mjs",
     "db:generate": "npm run db:generate -w packages/db",
     "db:migrate": "npm run db:migrate -w packages/db",
+    "migrate:prod": "node scripts/migrate-runner.mjs",
     "db:roles": "node scripts/ensure-db-roles.mjs",
     "relocate:default-partition-rows": "npm run relocate:default-partition-rows -w packages/db",
     "db:audit-sends-history": "npm run db:audit-sends-history -w packages/db",
@@ -51,8 +52,10 @@
     "check:root-hygiene": "node scripts/check-root-hygiene.mjs"
   },
   "devDependencies": {
+    "@mega-crm/db": "0.1.0",
     "@vitest/eslint-plugin": "^1.6.24",
     "concurrently": "10.0.3",
+    "drizzle-orm": "0.45.2",
     "eslint": "^10.8.0",
     "eslint-plugin-import-x": "^4.17.1",
     "eslint-plugin-no-only-tests": "^3.4.0",

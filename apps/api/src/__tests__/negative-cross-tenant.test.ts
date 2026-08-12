@@ -663,6 +663,8 @@ describe("Negative cross-tenant suite: API surface (SEC-16)", () => {
         "public, HMAC-signed-token-authenticated endpoint -- not session/workspace-membership-gated at all, so there is no session-authenticated cross-tenant attempt to make",
       registerWebhookRoutes:
         "public, SendGrid-signature-authenticated receiver -- not session-authenticated; SEC-09's sibling-workspace drop is proven by the worker-side negative suite (plan 10-14 Task 2), not here",
+      registerOpsHealthRoutes:
+        "unauthenticated infrastructure probes (/healthz, /readyz) carrying no tenant data and no id param -- deliberate deviation from every other route module's auth posture (D-13/D-14, T-14-04, accepted by design), so there is no session-authenticated cross-tenant attempt to make",
     };
 
     it("every register* module in server.ts's registration list is covered or has a documented exclusion reason", () => {

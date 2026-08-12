@@ -63,6 +63,7 @@ import { registerWebhookRoutes } from "./modules/webhooks/webhooks.routes.js";
 import { registerWebhookSettingsRoutes } from "./modules/webhooks/webhook-settings.routes.js";
 import { registerAnalyticsRoutes } from "./modules/analytics/index.js";
 import { registerSendLogRoutes } from "./modules/send-log/send-log.routes.js";
+import { registerOpsHealthRoutes } from "./modules/ops/health.js";
 
 /**
  * Options for `buildServer`. The only override that exists today is the
@@ -199,6 +200,7 @@ export async function buildServer(options: BuildServerOptions = {}) {
     },
   });
 
+  await app.register(registerOpsHealthRoutes);
   await app.register(authPlugin);
   await app.register(registerWorkspaceRoutes);
   await app.register(registerProfileRoutes);
