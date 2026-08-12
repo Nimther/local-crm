@@ -73,6 +73,22 @@ export const MIGRATION_LOCK_MAX_ATTEMPTS = Number(process.env.MIGRATION_LOCK_MAX
 export const MIGRATION_LOCK_RETRY_DELAY_MS = Number(process.env.MIGRATION_LOCK_RETRY_DELAY_MS ?? 3_000);
 
 /**
+ * 14-07 Task 1 (DB-05, ROADMAP-locked unclean-death scenario) -- TEST-ONLY
+ * pause hook, inert unless `MIGRATE_RUNNER_TEST_PAUSE_AFTER_LOCK=1` is
+ * explicitly set in the environment. No production invocation of this
+ * script ever sets that variable, so this branch is dead code on every real
+ * deploy; it exists solely so a test can land a SIGKILL deterministically
+ * inside the "lock held, migrate() not yet called" window without a sleep or
+ * a poll (mirrors `apps/worker/src/test/harness/sigkill-entrypoint.ts`'s
+ * marker-then-never-settle pattern, one level up at the process level: this
+ * script must be spawned via `fork()`, not `spawn()`, for `process.send` to
+ * exist at all -- `packages/test-support/src/harness/spawn-and-kill.ts`'s
+ * `spawnAndAwaitReady` already forks).
+ */
+export const MIGRATE_RUNNER_TEST_PAUSE_MARKER = "migrate-runner:test-paused-after-lock";
+
+
+/**
  * Applies every pending migration in `packages/db/migrations` against
  * `databaseUrl`, under a dedicated-connection bounded-retry advisory lock.
  * Propagates any failure (lock exhaustion, a failing migration statement) as
@@ -103,6 +119,19 @@ export async function runMigrations(databaseUrl) {
           MIGRATION_LOCK_MAX_ATTEMPTS,
         )} attempts -- another migration run is likely stuck; investigate before retrying (this runner never falls back to a blocking pg_advisory_lock)`,
       );
+    }
+
+    // TEST-ONLY (see MIGRATE_RUNNER_TEST_PAUSE_MARKER's own doc comment
+    // above): posts the marker the INSTANT the lock is held, before
+    // migrate() is ever called, then never returns on its own -- only a
+    // real kill signal ends this process. A timer here would land at an
+    // arbitrary instant and prove nothing (SPEC R6); the marker lets the
+    // caller kill provably inside the window instead.
+    if (process.env.MIGRATE_RUNNER_TEST_PAUSE_AFTER_LOCK === "1") {
+      process.send?.(MIGRATE_RUNNER_TEST_PAUSE_MARKER);
+      await new Promise(() => {
+        /* intentionally never resolved -- the caller SIGKILLs this process */
+      });
     }
 
     const db = drizzle(client);

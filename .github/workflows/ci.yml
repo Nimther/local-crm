@@ -239,6 +239,24 @@ jobs:
       - name: Segment sweep kill-resume
         run: npm run failure:segment-sweep-resume
 
+      # Phase 14 plan 07 (DB-05, ROADMAP-locked): kills a real migrate-runner.mjs
+      # process the instant it holds the advisory lock and confirms the next
+      # deploy proceeds.
+      - name: Migration runner killed mid-run
+        run: npm run failure:migrate-unclean-death
+
+      # Phase 14 plan 07 (R-05): a schemaVersion this worker does not
+      # recognize is deferred, not processed and not failed, in both
+      # directions of the deploy overlap.
+      - name: Two-version payload compatibility
+        run: npm run failure:two-version-compat
+
+      # Phase 14 plan 07 (Pitfall 7): a real SIGTERM sent mid-load-test --
+      # not just that shutdown starts, but that it finishes inside the
+      # derived stop-grace-period.
+      - name: Real SIGTERM mid-load
+        run: npm run failure:sigterm-mid-load
+
   # ---------------------------------------------------------------------------
   # Reports, never blocks. What CI needs from this job is not the browser
   # assertions — it is the evidence of WHICH database the run touched.
