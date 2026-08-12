@@ -1,8 +1,8 @@
 ---
 phase: 13-compliance-analytics-integrity
-reviewed: 2026-08-12T00:43:56Z
+reviewed: 2026-08-12T00:00:00Z
 depth: standard
-files_reviewed: 74
+files_reviewed: 91
 files_reviewed_list:
   - apps/api/src/__tests__/env-schema.test.ts
   - apps/api/src/modules/analytics/dashboard.repository.ts
@@ -87,6 +87,7 @@ files_reviewed_list:
   - packages/db/src/__tests__/migrate-from-empty.test.ts
   - packages/db/src/__tests__/migration-0056-workspace-daily-rollup-dirtied-at.test.ts
   - packages/db/src/__tests__/migration-0059-contact-erasure.test.ts
+  - packages/db/src/__tests__/quarantine-retention.test.ts
   - packages/db/src/__tests__/reputation-and-ingestion-alert-state.test.ts
   - packages/db/src/__tests__/send-events-dedup-rebase.test.ts
   - packages/db/src/__tests__/suppression-hash-migration.test.ts
@@ -116,38 +117,28 @@ files_reviewed_list:
   - packages/tenant-context/src/__tests__/tenant-context.test.ts
 findings:
   critical: 0
-  warning: 4
+  warning: 6
   info: 1
-  total: 5
+  total: 7
 status: issues_found
 ---
 
 # Phase 13: Code Review Report
 
-**Reviewed:** 2026-08-12T00:43:56Z
+**Reviewed:** 2026-08-12T00:00:00Z
 **Depth:** standard
-**Files Reviewed:** 74 (of the files listed for review; several test/schema files were read as corroborating evidence, not separately enumerated as findings sources)
+**Files Reviewed:** 91 (listed files plus the newest gap-closure diff: `quarantine.ts`, `quarantine-retention.test.ts`, `webhook-replay-sweep.worker.ts` + its test, `erasure-scrub.worker.ts`, `SPECIFICATION.md`, `ARCHITECTURE.md`)
 **Status:** issues_found
 
 ## Summary
 
-This phase (compliance & analytics integrity: webhook ingress durability/replay, occurred-at bounding + quarantine, dedup re-basing, contact erasure + async PII scrub, HMAC'd suppression hashing, reputation/ingestion watchdogs, campaign ledger completeness) is unusually well-instrumented: nearly every function under review carries an explicit doc comment tracing back to a threat id, a prior review finding, or a specific test that pins the behavior. Tenant isolation (RLS + `withTenant`/`withCrossWorkspaceScan` discipline), webhook signature verification ordering, and the erasure/suppression HMAC design are all sound and internally consistent with the codebase's own stated conventions.
+This is a re-review of Phase 13 after gap-closure plan 13-16 landed (commits `4369a14..700eed7`), which added `send_event_quarantine` retention (`pruneSendEventQuarantine`) and wired it into `webhook-replay-sweep.worker.ts`'s existing replay-then-retention transaction. That specific gap-closure is solid: the new function is correctly scoped (`received_at` only, never a provider-supplied value), independently configurable from `INGRESS_JOURNAL_RETENTION_DAYS`, ordered after the replay step in the same transaction, and thoroughly tested (`quarantine-retention.test.ts` covers tenant isolation, idempotency, and the "old candidate/recent received_at survives" cases explicitly). **The prior review's WR-01 ("`send_event_quarantine` retains PII indefinitely with no purge mechanism") is now resolved** and does not reappear below.
 
-The findings below are the places where an implementation detail quietly breaks a convention the codebase enforces everywhere else, or where a documented design intent ("retention can be pruned independently") was never actually built. None of them constitute a proven cross-tenant data leak or an active correctness regression in the paths this phase's own tests exercise — they are latent robustness/completeness gaps that are worth closing given the depth of care evident elsewhere in this phase.
+The rest of this pass re-verified the four warnings and one info item from the prior 13-REVIEW.md against the current code: three of the four warnings still hold unchanged (the code they cite was not touched by the gap-closure diff), and this pass adds two new findings surfaced by reading the newest files more closely (a bare-`console.error` regression relative to the codebase's own documented redaction invariant, and an error-isolation asymmetry between the phase's newest tick workers) plus one additional, lower-confidence finding about UTC day-bucketing on a non-`timestamptz` column. None of the findings below constitute a proven cross-tenant leak or an active correctness regression in a path this phase's own tests exercise — RLS remains fail-closed and forced everywhere it should be, the erasure/suppression HMAC design is sound, and the newest quarantine-retention work is well-tested.
 
 ## Warnings
 
-### WR-01: `send_event_quarantine` retains raw webhook PII indefinitely with no purge mechanism, and is never touched by the CMP-04 erasure scrub
-
-**File:** `packages/db/migrations/0055_webhook_ingress_durability.sql:121-146`, `packages/db/src/webhooks/quarantine.ts:43-64`, `apps/worker/src/queues/erasure-scrub.worker.ts` (whole file)
-
-**Issue:** `send_event_quarantine.raw_event` stores the complete, unredacted raw SendGrid webhook event body (including the recipient's `email`, IP, user agent, etc.) for every event whose `occurred_at` fails `classifyOccurredAt`'s bounds check. Migration 0055's own comment states this table's "quarantine retention... needs to be pruneable independently of the partitioned table's own retention policy" — but no pruning/retention job exists anywhere in the codebase (confirmed by searching every reference to `send_event_quarantine`: only the INSERT-only writer and the RLS policy exist). Contrast this with `ingress_journal`, whose 7-day retention + tombstone-purge is explicitly implemented (`packages/db/src/webhooks/ingress-journal.ts`'s `pruneIngressJournal`/`purgeExpiredIngressJournalPayloads`, driven by `webhook-replay-sweep.worker.ts`) and whose exclusion from the erasure scrub is explicitly reasoned about ("this horizon expires faster than an erasure request's own SLA"). No equivalent reasoning exists for `send_event_quarantine`, and the table also has no `contact_id` column, so even a future scrub pass would need to parse `raw_event` to find anything to redact.
-
-Net effect: a contact who exercises their erasure right (CMP-04) can still have their email address and other PII sitting in `send_event_quarantine.raw_event` forever, for any webhook event about them that happened to arrive with a bad/missing timestamp. This directly undercuts CMP-04's stated guarantee ("no plaintext form of it survives anywhere") for exactly the subset of events that get routed here.
-
-**Fix:** Either (a) give `send_event_quarantine` the same bounded retention `ingress_journal` has (age-out delete, since quarantined rows are diagnostic-only and have no replay value once resolved), or (b) if retention is intentionally deferred to a later phase, add an explicit `contact_id` correlation (or an allowlist-based scrub like `buildScrubbedSendEventPayload`) so the erasure scrub can reach it, and record the deferral decision explicitly in the migration/plan docs the way `ingress_journal`'s exclusion is recorded.
-
-### WR-02: `setFactColumnOnce`/`incrementCampaignCounter` interpolate column names into SQL with no allow-list, unlike every sibling dynamic-column helper in this codebase
+### WR-01: `setFactColumnOnce`/`incrementCampaignCounter` interpolate column names into SQL with no allow-list
 
 **File:** `packages/db/src/sends/fact-columns.ts:33-53`
 
@@ -157,36 +148,88 @@ const sql = reasonWrite
   ? `UPDATE sends SET ${column} = $2, ${reasonWrite.reasonColumn} = $3 WHERE id = $1 AND ${column} IS NULL RETURNING id`
   : `UPDATE sends SET ${column} = $2 WHERE id = $1 AND ${column} IS NULL RETURNING id`;
 ```
-Every call site today passes a hardcoded literal, so there is no live exploit — but this is the only dynamic-column-name helper in the phase's diff that does *not* go through a fixed allow-list, and the codebase explicitly documents the alternative elsewhere: `packages/db/src/analytics/daily-rollup.ts`'s `METRIC_COLUMN` map ("caller input is never string-interpolated into the SQL, since the `metric` TypeScript union already constrains callers"), `apps/worker/src/queues/erasure-scrub-checkpoint.ts`'s `cursorColumnFor`/`countColumnFor`, and `packages/segments-core/src/compile.ts`'s `STANDARD_FIELD_COLUMNS`. `fact-columns.ts` takes bare `string` parameters instead of a literal union, so a future caller (or a refactor that starts deriving `column` from any less-trusted source, e.g. an event-type-to-column map read from configuration) gets no compile-time or runtime protection against building an invalid or injectable UPDATE.
+and
+```ts
+await client.query(`UPDATE campaigns SET ${column} = ${column} + 1, updated_at = now() WHERE id = $1`, [campaignId]);
+```
+Every call site today passes a hardcoded literal, so there is no live exploit — but this is the only dynamic-column-name helper touched by this phase that does *not* go through a fixed literal-union allow-list, unlike every sibling: `packages/db/src/analytics/daily-rollup.ts`'s `METRIC_COLUMN` map, `apps/worker/src/queues/erasure-scrub-checkpoint.ts`'s `cursorColumnFor`/`countColumnFor` (both correctly narrow to a two-member union before interpolating — see IN-01), and `packages/segments-core/src/compile.ts`'s `STANDARD_FIELD_COLUMNS`. `fact-columns.ts` takes bare `string` parameters, so a future caller (or a refactor deriving `column` from a less-trusted source) gets no compile-time or runtime protection.
 
-**Fix:** Narrow `column`/`reasonColumn` to a literal union of the actual `sends` fact columns (mirroring `RollupMetric`/`METRIC_COLUMN`), or validate against a `Set` before interpolating, so this exported cross-app primitive can't silently become an injection point if a future call site's input becomes less trusted.
+**Fix:** Narrow `column`/`reasonColumn` to a literal union of the actual `sends`/`campaigns` fact columns (mirroring `RollupMetric`/`METRIC_COLUMN`), or validate against a `Set` before interpolating.
 
-### WR-03: Several `contacts`/`sends` reads and writes drop the explicit `workspace_id` predicate the same files use as defense-in-depth everywhere else
+### WR-02: Several `contacts`/`sends` reads and writes drop the explicit `workspace_id` predicate this codebase treats as load-bearing defense-in-depth everywhere else
 
-**File:** `packages/contacts-core/src/unsubscribe-apply.ts:116-127` (contacts SELECT/UPDATE), `apps/worker/src/queues/webhook-events.worker.ts:198-209` (`isFirstNonDeliveryTerminal`'s `sends` SELECT), `apps/worker/src/queues/webhook-events.worker.ts:228-237` (`applySuppression`'s `contacts` SELECT/UPDATE)
+**File:** `packages/contacts-core/src/unsubscribe-apply.ts:116-119,125-127`, `apps/worker/src/queues/webhook-events.worker.ts:198-209` (`isFirstNonDeliveryTerminal`'s `sends` SELECT), `apps/worker/src/queues/webhook-events.worker.ts:228-237` (`applySuppression`'s `contacts` SELECT/UPDATE)
 
-**Issue:** These queries scope entirely by RLS (`WHERE id = $1`), while sibling queries in the very same functions/files explicitly add `AND workspace_id = $N` "as defense-in-depth on top of RLS... matching this codebase's existing convention" (the exact wording used in `unsubscribe-apply.ts`'s own comment for its `sends` lookup one block above the un-scoped `contacts` lookup). In every call path exercised today the `contactId`/`sendId` reaching these queries has already been validated as belonging to the active tenant (an HMAC-signed unsubscribe token binding `workspaceId`+`contactId` together, or a `sends` row already resolved via an explicit `workspace_id`-scoped SELECT one step earlier) — so this is not a demonstrated cross-tenant leak today. It is, however, an inconsistency with a convention this codebase treats as load-bearing enough to call out in comments at nearly every other query site, and it means a future edit that starts passing a less-trusted id into `applyUnsubscribeWithSendFact`, `applySuppression`, or `isFirstNonDeliveryTerminal` has no explicit second gate to catch the mistake — it would depend entirely on RLS being correctly forced and the session GUC being correctly set for that connection.
+**Issue:** These queries scope entirely by RLS (`WHERE id = $1`), while sibling queries in the very same functions/files add `AND workspace_id = $N` explicitly. `unsubscribe-apply.ts`'s own doc comment states the workspace predicate is applied "as defense-in-depth on top of RLS... matching this codebase's existing convention" for its `sends` lookup one block above — and then the very next query (`contacts`) omits it. ARCHITECTURE.md §4 states this precisely: "RLS is defence in depth, not the only defence... relying on every engineer remembering the filter on every query, forever, is a single forgotten `WHERE` away from a cross-tenant leak." In every call path exercised today the `contactId`/`sendId` reaching these queries has already been validated as belonging to the active tenant (an HMAC-signed unsubscribe token binding `workspaceId`+`contactId`, or a `sends` row already resolved via an explicit `workspace_id`-scoped SELECT one step earlier), so this is not a demonstrated cross-tenant leak today — but it is an inconsistency with the codebase's own stated convention, on a compliance-critical write path (subscription status / unsubscribe), and there is no negative test covering cross-tenant behavior for these three specific queries (`unsubscribe-apply.test.ts` and the webhook-events suppression/unsubscribe tests exercise only single-workspace scenarios).
 
-**Fix:** Add the explicit `AND workspace_id = $N` predicate to these three queries, matching the convention already documented and applied one query away in the same files.
+**Fix:** Add the explicit `AND workspace_id = $N` predicate to all three queries, matching the convention already documented and applied one query away in the same files.
 
-### WR-04: `checkReputationHealthAndAlert` resends already-delivered alert emails on a retry after a partial mid-batch send failure
+### WR-03: `checkReputationHealthAndAlert` resends already-delivered alert emails on a retry after a partial mid-batch send failure
 
 **File:** `apps/api/src/modules/ops/reputation-watchdog.ts:326-357`
 
-**Issue:** For a claimed (workspace, metric) row, the function sends the operator email, then loops over every resolved tenant member sending the same alert text. If any `sendMail` call in that sequence rejects (e.g. the 3rd of 5 tenant recipients), the `catch` block releases the claim (resets `alerted_tier`/`last_alert_sent_at`) and rethrows. On the next tick (or the next replica), the same row is read again, the claim is re-acquired, and the **entire** send sequence — the operator email plus every tenant recipient, including the ones that already succeeded — is attempted again. This is "at-least-once, not idempotent-per-recipient": a transient SendGrid hiccup partway through a workspace with many members can cause the operator and some tenant members to receive the same reputation alert twice (or more, if the flaky recipient keeps failing while others succeed each time).
+**Issue:** For a claimed `(workspace, metric)` row, the function sends the operator email, then loops over every resolved tenant member sending the same alert text. If any `sendMail` call in that sequence rejects (e.g. the 3rd of 5 tenant recipients), the `catch` block releases the claim (resets `alerted_tier`/`last_alert_sent_at` to their pre-claim values) and rethrows. The next check (this replica or another, still inside the dedup window) re-acquires the claim and resends the **entire** sequence — operator email plus every tenant recipient, including the ones that already succeeded. This is at-least-once, not idempotent-per-recipient: a transient SendGrid hiccup partway through a many-member workspace can duplicate the same reputation alert to several recipients.
 
-**Fix:** Either track per-recipient send success and only retry the recipients that failed (rather than releasing the whole claim), or accept and explicitly document duplicate-send risk as a deliberate at-least-once trade-off (the way other watchdogs in this file document their own deliberate trade-offs) rather than leaving it implicit.
+**Fix:** Either track per-recipient send success and retry only the failed recipients, or explicitly document the duplicate-send risk as a deliberate at-least-once trade-off (as this file already does for other design choices) rather than leaving it implicit.
+
+### WR-04: `erasure-scrub.worker.ts` logs through bare `console.error`, contradicting the codebase's own documented redaction invariant
+
+**File:** `apps/worker/src/queues/erasure-scrub.worker.ts:444,469,513`
+
+**Issue:** SPECIFICATION.md §7 states as a hard invariant: "с 10-13 каждый прямой `console.*`-вызов в `apps/worker/src` (вне `__tests__`) идёт через `scrubbedConsole`... а не голый `console.log`/`console.error`" — with exactly one documented, named exception (`pool.on("error")` in `packages/tenant-context`). This file has three more, undocumented exceptions:
+```ts
+console.error("erasure-scrub: erasure_records row not found, skipping", { erasureRecordId });          // line 444
+console.error("erasure-scrub: failed to record scrub failure on the erasure record", markErr);          // line 469
+console.error("erasure-scrub: deferring job with an unrecognized payload shape", { jobId: job.id });     // line 513
+```
+Confirmed via `grep -rn "console\." apps/worker/src --include="*.ts" | grep -v __tests__ | grep -v scrubbedConsole`: these are the only three hits outside the documented tenant-context exception and comments referencing `console.error`. Every sibling file this phase touches (`webhook-replay-sweep.worker.ts`, `erasure-scrub-reclaim.worker.ts`, `reputation-tick.worker.ts`, `ingestion-health-watchdog.ts`) imports and uses `scrubbedConsole` consistently. Line 469 is the substantive risk: `markErr` is whatever error a failed Postgres write to `erasure_records` raised — a `pg` driver error's `detail`/`message` fields can echo back literal values from the failed statement, which `scrubbedConsole`'s `scrub()` pass exists specifically to catch (per-key and per-value redaction) before it reaches process stdout/log aggregation.
+
+**Fix:** Replace all three `console.error` calls with `scrubbedConsole.error` (the module already needs an import from `@mega-crm/redaction`, which every sibling file in this phase already has).
+
+### WR-05: `webhook-replay-sweep.worker.ts`'s tick has no per-workspace error isolation, unlike this same phase's later `erasure-scrub-reclaim.worker.ts`
+
+**File:** `apps/worker/src/queues/webhook-replay-sweep.worker.ts:362-378`
+
+**Issue:** `runWebhookReplaySweep`'s main loop:
+```ts
+for (const workspaceId of workspaceIds) {
+  const result = await runWorkspaceTick(workspaceId, thresholds);
+  ...
+  for (const candidate of result.enqueueCandidates) {
+    await producerQueue.add("webhook-events", buildWebhookEventsJobPayload(workspaceId, events, candidate.id));
+    rowsEnqueued += 1;
+  }
+}
+```
+has no `try/catch` around either the per-workspace DB transaction (`runWorkspaceTick`, which does the replay step *and* the newly-added quarantine/journal retention in the same transaction) or the subsequent Redis `producerQueue.add` call. A single workspace's failure — a query error, a Redis enqueue rejection — throws out of the loop, aborting replay *and* retention (including the gap-closure plan 13-16 quarantine prune) for every workspace after it in that tick's enumeration order, not just the failing one. This directly contradicts the isolation pattern this same phase's `erasure-scrub-reclaim.worker.ts` (plan 13-15, shipped one plan earlier in this phase) explicitly documents and implements: "A single workspace's failure... is caught and logged so it does not abort the remaining workspaces — a single tenant's transient failure must not stop every other tenant's [ticks]." (`erasure-scrub-reclaim.worker.ts:234-237`, implemented at `:263-269`). `reputation-tick.worker.ts` and `analytics-reconciliation.worker.ts` share the same unisolated pattern as pre-existing code, so this is not a new regression specific to 13-16 — but 13-16's own change (adding the quarantine-retention call inside the same unprotected per-workspace transaction) increases what one workspace's failure can now delay for every other tenant on this specific tick.
+
+**Fix:** Wrap the per-workspace body of `runWebhookReplaySweep`'s loop in a `try/catch` that logs and continues, mirroring `erasure-scrub-reclaim.worker.ts`'s `workspacesErrored` counter pattern — the retry-on-next-tick behavior already assumed safe (BullMQ will retry the whole job on an uncaught rejection) is strictly worse than per-workspace isolation, since it does not narrow which workspace actually failed and re-does successfully-completed workspaces' work redundantly (harmless here since operations are idempotent, but wasteful and it delays failing-workspace visibility).
+
+### WR-06: Dashboard growth-chart day-bucketing casts a naive `timestamp` column with no verified UTC pinning anywhere in the connection stack
+
+**File:** `apps/api/src/modules/analytics/dashboard.repository.ts:145-153`, `packages/db/migrations/0003_eminent_meltdown.sql:15`
+
+**Issue:** `getWorkspaceDashboard`'s growth series buckets by day via:
+```sql
+SELECT created_at::date::text as day, count(*)::text as "newContacts"
+FROM contacts
+WHERE workspace_id = $1 AND created_at >= $2::date AND anonymized_at IS NULL
+GROUP BY created_at::date
+```
+`contacts.created_at` is declared `timestamp` (without time zone), not `timestamptz` (migration `0003`, line 15: `"created_at" timestamp DEFAULT now() NOT NULL`). This phase's own CMP-02/CMP-03 day-semantics contract (ARCHITECTURE.md §11, `analytics-reconciliation.worker.ts`'s extensive comment on the identical hazard for `sends.*_at`) states plainly that a bare `::date` cast is unsafe specifically because it converts through the session's `TimeZone` GUC — but the mechanism differs for a naive `timestamp` column: there is no per-read conversion, but the *value stored* was itself produced by Postgres's own `now()` default evaluated against whatever `TimeZone` GUC was in effect on the connection that ran the `INSERT`, and this codebase pins no explicit `TimeZone` anywhere (`docker-compose.yml`, `packages/tenant-context/src/index.ts`, and `apps/api/src/db.ts` all have zero references to `TimeZone`/`TZ`). If the Postgres server's configured default timezone is ever not UTC — an operator-settable parameter-group setting on a managed database, not something this codebase's own migrations or pool configuration verifiably pin — every `contacts.created_at` value (and therefore this chart's day boundaries) silently shifts by that offset, with no error and no test able to catch it against a database whose default already happens to be UTC (which the CI/dev Postgres almost certainly is). This is a narrower-scope version of the exact hazard class this phase spent real effort closing for `sends`/`send_events`/`workspace_daily_rollup`.
+
+**Fix:** Either force `AT TIME ZONE 'UTC'` at the read site (mirroring `reconcileWorkspaceDay`'s `(col AT TIME ZONE 'UTC')::date` pattern) despite the column being timestamp-without-timezone (harmless — `AT TIME ZONE` on a naive timestamp reinterprets it as already being in that zone, which is the correct assumption if writers are always meant to write UTC-intended wall-clock values), or explicitly pin the connection's `TimeZone` to `'UTC'` once at the pool level so every `now()`-derived naive-timestamp write across the whole codebase (not just this one read site) is provably UTC-anchored, and add a test that fails if the effective session `TimeZone` is ever not `'UTC'`.
 
 ## Info
 
-### IN-01: `advanceErasureScrubCheckpoint`'s countColumn interpolation is safe but silently duplicates the same allow-list pattern for review
+### IN-01: `erasure-scrub-checkpoint.ts`'s column interpolation is safe and correctly uses an allow-list — contrast case for WR-01
 
-**File:** `apps/worker/src/queues/erasure-scrub-checkpoint.ts:116-132`
+**File:** `apps/worker/src/queues/erasure-scrub-checkpoint.ts:72-78,116-132`
 
-**Issue:** Not a defect — `cursorColumnFor`/`countColumnFor` correctly restrict `table` to the two-member `ScrubTable` union before interpolating, exactly the pattern WR-02 above recommends for `fact-columns.ts`. Noted only so a reviewer comparing the two files understands why one is flagged and the other isn't: this file does the allow-list correctly; `fact-columns.ts` is the outlier.
+**Issue:** Not a defect — `cursorColumnFor`/`countColumnFor` correctly restrict `table` to the two-member `ScrubTable` union (`"sends" | "events"`) before interpolating the resulting literal into SQL, exactly the pattern WR-01 recommends for `fact-columns.ts`. Recorded only so a reviewer comparing the two files understands why one is flagged and the other is not.
 
 ---
 
-_Reviewed: 2026-08-12T00:43:56Z_
+_Reviewed: 2026-08-12T00:00:00Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
