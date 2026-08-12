@@ -263,7 +263,7 @@ Full decision log for v1.0 lives in PROJECT.md (Key Decisions) and the archived 
 Open decisions to resolve at `/gsd-discuss-phase` (recorded in ROADMAP.md § Open Decisions):
 
 - [x] **Phase 12 / WRK-02** — RESOLVED 2026-08-10 (D-01): Redis semaphore at the application layer, keyed per tenant + lane, TTL-leased; over-cap jobs defer through the same tenant-scoped path as the RPS ceiling.
-- [ ] **Phase 14 / DB-14** — introduce PgBouncer now vs. explicitly defer to SCALE-02.
+- [x] **Phase 14 / DB-14** — RESOLVED 2026-08-12 (D-09): deferred to SCALE-02 as an explicit accepted decision; revisit trigger = real `max_connections` pressure. App-level pools get sizes + error handlers via shared `createPgPool` factory. See `.planning/phases/14-deployment-database-durability/14-CONTEXT.md`.
 
 ### Blockers/Concerns
 
