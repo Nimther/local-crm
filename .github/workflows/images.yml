@@ -1,0 +1,93 @@
+name: Images
+
+# Phase 14 plan 06 (OPS-01, D-03). Builds and pushes the three deployable
+# images (api/web/worker) to GHCR on every push to master, tagged by the full
+# git SHA and nothing else.
+#
+# A SEPARATE workflow from .github/workflows/ci.yml, deliberately, for two
+# reasons:
+#   1. Narrower trigger -- `push` to master ONLY, never `pull_request`. A PR
+#      build would push an image for a commit that may never land on master;
+#      OPS-03's rollback story ("redeploy the previous SHA") only makes sense
+#      for commits that actually reached master.
+#   2. `ci.yml`'s three required status checks (`static`, `test`,
+#      `failure-injection`) stay untouched -- adding a fourth job there would
+#      either become a fourth required check (slowing every PR down with a
+#      build this workflow does not need to gate) or a non-required job
+#      hiding inside a file whose whole point is "these are the required
+#      checks".
+#
+# Quality gate: this workflow's OWN trigger is `push: branches: [master]`,
+# and this repository's branch protection on `master`
+# (`required_status_checks.contexts = ["static", "test", "failure-injection"]`,
+# `enforce_admins.enabled = true`, `required_status_checks.strict = true`) --
+# verified via `gh api repos/:owner/:repo/branches/master/protection` at the
+# time this file was written, not assumed -- already blocks any commit from
+# reaching master without passing those three checks first. By the time this
+# workflow's `push` trigger fires, the commit has therefore already passed
+# CI; no additional `needs:`/`workflow_run` gate is required here. Re-run that
+# same `gh api` call before trusting this claim again if branch protection is
+# ever reconfigured.
+#
+# Every third-party action is pinned to a full 40-character commit SHA with
+# the version tag in a trailing comment, matching ci.yml's own stated
+# convention (a floating tag can be re-pointed at attacker-controlled code
+# that runs with this job's `packages: write` token and the checked-out
+# tree). Every SHA below was resolved fresh via `gh api
+# repos/<owner>/<repo>/git/refs/tags/<tag>` at the time this file was
+# written -- never copied from training data or from RESEARCH.md's
+# deliberately-placeholder skeleton.
+on:
+  push:
+    branches: [master]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    name: build-and-push (${{ matrix.app }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        app: [api, web, worker]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # GHCR (like every OCI registry) requires a lowercase image reference.
+      # `github.repository` preserves this repository's actual owner/name
+      # casing verbatim -- a naive `ghcr.io/${{ github.repository }}/<app>`
+      # tag is an invalid reference the moment either segment contains an
+      # uppercase letter (true for this repository at the time this file was
+      # written). GitHub Actions expressions have no built-in lowercase
+      # function, so this is computed with a shell one-liner instead.
+      - name: Compute lowercase image base
+        id: image-base
+        run: echo "base=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: .
+          file: docker/Dockerfile.${{ matrix.app }}
+          push: true
+          # Exactly one tag, derived from the full git SHA -- never `latest`,
+          # never a branch name. A mutable tag is how a deploy script ends up
+          # running something other than what it was asked for; OPS-03's
+          # entire rollback story is "the tag names exactly one immutable
+          # build". If a future change wants a convenience tag (e.g. a moving
+          # `master` tag for quick local pulls), read this comment first and
+          # weigh that cost against this workflow's whole reason for existing.
+          tags: ${{ steps.image-base.outputs.base }}/${{ matrix.app }}:${{ github.sha }}
