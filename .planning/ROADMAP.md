@@ -501,7 +501,7 @@ Plans:
   4. A point-in-time restore from backup has actually been performed and written up, not merely configured.
   5. Postgres connections use TLS, every pool has an error handler, the missing constraints exist and are verifiably enforced, and retention deletes aged data on a defined schedule.
 
-**Plans**: 5/13 plans executed
+**Plans**: 7/13 plans executed
 
 Plans:
 **Wave 1**
@@ -517,8 +517,8 @@ Plans:
 
 **Wave 3**
 
-- [ ] 14-06-PLAN.md — Dockerfiles for api/worker/web (Node 22, non-root, direct `node` exec) + Caddyfile + GHCR build-and-push per SHA (OPS-01)
-- [ ] 14-07-PLAN.md — Failure injection: migration unclean death, two-version compatibility (R-05), real SIGTERM mid-load (DB-05, OPS-02)
+- [x] 14-06-PLAN.md — Dockerfiles for api/worker/web (Node 22, non-root, direct `node` exec) + Caddyfile + GHCR build-and-push per SHA (OPS-01)
+- [x] 14-07-PLAN.md — Failure injection: migration unclean death, two-version compatibility (R-05), real SIGTERM mid-load (DB-05, OPS-02)
 
 **Wave 4**
 
@@ -668,7 +668,7 @@ Phase 9 has no dependents and may be scheduled in parallel at any point after Ph
 | 11. Delivery Correctness | v1.1 | 11/11 | Complete    | 2026-08-09 |
 | 12. Worker Reliability & Tenant Fairness | v1.1 | 14/14 | Complete    | 2026-08-11 |
 | 13. Compliance & Analytics Integrity | v1.1 | 16/16 | Complete    | 2026-08-12 |
-| 14. Deployment & Database Durability | v1.1 | 5/13 | In Progress|  |
+| 14. Deployment & Database Durability | v1.1 | 7/13 | In Progress|  |
 | 15. Observability, Alerting & Frontend Resilience | v1.1 | 0/TBD | Not started | - |
 | 16. Live SendGrid Verification | v1.1 | 0/TBD | Not started | - |
 
