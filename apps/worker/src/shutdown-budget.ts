@@ -1,5 +1,21 @@
-import { SENDGRID_TIMEOUT_MS } from "@mega-crm/delivery-core";
-import { CLAIM_TX_MARGIN_MS, RECORD_TX_MARGIN_MS } from "@mega-crm/queue-core";
+// Phase 14 plan 04 (Pitfall 7): imports the LEAF modules by subpath, not the
+// package roots, so this file's COMPILED output (apps/worker/dist/shutdown-budget.js)
+// stays importable under plain `node` with zero further build steps --
+// scripts/print-stop-grace-period.mjs is the consumer that needs this.
+// `@mega-crm/delivery-core`'s and `@mega-crm/queue-core`'s own root
+// `src/index.ts` files re-export many sibling modules via relative `./foo.js`
+// specifiers that Node's native TypeScript support does NOT remap to `./foo.ts`
+// (unlike bundler-style resolution) -- importing the package root would make
+// plain `node` try to resolve those non-existent `.js` files and fail. The
+// two leaf modules below have zero imports of their own, so they carry none
+// of that risk; this mirrors `scripts/migrate-runner.mjs`'s identical
+// precedent of importing `@mega-crm/db/src/migration-journal.js` directly
+// rather than `@mega-crm/db`'s root. If a future refactor moves
+// SENDGRID_TIMEOUT_MS/CLAIM_TX_MARGIN_MS/RECORD_TX_MARGIN_MS back to being
+// re-exported only from each package's root, it will silently re-break the
+// print script the next time apps/worker is built.
+import { SENDGRID_TIMEOUT_MS } from "@mega-crm/delivery-core/src/send-mail.js";
+import { CLAIM_TX_MARGIN_MS, RECORD_TX_MARGIN_MS } from "@mega-crm/queue-core/src/queue-options.js";
 
 /**
  * Phase 12 (WRK-07, RESEARCH.md Pitfall 5): the container's SIGTERM->SIGKILL

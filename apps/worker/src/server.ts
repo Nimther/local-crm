@@ -135,7 +135,9 @@ export function attachSharedListeners(workers: Worker[]): void {
  * No HTTP listener; this is a long-running background process, not a
  * server.
  */
-// eslint-disable-next-line @typescript-eslint/require-await -- composition root: the declared Promise<WorkerRuntime> is the contract server.ts awaits, and boot ordering is not something to reshape for a lint rule
+// Phase 14 plan 04: buildWorker() now genuinely awaits (startWorkerHealthServer),
+// so the require-await disable this function needed before that change is
+// stale -- removed rather than left as a now-inert directive.
 export async function buildWorker(): Promise<WorkerRuntime> {
   const redisUrl = process.env.REDIS_URL;
   if (!redisUrl) {
