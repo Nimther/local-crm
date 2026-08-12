@@ -46,7 +46,7 @@
 -- per-batch-committing DELETE this cleanup needs cannot be expressed inside
 -- a migration under this repo's runner -- a `DO $$ ... END $$;` block is ONE
 -- transaction end to end, so it cannot COMMIT per batch, and the
--- `--> statement-breakpoint` convention gives no loop construct at all. The
+-- `statement-breakpoint` convention gives no loop construct at all. The
 -- deletion therefore lives OUTSIDE this file, in the operator-invoked
 -- `count-send-event-duplicates.ts --resolve` script (Task 1 of this plan,
 -- following the Phase 9 D-08 `relocate-default-partition-rows.ts` precedent:
