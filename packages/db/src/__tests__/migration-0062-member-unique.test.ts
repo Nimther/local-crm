@@ -302,9 +302,14 @@ describe("migration 0062 static shape (Phase 14, DB-12, plan 14-02)", () => {
     expect(withoutComments).not.toMatch(/\bDELETE\s+FROM\s+member\b/i);
     expect(withoutComments).not.toMatch(/\bUPDATE\s+member\s+SET\b/i);
 
-    const firstDoIndex = sql.indexOf("DO $$");
-    const firstCreateIndex = sql.indexOf("CREATE UNIQUE INDEX");
+    // Comment-stripped: this migration's own header prose discusses
+    // `CREATE UNIQUE INDEX` (the deviation note) BEFORE the real DDL
+    // statement, so a raw `indexOf` against the full file would find that
+    // prose mention first. Stripping comments first removes the false hit.
+    const firstDoIndex = withoutComments.indexOf("DO $$");
+    const firstCreateIndex = withoutComments.indexOf("CREATE UNIQUE INDEX");
     expect(firstDoIndex).toBeGreaterThanOrEqual(0);
+    expect(firstCreateIndex).toBeGreaterThanOrEqual(0);
     expect(firstDoIndex).toBeLessThan(firstCreateIndex);
   });
 
