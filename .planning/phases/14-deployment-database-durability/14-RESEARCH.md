@@ -553,19 +553,19 @@ export function createPgPool(options: CreatePgPoolOptions): Pool {
 
 **If this table is empty:** N/A — see rows above.
 
-## Open Questions
+## Open Questions (RESOLVED VIA PLAN TASKS)
 
-1. **Exact drizzle journal comparison mechanism for `/readyz`'s applied-vs-shipped check (D-13)**
+1. **Exact drizzle journal comparison mechanism for `/readyz`'s applied-vs-shipped check (D-13)** (RESOLVED — delegated to 14-01 Task 1 `read_first`: read `node_modules/drizzle-orm/node-postgres/migrator.js` + `node_modules/drizzle-orm/migrator.js` at the pinned 0.45.2 as the task's first action, and record the mechanism in `packages/db/src/migration-journal.ts`'s header comment)
    - What we know: `migrate()` and the CLI share the same `__drizzle_migrations` journal table (hash + timestamp columns), confirmed via official docs.
    - What's unclear, narrowed to a concrete check: whether drizzle's node-postgres migrator decides "this migration is pending" by comparing each journal entry's `meta/_journal.json` `when` timestamp against `__drizzle_migrations.created_at` (a timestamp-cutoff comparison — "has anything with a `when` after the last applied `created_at` shipped?"), or by hash-set membership (compute each shipped migration's hash, check it exists as a row) — these are different queries with different failure modes (a timestamp-cutoff check can be fooled by a migration inserted out of chronological order; a hash-set check cannot, but requires recomputing the same hash function the migrator uses).
    - Recommendation: the plan's first DB-13/readiness task should read `drizzle-orm`'s own migrator source (`node_modules/drizzle-orm/node-postgres/migrator.*` at the pinned 0.45.2 version) to confirm which of the two mechanisms it actually uses, and `/readyz` should reuse that exact mechanism rather than inventing a third comparison — inventing a new comparison risks disagreeing with the migrator's own definition of "applied."
 
-2. **DB-12 full constraint inventory beyond `member`/`invitation`**
+2. **DB-12 full constraint inventory beyond `member`/`invitation`** (RESOLVED — delegated to 14-02 Task 1: live `pg_constraint`/`pg_index`/`pg_class` introspection via `packages/db/scripts/audit-missing-constraints.ts` against a migrated database, including `indisvalid` per unique index)
    - What we know: every application-owned tenant table (`contacts`, `workspace_sendgrid_keys`, `workspace_send_settings`, `session`, `organization`) already has the uniqueness its own business rules require, confirmed by direct schema read.
    - What's unclear: whether a live-database introspection query (comparing `pg_constraint`/`pg_index` against the schema's declared intent, rather than reading `schema.ts` files) would surface anything this static read missed — e.g., a constraint declared in Drizzle but never actually applied because a migration was skipped, or a raw-SQL-only table (partitioned tables can't express constraints in Drizzle's `pgTable` API, per migration 0057's own header) that was never audited this way.
    - Recommendation: the DB-12 plan's first task should be a live introspection query against a fully-migrated database (comparing `pg_constraint` to the expected inventory this research documents), not solely a repeat of this static code read.
 
-3. **VPS RAM size for `mem_limit`/`oom_score_adj` concrete numbers**
+3. **VPS RAM size for `mem_limit`/`oom_score_adj` concrete numbers** (RESOLVED — operator supplies the figure at the 14-08 `checkpoint:decision` (blocking), which is also declared in 14-08's `user_setup`; the executor derives every value from it or takes the documented-minimum parameterized option)
    - What we know: the pattern (negative score for Postgres, explicit limits everywhere) is correct and locked.
    - What's unclear: the actual numbers, which depend on the operator's VPS choice — explicitly deferred to the operator per CONTEXT.md's Claude's Discretion section.
    - Recommendation: plan should parameterize these as environment-supplied values with a documented minimum, not hardcode a guess.
