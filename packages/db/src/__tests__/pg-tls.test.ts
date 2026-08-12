@@ -57,7 +57,6 @@ const provisioned = await createEphemeralDatabase({ workspace: "pg-tls" });
 const serverServesTls = await probeServerServesTls(provisioned.dsn);
 
 if (!serverServesTls) {
-  // eslint-disable-next-line no-console -- deliberate, loud, human-facing skip notice, not app logging
   console.warn(
     "\npg-tls.test.ts: this run's Postgres server reports `SHOW ssl` = off -- the positive TLS " +
       "assertion (sslmode=require&uselibpqcompat=true -> pg_stat_ssl reports ssl=true) is SKIPPED in " +
