@@ -1,0 +1,62 @@
+# Phase 14 plan 06 (OPS-01, T-14-28). The build context is a second copy of
+# this tree that scripts/check-root-hygiene.mjs's env-file blacklist does NOT
+# police -- everything excluded here is excluded from every image's build
+# context, never just from the final layer, so nothing on this list can leak
+# into an image even via an intermediate layer that a later layer "deletes".
+
+# Dependency trees -- reinstalled fresh inside the image via `npm ci`.
+node_modules
+**/node_modules
+
+# Compiled output -- rebuilt fresh inside the image; a stale host-machine
+# dist/ copied into the build context could silently shadow what the image
+# actually compiles.
+dist
+**/dist
+build
+**/build
+
+# VCS metadata -- irrelevant to the build, and .git can be large.
+.git
+.gitignore
+
+# GSD planning artifacts and generated docs -- not part of the runtime, and
+# .planning/ is this repo's own gitignored working directory.
+.planning
+docs
+AGENTS.md
+ARCHITECTURE.md
+CONVENTIONS.md
+README.md
+SPECIFICATION.md
+
+# Test output, coverage, and Playwright artifacts.
+coverage
+coverage-baseline.json
+**/coverage
+playwright-report
+test-results
+**/test-results
+
+# CI-only configuration -- never needed inside an image.
+.github
+
+# Env files -- the single most important entry on this list (T-14-28). Every
+# variant this repo's own scripts/check-root-hygiene.mjs blacklists, plus the
+# checked-in example (harmless alone, but no reason to ship it either).
+.env
+.env.*
+**/.env
+**/.env.*
+
+# Editor/OS noise.
+.DS_Store
+**/.DS_Store
+*.log
+npm-debug.log*
+
+# Docker itself -- never copy Dockerfiles/compose/certs into a build context;
+# a build context including its own Dockerfile is a common accidental-secret
+# vector once someone adds a build ARG default here.
+docker/certs
+docker-compose.yml
