@@ -429,7 +429,7 @@ Plans:
   4. A provider event carrying an out-of-range or manipulated timestamp cannot bypass deduplication or land outside its partition, and a redelivered event is counted once even when `sg_event_id` is not stable across retries.
   5. Metric drift is corrected by a scheduled reconciliation job rather than a one-off fix, events missed while the webhook endpoint was unreachable are recovered by backfill, and a tenant approaching the spam-complaint threshold raises an alert.
 
-**Plans**: 15/15 plans executed
+**Plans**: 16 plans (15 executed; 13-16 added by gap closure after verification found SC3/CMP-04 partial)
 
 Plans:
 **Wave 1**
@@ -473,6 +473,10 @@ Plans:
 **Wave 9** *(blocked on Wave 8 completion)*
 
 - [x] 13-14-PLAN.md — SPECIFICATION/ARCHITECTURE/CONVENTIONS as-built update, coverage matrix, human phase verification (CMP-01…CMP-09)
+
+**Wave 10** *(gap closure — 13-VERIFICATION.md Gap #1, SC3/CMP-04)*
+
+- [ ] 13-16-PLAN.md — Bounded retention for `send_event_quarantine`: age out the raw webhook bodies this phase started persisting, on the tick that already runs, with the erasure-scrub exclusion documented (CMP-04)
 
 **Sequencing and pitfall notes:**
 
