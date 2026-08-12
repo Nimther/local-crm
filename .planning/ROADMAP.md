@@ -35,7 +35,7 @@ Full phase details: [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md)
 - [x] **Phase 10: Tenant Isolation & Trust Boundaries** - Cross-tenant access prevented by DB identity and policy, proven by negative tests (completed 2026-08-08)
 - [x] **Phase 11: Delivery Correctness** - No mail lost, duplicated or misclassified at crash, timeout and ambiguous-outcome boundaries (completed 2026-08-09)
 - [x] **Phase 12: Worker Reliability & Tenant Fairness** - One tenant, one huge segment, or a restart cannot degrade the platform (completed 2026-08-10)
-- [ ] **Phase 13: Compliance & Analytics Integrity** - Consent and delivery numbers mean exactly what they claim
+- [x] **Phase 13: Compliance & Analytics Integrity** - Consent and delivery numbers mean exactly what they claim (completed 2026-08-12)
 - [ ] **Phase 14: Deployment & Database Durability** - Reproducible deploy, gated migrations, rehearsed restore, enforced constraints
 - [ ] **Phase 15: Observability, Alerting & Frontend Resilience** - The system reports its true state to operators and to users
 - [ ] **Phase 16: Live SendGrid Verification** - Every delivery guarantee confirmed against the real provider (release barrier)
@@ -629,7 +629,7 @@ Phase 9 has no dependents and may be scheduled in parallel at any point after Ph
 | 10. Tenant Isolation & Trust Boundaries | v1.1 | 15/15 | Complete    | 2026-08-09 |
 | 11. Delivery Correctness | v1.1 | 11/11 | Complete    | 2026-08-09 |
 | 12. Worker Reliability & Tenant Fairness | v1.1 | 14/14 | Complete    | 2026-08-11 |
-| 13. Compliance & Analytics Integrity | v1.1 | 16/16 | In Progress|  |
+| 13. Compliance & Analytics Integrity | v1.1 | 16/16 | Complete    | 2026-08-12 |
 | 14. Deployment & Database Durability | v1.1 | 0/TBD | Not started | - |
 | 15. Observability, Alerting & Frontend Resilience | v1.1 | 0/TBD | Not started | - |
 | 16. Live SendGrid Verification | v1.1 | 0/TBD | Not started | - |

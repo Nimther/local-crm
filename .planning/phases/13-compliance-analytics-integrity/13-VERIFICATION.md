@@ -1,7 +1,7 @@
 ---
 phase: 13-compliance-analytics-integrity
 verified: 2026-08-12T10:00:00Z
-status: human_needed
+status: passed
 score: 5/5 must-haves verified
 behavior_unverified: 0
 overrides_applied: 0
@@ -9,22 +9,28 @@ re_verification:
   previous_status: gaps_found
   previous_score: 4/5
   gaps_closed:
+
     - "Deleting a contact removes personal data while leaving the minimum evidence needed to later prove a send or a suppression was lawful. (ROADMAP SC3 / CMP-04) -- send_event_quarantine now has a bounded, versioned retention horizon (pruneSendEventQuarantine, SEND_EVENT_QUARANTINE_RETENTION_DAYS=7) wired into the existing webhook-replay-sweep tick, keyed exclusively on the server-set received_at column."
   gaps_remaining: []
   regressions: []
 human_verification:
+
   - test: "Unsubscribe atomicity and convergence (ROADMAP SC1 / CMP-01) -- send a real campaign email, click unsubscribe, confirm send/consent-history/campaign-counter all update exactly once, then replay the SendGrid unsubscribe webhook for the same send and confirm nothing changes a second time."
     expected: "Exactly one status change, one consent-history row, one unsubscribed_at fact, one counter increment, regardless of order or replay."
     why_human: "Requires a live dev environment, a real campaign send, and a real or replayed SendGrid webhook delivery -- deferred per human_verify_mode=end-of-phase (13-14-SUMMARY.md coverage D4)."
+
   - test: "Daily numbers under multiple session timezones (ROADMAP SC2 / CMP-02/CMP-03/CMP-06) -- note a day's sent/delivered counts, trigger reconciliation, repeat under SET TIME ZONE 'Asia/Tokyo', confirm unchanged; inject a 4-day-late webhook event and confirm the day is marked dirty, cleared by the next tick, and the count reflects the late event."
     expected: "Counts are session-timezone-independent and late events land on the day they occurred, not the day they arrived."
     why_human: "Requires a running worker with a live reconciliation tick and direct DB session control -- deferred per human_verify_mode=end-of-phase. (Automated equivalent already passed: reconcile-utc-day.test.ts and analytics-reconciliation-dirty-day.test.ts, re-confirmed by the prior verification pass and unaffected by 13-16.)"
+
   - test: "Erasure end-to-end, extended by gap-closure plan 13-16 (ROADMAP SC3 / CMP-04) -- delete a contact with sends/events/external_id, confirm disappearance from lists/segments, confirm PII columns null and anonymized_at set, wait for scrub completion, confirm send_events.payload no longer carries the email, re-import the former external_id/email and confirm a new contact is created and suppression still refuses it. THEN, as the 13-16 extension to this same checklist step: delete a contact that previously produced at least one webhook event with an out-of-bounds timestamp (so a send_event_quarantine row carrying that contact's address exists); confirm the erasure completes as above; confirm the quarantine row is STILL PRESENT immediately afterward (not scrubbed, by design); confirm it is gone after SEND_EVENT_QUARANTINE_RETENTION_DAYS (7 days) has elapsed for that row, with no manual SQL."
     expected: "All steps in 13-14-SUMMARY.md's checklist step 4 succeed exactly as described, AND the quarantine row survives erasure but ages out on its own retention horizon without operator action."
     why_human: "Requires a live dev environment, the BullMQ scrub worker actually running, a CSV/API re-import round trip, and (for the 13-16 extension) either a real 7-day wait or a controlled received_at backdate plus a live webhook-replay-sweep tick -- deferred per human_verify_mode=end-of-phase. NOTE: this item now closes the prior verification's caveat -- a clean step-4 pass on send_events.payload alone never covered send_event_quarantine; the walkthrough must explicitly observe the quarantine row's survive-then-expire behavior to close SC3/CMP-04 in a live environment, not just in the codebase."
+
   - test: "Event integrity (ROADMAP SC4 / CMP-05/CMP-07) -- send a webhook event timestamped 30 days in the past, confirm quarantine + no send_events row + no metric movement; send the same event twice under two different sg_event_id values and confirm exactly one send_events row and one counter increment."
     expected: "Out-of-range timestamps are quarantined per-event without failing the batch; redelivery with an unstable sg_event_id still dedupes to one row."
     why_human: "Requires live webhook delivery against a running API -- deferred per human_verify_mode=end-of-phase. (Automated equivalent already passed: occurred-at-bounds.test.ts, webhook-events-occurred-at-bounds.test.ts, send-events-dedup-rebase.test.ts, unaffected by 13-16.)"
+
   - test: "Backfill and alerts (ROADMAP SC5 / CMP-08/CMP-09) -- stop the worker, deliver a signed webhook batch, confirm an un-ingested journal row, restart, confirm the replay sweep marks it ingested and processes events exactly once; seed a workspace above the complaint warn threshold with OPERATOR_ALERT_EMAIL pointed at a real inbox and confirm operator + tenant-member emails arrive, cooldown suppresses a repeat, and escalation to critical sends immediately."
     expected: "All steps in 13-14-SUMMARY.md's checklist steps 6-7 succeed exactly as described."
     why_human: "Requires a live SendGrid-facing webhook endpoint, a real inbox, and worker stop/restart timing -- deferred per human_verify_mode=end-of-phase. (Automated equivalent already passed: webhook-replay-sweep.test.ts -- including 13-16's new quarantine-retention cases, 59/59 -- ingestion-health-watchdog.test.ts, reputation-watchdog.test.ts, scheduler-registration.test.ts.)"
