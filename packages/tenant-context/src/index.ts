@@ -1,6 +1,15 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { Pool } from "pg";
 import type { PoolClient } from "pg";
+// Phase 14 plan 03 (DB-14, D-11): deep-imports @mega-crm/db's factory module
+// directly (NOT the package root "@mega-crm/db"), because the root's
+// src/index.ts throws at import time when DATABASE_URL is unset and
+// eagerly constructs its own "db"/"auth" pools -- importing the root here
+// would inject both of those side effects into every consumer of this
+// already dependency-light package. `packages/db/package.json`'s own
+// `"./src/*.js": "./src/*.ts"` exports-map entry is what makes this deep
+// import resolve. Mirrors apps/worker's own
+// `@mega-crm/db/src/partitions/...` deep-import precedent.
+import { createPgPool } from "@mega-crm/db/src/pool.js";
 
 // Phase 10 (SEC-01/SEC-02, D-02): the cross-workspace scan helper lives in
 // its own module (scan.ts) but is re-exported here so `withTenantTransaction`
@@ -18,27 +27,20 @@ export { closeScanPool, withCrossWorkspaceScan } from "./scan.js";
  * tables, which are not RLS-protected). Both point at the same physical
  * database via the same DATABASE_URL.
  */
-export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-
-// CR-03: without this listener, an idle-connection termination (Postgres
-// restart/failover/idle timeout) surfaces as an uncaught 'error' event and
-// crashes the process (API or worker). Log it instead so the pool recovers
-// on its own. Uses console.error (not a structured logger) to keep this
-// shared package dependency-light — callers that want structured logging
-// wrap/observe at their own layer.
-//
-// 10-13 (SEC-13) decision: stays on bare console.error rather than adopting
-// @mega-crm/redaction's scrubbedConsole. This package is imported by
-// literally everything (both apps, every worker queue) specifically to stay
-// dependency-light, and the argument here is never a payload -- `err` is a
-// driver-level Error ("Connection terminated unexpectedly" and similar) with
-// no tenant data, no workspace id, no query parameters. There is nothing for
-// scrubbing to protect at this call site. If a future change ever attaches a
-// payload to this listener, that is the point to revisit this decision, not
-// before.
-pool.on("error", (err) => {
-  console.error("idle pg pool client error (connection dropped)", err);
-});
+// Phase 14 plan 03 (DB-14, D-11) SUPERSEDES the 10-13 (SEC-13) decision
+// recorded here previously: this pool is now built through
+// `@mega-crm/db`'s `createPgPool` factory, which routes its error listener
+// through `@mega-crm/redaction`'s `scrubbedConsole` unconditionally (every
+// factory-built pool does, with no opt-out) rather than the bare
+// `console.error` this package's own "stay dependency-light" argument used
+// to justify. DB-14's CI-enforced invariant (no bare `pg.Pool` outside the
+// factory) takes priority over that argument now -- the dependency-light
+// property this package still keeps is "no NEW runtime dependency for its
+// OWN sake", not "never depend on `@mega-crm/db`", and `@mega-crm/db`
+// already sits below this package in the dependency graph (no cycle: see
+// `packages/db/src/pool.ts`'s own header, which documents this package by
+// name and does not import it back).
+export const pool = createPgPool({ connectionString: process.env.DATABASE_URL ?? "", name: "tenant-context" });
 
 /**
  * Request/job-scoped tenant context — AsyncLocalStorage ONLY, never a

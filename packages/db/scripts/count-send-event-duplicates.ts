@@ -1,6 +1,7 @@
-import { Pool } from "pg";
+import type { Pool } from "pg";
 
 import { resolveEnvPath } from "../../../scripts/env-path.mjs";
+import { createPgPool } from "../src/pool.js";
 
 /**
  * Phase 13 (CMP-07, plan 13-07), Task 1: the operator-invoked companion to
@@ -304,13 +305,15 @@ async function main(): Promise<void> {
   const databaseUrl = requireEnv("DATABASE_URL");
   const scanDatabaseUrl = requireEnv("SCAN_DATABASE_URL");
 
-  const appPool = new Pool({ connectionString: databaseUrl });
-  appPool.on("error", (err) => {
-    console.error("idle pg pool client error (connection dropped) -- app pool", err);
-  });
-  const scanPool = new Pool({ connectionString: scanDatabaseUrl });
-  scanPool.on("error", (err) => {
-    console.error("idle pg pool client error (connection dropped) -- scan pool", err);
+  // Phase 14 plan 03 (DB-14, D-11): built through the shared factory -- see
+  // this file's own header-adjacent note in relocate-default-partition-rows.ts
+  // for why assertDsnRequestsTls never fires under `tsx` here, and why the
+  // production TLS guarantee for this script comes from the env file's own
+  // DSNs, not from this script.
+  const appPool = createPgPool({ connectionString: databaseUrl, name: "count-send-event-duplicates" });
+  const scanPool = createPgPool({
+    connectionString: scanDatabaseUrl,
+    name: "count-send-event-duplicates-scan",
   });
 
   try {

@@ -1,5 +1,8 @@
-import { Pool } from "pg";
-import type { PoolClient } from "pg";
+import type { Pool, PoolClient } from "pg";
+// Phase 14 plan 03 (DB-14, D-11): see index.ts's own comment for why this is
+// a deep import of @mega-crm/db's factory module rather than the package
+// root.
+import { createPgPool } from "@mega-crm/db/src/pool.js";
 
 /**
  * Phase 10 (SEC-01/SEC-02, D-01/D-02) — the one audited entry point for
@@ -28,13 +31,10 @@ function getScanPool(): Pool {
     );
   }
   if (!scanPool) {
-    scanPool = new Pool({ connectionString: dsn });
-    // Same CR-03 discipline as the tenant pool in index.ts: without this
-    // listener an idle-connection termination surfaces as an uncaught
-    // 'error' event and crashes the process.
-    scanPool.on("error", (err) => {
-      console.error("idle scan pool client error (connection dropped)", err);
-    });
+    // Phase 14 plan 03 (DB-14, D-11): built through the shared factory,
+    // named "tenant-context-scan" in PG_POOL_SIZES -- same discipline as
+    // the tenant pool in index.ts.
+    scanPool = createPgPool({ connectionString: dsn, name: "tenant-context-scan" });
   }
   return scanPool;
 }

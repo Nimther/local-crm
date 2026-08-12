@@ -1,6 +1,7 @@
-import { Pool } from "pg";
+import type { Pool } from "pg";
 
 import { resolveEnvPath } from "../../../scripts/env-path.mjs";
+import { createPgPool } from "../src/pool.js";
 
 /**
  * Phase 14 (DB-12, Pitfall 17), Task 1: a read-only, live-database
@@ -169,10 +170,11 @@ async function main(): Promise<void> {
   }
 
   const databaseUrl = requireEnv("DATABASE_URL");
-  const pool = new Pool({ connectionString: databaseUrl });
-  pool.on("error", (err) => {
-    console.error("idle pg pool client error (connection dropped)", err);
-  });
+  // Phase 14 plan 03 (DB-14, D-11): built through the shared factory; not
+  // in this plan's own <files_modified> list -- found by the acceptance
+  // grep's repo-wide scope, migrated for the same reason as the five named
+  // scripts.
+  const pool = createPgPool({ connectionString: databaseUrl, name: "audit-missing-constraints" });
 
   try {
     const reports = await auditAllTables(pool);

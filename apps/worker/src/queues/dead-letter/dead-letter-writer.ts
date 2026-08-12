@@ -1,6 +1,5 @@
 import type { Job } from "bullmq";
-import { Pool } from "pg";
-import { scrubbedConsole } from "@mega-crm/redaction";
+import { createPgPool } from "@mega-crm/db/src/pool.js";
 import {
   isTerminalJobFailure,
   writeDeadLetterOnTerminalFailure as writeDeadLetterOnTerminalFailureShared,
@@ -32,14 +31,13 @@ import {
  * column to scope by, and this writer is called from a plain worker event
  * listener, never from inside `withTenant`/`withTenantTransaction`.
  */
-const deadLetterPool = new Pool({ connectionString: process.env.DATABASE_URL });
-
-// Mirrors every other dedicated pool in this codebase (partition-maintenance's,
-// @mega-crm/tenant-context's, @mega-crm/db's): without this listener, an idle-
-// connection termination surfaces as an uncaught 'error' event and crashes the
-// whole apps/worker process.
-deadLetterPool.on("error", (err) => {
-  scrubbedConsole.error("dead-letter-writer: idle pg pool client error (connection dropped)", err);
+// Phase 14 plan 03 (DB-14, D-11): built through the shared createPgPool
+// factory, named "worker-dead-letter" in PG_POOL_SIZES -- the error handler
+// this comment used to wire by hand now lives in the factory,
+// unconditionally, for every pool in the codebase.
+const deadLetterPool = createPgPool({
+  connectionString: process.env.DATABASE_URL ?? "",
+  name: "worker-dead-letter",
 });
 
 export type { DeadLetterWriterClient };

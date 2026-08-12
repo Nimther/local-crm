@@ -2,6 +2,13 @@ services:
   db:
     image: postgres:17
     restart: unless-stopped
+    # Phase 14 plan 03 (DB-13, D-10): TLS entrypoint override -- see
+    # docker/pg-tls-entrypoint.sh's own header for the full rationale
+    # (generates a self-signed cert on first boot, then defers to the
+    # image's own docker-entrypoint.sh). Mirrors the `redis` service's own
+    # `command:` override below as this project's precedent for overriding
+    # an official image's startup.
+    entrypoint: ["/usr/local/bin/pg-tls-entrypoint.sh"]
     environment:
       POSTGRES_DB: mega_crm
       POSTGRES_USER: postgres
@@ -11,6 +18,11 @@ services:
     volumes:
       - mega_crm_db_data:/var/lib/postgresql/data
       - ./docker/init-app-role.sql:/docker-entrypoint-initdb.d/01-init-app-role.sql:ro
+      - ./docker/pg-tls-entrypoint.sh:/usr/local/bin/pg-tls-entrypoint.sh:ro
+      # A DEDICATED volume, deliberately separate from mega_crm_db_data --
+      # certificate lifetime is independent of the database volume (see the
+      # entrypoint script's own comment).
+      - mega_crm_db_certs:/certs
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -38,4 +50,5 @@ services:
 
 volumes:
   mega_crm_db_data:
+  mega_crm_db_certs:
   mega_crm_redis_data:

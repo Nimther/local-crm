@@ -84,6 +84,14 @@ jobs:
       - name: Session-state audit
         run: npm run lint:session-state
 
+      # Phase 14 plan 03 (DB-14, D-11): the machine half of "every first-party
+      # production Postgres pool goes through createPgPool() and therefore
+      # carries an error handler" -- a bare `new Pool(...)` reintroduced
+      # anywhere in the source tree fails here instead of only being caught
+      # by review.
+      - name: Pool factory audit
+        run: npm run lint:pg-pool-factory
+
       - name: Working-root hygiene
         run: npm run check:root-hygiene
 

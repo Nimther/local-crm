@@ -1,5 +1,6 @@
 import { drizzle } from "drizzle-orm/node-postgres";
-import { Pool } from "pg";
+import type { Pool } from "pg";
+import { createPgPool } from "./pool.js";
 import * as authSchema from "./schema/auth.js";
 import * as sendgridKeysSchema from "./schema/sendgrid-keys.js";
 import * as contactsSchema from "./schema/contacts.js";
@@ -73,14 +74,11 @@ if (!databaseUrl) {
   throw new Error("DATABASE_URL must be set to construct the Drizzle client (@mega-crm/db)");
 }
 
-const pool = new Pool({ connectionString: databaseUrl });
-
-// CR-03 precedent (see authPool below / @mega-crm/tenant-context's pool.on):
-// without this listener an idle-connection termination surfaces as an
-// uncaught 'error' event and crashes the process.
-pool.on("error", (err) => {
-  console.error("idle pg pool client error (connection dropped)", err);
-});
+// Phase 14 plan 03 (DB-14, D-11): built through the shared createPgPool
+// factory (packages/db/src/pool.ts) -- the error handler, the TLS decision
+// and this pool's explicit named size ("db" in PG_POOL_SIZES) all live
+// there now, not here.
+const pool = createPgPool({ connectionString: databaseUrl, name: "db" });
 
 /**
  * Drizzle client used for any non-tenant, app-role query (e.g. workspace-slug
@@ -114,13 +112,9 @@ function getAuthDb(): ReturnType<typeof drizzle<typeof schema>> {
     if (!authDatabaseUrl) {
       throw new Error("AUTH_DATABASE_URL must be set to construct the auth Drizzle client (@mega-crm/db)");
     }
-    authPool = new Pool({ connectionString: authDatabaseUrl });
-    // CR-03 precedent (see `pool` above / scan.ts's getScanPool): without
-    // this listener an idle-connection termination surfaces as an uncaught
-    // 'error' event and crashes the process.
-    authPool.on("error", (err) => {
-      console.error("idle auth pg pool client error (connection dropped)", err);
-    });
+    // Phase 14 plan 03 (DB-14, D-11): same factory as `pool` above, named
+    // "auth" in PG_POOL_SIZES.
+    authPool = createPgPool({ connectionString: authDatabaseUrl, name: "auth" });
     authDbInstance = drizzle(authPool, { schema });
   }
   return authDbInstance;
@@ -176,3 +170,12 @@ export { TENANT_GUC_KEY } from "./rls.js";
 // (indirectly, via drizzle-orm's own migrate()) and apps/api's /readyz route
 // (directly, via assertMigrationsCurrent).
 export * from "./migration-journal.js";
+// Phase 14 plan 03 (DB-14, D-11): the one factory every first-party
+// production Postgres pool must go through (Task 1/2). Re-exported from the
+// package root for consumers that already import from "@mega-crm/db" and
+// have DATABASE_URL available at that point; consumers that must NOT
+// eagerly construct this module's own top-level `pool`/`authDb` (e.g.
+// packages that stay dependency-light on env vars, per scan.ts's own lazy
+// pattern) import "@mega-crm/db/src/pool.js" directly instead -- see
+// packages/tenant-context's migrated call sites for that precedent.
+export * from "./pool.js";

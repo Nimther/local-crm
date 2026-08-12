@@ -1,6 +1,5 @@
-import { Pool } from "pg";
-
 import { resolveEnvPath } from "../../../scripts/env-path.mjs";
+import { createPgPool } from "../src/pool.js";
 import { PARTITIONED_TABLES } from "../src/partitions/ensure-partitions.js";
 import { relocateAllDefaultRows, type RelocationReport } from "../src/partitions/relocate-default.js";
 
@@ -41,6 +40,18 @@ import { relocateAllDefaultRows, type RelocationReport } from "../src/partitions
  * NEVER wired into `predev`, `pretest`, or any CI workflow (T-09-22) --
  * this changes live partitioned data and runs only when an operator
  * invokes it deliberately.
+ *
+ * Phase 14 plan 03 (DB-14, D-11): both pools below are now built through
+ * `createPgPool` (this had NO error listener at all before this change --
+ * one of two scripts this plan found in that state, the other being
+ * `replay-webhook-journal.ts`). `createPgPool`'s fail-closed
+ * `assertDsnRequestsTls` never fires here: this script runs under `tsx`
+ * with no `NODE_ENV=production` set, so an operator running a report or
+ * relocation against a local database is never forced onto TLS. The
+ * PRODUCTION TLS guarantee for this script's actual traffic comes from
+ * whatever `sslmode` the operator's own `DATABASE_URL`/
+ * `PARTITION_RELOCATION_ADMIN_DATABASE_URL` carries in the production env
+ * file (SPECIFICATION.md §3) -- not from anything this script enforces.
  */
 
 function formatReport(report: RelocationReport): string {
@@ -104,8 +115,11 @@ async function main(): Promise<void> {
   const databaseName = new URL(databaseUrl).pathname.replace(/^\//, "");
   console.log(`Relocating DEFAULT partition rows on database: ${databaseName}`);
 
-  const pool = new Pool({ connectionString: databaseUrl });
-  const adminPool = new Pool({ connectionString: adminDatabaseUrl });
+  const pool = createPgPool({ connectionString: databaseUrl, name: "relocate-default-partition-rows" });
+  const adminPool = createPgPool({
+    connectionString: adminDatabaseUrl,
+    name: "relocate-default-partition-rows-admin",
+  });
   let report: RelocationReport;
   try {
     report = await relocateAllDefaultRows(pool, adminPool, PARTITIONED_TABLES);
