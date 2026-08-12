@@ -220,6 +220,52 @@ This is more tolerable than it sounds for the ticks that already exist: several 
 
 ---
 
+## 11. The daily-metric day-semantics contract (CMP-02/CMP-03)
+
+Every number in `workspace_daily_rollup` answers the same question — "how many of X happened on day D" — and this section is the single place that says what "day D" means, so it is stated once and referenced, not restated with a subtly different meaning every time a new counter is added. This contract has to agree word for word with the one written into `packages/db/src/schema/workspace-daily-rollup.ts`'s own doc comment, because that file is read by the engineers changing the write paths and this one is read by everyone else — two descriptions of the same rule is the exact failure this section exists to prevent.
+
+**The contract:**
+
+1. `day` is always a UTC calendar day, never a local or session-timezone day. Every day-bucketing cast forces `AT TIME ZONE 'UTC'` explicitly — a bare `::date` cast on a `timestamptz` converts through the session's `TimeZone` GUC first, which would otherwise make the same row report a different day depending on which pooled connection happened to serve the query.
+2. `sent_count` is bucketed by `sends.sent_at` — the SendGrid-acceptance timestamp. The reconciliation worker is its sole writer; the incremental webhook-driven path never sets it, because a dispatched send produces no webhook event of its own to trigger an increment from.
+3. Every event-derived counter (`delivered_count`, `opened_count`, `clicked_count`, `bounced_count`, `unsubscribed_count`) is bucketed by the provider event's own `occurred_at` UTC day on the incremental path, and by the corresponding `sends` fact column's UTC day on the reconciliation path. The two must agree, because reconciliation is an absolute overwrite of whatever the incremental path already wrote for that `(workspace, day)` — a disagreement here silently corrupts the number reconciliation was supposed to correct.
+4. `unknown` sends are excluded from every rollup count. They get their own visible count instead, in campaign progress and send-log stats (plan 13-03) — a marketer reading "sent: 40, outcome unknown: 3" sees an honest accounting; folding those 3 silently into either `sent_count` or a failure count would assert something the platform does not know to be true.
+5. An increment for any day other than today (UTC) marks that day's row dirty (`dirtied_at`, migration 0056) instead of trusting the incremental write alone. The next reconciliation tick re-verifies every dirty day against a fresh scan of `sends`, then clears the mark — but only if the mark predates the sweep's own start time, so a second late event arriving mid-sweep is never lost to an unconditional clear. Lateness is judged purely by UTC calendar day, independent of how wide the reconciler's own standing window happens to be — an event arriving in the last minute before UTC midnight is still caught, which a window-edge-relative predicate would have missed.
+
+**One discontinuity worth naming plainly, because an unexplained step change in a dashboard series is exactly the kind of thing that gets investigated as a bug months later:** the public unsubscribe route started incrementing `workspace_daily_rollup.unsubscribed_count` as of plan 13-08 — it never did before, because the increment function was unreachable from `apps/api` until that plan relocated it into a package both applications import. Daily unsubscribe counts are higher from that plan's deploy date onward for the same underlying tenant behavior; nothing about how a marketer unsubscribes changed.
+
+Exact column names, the reconciliation window, and the dirty-day sweep's page limit: [`SPECIFICATION.md` §4.2, §5.1](./SPECIFICATION.md).
+
+## 12. The erasure-and-evidence model (CMP-04)
+
+A contact-deletion request sits at the intersection of two obligations that pull in opposite directions: the right to have personal data erased, and the platform's own need to later prove a send or a suppression was lawful. A hard `DELETE` satisfies the first and destroys the second. This platform's answer is **anonymize in place, retain the evidence skeleton, scrub the linked PII asynchronously** — never a hard delete of the contact row, and never a permanent skip of the scrub.
+
+**Synchronous, inside the delete request's own transaction:** the contact row is anonymized — every PII-bearing column nulled (or emptied, for the one `NOT NULL` array column), the row and every foreign key pointing at it left in place — subscription status and suppression are resolved immediately so mail to that address stops before the request even returns, an auditable erasure record is written proving the erasure happened and when, and a scrub job is queued. All four of these happen in the one transaction the delete request opens; nothing about "erasure happened" is left to a later, unobserved step.
+
+**Asynchronous, bounded and resumable:** a scrub worker walks the linked partitioned tables in checkpointed pages and rewrites their JSONB payloads. The mechanism is allowlist reconstruction, never a denylist — one table's evidence-bearing column keeps only a small, explicitly named set of provider fields (the event type, the provider's own message and event ids, delivery status, and similar forensic-but-not-personal fields); a free-text field capable of embedding the recipient's own address in prose, or a tenant-invented field nobody anticipated at design time, is gone by construction because it was never on the list to begin with — not because something scanned for it and failed to find it. A second linked table's freeform properties have no allowlist at all, because their key space is tenant-defined and cannot be enumerated in advance; that column is unconditionally rewritten to empty.
+
+**Deliberately NOT scrubbed, and why:** the webhook ingress journal (`ingress_journal`) and its quarantine table (`send_event_quarantine`) are exempt from this scrub. Their own pruning horizon is measured in single-digit days, which is faster than a typical erasure's own completion window — by the time an erasure would reach that data, retention has already disposed of it. Building a second scrub path into short-lived operational tables that are already self-pruning would add a real mechanism to close a window that closes itself first.
+
+**What survives on purpose, permanently:** foreign keys, event types, and timestamps — the shape of evidence that a send or a suppression happened lawfully, stripped of the personal content that would make it identify anyone.
+
+**Known limitation, stated rather than left to be discovered:** a contact hard-deleted before this model existed has no retrofittable evidence trail. There is nothing to migrate, because the row is already gone — this is a fact about history, not a defect in the current design.
+
+Exact column names, the retention horizons, and the allowlist's contents: [`SPECIFICATION.md` §4.2, §5.15, §6.16](./SPECIFICATION.md).
+
+## 13. The webhook ingestion, backfill, and replay flow (CMP-05/CMP-07/CMP-08)
+
+A SendGrid Event Webhook batch crosses four trust boundaries before it becomes a row this platform will act on, and the order they happen in is itself part of the design: verify the batch is genuinely from SendGrid and recent, durably record that a verified batch arrived, only then act on its contents, and keep a recovery path for every place a batch can still be lost after all of that.
+
+**Order of operations, and why each step is where it is:** the request's signature and header timestamp are verified first, against the raw, unparsed bytes — parsing before verifying would let an attacker manipulate a JSON body between the byte string the signature was computed over and the object the platform actually reads. Only a batch that passes both checks is journaled — written to a durable table — and that journal write happens strictly before the batch is handed to the queue, inside the same request, so that a journal-write failure fails the request closed with nothing enqueued, rather than losing the batch's only record of ever having arrived. The route never falls back to enqueueing without a successful journal write; SendGrid's own retry window is the sole recovery path for that specific failure.
+
+**Once journaled and queued**, each event's own provider-supplied timestamp is bounded to a narrow window before it is allowed to choose a partition or enter the dedup key — an event outside that window is quarantined individually, without failing the rest of the batch, because one manipulated or clock-skewed event should not cost every other event in the same delivery. Deduplication itself is keyed on `(workspace_id, send_id, event_type, occurred_at)` — a server-observed compound key — rather than the provider's own event id, because that id was found to be unstable across SendGrid's own redeliveries: a redelivered event carrying a *different* provider id used to insert a second row and double-count delivered/opened/clicked metrics. The provider id is retained as a forensic column, demoted out of the identity the platform relies on for correctness.
+
+**Recovery from loss after receipt** has two paths at two different scales. A scheduled sweep periodically finds journaled batches that were never marked ingested and replays them through the identical path a live request would take — bounded by an attempt cap and a page limit per tick, so a systemic failure cannot turn the sweep itself into an unbounded resource drain. For a known incident affecting a specific window, an operator-invoked tool replays an explicit workspace and time range directly, without waiting for the sweep's own schedule. Both paths converge on the same durability guarantee: a verified batch that reached the platform is never silently lost to a crash between "received" and "processed," only ever delayed until the next opportunity to finish processing it.
+
+Exact windows, queue names, and the dedup key's construction: [`SPECIFICATION.md` §4.2, §5.13, §6.8](./SPECIFICATION.md).
+
+---
+
 ## Forward-looking — not yet true
 
 Everything above describes code in this repository today. The items below do not exist yet and are named with the phase that introduces them, so nothing here can be mistaken for a description of the current system.
