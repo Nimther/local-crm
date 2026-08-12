@@ -1,6 +1,7 @@
-import { Pool, type PoolClient } from "pg";
+import type { Pool, PoolClient } from "pg";
 
 import { resolveEnvPath } from "../../../scripts/env-path.mjs";
+import { createPgPool } from "../src/pool.js";
 
 /**
  * Phase 11, plan 11-02 (DLV-03/ROADMAP pre-migration audit, Pitfall 2) — a
@@ -218,18 +219,11 @@ async function main(): Promise<void> {
   const databaseUrl = requireEnv("DATABASE_URL");
   const scanDatabaseUrl = requireEnv("SCAN_DATABASE_URL");
 
-  const appPool = new Pool({ connectionString: databaseUrl });
-  // CR-03 precedent (see @mega-crm/db's own pool.on): without this listener
-  // an idle-connection termination surfaces as an uncaught 'error' event and
-  // crashes the process.
-  appPool.on("error", (err) => {
-    console.error("idle pg pool client error (connection dropped) -- app pool", err);
-  });
-
-  const scanPool = new Pool({ connectionString: scanDatabaseUrl });
-  scanPool.on("error", (err) => {
-    console.error("idle pg pool client error (connection dropped) -- scan pool", err);
-  });
+  // Phase 14 plan 03 (DB-14, D-11): built through the shared factory; see
+  // relocate-default-partition-rows.ts's own note on why the production
+  // TLS guarantee here comes from the env file's DSNs, not from this script.
+  const appPool = createPgPool({ connectionString: databaseUrl, name: "audit-sends-history" });
+  const scanPool = createPgPool({ connectionString: scanDatabaseUrl, name: "audit-sends-history-scan" });
 
   try {
     const [statusCountsResult, totalResult, kindCountsResult, boundsResult, workspacesResult] =

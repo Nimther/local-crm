@@ -1,6 +1,7 @@
-import { Pool } from "pg";
+import type { Pool } from "pg";
 
 import { resolveEnvPath } from "../../../scripts/env-path.mjs";
+import { createPgPool } from "../src/pool.js";
 
 /**
  * Phase 14 (DB-12, Pitfall 17), Task 1: the operator-invoked companion to
@@ -292,10 +293,11 @@ async function main(): Promise<void> {
   const pageSize = parsePageSize(process.argv);
 
   const authDatabaseUrl = requireEnv("AUTH_DATABASE_URL");
-  const authPool = new Pool({ connectionString: authDatabaseUrl });
-  authPool.on("error", (err) => {
-    console.error("idle pg pool client error (connection dropped) -- auth pool", err);
-  });
+  // Phase 14 plan 03 (DB-14, D-11): built through the shared factory; not
+  // in this plan's own <files_modified> list -- found by the acceptance
+  // grep's repo-wide scope, migrated for the same reason as the five named
+  // scripts.
+  const authPool = createPgPool({ connectionString: authDatabaseUrl, name: "count-member-duplicates-auth" });
 
   try {
     if (!resolve) {

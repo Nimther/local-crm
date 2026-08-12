@@ -1,9 +1,10 @@
-import { Pool } from "pg";
+import type { Pool } from "pg";
 import { Queue } from "bullmq";
 import { buildJobOptions, buildRedisConnectionOptions, STANDARD_JOB_RETENTION } from "@mega-crm/queue-core";
 import { buildWebhookEventsJobPayload, WEBHOOK_EVENTS_QUEUE, type WebhookEventsJob } from "@mega-crm/shared-schemas";
 
 import { resolveEnvPath } from "../../../scripts/env-path.mjs";
+import { createPgPool } from "../src/pool.js";
 
 /**
  * Phase 13 (CMP-08, D-06, plan 13-06), Task 3 -- an operator-invoked CLI for
@@ -67,6 +68,15 @@ import { resolveEnvPath } from "../../../scripts/env-path.mjs";
  * asserted nothing at all) -- `<verify>`'s automated line asserts a
  * non-zero exit for a missing `--workspace`, and that assertion would
  * silently depend on a reachable database if connection happened first.
+ *
+ * Phase 14 plan 03 (DB-14, D-11): the pool below is now built through
+ * `createPgPool` -- this file had NO error listener at all before this
+ * change, the newest of the two scripts this plan found in that state (the
+ * other being `relocate-default-partition-rows.ts`, from Phase 9; this one
+ * is from Phase 13's plan 13-06). `assertDsnRequestsTls` never fires here
+ * under `tsx` with no `NODE_ENV=production` -- the production TLS
+ * guarantee for this script comes from its `DATABASE_URL`'s own `sslmode`
+ * in the production env file, not from this script.
  */
 
 const DEFAULT_PAGE_SIZE = 500;
@@ -258,7 +268,7 @@ async function main(): Promise<void> {
       (args.dryRun ? " (dry run -- nothing will be enqueued)" : "")
   );
 
-  const pool = new Pool({ connectionString: databaseUrl });
+  const pool = createPgPool({ connectionString: databaseUrl, name: "replay-webhook-journal" });
   const queue =
     args.dryRun || !redisUrl
       ? undefined
