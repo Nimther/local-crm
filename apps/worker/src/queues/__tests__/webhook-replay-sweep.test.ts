@@ -18,6 +18,7 @@ import {
   WEBHOOK_REPLAY_SWEEP_PAGE_LIMIT,
   WEBHOOK_REPLAY_MAX_ATTEMPTS,
 } from "../webhook-replay-sweep.worker.js";
+import { SEND_EVENT_QUARANTINE_RETENTION_DAYS } from "@mega-crm/db/src/webhooks/quarantine.js";
 
 /**
  * Phase 13 (CMP-08, D-06/D-07, plan 13-06), Task 1: proves the replay-sweep's
@@ -114,6 +115,45 @@ describe("webhook-replay-sweep.worker.ts (CMP-08, D-06, plan 13-06)", () => {
           [journalId]
         );
         return rows[0];
+      })
+    );
+  }
+
+  /**
+   * Gap-closure plan 13-16, Task 2: seeds a `send_event_quarantine` row with
+   * a directly-controlled `received_at` (mirrors `seedJournalRow`'s own
+   * `receivedAtMinutesAgo` override) -- `writeQuarantinedEvent` always
+   * stamps `received_at` at `now()` and has no backdating parameter.
+   */
+  async function seedQuarantineRow(workspaceId: string, overrides: { receivedAtMinutesAgo?: number } = {}): Promise<string> {
+    const { receivedAtMinutesAgo = 30 } = overrides;
+    return withTenant(workspaceId, () =>
+      withTenantTransaction(async (client) => {
+        const { rows } = await client.query<{ id: string }>(
+          `INSERT INTO send_event_quarantine
+             (workspace_id, sg_event_id, event_type, raw_event, reason, occurred_at_candidate, received_at)
+           VALUES ($1, $2, $3, $4, $5, $6, now() - make_interval(mins => $7))
+           RETURNING id`,
+          [
+            workspaceId,
+            `sg-${randomUUID()}`,
+            "delivered",
+            JSON.stringify({ event: "delivered" }),
+            "too_old",
+            null,
+            receivedAtMinutesAgo,
+          ]
+        );
+        return rows[0].id;
+      })
+    );
+  }
+
+  async function quarantineRowExists(workspaceId: string, quarantineId: string): Promise<boolean> {
+    return withTenant(workspaceId, () =>
+      withTenantTransaction(async (client) => {
+        const { rows } = await client.query(`SELECT 1 FROM send_event_quarantine WHERE id = $1`, [quarantineId]);
+        return rows.length > 0;
       })
     );
   }
@@ -443,6 +483,110 @@ describe("webhook-replay-sweep.worker.ts (CMP-08, D-06, plan 13-06)", () => {
       expect(afterSecondTick).toBeDefined();
       expect(afterSecondTick?.rawBatch).toBeNull();
       expect(afterSecondTick?.payloadPurgedAt?.getTime()).toBe(afterFirstTick?.payloadPurgedAt?.getTime());
+    });
+  });
+
+  /**
+   * Gap-closure plan 13-16, Task 2: `pruneSendEventQuarantine` runs on the
+   * SAME tick, in the SAME per-workspace transaction, immediately after both
+   * journal retention calls -- reported as its own `quarantineRowsPruned`
+   * summary field, never summed into `journalRowsPruned`/
+   * `journalPayloadsPurged`. `quarantineRetentionDays` defaults to
+   * `SEND_EVENT_QUARANTINE_RETENTION_DAYS` and is independently settable
+   * from the journal's `retentionDays`.
+   */
+  describe("quarantine retention (Task 2, gap-closure plan 13-16)", () => {
+    it("one expired quarantine row in each of two workspaces, no expired journal rows: reports quarantineRowsPruned 2 and both rows are gone", async () => {
+      const workspaceA = await freshWorkspaceId("quarantine-two-ws-a");
+      const workspaceB = await freshWorkspaceId("quarantine-two-ws-b");
+      const rowA = await seedQuarantineRow(workspaceA, { receivedAtMinutesAgo: 8 * 24 * 60 });
+      const rowB = await seedQuarantineRow(workspaceB, { receivedAtMinutesAgo: 8 * 24 * 60 });
+
+      const summary = await runWebhookReplaySweep({ workspaceIds: [workspaceA, workspaceB] });
+
+      expect(summary.quarantineRowsPruned).toBe(2);
+      expect(summary.journalRowsPruned).toBe(0);
+      expect(summary.journalPayloadsPurged).toBe(0);
+      expect(await quarantineRowExists(workspaceA, rowA)).toBe(false);
+      expect(await quarantineRowExists(workspaceB, rowB)).toBe(false);
+    });
+
+    it("a quarantine row received within the horizon is left in place and quarantineRowsPruned is 0", async () => {
+      const workspaceId = await freshWorkspaceId("quarantine-fresh");
+      const rowId = await seedQuarantineRow(workspaceId, { receivedAtMinutesAgo: 30 });
+
+      const summary = await runWebhookReplaySweep({ workspaceIds: [workspaceId] });
+
+      expect(summary.quarantineRowsPruned).toBe(0);
+      expect(await quarantineRowExists(workspaceId, rowId)).toBe(true);
+    });
+
+    it("an expired quarantine row and an expired completed journal row in the same workspace report 1 and 1 in separate fields", async () => {
+      const workspaceId = await freshWorkspaceId("quarantine-and-journal");
+      const quarantineId = await seedQuarantineRow(workspaceId, { receivedAtMinutesAgo: 8 * 24 * 60 });
+      const journalId = await seedJournalRow(workspaceId, { receivedAtMinutesAgo: 8 * 24 * 60, ingestionCompletedAt: new Date() });
+
+      const summary = await runWebhookReplaySweep({ workspaceIds: [workspaceId] });
+
+      expect(summary.quarantineRowsPruned).toBe(1);
+      expect(summary.journalRowsPruned).toBe(1);
+      expect(await quarantineRowExists(workspaceId, quarantineId)).toBe(false);
+      expect(await readJournalRow(workspaceId, journalId)).toBeUndefined();
+    });
+
+    it("a quarantineRetentionDays override and a different retentionDays override age the two tables independently in the same tick", async () => {
+      const workspaceId = await freshWorkspaceId("quarantine-independent-horizon");
+      // Both rows are 3 days old. quarantineRetentionDays=2 ages the
+      // quarantine row out; retentionDays=5 leaves the (completed) journal
+      // row in place -- proving the two horizons are independently settable.
+      const quarantineId = await seedQuarantineRow(workspaceId, { receivedAtMinutesAgo: 3 * 24 * 60 });
+      const journalId = await seedJournalRow(workspaceId, { receivedAtMinutesAgo: 3 * 24 * 60, ingestionCompletedAt: new Date() });
+
+      const summary = await runWebhookReplaySweep({
+        workspaceIds: [workspaceId],
+        quarantineRetentionDays: 2,
+        retentionDays: 5,
+      });
+
+      expect(summary.quarantineRowsPruned).toBe(1);
+      expect(summary.journalRowsPruned).toBe(0);
+      expect(await quarantineRowExists(workspaceId, quarantineId)).toBe(false);
+      expect(await readJournalRow(workspaceId, journalId)).toBeDefined();
+    });
+
+    it("a tick that finds a stuck journal row still enqueues its replay job, and the quarantine prune in the same transaction does not change that outcome", async () => {
+      const workspaceId = await freshWorkspaceId("quarantine-replay-ordering");
+      await seedJournalRow(workspaceId, { receivedAtMinutesAgo: 30 });
+      const quarantineId = await seedQuarantineRow(workspaceId, { receivedAtMinutesAgo: 8 * 24 * 60 });
+
+      const summary = await runWebhookReplaySweep({ workspaceIds: [workspaceId] });
+
+      expect(summary.rowsEnqueued).toBe(1);
+      expect(await countQueuedJobsFor(workspaceId)).toBe(1);
+      expect(summary.quarantineRowsPruned).toBe(1);
+      expect(await quarantineRowExists(workspaceId, quarantineId)).toBe(false);
+    });
+
+    it("a tick over a workspace with no quarantine rows at all completes normally and reports 0 for quarantineRowsPruned", async () => {
+      const workspaceId = await freshWorkspaceId("quarantine-none");
+      await seedJournalRow(workspaceId, { receivedAtMinutesAgo: 30 });
+
+      const summary = await runWebhookReplaySweep({ workspaceIds: [workspaceId] });
+
+      expect(summary.quarantineRowsPruned).toBe(0);
+    });
+
+    it("SEND_EVENT_QUARANTINE_RETENTION_DAYS is the default quarantineRetentionDays applied when no override is supplied", async () => {
+      const workspaceId = await freshWorkspaceId("quarantine-default-horizon");
+      // Aged one day past the default horizon -- pruned with no override.
+      const rowId = await seedQuarantineRow(workspaceId, {
+        receivedAtMinutesAgo: (SEND_EVENT_QUARANTINE_RETENTION_DAYS + 1) * 24 * 60,
+      });
+
+      const summary = await runWebhookReplaySweep({ workspaceIds: [workspaceId] });
+
+      expect(summary.quarantineRowsPruned).toBe(1);
+      expect(await quarantineRowExists(workspaceId, rowId)).toBe(false);
     });
   });
 });
