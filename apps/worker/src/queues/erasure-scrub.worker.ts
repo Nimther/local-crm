@@ -37,6 +37,19 @@ import {
  * for the specific cases (`reason` embedding an address, a tenant-invented
  * key holding a person's name) that a denylist provably cannot catch and
  * this allowlist closes by never copying them forward at all.
+ *
+ * SCOPE BOUNDARY (gap-closure plan 13-16, closing 13-VERIFICATION.md Gap #1):
+ * this worker rewrites `send_events.payload` and `events.properties` and
+ * deliberately does NOT reach `send_event_quarantine` or `ingress_journal`.
+ * Both of those tables are disposed of by their own retention horizons on
+ * the `webhook-replay-sweep` tick instead (`SEND_EVENT_QUARANTINE_RETENTION_DAYS`,
+ * `INGRESS_JOURNAL_RETENTION_DAYS`, both `packages/db/src/webhooks/`), and
+ * both horizons expire faster than an erasure request's own completion
+ * window -- a row carrying an erasure-requested contact's data is gone from
+ * either table on its own before this scrub would ever need to touch it.
+ * This exclusion is falsifiable, not permanent: if either horizon is ever
+ * lengthened past that completion window, the exemption argument stops
+ * holding and this worker's scope must be reconsidered, not assumed.
  */
 
 /**
