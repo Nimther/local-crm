@@ -63,6 +63,7 @@ import { registerWebhookRoutes } from "./modules/webhooks/webhooks.routes.js";
 import { registerWebhookSettingsRoutes } from "./modules/webhooks/webhook-settings.routes.js";
 import { registerAnalyticsRoutes } from "./modules/analytics/index.js";
 import { registerSendLogRoutes } from "./modules/send-log/send-log.routes.js";
+import { ensureMigrationsCurrentOnce, registerOpsHealthRoutes } from "./modules/ops/health.js";
 
 /**
  * Options for `buildServer`. The only override that exists today is the
@@ -197,6 +198,39 @@ export async function buildServer(options: BuildServerOptions = {}) {
         frameAncestors: ["'none'"],
       },
     },
+  });
+
+  await app.register(registerOpsHealthRoutes);
+
+  // DB-06 (paired with OPS-05, ROADMAP § Phase 14): "does not accept traffic
+  // until migrations complete" is implemented as a request-time refusal,
+  // not a startup sleep. Runs before every route's own preHandler/handler
+  // (Fastify's onRequest fires earliest in the lifecycle, before body
+  // parsing) and deliberately never reads or consumes `request.body` --
+  // the SendGrid webhook route's raw-body ECDSA signature verification
+  // depends on those exact bytes reaching its own content-type parser
+  // untouched (RESEARCH.md: body-parsing-before-verification is the most
+  // common SendGrid integration bug).
+  //
+  // Migration currency ONLY -- never Postgres-liveness-in-general, never
+  // Redis. See `ensureMigrationsCurrentOnce`'s own header comment in
+  // health.ts for the full DB-06-vs-OPS-05 split rationale: widening this
+  // guard would make every apps/api integration suite depend on a live
+  // Redis for routes that never touch it. `/readyz` is where all three
+  // checks live; this guard is where the migration half is enforced
+  // against every request. Do not "fix" this asymmetry without re-reading
+  // that comment first.
+  app.addHook("onRequest", async (request, reply) => {
+    if (request.url === "/healthz" || request.url === "/readyz") return;
+    try {
+      await ensureMigrationsCurrentOnce();
+    } catch (err) {
+      await reply.code(503).send({
+        ready: false,
+        error: "migrations_pending",
+        detail: err instanceof Error ? err.message : String(err),
+      });
+    }
   });
 
   await app.register(authPlugin);

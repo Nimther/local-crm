@@ -171,3 +171,8 @@ export * from "./schema/workspace-suppression-keys.js";
 // `@mega-crm/db` -- this plan is the first to need them.
 export * from "./schema/erasure-records.js";
 export { TENANT_GUC_KEY } from "./rls.js";
+// Phase 14 plan 01 (D-13, DB-05/DB-06, OPS-04/OPS-05): the one shared
+// definition of "a migration is applied", consumed by scripts/migrate-runner.mjs
+// (indirectly, via drizzle-orm's own migrate()) and apps/api's /readyz route
+// (directly, via assertMigrationsCurrent).
+export * from "./migration-journal.js";

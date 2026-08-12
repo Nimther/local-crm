@@ -1,4 +1,5 @@
-import { mkdirSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -20,6 +21,14 @@ import {
   LOOKAHEAD_MONTHS,
   PARTITIONED_TABLES,
 } from "@mega-crm/db/src/partitions/ensure-partitions.js";
+// Phase 14 plan 01 (Task 3, Rule 1 fix): this fixture applies each migration
+// file as raw SQL and tracks "applied" in its OWN `_test_migrations_applied`
+// table -- it never touches drizzle's own `"drizzle"."__drizzle_migrations"`
+// journal. Once `/readyz` and the onRequest guard started reading THAT
+// journal (via `assertMigrationsCurrent`), every test database this fixture
+// migrates looked permanently un-migrated to them, 503-ing almost the entire
+// suite. Same deep-specifier precedent as `ensure-partitions.js` above.
+import { readShippedMigrations } from "@mega-crm/db/src/migration-journal.js";
 
 /**
  * 08-06 (QG-04, D-13) — the ONE migration-applying test fixture.
@@ -127,12 +136,30 @@ async function applyPendingMigrations(pool: Pool): Promise<void> {
       )
     `);
 
+    // Phase 14 plan 01 (Task 3, Rule 1 fix): mirror drizzle-orm's own
+    // migrator schema/table EXACTLY (`packages/db/src/migration-journal.ts`'s
+    // header documents the shape: `id serial primary key, hash text not
+    // null, created_at bigint`, storing the journal's own `when` epoch-ms
+    // verbatim) -- this fixture is a SECOND writer of "applied", and
+    // `assertMigrationsCurrent`'s readers (`/readyz`, the onRequest guard)
+    // must never be able to tell the difference between a database this
+    // fixture migrated and one the real migrate-runner migrated.
+    await client.query(`CREATE SCHEMA IF NOT EXISTS "drizzle"`);
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS "drizzle"."__drizzle_migrations" (
+        id SERIAL PRIMARY KEY,
+        hash text NOT NULL,
+        created_at bigint
+      )
+    `);
+
     mkdirSync(MIGRATIONS_DIR, { recursive: true });
     // 08-09: listing and per-file application now come from migration-runner.ts,
     // so the fixture and the two migration tests share one mechanism. The
     // zero-padded-filename check that used to be a comment here is enforced
     // inside listMigrationFiles.
     const files = listMigrationFiles(MIGRATIONS_DIR);
+    const shippedByTag = new Map(readShippedMigrations(MIGRATIONS_DIR).map((m) => [m.tag, m.when]));
 
     for (const file of files) {
       const { rows } = await client.query<{ exists: boolean }>(
@@ -143,6 +170,21 @@ async function applyPendingMigrations(pool: Pool): Promise<void> {
 
       await applyMigrationFile(client, MIGRATIONS_DIR, file);
       await client.query("INSERT INTO _test_migrations_applied (filename) VALUES ($1)", [file]);
+
+      // The migration filename (minus `.sql`) IS the journal tag.
+      const tag = file.replace(/\.sql$/, "");
+      const when = shippedByTag.get(tag);
+      if (when === undefined) {
+        throw new Error(
+          `applyPendingMigrations: "${file}" has no matching entry in meta/_journal.json -- cannot mirror drizzle's own journal`,
+        );
+      }
+      const fileContents = readFileSync(path.join(MIGRATIONS_DIR, file), "utf8");
+      const hash = createHash("sha256").update(fileContents).digest("hex");
+      await client.query(
+        `INSERT INTO "drizzle"."__drizzle_migrations" ("hash", "created_at") VALUES ($1, $2)`,
+        [hash, when],
+      );
     }
 
     // 09-03 (D-05): migrations create FROZEN partition months (migration
