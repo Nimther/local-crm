@@ -198,6 +198,10 @@ Per this worktree's repo-specific rules, SPECIFICATION.md filing is deferred to 
 - **§8 (Расхождения), if tracked there:** none -- no new package, no new environment variable, no new HTTP route, no new queue/worker. `drizzle-kit`, `pg`, and `vitest` are all already-pinned dependencies this plan reused via their existing programmatic APIs.
 - New docs artifact: `docs/runbooks/migration-rollback-and-roll-forward.md` (not a SPECIFICATION.md section, but worth noting in whatever index/README lists this repository's runbooks, if one exists).
 
+## Self-Check: PASSED
+
+All 8 created/referenced files confirmed present on disk (`migration-tiers.ts`, `migration-tiers.test.ts`, `check-empty-diff.ts`, `migration-empty-diff.test.ts`, `0062_snapshot.json`, `migration-rollback-rehearsal.test.ts`, the runbook, this SUMMARY). All 4 commits (`96490c7`, `f3ef2c0`, `5774f19`, `e21cb26`) confirmed present in `git log`.
+
 ---
 *Phase: 14-deployment-database-durability*
 *Completed: 2026-08-13*
