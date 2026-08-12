@@ -23,6 +23,7 @@
     "db:count-member-duplicates": "tsx scripts/count-member-duplicates.ts",
     "db:resolve-member-duplicates": "tsx scripts/count-member-duplicates.ts --resolve",
     "db:check-empty-diff": "tsx scripts/check-empty-diff.ts",
+    "test:rehearsal": "vitest run src/__tests__/migration-rollback-rehearsal.test.ts",
     "test": "vitest run"
   },
   "dependencies": {
