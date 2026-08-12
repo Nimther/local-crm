@@ -16,6 +16,7 @@ import {
   INGRESS_JOURNAL_RETENTION_DAYS,
   INGRESS_JOURNAL_STUCK_THRESHOLD_MINUTES,
 } from "@mega-crm/db/src/webhooks/ingress-journal.js";
+import { pruneSendEventQuarantine, SEND_EVENT_QUARANTINE_RETENTION_DAYS } from "@mega-crm/db/src/webhooks/quarantine.js";
 import { registerTrackedQueue } from "./queue-registry.js";
 
 /**
@@ -136,6 +137,15 @@ export interface RunWebhookReplaySweepOptions {
   maxAttempts?: number;
   /** Test-only override of `INGRESS_JOURNAL_RETENTION_DAYS`. */
   retentionDays?: number;
+  /**
+   * Test-only override of `SEND_EVENT_QUARANTINE_RETENTION_DAYS` (gap-closure
+   * plan 13-16, Task 2). Deliberately a SEPARATE option from `retentionDays`
+   * rather than reusing it: the independence of the two horizons is the
+   * property migration 0055's `send_event_quarantine` table comment asserts
+   * ("quarantine retention can be pruned independently"), and a shared knob
+   * would quietly remove it.
+   */
+  quarantineRetentionDays?: number;
 }
 
 export interface WebhookReplaySweepTickSummary {
@@ -160,6 +170,16 @@ export interface WebhookReplaySweepTickSummary {
    * the signal an operator needs (Codex follow-up review, WARNING finding 6).
    */
   journalPayloadsPurged: number;
+  /**
+   * `send_event_quarantine` rows PRUNED (deleted outright) this tick
+   * (gap-closure plan 13-16, Task 2) -- closes 13-VERIFICATION.md Gap #1.
+   * Deliberately reported as its own field, never summed with
+   * `journalRowsPruned` or `journalPayloadsPurged`: a rising quarantine-prune
+   * count is quarantine throughput ageing out, a different event from either
+   * journal counter, and folding the three into one number would make all
+   * three unreadable.
+   */
+  quarantineRowsPruned: number;
 }
 
 interface WorkspaceRow {
@@ -187,6 +207,7 @@ interface WorkspaceTickResult {
   rowsSkippedTombstoned: number;
   journalRowsPruned: number;
   journalPayloadsPurged: number;
+  quarantineRowsPruned: number;
 }
 
 interface WorkspaceTickThresholds {
@@ -194,6 +215,7 @@ interface WorkspaceTickThresholds {
   pageLimit: number;
   maxAttempts: number;
   retentionDays: number;
+  quarantineRetentionDays: number;
 }
 
 /**
@@ -277,7 +299,29 @@ async function runWorkspaceTick(
       const journalRowsPruned = await pruneIngressJournal(client, thresholds.retentionDays);
       const journalPayloadsPurged = await purgeExpiredIngressJournalPayloads(client, thresholds.retentionDays);
 
-      return { enqueueCandidates, rowsSkippedAttemptCapped, rowsSkippedTombstoned, journalRowsPruned, journalPayloadsPurged };
+      // Gap-closure plan 13-16, Task 2: a THIRD call, immediately after both
+      // journal retention calls above, still inside this same tenant-scoped
+      // transaction -- retention for `send_event_quarantine`, the sibling
+      // table created by the same migration (0055). This is a plain row
+      // delete, not the prune/purge split above it: a quarantined event is a
+      // terminal decision with no replay value and no cross-workspace
+      // reader, whereas an un-ingested journal row is evidence of a loss
+      // that plan 13-11's watchdog still needs to see. Placement here (not a
+      // second scheduler) is deliberate -- this transaction is already
+      // tenant-scoped for exactly the workspace whose rows are being
+      // deleted, which is what the table's fail-closed RLS policy requires,
+      // and coming after both journal calls keeps replay-then-retention
+      // ordering intact for this table too.
+      const quarantineRowsPruned = await pruneSendEventQuarantine(client, thresholds.quarantineRetentionDays);
+
+      return {
+        enqueueCandidates,
+        rowsSkippedAttemptCapped,
+        rowsSkippedTombstoned,
+        journalRowsPruned,
+        journalPayloadsPurged,
+        quarantineRowsPruned,
+      };
     })
   );
 }
@@ -302,6 +346,7 @@ export async function runWebhookReplaySweep(
     pageLimit: options.pageLimit ?? WEBHOOK_REPLAY_SWEEP_PAGE_LIMIT,
     maxAttempts: options.maxAttempts ?? WEBHOOK_REPLAY_MAX_ATTEMPTS,
     retentionDays: options.retentionDays ?? INGRESS_JOURNAL_RETENTION_DAYS,
+    quarantineRetentionDays: options.quarantineRetentionDays ?? SEND_EVENT_QUARANTINE_RETENTION_DAYS,
   };
 
   const workspaceIds = await discoverWorkspaceIds(options.workspaceIds);
@@ -312,6 +357,7 @@ export async function runWebhookReplaySweep(
   let rowsSkippedTombstoned = 0;
   let journalRowsPruned = 0;
   let journalPayloadsPurged = 0;
+  let quarantineRowsPruned = 0;
 
   for (const workspaceId of workspaceIds) {
     const result = await runWorkspaceTick(workspaceId, thresholds);
@@ -319,6 +365,7 @@ export async function runWebhookReplaySweep(
     rowsSkippedTombstoned += result.rowsSkippedTombstoned;
     journalRowsPruned += result.journalRowsPruned;
     journalPayloadsPurged += result.journalPayloadsPurged;
+    quarantineRowsPruned += result.quarantineRowsPruned;
 
     // Redis enqueue happens strictly AFTER the Postgres transaction above
     // has committed -- see runWorkspaceTick's own doc comment for the
@@ -337,6 +384,7 @@ export async function runWebhookReplaySweep(
     rowsSkippedTombstoned,
     journalRowsPruned,
     journalPayloadsPurged,
+    quarantineRowsPruned,
   };
   scrubbedConsole.log("webhook-replay-sweep: tick complete", summary);
   return summary;
