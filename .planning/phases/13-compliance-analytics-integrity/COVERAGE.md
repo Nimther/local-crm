@@ -3,7 +3,7 @@
 **Produced:** 2026-08-11 (plan time)
 **External API in scope:** Twilio SendGrid — Event Webhook (inbound capability surface) and Mail Send v3 / Email Activity API (outbound capability surface).
 
-This phase changes how the platform ingests, bounds, dedupes, journals and replays the SendGrid Event Webhook, so the webhook's **event-type surface** is the capability list that matters. Baseline is full coverage; every `OPT-OUT` carries a reason.
+This phase changes how the platform ingests, bounds, dedupes, journals and replays the SendGrid Event Webhook, so the webhook's **event-type surface** is the capability list that matters. Baseline is full coverage; every opted-out row below carries a reason.
 
 ## Event Webhook — event types
 
