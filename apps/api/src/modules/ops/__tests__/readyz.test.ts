@@ -2,7 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { createEphemeralDatabase, dropEphemeralDatabase } from "@mega-crm/test-support";
 import type { ReadinessResult } from "../health.js";
@@ -94,5 +94,197 @@ describe("GET /readyz: an un-migrated database refuses readiness, the runner mak
     const afterBody = after.json<ReadinessResult>();
     expect(afterBody.ready).toBe(true);
     expect(afterBody.checks.every((check) => check.ok)).toBe(true);
+  });
+});
+
+/**
+ * Phase 14 plan 01, Task 3 (OPS-05/DB-06) -- the remaining blocks below each
+ * need a DIFFERENT `DATABASE_URL`/`REDIS_URL` in force at `server.js`'s
+ * (and its transitive `@mega-crm/tenant-context` pool's) IMPORT time. A
+ * single test file only gets ONE fresh module registry from vitest, so
+ * every block below calls `vi.resetModules()` in its own `beforeAll` BEFORE
+ * overriding env vars and re-importing `server.js` -- this is the same
+ * pattern `packages/test-support/src/__tests__/db-fixture-advisory-unlock.test.ts`
+ * already uses for exactly this reason.
+ */
+
+// A port nothing listens on in this sandbox -- immediate connection refusal.
+const CLOSED_PORT = 1;
+
+/** A real, unauthenticated, already-registered route -- used to prove the guard fires (or doesn't) without needing any session/auth setup. */
+const NON_HEALTH_ROUTE = "/api/workspaces/definitely-not-a-real-slug-14-01/send-settings";
+
+async function provisionMigratedDatabase(workspace: string): Promise<{
+  databaseName: string;
+  adminDsn: string;
+  dsn: string;
+}> {
+  const created = await createEphemeralDatabase({ workspace });
+  const { code } = await runMigrateRunner(created.dsn);
+  if (code !== 0) {
+    throw new Error(`fixture setup: migrate-runner failed to migrate ${workspace}'s database`);
+  }
+  return created;
+}
+
+describe("GET /readyz: per-check 503 responses name the failing check", () => {
+  describe("Postgres unreachable", () => {
+    let app: Awaited<ReturnType<typeof buildServer>>;
+
+    beforeAll(async () => {
+      vi.resetModules();
+      process.env.DATABASE_URL = `postgresql://mega_crm_app:mega_crm_dev_pw@localhost:${String(CLOSED_PORT)}/mega_crm_unreachable`;
+      const serverModule = await import("../../../server.js");
+      app = await serverModule.buildServer();
+    });
+
+    afterAll(async () => {
+      await app?.close();
+    });
+
+    it("responds 503 naming the postgres check", async () => {
+      const response = await app.inject({ method: "GET", url: "/readyz" });
+      expect(response.statusCode).toBe(503);
+      const body = response.json<ReadinessResult>();
+      expect(body.ready).toBe(false);
+      const postgresCheck = body.checks.find((check) => check.name === "postgres");
+      expect(postgresCheck?.ok).toBe(false);
+    });
+  });
+
+  describe("Redis unreachable (Postgres and migrations fine)", () => {
+    let app: Awaited<ReturnType<typeof buildServer>>;
+    let databaseName: string;
+    let adminDsn: string;
+
+    beforeAll(async () => {
+      const migrated = await provisionMigratedDatabase("readyz-redis-down");
+      databaseName = migrated.databaseName;
+      adminDsn = migrated.adminDsn;
+
+      vi.resetModules();
+      process.env.DATABASE_URL = migrated.dsn;
+      process.env.REDIS_URL = `redis://localhost:${String(CLOSED_PORT)}`;
+      const serverModule = await import("../../../server.js");
+      app = await serverModule.buildServer();
+    });
+
+    afterAll(async () => {
+      await app?.close();
+      if (databaseName) await dropEphemeralDatabase(databaseName, adminDsn);
+    });
+
+    it("responds 503 naming the redis check, with postgres and migrations both ok", async () => {
+      const response = await app.inject({ method: "GET", url: "/readyz" });
+      expect(response.statusCode).toBe(503);
+      const body = response.json<ReadinessResult>();
+      expect(body.ready).toBe(false);
+      const redisCheck = body.checks.find((check) => check.name === "redis");
+      expect(redisCheck?.ok).toBe(false);
+      const postgresCheck = body.checks.find((check) => check.name === "postgres");
+      expect(postgresCheck?.ok).toBe(true);
+      const migrationsCheck = body.checks.find((check) => check.name === "migrations");
+      expect(migrationsCheck?.ok).toBe(true);
+    });
+  });
+});
+
+describe("onRequest guard (DB-06): refuses non-health traffic until migrations are current", () => {
+  describe("a database with pending migrations", () => {
+    let app: Awaited<ReturnType<typeof buildServer>>;
+    let databaseName: string;
+    let adminDsn: string;
+
+    beforeAll(async () => {
+      const created = await createEphemeralDatabase({ workspace: "readyz-guard-pending" });
+      databaseName = created.databaseName;
+      adminDsn = created.adminDsn;
+
+      vi.resetModules();
+      process.env.DATABASE_URL = created.dsn;
+      const serverModule = await import("../../../server.js");
+      app = await serverModule.buildServer();
+    });
+
+    afterAll(async () => {
+      await app?.close();
+      if (databaseName) await dropEphemeralDatabase(databaseName, adminDsn);
+    });
+
+    it("refuses a non-health route with 503 naming migrations_pending, without reaching its handler", async () => {
+      const response = await app.inject({ method: "GET", url: NON_HEALTH_ROUTE });
+      expect(response.statusCode).toBe(503);
+      const body = response.json<{ error: string }>();
+      // The route's own handler would answer 404 "Workspace not found" for
+      // this nonexistent slug (proven by the "fully migrated" block below) --
+      // getting the guard's distinct body shape instead proves the handler
+      // was never reached.
+      expect(body.error).toBe("migrations_pending");
+    });
+
+    it("still answers /readyz -- the guard never blocks the health routes themselves", async () => {
+      const response = await app.inject({ method: "GET", url: "/readyz" });
+      expect(response.statusCode).toBe(503);
+      const body = response.json<ReadinessResult>();
+      const migrationsCheck = body.checks.find((check) => check.name === "migrations");
+      expect(migrationsCheck?.ok).toBe(false);
+      expect(migrationsCheck?.detail).toBeTruthy();
+    });
+  });
+
+  describe("a fully migrated database", () => {
+    let app: Awaited<ReturnType<typeof buildServer>>;
+    let databaseName: string;
+    let adminDsn: string;
+
+    beforeAll(async () => {
+      const migrated = await provisionMigratedDatabase("readyz-guard-migrated");
+      databaseName = migrated.databaseName;
+      adminDsn = migrated.adminDsn;
+
+      vi.resetModules();
+      process.env.DATABASE_URL = migrated.dsn;
+      const serverModule = await import("../../../server.js");
+      app = await serverModule.buildServer();
+    });
+
+    afterAll(async () => {
+      await app?.close();
+      if (databaseName) await dropEphemeralDatabase(databaseName, adminDsn);
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    // MUST run before any other test in this block issues a non-health
+    // request against `app`: the guard's confirmed-once latch (a
+    // module-level flag in health.ts) would otherwise already be set by an
+    // earlier request, making every subsequent request's query count zero
+    // rather than the "exactly one" this test exists to prove. vitest runs
+    // `it`s within a `describe` in declaration order, so this being first
+    // is what makes it the app's first-ever non-health request.
+    it("performs exactly one migration query across two consecutive non-health requests", async () => {
+      const dbModule = await import("../../../db.js");
+      const querySpy = vi.spyOn(dbModule.pool, "query");
+
+      await app.inject({ method: "GET", url: NON_HEALTH_ROUTE });
+      await app.inject({ method: "GET", url: NON_HEALTH_ROUTE });
+
+      const migrationQueryCalls = querySpy.mock.calls.filter((call) =>
+        String(call[0]).includes("__drizzle_migrations"),
+      );
+      expect(migrationQueryCalls).toHaveLength(1);
+    });
+
+    it("is invisible in the healthy case -- the non-health route returns its own normal response", async () => {
+      const response = await app.inject({ method: "GET", url: NON_HEALTH_ROUTE });
+      // The guard did not intercept; the route's own handler ran and
+      // reported the (nonexistent) workspace not found -- a DIFFERENT body
+      // shape than the guard's `migrations_pending` signature above.
+      expect(response.statusCode).toBe(404);
+      const body = response.json<{ error: string }>();
+      expect(body.error).toBe("Workspace not found");
+    });
   });
 });

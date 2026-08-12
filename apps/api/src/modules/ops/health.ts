@@ -36,9 +36,36 @@ function errorDetail(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/**
+ * Bounds every readiness check to a fixed wall-clock budget. Without this, a
+ * check whose underlying client retries forever (ioredis's default
+ * `retryStrategy` never gives up; BullMQ requires `maxRetriesPerRequest:
+ * null`) never resolves NOR rejects on its own -- `/readyz` would hang
+ * indefinitely instead of reporting "not ready" promptly (Rule 1 fix,
+ * discovered by this plan's own Task 3 Redis-down test: the naive
+ * `await campaignKickoffQueue.client` call hung the whole request). A
+ * readiness probe that hangs is strictly worse than one that answers 503
+ * fast -- an orchestrator waiting on this endpoint needs a bounded answer.
+ */
+const READINESS_CHECK_TIMEOUT_MS = 2_000;
+
+async function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`${label} check timed out after ${String(READINESS_CHECK_TIMEOUT_MS)}ms`));
+    }, READINESS_CHECK_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function checkPostgres(): Promise<ReadinessCheckResult> {
   try {
-    await pool.query("SELECT 1");
+    await withTimeout(pool.query("SELECT 1"), "postgres");
     return { name: "postgres", ok: true };
   } catch (err) {
     return { name: "postgres", ok: false, detail: errorDetail(err) };
@@ -55,11 +82,21 @@ async function checkPostgres(): Promise<ReadinessCheckResult> {
  * today and other clients later) declares `info()` but not `ping()`, and
  * `info()` still requires a real round-trip to Redis, rejecting exactly the
  * same way `ping()` would on an unreachable connection.
+ *
+ * Wrapped in `withTimeout`: `campaignKickoffQueue.client` itself does not
+ * resolve OR reject while the underlying connection is still retrying (which
+ * it does forever by default) -- without the bound, this check would hang
+ * `/readyz` rather than reporting Redis unreachable.
  */
 async function checkRedis(): Promise<ReadinessCheckResult> {
   try {
-    const client = await campaignKickoffQueue.client;
-    await client.info();
+    await withTimeout(
+      (async () => {
+        const client = await campaignKickoffQueue.client;
+        await client.info();
+      })(),
+      "redis",
+    );
     return { name: "redis", ok: true };
   } catch (err) {
     return { name: "redis", ok: false, detail: errorDetail(err) };
@@ -88,10 +125,9 @@ async function checkMigrations(): Promise<ReadinessCheckResult> {
 }
 
 /**
- * Runs all three named checks. Exported so both the `/readyz` route and the
- * onRequest readiness guard (plan 14-01 Task 3) can call it -- though the
- * guard only cares about the `migrations` check, per DB-06 vs OPS-05's split
- * (see the guard's own comment in `server.ts`).
+ * Runs all three named checks for `/readyz` (OPS-05). NOT used by the
+ * onRequest guard below -- see that function's own comment for why the
+ * guard checks migrations only, never Postgres-in-general or Redis.
  */
 export async function checkReadiness(): Promise<ReadinessResult> {
   const checks = await Promise.all([checkPostgres(), checkRedis(), checkMigrations()]);
@@ -111,4 +147,49 @@ export async function registerOpsHealthRoutes(fastify: FastifyInstance): Promise
     const result = await checkReadiness();
     reply.code(result.ready ? 200 : 503).send(result);
   });
+}
+
+/**
+ * DB-06's fail-closed request guard, consumed by `buildServer()`'s
+ * `onRequest` hook (`server.ts`). Confirms migration currency ONCE, then
+ * latches permanently: the shipped migration set is baked into the image
+ * and the journal only grows, so "current" cannot become false again for
+ * this running process -- a per-request query would put a round trip on
+ * every request in the platform for a condition that changes at most once
+ * in a container's lifetime.
+ *
+ * On failure the memo is cleared (not the confirmed flag, which stays
+ * false) so the NEXT request retries the check rather than caching a
+ * failure forever -- a transient connection blip on the very first request
+ * must not permanently wedge the guard into refusing all traffic.
+ *
+ * Deliberately migrations-only, never Postgres-liveness-in-general and
+ * never Redis: DB-06's requirement is literally "does not accept traffic
+ * until migrations complete", and widening this guard to Redis would make
+ * every apps/api integration suite depend on a live Redis for routes that
+ * never touch it. `/readyz` (OPS-05) is where all three checks live; this
+ * guard is where the migration half is enforced against every request.
+ */
+let migrationsConfirmed = false;
+let migrationsCheckPromise: Promise<void> | null = null;
+
+export async function ensureMigrationsCurrentOnce(): Promise<void> {
+  if (migrationsConfirmed) return;
+  if (!migrationsCheckPromise) {
+    migrationsCheckPromise = assertMigrationsCurrent(pool)
+      .then(() => {
+        migrationsConfirmed = true;
+      })
+      .catch((err: unknown) => {
+        migrationsCheckPromise = null;
+        throw err;
+      });
+  }
+  return migrationsCheckPromise;
+}
+
+/** Test-only: resets the module-level latch between test cases (each test needs its own confirm-once lifecycle). */
+export function resetMigrationGuardForTests(): void {
+  migrationsConfirmed = false;
+  migrationsCheckPromise = null;
 }
