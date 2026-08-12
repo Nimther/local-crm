@@ -501,7 +501,45 @@ Plans:
   4. A point-in-time restore from backup has actually been performed and written up, not merely configured.
   5. Postgres connections use TLS, every pool has an error handler, the missing constraints exist and are verifiably enforced, and retention deletes aged data on a defined schedule.
 
-**Plans**: TBD
+**Plans**: 13 plans (8 waves, tracer-first). Waves respect three hub files that no two plans in a wave may share: root `package.json`, `.github/workflows/ci.yml`, and `packages/db/migrations/meta/`. The image-build job lives in a new `.github/workflows/images.yml` rather than `ci.yml` specifically to keep W3 parallel. `SPECIFICATION.md`/`ARCHITECTURE.md`/`CONVENTIONS.md` are consolidated into the final docs plan (Phase 13's 13-14/13-16 precedent); per-feature runbooks stay with their feature plans.
+
+Plans:
+**Wave 1**
+
+- [ ] 14-01-PLAN.md — [tracer] Migration runner (dedicated-connection advisory lock) + `/healthz`/`/readyz` with applied-vs-shipped verification + fail-closed request guard (DB-05, DB-06, OPS-04, OPS-05)
+- [ ] 14-02-PLAN.md — DB-12: live constraint introspection, `member` duplicate pre-check, migration 0062 with `indisvalid` assertion (DB-12)
+
+**Wave 2**
+
+- [ ] 14-03-PLAN.md — `createPgPool` factory + every production pool migrated + CI guard; TLS driven by the connection string, proven via `pg_stat_ssl` (DB-13, DB-14)
+- [ ] 14-04-PLAN.md — Worker `node:http` health server, draining-on-SIGTERM, and the stop-grace-period publish script (OPS-04, OPS-05)
+- [ ] 14-05-PLAN.md — DB-07: two-tier migration classification, empty-diff smoke test, snapshot backfill, revert/roll-forward rehearsal in CI (DB-07)
+
+**Wave 3**
+
+- [ ] 14-06-PLAN.md — Dockerfiles for api/worker/web (Node 22, non-root, direct `node` exec) + Caddyfile + GHCR build-and-push per SHA (OPS-01)
+- [ ] 14-07-PLAN.md — Failure injection: migration unclean death, two-version compatibility (R-05), real SIGTERM mid-load (DB-05, OPS-02)
+
+**Wave 4**
+
+- [ ] 14-08-PLAN.md — Production compose: Postgres TLS, memory limits + `oom_score_adj`, connection headroom, one-shot migrate, invariant gate (OPS-01, OPS-02, DB-13)
+
+**Wave 5**
+
+- [ ] 14-09-PLAN.md — `deploy.sh <sha>`: readiness-gated, fail-before-replace, stop-old-then-start-new worker; deploy/rollback runbook (OPS-02, OPS-03)
+- [ ] 14-10-PLAN.md — pgBackRest: WAL archiving, scheduled backups, off-host encrypted S3 repository (DB-09)
+
+**Wave 6**
+
+- [ ] 14-11-PLAN.md — DB-10: scripted PITR drill into a scratch container with a tested verification query set, actually performed (DB-10)
+
+**Wave 7**
+
+- [ ] 14-12-PLAN.md — DB-11: partition-drop retention on the daily tick behind a default-off flag, evidence tables excluded (DB-11)
+
+**Wave 8**
+
+- [ ] 14-13-PLAN.md — As-built docs: SPECIFICATION.md §2–§8, ARCHITECTURE.md topology/gating/backup/retention + connection budget, CONVENTIONS.md rules, env-coverage gate (DB-09, DB-11, DB-13, DB-14)
 
 **Sequencing and pitfall notes:**
 
