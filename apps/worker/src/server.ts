@@ -3,6 +3,9 @@ import type { Redis } from "ioredis";
 import type { Job, Worker } from "bullmq";
 import { scrubbedConsole } from "@mega-crm/redaction";
 import { attachSharedErrorListeners, buildRedisConnectionOptions, createRedisConnection } from "@mega-crm/queue-core";
+import { pool } from "@mega-crm/tenant-context";
+import { assertMigrationsCurrent } from "@mega-crm/db";
+import { markWorkerDraining, startWorkerHealthServer, type WorkerHealthServer } from "./health-server.js";
 import { closeTrackedQueues } from "./queues/queue-registry.js";
 import { isTerminalJobFailure, writeDeadLetterOnTerminalFailure } from "./queues/dead-letter/dead-letter-writer.js";
 import { createEventsIngestWorker } from "./queues/events-ingest.worker.js";
@@ -48,6 +51,8 @@ import { createErasureScrubReclaimWorker } from "./queues/erasure-scrub-reclaim.
 export interface WorkerRuntime {
   connection: ReturnType<typeof createRedisConnection>;
   workers: Worker[];
+  /** Phase 14 plan 04 (D-14, OPS-04/OPS-05): the worker's own `/healthz`+`/readyz` listener -- see `closeWorkerRuntime`'s ordering comment for why it closes LAST. */
+  healthServer: WorkerHealthServer;
   close: () => Promise<void>;
 }
 
@@ -59,19 +64,35 @@ export interface WorkerRuntime {
  *
  * Order matters: every registered `Worker` closes FIRST (draining any
  * in-flight job to completion, BullMQ's own default), THEN every tracked
- * long-lived `Queue` handle (`queue-registry.ts`) closes, and ONLY THEN does
- * the shared connection disconnect. A producer `Queue` close racing a
- * still-draining `Worker` could drop an enqueue the worker was mid-making;
- * closing workers first removes that race entirely. Idempotent: calling
- * this twice is safe -- `closeTrackedQueues()` drains its own registry
- * before closing, so a second call has nothing left to close, and BullMQ's
+ * long-lived `Queue` handle (`queue-registry.ts`) closes, THEN the shared
+ * connection disconnects, and -- Phase 14 plan 04 (D-14, R-05) -- the health
+ * server closes LAST, after all three of those. A producer `Queue` close
+ * racing a still-draining `Worker` could drop an enqueue the worker was
+ * mid-making; closing workers first removes that race entirely. The health
+ * server closes last because the entire point of `markWorkerDraining()` is
+ * that a draining process can still be ASKED what it is doing while it
+ * drains -- closing the listener before the drain finishes would blind the
+ * deploy script at exactly the moment it most needs visibility.
+ * `healthServer` is optional so this function's existing two-argument call
+ * sites (`graceful-shutdown.test.ts`'s pre-existing Phase 12 tests, which
+ * construct neither a real `WorkerRuntime` nor a health server) keep
+ * working unchanged. Idempotent: calling this twice is safe --
+ * `closeTrackedQueues()` drains its own registry before closing, BullMQ's
  * own `Worker.close()` and `Redis.disconnect()` both tolerate being called
- * more than once.
+ * more than once, and `startWorkerHealthServer`'s own `close()` guards
+ * against a second `node:http` close (which would otherwise reject).
  */
-export async function closeWorkerRuntime(workers: Worker[], connection: Redis): Promise<void> {
+export async function closeWorkerRuntime(
+  workers: Worker[],
+  connection: Redis,
+  healthServer?: WorkerHealthServer
+): Promise<void> {
   await Promise.all(workers.map((worker) => worker.close()));
   await closeTrackedQueues();
   connection.disconnect();
+  if (healthServer) {
+    await healthServer.close();
+  }
 }
 
 /**
@@ -248,9 +269,39 @@ export async function buildWorker(): Promise<WorkerRuntime> {
   // for why this happens over the array rather than per-factory.
   attachSharedListeners(workers);
 
-  const close = (): Promise<void> => closeWorkerRuntime(workers, connection);
+  // Phase 14 plan 04 (D-14, OPS-04/OPS-05): the worker's own health server --
+  // same three checks apps/api's /readyz runs, reusing the SAME
+  // `@mega-crm/tenant-context` pool the worker already holds (never a
+  // second Postgres connection) and the SAME shared ioredis `connection`
+  // constructed above (never a second Redis connection). `checkMigrationsCurrent`
+  // is `assertMigrationsCurrent` (D-13, packages/db/src/migration-journal.ts)
+  // bound to that pool -- the identical applied-vs-shipped definition
+  // apps/api's /readyz uses, never a second comparison.
+  const healthServer = await startWorkerHealthServer({
+    queryPostgres: () => pool.query("SELECT 1"),
+    redisConnection: connection,
+    checkMigrationsCurrent: () => assertMigrationsCurrent(pool),
+  });
 
-  return { connection, workers, close };
+  const close = (): Promise<void> => closeWorkerRuntime(workers, connection, healthServer);
+
+  return { connection, workers, healthServer, close };
+}
+
+/**
+ * R-05 (stop-old-then-start-new): the exact shutdown path the SIGTERM/SIGINT
+ * handler below invokes, factored out so tests can drive it directly rather
+ * than sending a real signal to the test process
+ * (`health-server.test.ts`'s `WorkerRuntime` lifecycle suite).
+ * `markWorkerDraining()` runs BEFORE `runtime.close()` begins -- this
+ * ordering IS the observable half of R-05: the deploy script needs "the old
+ * worker has stopped accepting work" as a fact, and a flag flipped at the
+ * very start of shutdown, before any Worker/Queue/connection starts
+ * closing, is that fact.
+ */
+export function requestWorkerRuntimeShutdown(runtime: WorkerRuntime): Promise<void> {
+  markWorkerDraining();
+  return runtime.close();
 }
 
 async function main(): Promise<void> {
@@ -258,8 +309,7 @@ async function main(): Promise<void> {
 
   const shutdown = (signal: NodeJS.Signals) => {
     scrubbedConsole.log(`apps/worker received ${signal}, shutting down gracefully`);
-    runtime
-      .close()
+    requestWorkerRuntimeShutdown(runtime)
       .then(() => process.exit(0))
       .catch((err) => {
         scrubbedConsole.error("apps/worker shutdown error", err);
