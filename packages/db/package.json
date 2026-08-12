@@ -19,6 +19,9 @@
     "db:resolve-send-event-duplicates": "tsx scripts/count-send-event-duplicates.ts --resolve",
     "db:rehash-suppressions": "tsx scripts/rehash-suppressions.ts",
     "replay:webhook-journal": "tsx scripts/replay-webhook-journal.ts",
+    "db:audit-missing-constraints": "tsx scripts/audit-missing-constraints.ts",
+    "db:count-member-duplicates": "tsx scripts/count-member-duplicates.ts",
+    "db:resolve-member-duplicates": "tsx scripts/count-member-duplicates.ts --resolve",
     "test": "vitest run"
   },
   "dependencies": {
