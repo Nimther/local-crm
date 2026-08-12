@@ -501,13 +501,13 @@ Plans:
   4. A point-in-time restore from backup has actually been performed and written up, not merely configured.
   5. Postgres connections use TLS, every pool has an error handler, the missing constraints exist and are verifiably enforced, and retention deletes aged data on a defined schedule.
 
-**Plans**: 13 plans (8 waves, tracer-first). Waves respect three hub files that no two plans in a wave may share: root `package.json`, `.github/workflows/ci.yml`, and `packages/db/migrations/meta/`. The image-build job lives in a new `.github/workflows/images.yml` rather than `ci.yml` specifically to keep W3 parallel. `SPECIFICATION.md`/`ARCHITECTURE.md`/`CONVENTIONS.md` are consolidated into the final docs plan (Phase 13's 13-14/13-16 precedent); per-feature runbooks stay with their feature plans.
+**Plans**: 2/13 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 14-01-PLAN.md — [tracer] Migration runner (dedicated-connection advisory lock) + `/healthz`/`/readyz` with applied-vs-shipped verification + fail-closed request guard (DB-05, DB-06, OPS-04, OPS-05)
-- [ ] 14-02-PLAN.md — DB-12: live constraint introspection, `member` duplicate pre-check, migration 0062 with `indisvalid` assertion (DB-12)
+- [x] 14-01-PLAN.md — [tracer] Migration runner (dedicated-connection advisory lock) + `/healthz`/`/readyz` with applied-vs-shipped verification + fail-closed request guard (DB-05, DB-06, OPS-04, OPS-05)
+- [x] 14-02-PLAN.md — DB-12: live constraint introspection, `member` duplicate pre-check, migration 0062 with `indisvalid` assertion (DB-12)
 
 **Wave 2**
 
@@ -668,7 +668,7 @@ Phase 9 has no dependents and may be scheduled in parallel at any point after Ph
 | 11. Delivery Correctness | v1.1 | 11/11 | Complete    | 2026-08-09 |
 | 12. Worker Reliability & Tenant Fairness | v1.1 | 14/14 | Complete    | 2026-08-11 |
 | 13. Compliance & Analytics Integrity | v1.1 | 16/16 | Complete    | 2026-08-12 |
-| 14. Deployment & Database Durability | v1.1 | 0/TBD | Not started | - |
+| 14. Deployment & Database Durability | v1.1 | 2/13 | In Progress|  |
 | 15. Observability, Alerting & Frontend Resilience | v1.1 | 0/TBD | Not started | - |
 | 16. Live SendGrid Verification | v1.1 | 0/TBD | Not started | - |
 
