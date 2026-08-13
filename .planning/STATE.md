@@ -37,6 +37,16 @@ Progress: [████████████████████] 79/79 p
 
 ✓ **Deadline closed (2026-08-07):** Phase 9 (DB-01/DB-02 partition automation) completed ahead of the hard **2026-09-01** deadline — 20 attached monthly partitions (2026-09…2027-06) confirmed by catalog query against a migrated database.
 
+## Pending Checkpoints (Phase 14)
+
+Three plans are paused at blocking real-host `checkpoint:human-verify` gates (each 2/3 tasks committed, no SUMMARY yet — this is a legal paused state, NOT lost work; on cold resume choose 'close out manually', never 're-execute from scratch'):
+
+- **14-09** deploy/rollback — awaiting first real deploy + rollback on the production VPS (see docs/runbooks/deploy-and-rollback.md)
+- **14-10** pgBackRest backups — awaiting first real backup + WAL shipment to the off-host bucket (see docs/runbooks/backups.md)
+- **14-11** restore drill — awaiting the real PITR drill against the off-host repository (see docs/runbooks/restore-drill.md)
+
+Resolution path: user reports "approved" or issues per plan → spawn continuation executor to record results and write the plan SUMMARY → then phase verification.
+
 ## Performance Metrics
 
 **Velocity:**
