@@ -92,6 +92,21 @@ jobs:
       - name: Pool factory audit
         run: npm run lint:pg-pool-factory
 
+      # Phase 14 plan 14 (OPS-01, G-14-4 gap closure): the machine half of
+      # "package-lock.json satisfies both npm majors, not just dev/CI's".
+      # docker/Dockerfile.{api,worker,web} pin node:22-slim (npm 10); this
+      # repo's own .nvmrc/CI toolchain is Node 26 (npm 11). npm 11's ideal
+      # tree does not require every entry npm 10's does (see
+      # .planning/debug/docker-npm-ci-lockfile-desync.md), so a routine
+      # `npm install <pkg>` performed under this job's own npm 11 could
+      # silently drop an npm-10-required lockfile entry and reintroduce a
+      # defect that only ever surfaced at `docker build` time -- this step
+      # lives inside `static`, a required status check, specifically so
+      # that reintroduction blocks the merge instead of only being caught
+      # post-merge by the Images workflow's own build.
+      - name: npm-10 lockfile guard
+        run: npm run check:lockfile-npm10
+
       - name: Working-root hygiene
         run: npm run check:root-hygiene
 
