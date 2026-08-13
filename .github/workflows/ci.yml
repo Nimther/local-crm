@@ -104,6 +104,14 @@ jobs:
       # lives inside `static`, a required status check, specifically so
       # that reintroduction blocks the merge instead of only being caught
       # post-merge by the Images workflow's own build.
+      #
+      # Network note (WR-02, 14-REVIEW.md): with no --npm-command override
+      # (the path this step takes), the guard shells out to
+      # `npx --yes npm@10`, which needs to resolve/fetch the npm@10
+      # package from the registry (or an already-warm local npx cache)
+      # before it can run. If this required check goes red for a reason
+      # that looks unrelated to the lockfile itself, check npm registry /
+      # npx-cache health before suspecting package-lock.json.
       - name: npm-10 lockfile guard
         run: npm run check:lockfile-npm10
 
