@@ -172,6 +172,24 @@ resolve_worker_stop_grace_period() {
     echo "${DEPLOY_SCRIPT_TEST_STOP_GRACE_PERIOD_SECONDS}"
     return 0
   fi
+
+  # WR-05: this builds and reads WORKER_STOP_GRACE_PERIOD_SECONDS from
+  # whatever is CURRENTLY CHECKED OUT on the deploy host, not from
+  # $TARGET_SHA itself. If the local tree isn't actually at $TARGET_SHA --
+  # the ordinary case for --rollback-to an older commit, or any multi-
+  # operator/CI setup where the checkout lags or leads the SHA being
+  # deployed -- the resolved number would reflect the WRONG commit's
+  # shutdown-budget constants while `docker compose stop --timeout` applies
+  # it to the image actually being deployed. Fail loud here (this repo's
+  # own convention -- see the header's Pitfall 7 discussion) rather than
+  # silently building against the wrong tree state.
+  local head_sha
+  head_sha="$(git rev-parse HEAD)"
+  if [[ "$head_sha" != "$TARGET_SHA" ]]; then
+    echo "deploy.sh: refusing to resolve the worker stop-grace-period -- the local working tree is checked out at $head_sha, not the SHA being deployed ($TARGET_SHA). The grace period MUST come from a build of the exact SHA being deployed (Pitfall 7); building from a mismatched tree would silently apply the wrong commit's shutdown-budget constants. Run 'git checkout $TARGET_SHA' (or an equivalent worktree checked out at that SHA) and re-run this script." >&2
+    exit 1
+  fi
+
   npm run build -w apps/worker 1>&2
   node scripts/print-stop-grace-period.mjs
 }
