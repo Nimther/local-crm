@@ -1,9 +1,9 @@
 ---
-status: partial
+status: diagnosed
 phase: 14-deployment-database-durability
 source: [14-01-SUMMARY.md, 14-02-SUMMARY.md, 14-03-SUMMARY.md, 14-04-SUMMARY.md, 14-05-SUMMARY.md, 14-06-SUMMARY.md, 14-07-SUMMARY.md, 14-08-SUMMARY.md, 14-12-SUMMARY.md, 14-13-SUMMARY.md]
 started: 2026-08-13T07:49:52.025Z
-updated: 2026-08-13T08:26:48Z
+updated: 2026-08-13T08:41:43Z
 ---
 
 ## Current Test
@@ -269,8 +269,19 @@ blocked: 2
   reason: "User reported: Docker image build failed. `npm ci` exits with EUSAGE because package.json and package-lock.json are out of sync: esbuild 0.28.2 and its @esbuild platform packages are missing from the lockfile. Local `npm ls esbuild --all` also reports esbuild@0.25.12 as invalid for Vite's ^0.27.0 || ^0.28.0 requirement. Both API and worker Docker images are currently unbuildable from a clean checkout."
   severity: blocker
   test: 4
-  artifacts: []  # Filled by diagnosis
-  missing: []    # Filled by diagnosis
+  root_cause: "Latent npm-version-dependent lockfile inconsistency, not a bad commit: package-lock.json is npm-11-shaped (dev/CI use Node 26/npm 11, which tolerates vite 8.1.3's optional peer esbuild ^0.27||^0.28 being unsatisfied — only hoisted esbuild@0.25.12 for drizzle-kit exists). Phase 14's Dockerfiles pin node:22-slim (npm 10), whose ideal tree requires esbuild@0.28.2 + 26 @esbuild/* platform packages that are absent from the lockfile, so npm ci exits EUSAGE. Docker builds are the first-ever npm-10 consumer; no pre-merge gate exercises npm 10."
+  artifacts:
+    - path: "package-lock.json"
+      issue: "npm-11-shaped; missing esbuild@0.28.2 + 26 @esbuild/* platform packages that npm 10's ideal tree requires"
+    - path: "docker/Dockerfile.api"
+      issue: "pins node:22-slim (npm 10) and runs root npm ci — first npm-10 consumer (pin itself is intentional and correct; do not change)"
+    - path: ".github/workflows/ci.yml"
+      issue: "all jobs run npm ci under .nvmrc Node 26/npm 11 — no gate exercises npm 10, so the desync passes CI"
+  missing:
+    - "Regenerate package-lock.json under npm 10 (npx npm@10 install --package-lock-only) — verified purely-additive, accepted by both npm 10 and 11"
+    - "Pre-merge CI guard: npm ci --dry-run under node:22 (or npx npm@10) so an npm-11 lockfile regen can't silently reintroduce the failure"
+    - "Acceptance: at least one end-to-end docker build (also exercises npm prune --omit=dev), not ci --dry-run alone"
+  debug_session: ".planning/debug/docker-npm-ci-lockfile-desync.md"
 
 ## Notes
 
