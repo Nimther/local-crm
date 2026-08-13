@@ -123,6 +123,11 @@ describe("each fixture trips exactly the invariant it targets", () => {
     { fixture: "missing-mem-limit.yml", rule: "missing-mem-limit", service: "api" },
     { fixture: "db-oom-non-negative.yml", rule: "db-oom-score-adj-not-negative", service: "db" },
     { fixture: "non-db-oom-score-adj-negative.yml", rule: "non-db-oom-score-adj-negative", service: "api" },
+    {
+      fixture: "pgbackrest-oom-score-adj-negative.yml",
+      rule: "non-db-oom-score-adj-negative",
+      service: "pgbackrest",
+    },
     { fixture: "non-web-service-publishes-port.yml", rule: "non-web-service-publishes-port", service: "redis" },
     { fixture: "mutable-image-tag.yml", rule: "mutable-image-tag", service: "web" },
     { fixture: "max-connections-at-floor.yml", rule: "max-connections-at-or-below-floor", service: "db" },

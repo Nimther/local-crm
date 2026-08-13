@@ -55,6 +55,12 @@ export const POOL_SUM_FLOOR = 84;
  * introduces them. */
 export const EXPECTED_SERVICES = ["db", "redis", "api", "worker", "web", "migrate", "pgbackrest"];
 
+/** WR-04: every service other than `db` must never carry a negative
+ * oom_score_adj -- `db` alone is favored to survive an OOM event. Explicit
+ * set (not an `if/else if` chain) so a future service added to
+ * `EXPECTED_SERVICES` is covered by construction. */
+const NEVER_NEGATIVE_OOM_SERVICES = new Set(EXPECTED_SERVICES.filter((name) => name !== "db"));
+
 /** The one service permitted to publish a port to the host (T-14-43). */
 const PORT_PUBLISHING_SERVICE = "web";
 
@@ -455,7 +461,16 @@ export function evaluateInvariants(model, opts) {
       `service "${name}" has no mem_limit (or it did not resolve to a positive byte value) -- Pitfall 19 requires an explicit memory limit on every service`,
     );
 
-    // 2. db's oom_score_adj is negative; api/worker's is not (Pitfall 19).
+    // 2. db's oom_score_adj is negative; every OTHER service's is not
+    // (Pitfall 19). WR-04: this used to be an `if (db) / else if (api ||
+    // worker)` pair with no `else` branch at all, so `web`, `redis`,
+    // `migrate`, and `pgbackrest` were entirely uncovered -- notably
+    // `pgbackrest`, whose own compose comment explicitly states it "must
+    // never win an OOM contest against the database it protects" and must
+    // get the SAME non-negative treatment as api/worker, never db's
+    // protective -500 (T-14-65). Enumerate the never-negative set
+    // explicitly so a future service is covered by construction, not by
+    // remembering to extend an `else if` chain.
     const oom = svc.oomScoreAdj === undefined ? undefined : Number(svc.oomScoreAdj);
     if (name === "db") {
       check(
@@ -464,7 +479,7 @@ export function evaluateInvariants(model, opts) {
         name,
         `db's oom_score_adj must be a negative number (favoring Postgres's survival) -- resolved to ${JSON.stringify(svc.oomScoreAdj)}`,
       );
-    } else if (name === "api" || name === "worker") {
+    } else if (NEVER_NEGATIVE_OOM_SERVICES.has(name)) {
       check(
         oom === undefined || Number.isNaN(oom) || oom >= 0,
         "non-db-oom-score-adj-negative",
