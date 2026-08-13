@@ -106,6 +106,15 @@ jobs:
       - name: Production compose invariants
         run: npm run verify:prod-compose
 
+      # Phase 14 plan 13 (DB-14 SPECIFICATION.md filing gate): the machine
+      # half of .claude/CLAUDE.md's "a new secret must be recorded in the
+      # same change" rule for the secrets section specifically -- every
+      # environment-variable NAME docker/prod.env.example documents must
+      # also appear in SPECIFICATION.md. Names only, never values; the gate
+      # itself never reads a real secret.
+      - name: SPECIFICATION env coverage
+        run: npm run check:spec-env-coverage
+
   # ---------------------------------------------------------------------------
   # The full corpus against live services, then the coverage threshold and the
   # ratchet that stops the threshold being lowered to meet a regression.
