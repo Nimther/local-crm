@@ -361,7 +361,17 @@ run_real_drill() {
   fi
 
   echo "restore-drill.sh: verifying the restored cluster (db:verify-restored)"
-  if ! VERIFY_RESTORED_DATABASE_URL="postgresql://postgres:${POSTGRES_PASSWORD}@127.0.0.1:${SCRATCH_PORT}/${POSTGRES_DB:-mega_crm}" \
+  # WR-06: POSTGRES_PASSWORD came back with the physical backup -- it is
+  # whatever the password was at backup time, not a value this script
+  # controls, so it may contain URL-significant characters (@, :, /, #, %,
+  # whitespace). Interpolating it unencoded can misparse the
+  # credential/host boundary (or throw outright) in the URL parser
+  # createPgPool's assertDsnRequestsTls and pg-connection-string both use,
+  # turning every real restore drill against such a password into a
+  # confusing parse/auth error instead of the actual verification outcome.
+  local encoded_postgres_password
+  encoded_postgres_password="$(node -e 'process.stdout.write(encodeURIComponent(process.argv[1]))' "$POSTGRES_PASSWORD")"
+  if ! VERIFY_RESTORED_DATABASE_URL="postgresql://postgres:${encoded_postgres_password}@127.0.0.1:${SCRATCH_PORT}/${POSTGRES_DB:-mega_crm}" \
         npm run db:verify-restored --workspace=packages/db -- --baseline="$BASELINE_FILE" --as-of="$target"; then
     echo "restore-drill.sh: VERIFICATION FAILED -- scratch resources left in place for inspection." >&2
     print_cleanup_command >&2
