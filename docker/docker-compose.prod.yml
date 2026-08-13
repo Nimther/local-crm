@@ -23,10 +23,55 @@
 # docker/prod.env.example config` is this file's own local proof; the first
 # real bring-up belongs to plan 14-09's deploy script against a real host
 # and a real domain, never this plan.
+#
+# Plan 14-10 (Rule 1 bug fix, found via direct empirical testing with a real
+# `docker compose config` -- Homebrew's `docker-compose` v5.4.0 CLI plugin,
+# which resolves/interpolates without needing a daemon): every bind-mount
+# `source:` below is relative to THIS FILE'S OWN DIRECTORY (`docker/`) --
+# Compose's own documented default project-directory rule ("the path of the
+# first specified Compose file") -- NOT the repository root. `deploy.sh`
+# invokes `docker compose -f docker/docker-compose.prod.yml ...` from the
+# REPO ROOT, so a path written as `./postgres/foo` resolves to
+# `<repo-root>/docker/docker/postgres/foo` -- a nonexistent, doubled
+# `docker/docker/` prefix that would make EVERY bind mount in this file fail
+# at container-creation time on a real deploy. Confirmed directly: copied
+# this file into `<tmp>/docker/docker-compose.prod.yml` and ran
+# `docker-compose -f docker/docker-compose.prod.yml config` from `<tmp>`
+# (mirroring deploy.sh's own cwd/`-f` combination exactly) -- the resolved
+# `source:` was genuinely `<tmp>/docker/docker/postgres/...` before this fix,
+# and `<tmp>/docker/postgres/...` (correct) after removing the redundant
+# leading `docker/` segment from every relative volume path in this file.
+# Every relative path below is therefore `./postgres/...`, `./pgbackrest/...`
+# or `./redis.conf` -- never `./docker/...`.
 
 services:
   db:
-    image: postgres:17
+    # Phase 14 plan 10 (DB-09, D-05, D-06, T-14-62): a LOCALLY BUILT image,
+    # not the official `postgres:17` directly -- `archive_command` below is
+    # executed by the Postgres server process itself, inside THIS container,
+    # so the pgBackRest binary has to live here (docker/postgres/Dockerfile
+    # adds it on top of the same `postgres:17` base). This plan's own
+    # acceptance criteria explicitly allow "builds or references" a custom
+    # image; `build:` was chosen over a GHCR-published image because this
+    # image changes rarely (an OS package layer, not application code) and
+    # extending .github/workflows/images.yml's matrix + adding `db`/
+    # `pgbackrest` to scripts/validate-prod-compose.mjs's
+    # FIRST_PARTY_IMAGE_SERVICES immutable-tag check was judged out of this
+    # plan's own declared file scope -- recorded as a forward flag in
+    # docs/runbooks/backups.md, not silently decided. NOTE for the operator:
+    # scripts/deploy.sh's own `compose pull api worker web` never rebuilds
+    # this image -- run `docker compose -f docker/docker-compose.prod.yml
+    # build db pgbackrest` by hand after any docker/postgres/Dockerfile or
+    # docker/pgbackrest/pgbackrest.conf change, BEFORE the next deploy.
+    image: megacrm-postgres:${POSTGRES_IMAGE_TAG:-local}
+    # `context: .` is THIS file's own directory (docker/) -- the Dockerfile
+    # has no `COPY` of any repository source (it only adds an apt package to
+    # the official base), so the build context is deliberately narrow rather
+    # than the whole monorepo (which docker/Dockerfile.{api,worker,web}
+    # legitimately need, but this image does not).
+    build:
+      context: .
+      dockerfile: postgres/Dockerfile
     restart: unless-stopped
     # SEPARATE from docker/pg-tls-entrypoint.sh (the dev/CI entrypoint) --
     # see docker/postgres/prod-tls-entrypoint.sh's own header for why this
@@ -48,6 +93,20 @@ services:
       MEGA_CRM_APP_PASSWORD: ${MEGA_CRM_APP_PASSWORD}
       MEGA_CRM_SCAN_PASSWORD: ${MEGA_CRM_SCAN_PASSWORD}
       MEGA_CRM_AUTH_PASSWORD: ${MEGA_CRM_AUTH_PASSWORD}
+      # Plan 14-10 (DB-09): read by the `archive_command`
+      # prod-tls-entrypoint.sh sets (pgbackrest archive-push runs INSIDE
+      # this container, as a child of the Postgres server process, so it
+      # inherits this same environment). Same six names, same
+      # PGBACKREST_<OPTION> override convention, same MEGA_CRM_ENV_FILE
+      # provenance as the `pgbackrest` sidecar below -- one set of secrets,
+      # read by both containers that need repository access.
+      PGBACKREST_STANZA: mega_crm
+      PGBACKREST_REPO1_S3_ENDPOINT: ${PGBACKREST_REPO1_S3_ENDPOINT}
+      PGBACKREST_REPO1_S3_BUCKET: ${PGBACKREST_REPO1_S3_BUCKET}
+      PGBACKREST_REPO1_S3_REGION: ${PGBACKREST_REPO1_S3_REGION}
+      PGBACKREST_REPO1_S3_KEY: ${PGBACKREST_REPO1_S3_KEY}
+      PGBACKREST_REPO1_S3_KEY_SECRET: ${PGBACKREST_REPO1_S3_KEY_SECRET}
+      PGBACKREST_REPO1_CIPHER_PASS: ${PGBACKREST_REPO1_CIPHER_PASS}
     # Pitfall 19: both halves required, neither works alone -- an unset
     # memory limit lets a container exhaust host RAM before the kernel ever
     # compares scores, so the score adjustment below achieves nothing without
@@ -60,18 +119,82 @@ services:
     oom_score_adj: ${DB_OOM_SCORE_ADJ:--500}
     volumes:
       - mega_crm_db_data_prod:/var/lib/postgresql/data
-      - ./docker/postgres/init-prod-roles.sql:/docker-entrypoint-initdb.d/01-init-prod-roles.sql:ro
-      - ./docker/postgres/prod-tls-entrypoint.sh:/usr/local/bin/prod-tls-entrypoint.sh:ro
+      - ./postgres/init-prod-roles.sql:/docker-entrypoint-initdb.d/01-init-prod-roles.sql:ro
+      - ./postgres/prod-tls-entrypoint.sh:/usr/local/bin/prod-tls-entrypoint.sh:ro
       # DEDICATED volume, separate from the data volume -- certificate
       # lifetime is independent of the database volume (mirrors
       # docker-compose.yml's dev `mega_crm_db_certs` precedent exactly).
       - mega_crm_db_certs_prod:/certs
+      # Plan 14-10 (DB-09): read by `archive_command` (archive-push) and,
+      # were it ever needed, by an operator running `pgbackrest` by hand
+      # inside this container -- the SAME file the `pgbackrest` sidecar
+      # mounts below, never a second copy.
+      - ./pgbackrest/pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro
+      # Shared with `pgbackrest` (T-14-62's mechanism): the sidecar's own
+      # backup/check/info commands need a control connection to run
+      # Postgres's backup-start/backup-stop functions, and PostgreSQL's
+      # `initdb` defaults an unauthenticated `local` (Unix-socket)
+      # pg_hba.conf entry to `trust` -- see docker/pgbackrest/pgbackrest.conf's
+      # own comment for the full reasoning. A named volume (not a bind
+      # mount) because the path itself never needs host visibility.
+      - mega_crm_pg_socket_prod:/var/run/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
       interval: 5s
       timeout: 5s
       retries: 10
     # No `ports:` -- reachable only on the compose network (T-14-43).
+
+  # Phase 14 plan 10 (DB-09, D-05, D-06). The scheduled-backup sidecar --
+  # SAME image as `db` (a second entrypoint into the same custom Postgres+
+  # pgBackRest image, never a second Dockerfile), running
+  # docker/pgbackrest/backup-entrypoint.sh's cron schedule
+  # (docker/pgbackrest/crontab) instead of the Postgres server itself.
+  # Shares TWO volumes with `db`, and nothing else -- no TCP credential of
+  # its own, no copy of any application secret it doesn't also need:
+  #   - the Postgres data volume, READ-ONLY (it only ever needs to READ
+  #     PGDATA/WAL for a backup, never write to it)
+  #   - the Unix-socket volume, read-write (its own backup/check/info
+  #     commands need a control connection to `db`'s Postgres process to
+  #     run the backup-start/backup-stop functions -- see
+  #     docker/pgbackrest/pgbackrest.conf's own comment for why a shared
+  #     socket + PostgreSQL's own `local`-connection `trust` default, not a
+  #     TCP role/password, is what makes this work with no new credential)
+  pgbackrest:
+    image: megacrm-postgres:${POSTGRES_IMAGE_TAG:-local}
+    build:
+      context: .
+      dockerfile: postgres/Dockerfile
+    restart: unless-stopped
+    entrypoint: ["/usr/local/bin/backup-entrypoint.sh"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGBACKREST_STANZA: mega_crm
+      PGBACKREST_REPO1_S3_ENDPOINT: ${PGBACKREST_REPO1_S3_ENDPOINT}
+      PGBACKREST_REPO1_S3_BUCKET: ${PGBACKREST_REPO1_S3_BUCKET}
+      PGBACKREST_REPO1_S3_REGION: ${PGBACKREST_REPO1_S3_REGION}
+      PGBACKREST_REPO1_S3_KEY: ${PGBACKREST_REPO1_S3_KEY}
+      PGBACKREST_REPO1_S3_KEY_SECRET: ${PGBACKREST_REPO1_S3_KEY_SECRET}
+      PGBACKREST_REPO1_CIPHER_PASS: ${PGBACKREST_REPO1_CIPHER_PASS}
+    # T-14-65: a backup process must never win an OOM contest against the
+    # database it protects -- an explicit limit (Pitfall 19) and the SAME
+    # non-negative (kernel-default) oom_score_adj treatment `api`/`worker`
+    # get, never `db`'s protective -500.
+    mem_limit: ${PGBACKREST_MEM_LIMIT:-256m}
+    volumes:
+      # SAME mount convention as db's own prod-tls-entrypoint.sh (plan
+      # 14-08) -- the script is bind-mounted, not baked into
+      # docker/postgres/Dockerfile, so Task 2's own script changes never
+      # require a Task-1-owned image rebuild.
+      - ./pgbackrest/backup-entrypoint.sh:/usr/local/bin/backup-entrypoint.sh:ro
+      - ./pgbackrest/pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro
+      - ./pgbackrest/crontab:/etc/pgbackrest-crontab.d/crontab:ro
+      - mega_crm_db_data_prod:/var/lib/postgresql/data:ro
+      - mega_crm_pg_socket_prod:/var/run/postgresql
+    # No `ports:`, no `healthcheck:` -- a scheduled batch process, not a
+    # request-serving service (T-14-43).
 
   redis:
     image: redis:7
@@ -85,7 +208,7 @@ services:
     mem_limit: ${REDIS_MEM_LIMIT:-768m}
     volumes:
       - mega_crm_redis_data_prod:/data
-      - ./docker/redis.conf:/usr/local/etc/redis/redis.conf:ro
+      - ./redis.conf:/usr/local/etc/redis/redis.conf:ro
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -216,6 +339,11 @@ services:
 volumes:
   mega_crm_db_data_prod:
   mega_crm_db_certs_prod:
+  # Phase 14 plan 10 (DB-09): shared between `db` and `pgbackrest` so the
+  # sidecar's own control connection reaches `db`'s Postgres process over
+  # the SAME Unix socket file, not a second one -- see
+  # docker/pgbackrest/pgbackrest.conf's own comment for the full reasoning.
+  mega_crm_pg_socket_prod:
   mega_crm_redis_data_prod:
   mega_crm_caddy_data_prod:
   mega_crm_caddy_config_prod:

@@ -70,9 +70,26 @@ chmod 644 "${CERT_FILE}"
 PG_MAX_CONNECTIONS="${PG_MAX_CONNECTIONS:-200}"
 PG_SHARED_BUFFERS="${PG_SHARED_BUFFERS:-512MB}"
 
+# Phase 14 plan 10 (DB-09, D-05, D-06, T-14-62). Rule 3 addition -- not in
+# plan 14-08's own file list, but required for plan 14-10's own stated
+# behavior to be possible at all: `archive_command` is a Postgres server
+# setting, and this script is the ONLY place `-c` overrides reach the
+# `postgres` process in this image (compose's own `command:` is never
+# forwarded -- see this file's header). "Configured" and "archiving" are
+# different states (this plan's own wording): a config-only assertion here
+# would prove nothing about WAL actually shipping. `%p` is Postgres's own
+# archive_command placeholder for the WAL file's full path -- pgBackRest's
+# `archive-push` command takes it verbatim, unchanged from
+# RESEARCH.md's own skeleton and confirmed against a real archive
+# (`pg_stat_archiver`, this sandbox's local dry-run -- see
+# docs/runbooks/backups.md).
+PGBACKREST_STANZA="${PGBACKREST_STANZA:-mega_crm}"
+
 exec docker-entrypoint.sh postgres \
   -c ssl=on \
   -c ssl_cert_file="${CERT_FILE}" \
   -c ssl_key_file="${KEY_FILE}" \
   -c max_connections="${PG_MAX_CONNECTIONS}" \
-  -c shared_buffers="${PG_SHARED_BUFFERS}"
+  -c shared_buffers="${PG_SHARED_BUFFERS}" \
+  -c archive_mode=on \
+  -c archive_command="pgbackrest --config=/etc/pgbackrest/pgbackrest.conf --stanza=${PGBACKREST_STANZA} archive-push %p"
