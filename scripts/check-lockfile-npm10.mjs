@@ -37,7 +37,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -185,7 +185,7 @@ function runCapture(cmd, cmdArgs, options) {
 function isDirectInvocation() {
   const entry = process.argv[1];
   if (!entry) return false;
-  return import.meta.url === `file://${path.resolve(entry)}`;
+  return import.meta.url === pathToFileURL(path.resolve(entry)).href;
 }
 
 function main() {
