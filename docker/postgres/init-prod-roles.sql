@@ -54,22 +54,46 @@
 -- as psql's own reported ERROR and a non-zero process exit code --
 -- re-verified empirically after finding the `\quit` bug, not assumed.
 
+-- WR-02: `\if :{?var}` alone only detects an UNSET psql variable. But
+-- docker-compose.prod.yml delivers these as `VAR: ${VAR}` -- if the
+-- operator's env file never sets the value, Compose's own `${VAR}`
+-- substitution resolves to an empty string, so the container's env var is
+-- SET (to ""), not absent, and `\getenv` succeeds with a defined-but-empty
+-- variable that this file's own stated guard ("refuse to create a role
+-- with a blank password") must still catch. Each guard below therefore
+-- checks BOTH conditions: unset (`\else` branch of `\if :{?var}`, checked
+-- client-side, no query needed) and set-but-empty (`SELECT (:'var' = '')
+-- \gset`, only run once the variable is confirmed defined, so the `:'var'`
+-- substitution below is guaranteed to actually happen rather than leaving
+-- literal `:'var'` text in the query for the server to choke on).
 \getenv app_password MEGA_CRM_APP_PASSWORD
 \if :{?app_password}
+  SELECT (:'app_password' = '') AS is_blank \gset
 \else
-  DO $guard$ BEGIN RAISE EXCEPTION 'init-prod-roles: MEGA_CRM_APP_PASSWORD is not set -- refusing to create mega_crm_app with a blank password.'; END $guard$;
+  \set is_blank 't'
+\endif
+\if :is_blank
+  DO $guard$ BEGIN RAISE EXCEPTION 'init-prod-roles: MEGA_CRM_APP_PASSWORD is unset or empty -- refusing to create mega_crm_app with a blank password.'; END $guard$;
 \endif
 
 \getenv scan_password MEGA_CRM_SCAN_PASSWORD
 \if :{?scan_password}
+  SELECT (:'scan_password' = '') AS is_blank \gset
 \else
-  DO $guard$ BEGIN RAISE EXCEPTION 'init-prod-roles: MEGA_CRM_SCAN_PASSWORD is not set -- refusing to create mega_crm_scan with a blank password.'; END $guard$;
+  \set is_blank 't'
+\endif
+\if :is_blank
+  DO $guard$ BEGIN RAISE EXCEPTION 'init-prod-roles: MEGA_CRM_SCAN_PASSWORD is unset or empty -- refusing to create mega_crm_scan with a blank password.'; END $guard$;
 \endif
 
 \getenv auth_password MEGA_CRM_AUTH_PASSWORD
 \if :{?auth_password}
+  SELECT (:'auth_password' = '') AS is_blank \gset
 \else
-  DO $guard$ BEGIN RAISE EXCEPTION 'init-prod-roles: MEGA_CRM_AUTH_PASSWORD is not set -- refusing to create mega_crm_auth with a blank password.'; END $guard$;
+  \set is_blank 't'
+\endif
+\if :is_blank
+  DO $guard$ BEGIN RAISE EXCEPTION 'init-prod-roles: MEGA_CRM_AUTH_PASSWORD is unset or empty -- refusing to create mega_crm_auth with a blank password.'; END $guard$;
 \endif
 
 -- mega_crm_app: the primary application role (DATABASE_URL). NEVER
