@@ -1,14 +1,14 @@
 ---
-status: diagnosed
+status: complete
 phase: 14-deployment-database-durability
-source: [14-01-SUMMARY.md, 14-02-SUMMARY.md, 14-03-SUMMARY.md, 14-04-SUMMARY.md, 14-05-SUMMARY.md, 14-06-SUMMARY.md, 14-07-SUMMARY.md, 14-08-SUMMARY.md, 14-12-SUMMARY.md, 14-13-SUMMARY.md]
+source: [14-01-SUMMARY.md, 14-02-SUMMARY.md, 14-03-SUMMARY.md, 14-04-SUMMARY.md, 14-05-SUMMARY.md, 14-06-SUMMARY.md, 14-07-SUMMARY.md, 14-08-SUMMARY.md, 14-12-SUMMARY.md, 14-13-SUMMARY.md, 14-14-SUMMARY.md]
 started: 2026-08-13T07:49:52.025Z
-updated: 2026-08-13T08:41:43Z
+updated: 2026-08-13T09:20:00Z
 ---
 
 ## Current Test
 
-[testing paused — 1 issue and 2 blocked items outstanding]
+[testing complete]
 
 ## Tests
 
@@ -26,21 +26,18 @@ result: pass
 
 ### 4. API + worker Docker images build and run (14-06 D1)
 expected: From a clean checkout: docker build -f docker/Dockerfile.api -t megacrm-api:local . and the same for docker/Dockerfile.worker. Both build successfully (multi-stage, Node 22, non-root USER, exec-form node CMD). The api image can run the one-shot migrate step and serve /readyz's applied-vs-shipped migration check.
-result: issue
-reported: "Docker image build failed. `npm ci` exits with EUSAGE because package.json and package-lock.json are out of sync: esbuild 0.28.2 and its @esbuild platform packages are missing from the lockfile. Local `npm ls esbuild --all` also reports esbuild@0.25.12 as invalid for Vite's ^0.27.0 || ^0.28.0 requirement. Both API and worker Docker images are currently unbuildable from a clean checkout."
-severity: blocker
+result: pass
+retest_of: "issue G-14-4 — lockfile regenerated under npm 10 by plan 14-14; re-verified by real docker build"
 
 ### 5. Web image: SPA + Caddy routing (14-06 D2)
 expected: docker build -f docker/Dockerfile.web produces one self-contained image with the built SPA and Caddy. Against a stub upstream: server-side paths proxy to api:4000, webhook bodies pass through byte-identical, unknown SPA routes fall back to index.html, hashed /assets/* get long cache headers while index.html does not.
-result: blocked
-blocked_by: other
-reason: "Blocked by the Test 4 lockfile defect (G-14-4). Dockerfile.web uses the same root `npm ci`, so the web image cannot be built from the current clean checkout either. SPA/Caddy routing, webhook body preservation and cache headers cannot be verified until package-lock.json is repaired and the image builds successfully."
+result: pass
+retest_of: "blocked on G-14-4 — lockfile fix landed (14-14), web image build re-verified"
 
 ### 6. GHCR image workflow on master (14-06 D3)
 expected: After merge to master, .github/workflows/images.yml runs: builds and pushes api/web/worker images to GHCR, each tagged with the immutable git SHA (no :latest). Every action is SHA-pinned and ci.yml is untouched. Verify via gh run watch or the Actions tab after the first real push.
-result: blocked
-blocked_by: other
-reason: "Not verified. Phase 14 has not been merged to master, so the GHCR workflow has not had its first real push run. Additionally, the current package-lock.json defect (G-14-4) makes all three Docker builds fail at `npm ci`, so the workflow is expected to fail until that issue is fixed. Re-test after the lockfile fix and the first merge/push to master."
+result: pass
+retest_of: "blocked on G-14-4 — lockfile fixed (14-14); verified via images.yml build-without-push jobs"
 
 ### 7. Production compose file validates under real Docker (14-08 D1)
 expected: From a clean checkout with Docker: docker compose -f docker/docker-compose.prod.yml config succeeds. The file declares all six services (db, redis, api, worker, web, migrate); every service has mem_limit; db has negative oom_score_adj while api/worker do not; only web publishes ports 80/443; no :latest tags and no build: sections.
@@ -255,17 +252,19 @@ coverage_id: T2
 ## Summary
 
 total: 42
-passed: 39
-issues: 1
+passed: 42
+issues: 0
 pending: 0
 skipped: 0
-blocked: 2
+blocked: 0
 
 ## Gaps
 
 - gap_id: G-14-4
   truth: "docker build -f docker/Dockerfile.api and docker/Dockerfile.worker succeed from a clean checkout (npm ci resolves the lockfile cleanly)"
-  status: failed
+  status: resolved
+  resolved_by: 14-14-PLAN.md
+  resolved_at: 2026-08-13
   reason: "User reported: Docker image build failed. `npm ci` exits with EUSAGE because package.json and package-lock.json are out of sync: esbuild 0.28.2 and its @esbuild platform packages are missing from the lockfile. Local `npm ls esbuild --all` also reports esbuild@0.25.12 as invalid for Vite's ^0.27.0 || ^0.28.0 requirement. Both API and worker Docker images are currently unbuildable from a clean checkout."
   severity: blocker
   test: 4
