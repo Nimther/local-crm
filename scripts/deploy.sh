@@ -66,6 +66,12 @@ RECORD_FILE="${MEGA_CRM_DEPLOY_STATE_FILE:-${XDG_STATE_HOME:-$HOME/.local/state}
 # Docker-visible health status can never disagree about what "ready" means.
 READYZ_PROBE_JS="fetch('http://127.0.0.1:4000/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
+# WR-07: mirrors the `web` service's own Docker healthcheck
+# (docker/docker-compose.prod.yml) verbatim -- Caddy's admin API on
+# 127.0.0.1:2019, not the public {$SITE_ADDRESS} site, so this gate never
+# depends on ACME cert issuance or DNS/hostname resolution.
+WEB_READY_PROBE_CMD=(wget --spider -q "http://127.0.0.1:2019/config/")
+
 # --- Readiness/timeout budgets -----------------------------------------
 #
 # OPS-02's core guarantee: gate on /readyz, NEVER a fixed sleep (T-14-54).
@@ -75,6 +81,12 @@ READYZ_PROBE_JS="fetch('http://127.0.0.1:4000/readyz').then(r=>process.exit(r.ok
 # inside a normal deploy window rather than hanging it indefinitely.
 API_READYZ_TIMEOUT_SECONDS="${API_READYZ_TIMEOUT_SECONDS:-120}"
 API_READYZ_POLL_INTERVAL_SECONDS="${API_READYZ_POLL_INTERVAL_SECONDS:-3}"
+
+# WR-07: same reasoning as API_READYZ_TIMEOUT_SECONDS above, sized against
+# `web`'s own Docker healthcheck worst-case time-to-first-healthy
+# (start_period 10s + 5 retries x 10s interval = 60s, docker/docker-compose.prod.yml).
+WEB_READY_TIMEOUT_SECONDS="${WEB_READY_TIMEOUT_SECONDS:-90}"
+WEB_READY_POLL_INTERVAL_SECONDS="${WEB_READY_POLL_INTERVAL_SECONDS:-3}"
 
 # The worker's own timeouts are ALWAYS derived from the machine-read
 # WORKER_STOP_GRACE_PERIOD_SECONDS (plan 14-04's
@@ -206,6 +218,23 @@ wait_for_api_ready() {
   return 1
 }
 
+# WR-07: `web` had no deploy-time gate at all -- `compose up -d web api`
+# returned as soon as the containers were STARTED, with no verification
+# that Caddy actually came up (e.g. CR-01's storage-permission failure
+# would have gone entirely unnoticed here). Polls the same admin-API probe
+# the `web` service's own Docker healthcheck uses.
+wait_for_web_ready() {
+  local waited=0
+  while (( waited < WEB_READY_TIMEOUT_SECONDS )); do
+    if compose exec -T web "${WEB_READY_PROBE_CMD[@]}"; then
+      return 0
+    fi
+    sleep "$WEB_READY_POLL_INTERVAL_SECONDS"
+    waited=$(( waited + WEB_READY_POLL_INTERVAL_SECONDS ))
+  done
+  return 1
+}
+
 wait_for_worker_gone() {
   local bound=$(( WORKER_STOP_GRACE_PERIOD_SECONDS + WORKER_STOP_CONFIRM_MARGIN_SECONDS ))
   local waited=0
@@ -266,6 +295,7 @@ npm run build -w apps/worker && node scripts/print-stop-grace-period.mjs
 docker compose -f $COMPOSE_FILE run --rm migrate
 docker compose -f $COMPOSE_FILE up -d web api
 docker compose -f $COMPOSE_FILE exec -T api node -e "$READYZ_PROBE_JS"
+docker compose -f $COMPOSE_FILE exec -T web ${WEB_READY_PROBE_CMD[@]}
 docker compose -f $COMPOSE_FILE stop --timeout \$WORKER_STOP_GRACE_PERIOD_SECONDS worker
 docker compose -f $COMPOSE_FILE ps -q --status=running worker
 docker compose -f $COMPOSE_FILE up -d worker
@@ -336,6 +366,13 @@ run_real_deploy() {
   echo "deploy.sh: waiting for api readiness (/readyz)"
   if ! wait_for_api_ready; then
     echo "deploy.sh: READINESS TIMEOUT waiting for service 'api' to answer /readyz after ${API_READYZ_TIMEOUT_SECONDS}s -- aborting before the worker is replaced." >&2
+    print_rollback_command "$prev_sha"
+    exit 1
+  fi
+
+  echo "deploy.sh: waiting for web readiness (Caddy admin API)"
+  if ! wait_for_web_ready; then
+    echo "deploy.sh: READINESS TIMEOUT waiting for service 'web' to answer its admin API after ${WEB_READY_TIMEOUT_SECONDS}s -- aborting before the worker is replaced. web is the only service this topology publishes to the internet (T-14-43); investigate before retrying." >&2
     print_rollback_command "$prev_sha"
     exit 1
   fi

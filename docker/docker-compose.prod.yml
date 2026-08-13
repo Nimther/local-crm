@@ -312,6 +312,24 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    # WR-07: every other long-lived service in this file has a healthcheck;
+    # `web` -- the ONLY service this topology publishes to the internet
+    # (T-14-43) -- had none, making a broken container (e.g. CR-01's
+    # storage-permission failure) invisible to both Docker and
+    # `scripts/deploy.sh`. Probes Caddy's own admin API on 127.0.0.1:2019
+    # (bound to loopback only, never published) rather than the public
+    # {$SITE_ADDRESS} site -- the admin listener comes up as soon as the
+    # Caddy process starts, with no dependency on ACME cert issuance or
+    # DNS/hostname resolution for the real domain, so this reflects "the
+    # Caddy process is alive and serving its config", not a redirect/TLS
+    # handshake outcome that would make the check itself SITE_ADDRESS-
+    # dependent.
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:2019/config/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   # One-shot migrate step (plan 14-01's `npm run migrate:prod` ==
   # `node scripts/migrate-runner.mjs`), built from the SAME api image --

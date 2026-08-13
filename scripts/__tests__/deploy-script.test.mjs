@@ -82,6 +82,10 @@ if [[ "$args" == *"exec -T api"* ]]; then
   exit "\${DEPLOY_TEST_API_READYZ_EXIT_CODE:-0}"
 fi
 
+if [[ "$args" == *"exec -T web"* ]]; then
+  exit "\${DEPLOY_TEST_WEB_READY_EXIT_CODE:-0}"
+fi
+
 if [[ "$args" == *"ps -q --status=running worker"* ]]; then
   if [[ "\${DEPLOY_TEST_WORKER_STILL_RUNNING:-0}" == "1" ]]; then
     echo "fakecid-worker-old"
@@ -127,6 +131,8 @@ function baseRealEnv(scratch, overrides = {}) {
     DEPLOY_SCRIPT_TEST_STOP_GRACE_PERIOD_SECONDS: "5",
     API_READYZ_TIMEOUT_SECONDS: "2",
     API_READYZ_POLL_INTERVAL_SECONDS: "1",
+    WEB_READY_TIMEOUT_SECONDS: "2",
+    WEB_READY_POLL_INTERVAL_SECONDS: "1",
     WORKER_STOP_CONFIRM_MARGIN_SECONDS: "1",
     WORKER_READY_MARGIN_SECONDS: "1",
     WORKER_POLL_INTERVAL_SECONDS: "1",
@@ -203,6 +209,7 @@ describe("--dry-run: ordering, machine-readability, no side effects", () => {
     const idxMigrate = lines.findIndex((l) => l.includes("run --rm migrate"));
     const idxUpWebApi = lines.findIndex((l) => l.includes("up -d web api"));
     const idxReadyzPoll = lines.findIndex((l) => l.includes("readyz"));
+    const idxWebReadyPoll = lines.findIndex((l) => l.includes("exec -T web"));
     const idxStopWorker = lines.findIndex((l) => l.includes("stop --timeout"));
     const idxConfirmGone = lines.findIndex((l) => l.includes("ps -q --status=running worker"));
     const idxUpWorker = lines.findIndex((l) => l.trim().endsWith("up -d worker"));
@@ -213,6 +220,7 @@ describe("--dry-run: ordering, machine-readability, no side effects", () => {
       idxMigrate,
       idxUpWebApi,
       idxReadyzPoll,
+      idxWebReadyPoll,
       idxStopWorker,
       idxConfirmGone,
       idxUpWorker,
@@ -224,6 +232,7 @@ describe("--dry-run: ordering, machine-readability, no side effects", () => {
     expect(idxPull).toBeLessThan(idxMigrate);
     expect(idxMigrate).toBeLessThan(idxUpWebApi);
     expect(idxMigrate).toBeLessThan(idxUpWorker);
+    expect(idxUpWebApi).toBeLessThan(idxWebReadyPoll);
 
     // readiness wait present, no fixed sleep used as a wait anywhere
     expect(lines.some((l) => /\bsleep\b/.test(l))).toBe(false);
@@ -298,6 +307,26 @@ describe("real invocation: unbounded /readyz never returns 200", () => {
   });
 });
 
+describe("real invocation: unbounded web admin-API probe never succeeds", () => {
+  it("exits non-zero naming the service and the timeout, and never replaces the worker", () => {
+    const scratch = makeScratch();
+    const run = runCli([VALID_SHA], {
+      env: baseRealEnv(scratch, { DEPLOY_TEST_WEB_READY_EXIT_CODE: "1" }),
+    });
+
+    expect(run.exitCode).not.toBe(0);
+    const output = run.stdout + run.stderr;
+    expect(output).toMatch(/web/);
+    expect(output).toMatch(/2s/); // WEB_READY_TIMEOUT_SECONDS=2 in baseRealEnv
+
+    const calls = callLines(scratch.logFile);
+    expect(calls.some((l) => l.includes("exec -T api"))).toBe(true);
+    expect(calls.some((l) => l.includes("exec -T web"))).toBe(true);
+    expect(calls.some((l) => l.includes("stop --timeout"))).toBe(false);
+    expect(calls.some((l) => l.trim().endsWith("up -d worker"))).toBe(false);
+  });
+});
+
 describe("real invocation: full successful deploy", () => {
   it("pulls, migrates, brings up web/api, waits readyz, replaces the worker stop-old-then-start-new, and records the SHA", () => {
     const scratch = makeScratch();
@@ -309,15 +338,19 @@ describe("real invocation: full successful deploy", () => {
     const idxPull = calls.findIndex((l) => l.includes("pull api worker web"));
     const idxMigrate = calls.findIndex((l) => l.includes("run --rm migrate"));
     const idxUpWebApi = calls.findIndex((l) => l.includes("up -d web api"));
+    const idxApiReady = calls.findIndex((l) => l.includes("exec -T api"));
+    const idxWebReady = calls.findIndex((l) => l.includes("exec -T web"));
     const idxStop = calls.findIndex((l) => l.includes("stop --timeout"));
     const idxConfirmGone = calls.findIndex((l) => l.includes("ps -q --status=running worker"));
     const idxUpWorker = calls.findIndex((l) => l.trim().endsWith("up -d worker"));
 
-    for (const idx of [idxPull, idxMigrate, idxUpWebApi, idxStop, idxConfirmGone, idxUpWorker]) {
+    for (const idx of [idxPull, idxMigrate, idxUpWebApi, idxApiReady, idxWebReady, idxStop, idxConfirmGone, idxUpWorker]) {
       expect(idx).toBeGreaterThanOrEqual(0);
     }
     expect(idxPull).toBeLessThan(idxMigrate);
     expect(idxMigrate).toBeLessThan(idxUpWebApi);
+    expect(idxUpWebApi).toBeLessThan(idxWebReady);
+    expect(idxWebReady).toBeLessThan(idxStop);
     expect(idxStop).toBeLessThan(idxConfirmGone);
     expect(idxConfirmGone).toBeLessThan(idxUpWorker);
 
