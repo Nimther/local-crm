@@ -1,0 +1,8 @@
+# Fixture: `migrate` carries no `profiles` entry, so a plain
+# `docker compose up` would start it as a long-lived container
+# (RESEARCH.md Pitfall C / T-14-48).
+services:
+  migrate:
+    image: ghcr.io/example/repo/api:abc123
+    mem_limit: 512m
+    command: ["node", "scripts/migrate-runner.mjs"]

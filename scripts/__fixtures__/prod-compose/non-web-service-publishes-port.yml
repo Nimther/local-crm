@@ -1,0 +1,7 @@
+# Fixture: `redis` publishes a port -- only `web` may (T-14-43).
+services:
+  redis:
+    image: redis:7
+    mem_limit: 768m
+    ports:
+      - "6379:6379"

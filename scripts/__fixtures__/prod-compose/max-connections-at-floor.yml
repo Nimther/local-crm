@@ -1,0 +1,10 @@
+# Fixture: `db`'s PG_MAX_CONNECTIONS sits exactly AT the pool-sum floor (84)
+# rather than exceeding it -- D-09 requires strictly greater than, never
+# merely equal.
+services:
+  db:
+    image: postgres:17
+    mem_limit: 2048m
+    oom_score_adj: -500
+    environment:
+      PG_MAX_CONNECTIONS: 84

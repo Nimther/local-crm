@@ -95,6 +95,17 @@ jobs:
       - name: Working-root hygiene
         run: npm run check:root-hygiene
 
+      # Phase 14 plan 08 (OPS-01, OPS-02, DB-13, D-09, Pitfall 19, Pitfall 7):
+      # the machine half of every production compose invariant that has no
+      # local feedback loop -- memory limits, OOM protection, connection
+      # headroom, published ports, immutable tags, and the derived worker
+      # stop-grace-period. Runs the YAML-parsing fallback here (no Docker
+      # daemon on this runner's `static` job) -- see
+      # scripts/validate-prod-compose.mjs's own header for why that path is
+      # not a downgrade for this specific check.
+      - name: Production compose invariants
+        run: npm run verify:prod-compose
+
   # ---------------------------------------------------------------------------
   # The full corpus against live services, then the coverage threshold and the
   # ratchet that stops the threshold being lowered to meet a regression.

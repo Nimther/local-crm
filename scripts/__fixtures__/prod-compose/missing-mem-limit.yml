@@ -1,0 +1,7 @@
+# Fixture for scripts/validate-prod-compose.mjs's test suite: `api` declares
+# no `mem_limit` at all. Deliberately minimal -- only the one service under
+# test; the "missing-service" checks for the other five will also fire, and
+# the test only asserts the specific rule this fixture targets is present.
+services:
+  api:
+    image: ghcr.io/example/repo/api:abc123

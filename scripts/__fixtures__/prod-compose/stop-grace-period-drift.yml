@@ -1,0 +1,9 @@
+# Fixture: `worker`'s stop_grace_period is a hand-typed literal that
+# disagrees with node scripts/print-stop-grace-period.mjs's published value
+# (Pitfall 7) -- the test drives this fixture with an `expectedStopGraceSeconds`
+# that does not equal 51.
+services:
+  worker:
+    image: ghcr.io/example/repo/worker:abc123
+    mem_limit: 1024m
+    stop_grace_period: 51s
