@@ -245,6 +245,25 @@ export async function findExpiredPartitions(
 }
 
 /**
+ * WR-03: catalog-sourced identifiers only ever look like this; refusing
+ * anything else is cheap insurance against ever interpolating something
+ * else into the one operation this file's own header calls "the only
+ * IRREVERSIBLE operation this phase adds" -- mirrors the exact discipline
+ * `verify-restored-database.ts`'s `SAFE_TABLE_NAME` already applies one
+ * file over for a much lower-stakes `SELECT count(*)`.
+ */
+const SAFE_IDENTIFIER = /^[a-z_][a-z0-9_]*$/;
+
+/** Throws if `identifier` does not match the identifier shape every real catalog-sourced relation name has -- called immediately before interpolating a name into DETACH/DROP DDL. */
+function assertSafeIdentifier(identifier: string, context: string): void {
+  if (!SAFE_IDENTIFIER.test(identifier)) {
+    throw new Error(
+      `dropExpiredPartitions: refusing to interpolate "${identifier}" (${context}) -- its name does not match the identifier shape every real catalog-sourced relation name has`,
+    );
+  }
+}
+
+/**
  * D-08: detach-and-drop exactly what `findExpiredPartitions` returns, one
  * partition per transaction (mirrors `attachPartitionCheckFirst`'s own
  * one-dedicated-connection-per-operation shape). NEVER issues a row-level
@@ -266,6 +285,9 @@ export async function dropExpiredPartitions(
   const drops: PartitionDropRecord[] = [];
 
   for (const partition of expired) {
+    assertSafeIdentifier(partition.parentTable, "parentTable");
+    assertSafeIdentifier(partition.partitionName, "partitionName");
+
     const conn = await client.connect();
     try {
       await conn.query("BEGIN");
