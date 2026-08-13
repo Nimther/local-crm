@@ -1,0 +1,221 @@
+# Phase 14 plan 08 (D-01, D-02, D-03, D-09, D-10, DB-13, OPS-01, OPS-02,
+# Pitfall 7, Pitfall 19, RESEARCH.md Pattern 3/4). The production topology
+# D-01 chose: one VPS, everything containerized under docker compose --
+# Postgres, Redis, api, worker, Caddy, plus a one-shot migrate service.
+# Promotes docker-compose.yml's (the development file's) own vocabulary
+# rather than inventing a second dialect -- same named-volume style, same
+# healthcheck style, and `redis` carries the SAME `docker/redis.conf` mount
+# and `command:` override, because that configuration is Phase 8's WRK-12
+# durability work, not a development convenience.
+#
+# Every genuinely secret value is read from `${MEGA_CRM_ENV_FILE}` (the
+# operator's own externally-resolved env file, outside any git working
+# tree -- scripts/env-path.mjs's convention, the same one every secret in
+# this project has followed since Phase 8) -- NEVER a literal in this file.
+# Every non-secret sizing knob below is `${VAR:-default}` -- an environment
+# variable with a conservative default, per this plan's checkpoint decision
+# (RESEARCH.md Open Question 3's "parameterize-with-minimum" option).
+# docker/prod.env.example documents every variable this file references;
+# docs/runbooks/production-topology.md documents the sizing derivation and
+# the revisit triggers for every default.
+#
+# `docker compose -f docker/docker-compose.prod.yml --env-file
+# docker/prod.env.example config` is this file's own local proof; the first
+# real bring-up belongs to plan 14-09's deploy script against a real host
+# and a real domain, never this plan.
+
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    # SEPARATE from docker/pg-tls-entrypoint.sh (the dev/CI entrypoint) --
+    # see docker/postgres/prod-tls-entrypoint.sh's own header for why this
+    # plan keeps two scripts rather than one with a runtime branch.
+    entrypoint: ["/usr/local/bin/prod-tls-entrypoint.sh"]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-mega_crm}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # D-09: floor is 84 (plan 14-03's PG_POOL_SIZES summed total for one
+      # instance each of apps/api + apps/worker) -- see
+      # docs/runbooks/production-topology.md for the full arithmetic.
+      # scripts/validate-prod-compose.mjs's CI gate fails if this resolves
+      # to <= 84.
+      PG_MAX_CONNECTIONS: ${PG_MAX_CONNECTIONS:-200}
+      PG_SHARED_BUFFERS: ${PG_SHARED_BUFFERS:-512MB}
+      # docker/postgres/init-prod-roles.sql reads these via psql's
+      # `\getenv` -- never embedded in that SQL file itself.
+      MEGA_CRM_APP_PASSWORD: ${MEGA_CRM_APP_PASSWORD}
+      MEGA_CRM_SCAN_PASSWORD: ${MEGA_CRM_SCAN_PASSWORD}
+      MEGA_CRM_AUTH_PASSWORD: ${MEGA_CRM_AUTH_PASSWORD}
+    # Pitfall 19: both halves required, neither works alone -- an unset
+    # memory limit lets a container exhaust host RAM before the kernel ever
+    # compares scores, so the score adjustment below achieves nothing without
+    # this. See docs/runbooks/production-topology.md for the derivation.
+    mem_limit: ${DB_MEM_LIMIT:-2048m}
+    # Negative favors survival. -500 (not -1000) is the pragmatic default:
+    # dockerd itself runs at -500; -1000 is "never kill," which risks a
+    # leaking Postgres freezing the whole host with nothing left for the OOM
+    # killer to reap.
+    oom_score_adj: ${DB_OOM_SCORE_ADJ:--500}
+    volumes:
+      - mega_crm_db_data_prod:/var/lib/postgresql/data
+      - ./docker/postgres/init-prod-roles.sql:/docker-entrypoint-initdb.d/01-init-prod-roles.sql:ro
+      - ./docker/postgres/prod-tls-entrypoint.sh:/usr/local/bin/prod-tls-entrypoint.sh:ro
+      # DEDICATED volume, separate from the data volume -- certificate
+      # lifetime is independent of the database volume (mirrors
+      # docker-compose.yml's dev `mega_crm_db_certs` precedent exactly).
+      - mega_crm_db_certs_prod:/certs
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # No `ports:` -- reachable only on the compose network (T-14-43).
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    # 08-04 (WRK-12): the SAME durability config as development -- sizing
+    # the VPS host for Redis's own `maxmemory` belongs to Phase 15
+    # (docker/redis.conf's own comment); REDIS_MEM_LIMIT below is only the
+    # CONTAINER ceiling around that fixed 512mb data ceiling, this plan's
+    # concern.
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    mem_limit: ${REDIS_MEM_LIMIT:-768m}
+    volumes:
+      - mega_crm_redis_data_prod:/data
+      - ./docker/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # No `ports:` -- reachable only on the compose network (T-14-43).
+
+  api:
+    image: ${GHCR_IMAGE_BASE}/api:${IMAGE_TAG}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # `required: false` so this file (and `docker compose config` run
+    # against docker/prod.env.example, which cannot point at a real
+    # operator secrets file) resolves cleanly without one existing --
+    # at a real deploy the path MUST exist, or every var below this
+    # comment is simply absent from the container's environment.
+    env_file:
+      - path: ${MEGA_CRM_ENV_FILE}
+        required: false
+    environment:
+      NODE_ENV: production
+    mem_limit: ${API_MEM_LIMIT:-512m}
+    # Probes /readyz, not just /healthz -- the API's own port is never
+    # published (T-14-43), so this container's OWN health status is the
+    # ONLY way the deploy script (plan 14-09) can observe true readiness
+    # (Postgres + Redis + migration currency), not just liveness.
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    # No `ports:` -- `web` (Caddy) is the ONLY published surface (T-14-43);
+    # Caddy reaches this container by compose service name (docker/Caddyfile).
+
+  worker:
+    image: ${GHCR_IMAGE_BASE}/worker:${IMAGE_TAG}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - path: ${MEGA_CRM_ENV_FILE}
+        required: false
+    environment:
+      NODE_ENV: production
+    mem_limit: ${WORKER_MEM_LIMIT:-1024m}
+    # ARCHITECTURE.md §10 / Pitfall 7: MUST come from the published constant,
+    # NEVER a hand-typed literal -- the deploy script (plan 14-09) exports
+    # WORKER_STOP_GRACE_PERIOD_SECONDS from
+    # `node scripts/print-stop-grace-period.mjs`'s output before every
+    # `up`/`run`. scripts/validate-prod-compose.mjs's drift check fails if
+    # this ever disagrees with that script's current output.
+    stop_grace_period: ${WORKER_STOP_GRACE_PERIOD_SECONDS}s
+    # Same readiness reasoning as `api` above -- WORKER_HEALTH_HOST is
+    # 127.0.0.1-only by design (plan 14-04, D-14); this container's health
+    # status is the only way to observe it from outside.
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4100/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    # No `ports:` -- publishing WORKER_HEALTH_PORT would expose an
+    # unauthenticated probe endpoint to the internet (T-14-43).
+
+  web:
+    image: ${GHCR_IMAGE_BASE}/web:${IMAGE_TAG}
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      # docker/Caddyfile's own `{$SITE_ADDRESS}` placeholder syntax --
+      # Caddy reads this from its OWN process environment, not compose-level
+      # interpolation of the Caddyfile (D-02).
+      SITE_ADDRESS: ${SITE_ADDRESS}
+    mem_limit: ${WEB_MEM_LIMIT:-256m}
+    # Rule 2 completion (not in the plan's own text): persistent ACME
+    # state. Without these, every container restart re-issues a fresh
+    # Let's Encrypt certificate for the same domain, which risks tripping
+    # ACME's own rate limits -- Caddy's default `/data`/`/config` paths
+    # inside its image, given real volumes here, survive a restart.
+    volumes:
+      - mega_crm_caddy_data_prod:/data
+      - mega_crm_caddy_config_prod:/config
+    # The ONLY service that publishes ports (T-14-43) -- exactly 80 and 443,
+    # because ACME needs both (HTTP-01 challenge + the served HTTPS site).
+    ports:
+      - "80:80"
+      - "443:443"
+
+  # One-shot migrate step (plan 14-01's `npm run migrate:prod` ==
+  # `node scripts/migrate-runner.mjs`), built from the SAME api image --
+  # no separate Dockerfile, no separate build. RESEARCH.md Pitfall C /
+  # T-14-48: NEVER expressed via a `depends_on: { condition:
+  # service_completed_successfully }` from api/worker -- that documented
+  # Compose bug can re-run a completed one-shot container on a later `up`.
+  # The deploy script (plan 14-09) instead runs
+  # `docker compose run --rm migrate` explicitly and checks its exit code,
+  # sequencing db-healthy -> migrate -> api/worker itself outside compose.
+  # The `manual` profile is this file's OTHER half of that defense: no
+  # service below declares that profile, so a plain `docker compose up`
+  # never starts this service at all -- `docker compose run migrate`
+  # targets it BY NAME regardless of profile activation, which is the exact
+  # mechanism this depends on.
+  migrate:
+    image: ${GHCR_IMAGE_BASE}/api:${IMAGE_TAG}
+    profiles: ["manual"]
+    command: ["node", "scripts/migrate-runner.mjs"]
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - path: ${MEGA_CRM_ENV_FILE}
+        required: false
+    environment:
+      NODE_ENV: production
+    mem_limit: ${MIGRATE_MEM_LIMIT:-512m}
+    # No `ports:`, no `healthcheck:` -- a one-shot process the deploy script
+    # awaits by exit code, never a long-lived container.
+
+volumes:
+  mega_crm_db_data_prod:
+  mega_crm_db_certs_prod:
+  mega_crm_redis_data_prod:
+  mega_crm_caddy_data_prod:
+  mega_crm_caddy_config_prod:
