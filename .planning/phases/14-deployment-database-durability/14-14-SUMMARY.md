@@ -151,6 +151,18 @@ Neither route was exercised by this executor; both remain available to the opera
 - Docker builds are unblocked from the lockfile side; the remaining Docker-daemon-dependent acceptance step (UAT test 4 re-run, UAT test 5 unblock) is ready for the operator or for the Images PR run once this branch opens a pull request.
 - No Dockerfile `node:22-slim` pin and no `.nvmrc` value was touched, per the plan's explicit constraint.
 
+## Self-Check: PASSED
+
+- FOUND: `scripts/check-lockfile-npm10.mjs`
+- FOUND: `scripts/__tests__/check-lockfile-npm10.test.mjs`
+- FOUND: `scripts/__fixtures__/lockfile-npm10/{clean,desynced,tag-mismatch}/`
+- FOUND: commit `1b0374d` (Task 1)
+- FOUND: commit `734e36a` (Task 2 RED)
+- FOUND: commit `a12efb2` (Task 2 GREEN)
+- FOUND: commit `56f1e89` (Task 3)
+- Re-parsed `.github/workflows/ci.yml` with the `yaml` package post-edit: `static` job's step list contains "npm-10 lockfile guard" between "Pool factory audit" and "Working-root hygiene", confirming the edit is structurally valid YAML (not just grep-count-matched).
+- Re-parsed `.github/workflows/images.yml` with the `yaml` package post-edit: `build-and-push`/`build-only` jobs both present with the expected `if:`/`permissions:` shape.
+
 ---
 *Phase: 14-deployment-database-durability*
 *Completed: 2026-08-13*
