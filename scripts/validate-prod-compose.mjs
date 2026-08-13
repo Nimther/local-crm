@@ -53,10 +53,20 @@ export const POOL_SUM_FLOOR = 84;
 
 /** Every service this compose file must declare, in the order the plan
  * introduces them. */
-export const EXPECTED_SERVICES = ["db", "redis", "api", "worker", "web", "migrate"];
+export const EXPECTED_SERVICES = ["db", "redis", "api", "worker", "web", "migrate", "pgbackrest"];
 
 /** The one service permitted to publish a port to the host (T-14-43). */
 const PORT_PUBLISHING_SERVICE = "web";
+
+/** Plan 14-10 (DB-09): the named volume `db` and `pgbackrest` must BOTH
+ * reference -- the sidecar's whole reason to exist is read access to this
+ * exact volume (T-14-62's "read access to the cluster directory"). */
+const DB_DATA_VOLUME_NAME = "mega_crm_db_data_prod";
+
+/** The on-disk pgBackRest configuration file -- grep-asserted (like
+ * `checkTlsEntrypointServesSsl` below) to contain no literal credential
+ * value, mirroring this plan's own acceptance-criteria command exactly. */
+const PGBACKREST_CONFIG_REL = path.join("docker", "pgbackrest", "pgbackrest.conf");
 
 /** Services whose `image:` must resolve to an immutable (non-mutable) tag --
  * built by THIS repo's own CI (.github/workflows/images.yml), unlike
@@ -219,6 +229,29 @@ export function findPortsList(lines, indent = 4) {
   return items;
 }
 
+/** Plan 14-10 (DB-09): the `volumes:` block-list under a service body,
+ * reduced to just each entry's SOURCE (the named volume, or bind-mount
+ * path, before the first unescaped `:`) -- this repo's compose file only
+ * ever uses the short `source:target[:mode]` string form, never the
+ * long-form mapping, so that is all this extracts. Used to assert
+ * `pgbackrest` actually shares `db`'s own data volume rather than a
+ * differently-named one. */
+export function findVolumeSources(lines, indent = 4) {
+  const idx = lines.findIndex((l) => new RegExp(`^ {${indent}}volumes:\\s*$`).test(l));
+  if (idx === -1) return [];
+  const sources = [];
+  for (let i = idx + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.trim() === "") continue;
+    if (indentOf(line) <= indent) break;
+    const m = line.match(new RegExp(`^ {${indent + 2}}-\\s*(.+?)\\s*$`));
+    if (!m) continue;
+    const raw = m[1].replace(/^["']|["']$/g, "");
+    sources.push(raw.split(":")[0]);
+  }
+  return sources;
+}
+
 /**
  * Builds the normalized model `{ services: { [name]: {...} } }` from the raw
  * compose text + a resolved env map, entirely via text substitution and the
@@ -239,6 +272,7 @@ export function resolveViaYamlFallback(composeText, envMap) {
       profiles: parseInlineStringArray(findScalarField(svcLines, "profiles")),
       ports: findPortsList(svcLines),
       environment: findEnvironmentMap(svcLines),
+      volumeSources: findVolumeSources(svcLines),
     };
   }
   return { services, source: "yaml-fallback" };
@@ -246,9 +280,15 @@ export function resolveViaYamlFallback(composeText, envMap) {
 
 // ---------------------------------------------------------------------------
 // `docker compose config` path -- exercised only when the subcommand is
-// actually available. Untestable in this sandbox (no `docker compose`
-// subcommand, no daemon -- confirmed directly); kept behind a capability
-// probe so it degrades to the fallback rather than crashing when absent.
+// actually available; kept behind a capability probe so it degrades to the
+// YAML fallback rather than crashing when absent. Plan 14-08 authored this
+// gate with NO real `docker compose` binary available in its own sandbox
+// (confirmed then: no daemon, no `compose` subcommand at all) -- plan 14-10
+// installed one locally (Homebrew's standalone `docker-compose` v5.4.0,
+// auto-discovered by the `docker` CLI as its own `compose` subcommand) and
+// found this path had never actually been exercised end-to-end anywhere in
+// this project before now, surfacing the `resolveViaDockerCompose` bug
+// documented on that function.
 // ---------------------------------------------------------------------------
 
 export function isDockerComposeAvailable() {
@@ -260,12 +300,29 @@ export function isDockerComposeAvailable() {
   }
 }
 
-/** Resolves via a real `docker compose ... config --format json` call. Throws on any compose error (a genuine config problem, never silently swallowed into the fallback path). */
+/** Resolves via a real `docker compose ... config --format json` call. Throws on any compose error (a genuine config problem, never silently swallowed into the fallback path).
+ *
+ * Plan 14-10 (Rule 1 bug, found via direct empirical testing once a real
+ * `docker compose` binary was available for the first time across this
+ * project's compose-file plans): `docker compose config` EXCLUDES any
+ * service carrying a `profiles:` entry (this file's own `migrate`, added by
+ * plan 14-08) from its resolved output UNLESS that profile is explicitly
+ * activated -- confirmed directly (`docker compose ... config --services`
+ * lists 6 services without `COMPOSE_PROFILES` set, 7 with
+ * `COMPOSE_PROFILES=manual` or `COMPOSE_PROFILES=*`). Without this,
+ * `evaluateInvariants`'s `missing-service` check would report `migrate` as
+ * absent on ANY machine/CI runner that actually has `docker compose`
+ * installed (this sandbox previously always used the YAML-fallback path
+ * below, which never had this gap, masking the bug entirely -- see
+ * `isDockerComposeAvailable`'s own comment). `COMPOSE_PROFILES=*` is
+ * Compose's own documented wildcard for "activate every profile a service
+ * declares" -- future-proof against a later plan adding a differently-named
+ * profile, unlike hardcoding `manual`. */
 export function resolveViaDockerCompose(composeFile, envFile) {
   const output = execFileSync(
     "docker",
     ["compose", "-f", composeFile, "--env-file", envFile, "config", "--format", "json"],
-    { encoding: "utf8" },
+    { encoding: "utf8", env: { ...process.env, COMPOSE_PROFILES: "*" } },
   );
   const parsed = JSON.parse(output);
   const services = {};
@@ -278,6 +335,7 @@ export function resolveViaDockerCompose(composeFile, envFile) {
       profiles: svc.profiles ?? [],
       ports: svc.ports ? svc.ports.map((p) => `${p.published ?? ""}:${p.target ?? ""}`) : null,
       environment: svc.environment ?? {},
+      volumeSources: (svc.volumes ?? []).map((v) => v.source),
     };
   }
   return { services, source: "docker-compose" };
@@ -302,15 +360,35 @@ export function parseMemLimitToBytes(value) {
   return Math.round(num * mult);
 }
 
-/** Parses a duration value ("60s", a bare number of seconds) to a plain number of seconds. */
+/** Parses a duration value to a plain number of seconds. Accepts a bare
+ * number ("60"), the raw compose-YAML shape this repo writes ("60s"), and a
+ * Go-style `time.Duration.String()` value.
+ *
+ * Plan 14-10 (Rule 1 bug, found via direct empirical testing once a real
+ * `docker compose` binary was available): `docker compose config --format
+ * json` does NOT echo `stop_grace_period` back as "<n>s" -- it normalizes
+ * to Go's own duration format ("1m0s" for 60 seconds, "1m30s" for 90,
+ * "2m5s" for 125s -- confirmed directly against this repo's own compose
+ * file at several WORKER_STOP_GRACE_PERIOD_SECONDS values). The original
+ * `/^(\d+(?:\.\d+)?)s$/`-only regex silently returned `undefined` for every
+ * one of those, which made the stop-grace-period-drift check fail on ANY
+ * machine with a real `docker compose` (this project's own YAML-fallback
+ * path never normalizes the text this way, which is why this had never
+ * been exercised before this plan installed one locally for the first
+ * time). */
 export function parseDurationToSeconds(value) {
   if (value === undefined || value === null || value === "") return undefined;
   if (typeof value === "number") return value;
   const s = String(value).trim();
-  const m = s.match(/^(\d+(?:\.\d+)?)s$/);
-  if (m) return Number.parseFloat(m[1]);
-  const n = Number(s);
-  return Number.isNaN(n) ? undefined : n;
+  if (/^\d+(?:\.\d+)?$/.test(s)) return Number.parseFloat(s);
+  const m = s.match(/^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s)?$/);
+  if (m && (m[1] !== undefined || m[2] !== undefined || m[3] !== undefined)) {
+    const hours = m[1] !== undefined ? Number.parseInt(m[1], 10) : 0;
+    const minutes = m[2] !== undefined ? Number.parseInt(m[2], 10) : 0;
+    const seconds = m[3] !== undefined ? Number.parseFloat(m[3]) : 0;
+    return hours * 3600 + minutes * 60 + seconds;
+  }
+  return undefined;
 }
 
 /** Extracts the tag portion of an image reference (text after the last `:` following the last `/`). Returns `""` for an implicit (tagless) reference. */
@@ -459,6 +537,20 @@ export function evaluateInvariants(model, opts) {
     );
   }
 
+  // 8. Plan 14-10 (DB-09, T-14-62): the pgbackrest sidecar actually shares
+  // db's own data volume -- the whole reason for its being a sidecar rather
+  // than a standalone backup client is read access to the same cluster
+  // directory `db` writes.
+  const pgbackrest = services.pgbackrest;
+  if (pgbackrest) {
+    check(
+      Array.isArray(pgbackrest.volumeSources) && pgbackrest.volumeSources.includes(DB_DATA_VOLUME_NAME),
+      "pgbackrest-missing-shared-data-volume",
+      "pgbackrest",
+      `pgbackrest does not mount the "${DB_DATA_VOLUME_NAME}" volume db itself uses -- it would have no access to the cluster directory it exists to back up`,
+    );
+  }
+
   return { violations, checkedCount };
 }
 
@@ -475,6 +567,29 @@ export function checkTlsEntrypointServesSsl(baseDir) {
   const content = readFileSync(scriptPath, "utf8");
   const ok = /ssl\s*=\s*on/.test(content);
   return { ok, detail: ok ? undefined : `${DB_TLS_ENTRYPOINT_REL} does not set ssl=on` };
+}
+
+/** Plan 14-10 (DB-09, T-14-61): the on-disk pgBackRest configuration file
+ * carries no literal credential value -- every secret/endpoint is read from
+ * the environment via pgBackRest's own `PGBACKREST_<OPTION>` override
+ * convention (docker/pgbackrest/pgbackrest.conf's own header). Same regex
+ * as this plan's own acceptance criteria (`grep -v '^\s*#' ... | grep -riE
+ * "(secret|key|pass)[[:space:]]*=[[:space:]]*[^$[:space:]]"`), applied to
+ * every non-comment line directly, so this is the SAME assertion machine-
+ * checked on every CI run, not just at authoring time. */
+export function checkPgbackrestConfigHasNoCredential(baseDir) {
+  const configPath = path.join(baseDir, PGBACKREST_CONFIG_REL);
+  if (!existsSync(configPath)) {
+    return { ok: false, detail: `${PGBACKREST_CONFIG_REL} does not exist` };
+  }
+  const credentialLinePattern = /(secret|key|pass)\s*=\s*[^\s$]/i;
+  const offendingLine = readFileSync(configPath, "utf8")
+    .split(/\r?\n/)
+    .find((line) => !/^\s*#/.test(line) && credentialLinePattern.test(line));
+  return {
+    ok: offendingLine === undefined,
+    detail: offendingLine === undefined ? undefined : `${PGBACKREST_CONFIG_REL} appears to contain a literal credential value: ${JSON.stringify(offendingLine.trim())}`,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -521,16 +636,24 @@ export function runValidation({
     expectedStopGraceSeconds,
   });
 
-  const tlsCheckedCount = checkedCount + 1;
   const tls = checkTlsEntrypointServesSsl(baseDir);
+  const pgbackrestConfig = checkPgbackrestConfigHasNoCredential(baseDir);
+  const bonusCheckedCount = checkedCount + 2;
   const allViolations = [...preflightViolations, ...violations];
   if (!tls.ok) {
     allViolations.push({ rule: "db-tls-entrypoint-missing-ssl-on", service: "db", detail: tls.detail });
   }
+  if (!pgbackrestConfig.ok) {
+    allViolations.push({
+      rule: "pgbackrest-config-contains-credential",
+      service: "pgbackrest",
+      detail: pgbackrestConfig.detail,
+    });
+  }
 
   return {
     violations: allViolations,
-    checkedCount: tlsCheckedCount,
+    checkedCount: bonusCheckedCount,
     servicesChecked: Object.keys(model.services ?? {}).length,
     usedDocker,
   };

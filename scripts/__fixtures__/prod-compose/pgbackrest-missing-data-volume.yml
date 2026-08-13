@@ -1,0 +1,9 @@
+# Fixture for scripts/validate-prod-compose.mjs's test suite: `pgbackrest`
+# does not mount db's own data volume -- it would have no access to the
+# cluster directory it exists to back up (T-14-62).
+services:
+  pgbackrest:
+    image: megacrm-postgres:local
+    mem_limit: 256m
+    volumes:
+      - some_other_volume:/var/lib/postgresql/data:ro

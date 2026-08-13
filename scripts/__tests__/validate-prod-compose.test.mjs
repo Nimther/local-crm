@@ -18,6 +18,7 @@ import { describe, expect, it } from "vitest";
 import {
   EXPECTED_SERVICES,
   POOL_SUM_FLOOR,
+  checkPgbackrestConfigHasNoCredential,
   evaluateInvariants,
   extractImageTag,
   isMutableTag,
@@ -62,6 +63,17 @@ describe("value normalization helpers", () => {
     expect(parseDurationToSeconds("51s")).toBe(51);
     expect(parseDurationToSeconds(60)).toBe(60);
     expect(parseDurationToSeconds(undefined)).toBeUndefined();
+  });
+
+  it("parseDurationToSeconds handles the Go-style duration strings a real `docker compose config` returns", () => {
+    // Plan 14-10: found empirically that `docker compose config --format
+    // json` normalizes stop_grace_period to Go's time.Duration.String()
+    // format, not "<n>s" -- confirmed directly against several
+    // WORKER_STOP_GRACE_PERIOD_SECONDS values.
+    expect(parseDurationToSeconds("1m0s")).toBe(60);
+    expect(parseDurationToSeconds("1m30s")).toBe(90);
+    expect(parseDurationToSeconds("2m5s")).toBe(125);
+    expect(parseDurationToSeconds("45s")).toBe(45);
   });
 
   it("extractImageTag / isMutableTag flag latest, branch names, and missing tags", () => {
@@ -115,6 +127,14 @@ describe("each fixture trips exactly the invariant it targets", () => {
     { fixture: "mutable-image-tag.yml", rule: "mutable-image-tag", service: "web" },
     { fixture: "max-connections-at-floor.yml", rule: "max-connections-at-or-below-floor", service: "db" },
     { fixture: "migrate-not-excluded.yml", rule: "migrate-not-profile-excluded", service: "migrate" },
+    { fixture: "missing-pgbackrest-service.yml", rule: "missing-service", service: "pgbackrest" },
+    { fixture: "pgbackrest-missing-mem-limit.yml", rule: "missing-mem-limit", service: "pgbackrest" },
+    { fixture: "pgbackrest-publishes-port.yml", rule: "non-web-service-publishes-port", service: "pgbackrest" },
+    {
+      fixture: "pgbackrest-missing-data-volume.yml",
+      rule: "pgbackrest-missing-shared-data-volume",
+      service: "pgbackrest",
+    },
   ];
 
   for (const { fixture, rule, service } of cases) {
@@ -150,6 +170,20 @@ describe("each fixture trips exactly the invariant it targets", () => {
     );
     const { violations } = evaluateInvariants(model, { poolSumFloor: POOL_SUM_FLOOR, expectedStopGraceSeconds: 60 });
     expect(violations.some((v) => v.service === "db")).toBe(false);
+  });
+});
+
+describe("checkPgbackrestConfigHasNoCredential", () => {
+  it("flags a literal credential value in the pgBackRest configuration file", () => {
+    const fixtureRoot = path.join(FIXTURES_DIR, "pgbackrest-conf-with-credential");
+    const result = checkPgbackrestConfigHasNoCredential(fixtureRoot);
+    expect(result.ok).toBe(false);
+    expect(result.detail).toMatch(/repo1-cipher-pass/);
+  });
+
+  it("passes against the real committed pgbackrest.conf (no literal credential)", () => {
+    const result = checkPgbackrestConfigHasNoCredential(REPO_ROOT);
+    expect(result.ok).toBe(true);
   });
 });
 

@@ -1,0 +1,10 @@
+# Fixture for scripts/validate-prod-compose.mjs's test suite: `pgbackrest`
+# publishes a port -- only `web` may (T-14-43).
+services:
+  pgbackrest:
+    image: megacrm-postgres:local
+    mem_limit: 256m
+    ports:
+      - "8432:8432"
+    volumes:
+      - mega_crm_db_data_prod:/var/lib/postgresql/data:ro
