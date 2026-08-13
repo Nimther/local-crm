@@ -139,7 +139,14 @@ services:
       # mount) because the path itself never needs host visibility.
       - mega_crm_pg_socket_prod:/var/run/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      # WR-01: no -h forces the client-library default (the Unix socket),
+      # which on a fresh volume can resolve to Postgres's own TEMPORARY
+      # bootstrap server (initdb runs docker-entrypoint-initdb.d/* against a
+      # socket-only server before the real TCP listener with ssl=on comes
+      # up) -- a dependent container gating on service_healthy could start
+      # against that bootstrap server instead. Force a TCP probe of the real
+      # listener so this can only pass once the real server is up.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${POSTGRES_USER:-postgres}"]
       interval: 5s
       timeout: 5s
       retries: 10
