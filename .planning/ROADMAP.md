@@ -501,7 +501,7 @@ Plans:
   4. A point-in-time restore from backup has actually been performed and written up, not merely configured.
   5. Postgres connections use TLS, every pool has an error handler, the missing constraints exist and are verifiably enforced, and retention deletes aged data on a defined schedule.
 
-**Plans**: 10/13 plans executed
+**Plans**: 10/14 plans executed (13 scoped + 1 gap-closure)
 
 Plans:
 **Wave 1**
@@ -523,6 +523,7 @@ Plans:
 **Wave 4**
 
 - [x] 14-08-PLAN.md — Production compose: Postgres TLS, memory limits + `oom_score_adj`, connection headroom, one-shot migrate, invariant gate (OPS-01, OPS-02, DB-13)
+- [ ] 14-14-PLAN.md — [gap G-14-4] npm-10 lockfile repair (all three Docker builds fail at root `npm ci`), fail-loud npm-10 guard in the required `static` job, pull_request-time image build (OPS-01)
 
 **Wave 5**
 
