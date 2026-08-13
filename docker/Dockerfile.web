@@ -67,6 +67,16 @@ RUN addgroup -g 1000 caddyweb \
 COPY docker/Caddyfile /etc/caddy/Caddyfile
 COPY --from=build --chown=caddyweb:caddyweb /app/apps/web/dist /srv/web
 
+# CR-01: caddy:2's own base image creates /data and /config as root during
+# its build (Caddy has never run as a non-root user by default). The named
+# volumes docker-compose.prod.yml mounts onto these exact paths (so ACME
+# certificate/account state under /data/caddy survives a restart) inherit
+# that root ownership on first attach. A process running as uid 1000 cannot
+# write into a root-owned 0755 directory, silently defeating ACME
+# persistence (or preventing Caddy from initializing storage at all) --
+# chown both paths to caddyweb before dropping privileges.
+RUN mkdir -p /data /config && chown -R caddyweb:caddyweb /data /config
+
 USER caddyweb
 
 EXPOSE 80 443
