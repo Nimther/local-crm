@@ -34,4 +34,23 @@ export const partitionMaintenanceRuns = pgTable("partition_maintenance_runs", {
   partitionsCreated: text("partitions_created").array().notNull().default([]),
   lastAlertSentAt: timestamp("last_alert_sent_at", { withTimezone: true }),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  // Phase 14 plan 12 (DB-11, D-08, migration 0063): the "run record
+  // distinguishes disabled from failed" half of T-14-79's mitigation.
+  // "disabled" is the value every run writes while the retention enable
+  // flag is unset (the only state any committed deploy of this codebase can
+  // reach); "ok" means retention ran (with or without anything eligible);
+  // "failed" means the retention step itself threw -- see
+  // apps/worker/src/queues/partition-maintenance.worker.ts's own retention
+  // step for why a retention failure must never also fail the
+  // partition-creation work's own recording. `retentionError` is populated
+  // only alongside "failed", and is the same message a human reading logs
+  // would see -- never row contents, workspace ids or any secret.
+  retentionStatus: text("retention_status").notNull().default("disabled"),
+  retentionError: text("retention_error"),
+  // Names only (mirrors `partitionsCreated` above) -- the full per-drop
+  // record (parent table, range, horizon) lives in the append-only
+  // `partition_retention_drops` ledger this same migration creates; this
+  // column is the fast "what did the MOST RECENT run drop" answer without a
+  // join, exactly as `partitionsCreated` already is for creation.
+  partitionsDropped: text("partitions_dropped").array().notNull().default([]),
 });

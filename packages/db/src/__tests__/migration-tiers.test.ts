@@ -125,13 +125,17 @@ describe("newestAutoReversibleTier", () => {
     }
   });
 
-  it("returns the current repository's trailing run as exactly [0062_member_unique_org_user]", () => {
+  it("returns the current repository's trailing run as exactly [0062_member_unique_org_user, 0063_partition_retention_drops]", () => {
     // 0061 (drops the plaintext suppression column/constraint) is
-    // forward-only, so the trailing run stops at the single newest
-    // migration, 0062 (an additive unique constraint). Pinned explicitly so
-    // a future migration silently changing this fails loudly here rather
-    // than only inside the rehearsal test.
-    expect(newestAutoReversibleTier(MIGRATIONS_DIR)).toEqual(["0062_member_unique_org_user"]);
+    // forward-only, so the trailing run starts at 0062 (an additive unique
+    // constraint) and now also includes 0063 (Phase 14 plan 12, DB-11: pure
+    // ADD COLUMN + CREATE TABLE, also additive). Pinned explicitly so a
+    // future migration silently changing this fails loudly here rather than
+    // only inside the rehearsal test.
+    expect(newestAutoReversibleTier(MIGRATIONS_DIR)).toEqual([
+      "0062_member_unique_org_user",
+      "0063_partition_retention_drops",
+    ]);
   });
 
   it("returns an empty run when the newest migration is forward-only", () => {

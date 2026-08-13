@@ -133,6 +133,7 @@ export const MIGRATION_TIERS: Readonly<Record<string, MigrationTier>> = Object.f
   "0060_suppression_hash_expand": "forward-only", // CREATE POLICY
   "0061_suppression_hash_contract": "forward-only", // DROP COLUMN + DROP CONSTRAINT
   "0062_member_unique_org_user": "auto-reversible", // CREATE UNIQUE INDEX + ADD CONSTRAINT ... UNIQUE USING INDEX
+  "0063_partition_retention_drops": "auto-reversible", // ADD COLUMN x3 on partition_maintenance_runs + CREATE TABLE partition_retention_drops -- pure additive shape, destroys nothing that existed before
 });
 
 /**

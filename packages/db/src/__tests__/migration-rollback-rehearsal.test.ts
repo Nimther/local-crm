@@ -54,6 +54,13 @@ interface InverseStep {
  *   fully reverses everything this migration added, and destroys no data
  *   (the underlying `member` rows are untouched; only the uniqueness
  *   enforcement is removed).
+ * - 0063_partition_retention_drops (Phase 14 plan 12, DB-11): adds three
+ *   columns to `partition_maintenance_runs` (all with defaults, so dropping
+ *   them destroys only the retention-run bookkeeping this same migration
+ *   introduced, never pre-existing data) and creates a brand-new table,
+ *   `partition_retention_drops`, with its own index. Reverting means
+ *   dropping exactly those four objects -- nothing this migration's inverse
+ *   touches existed before this migration ran.
  */
 const MIGRATION_INVERSES: Record<string, InverseStep[]> = {
   "0062_member_unique_org_user": [
@@ -61,6 +68,20 @@ const MIGRATION_INVERSES: Record<string, InverseStep[]> = {
       description:
         "drop member_organization_user_unique (the constraint AND its backing index -- Postgres drops both together)",
       sql: `ALTER TABLE member DROP CONSTRAINT member_organization_user_unique;`,
+    },
+  ],
+  "0063_partition_retention_drops": [
+    {
+      description: "drop partition_retention_drops (its own index drops automatically with the table)",
+      sql: `DROP TABLE partition_retention_drops;`,
+    },
+    {
+      description:
+        "drop the three retention columns this migration added to partition_maintenance_runs (retention_status, retention_error, partitions_dropped)",
+      sql: `ALTER TABLE partition_maintenance_runs
+              DROP COLUMN retention_status,
+              DROP COLUMN retention_error,
+              DROP COLUMN partitions_dropped;`,
     },
   ],
 };

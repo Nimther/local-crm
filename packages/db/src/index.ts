@@ -33,6 +33,7 @@ import * as reputationAlertStateSchema from "./schema/reputation-alert-state.js"
 import * as ingestionAlertStateSchema from "./schema/ingestion-alert-state.js";
 import * as erasureRecordsSchema from "./schema/erasure-records.js";
 import * as workspaceSuppressionKeysSchema from "./schema/workspace-suppression-keys.js";
+import * as partitionRetentionDropsSchema from "./schema/partition-retention-drops.js";
 
 const schema = {
   ...authSchema,
@@ -67,6 +68,7 @@ const schema = {
   ...ingestionAlertStateSchema,
   ...erasureRecordsSchema,
   ...workspaceSuppressionKeysSchema,
+  ...partitionRetentionDropsSchema,
 };
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -164,6 +166,11 @@ export * from "./schema/workspace-suppression-keys.js";
 // and the `erasureRecords` table were unreachable from any consumer of
 // `@mega-crm/db` -- this plan is the first to need them.
 export * from "./schema/erasure-records.js";
+// Phase 14 plan 12 (DB-11): the retention drop ledger's own type-inference
+// shape -- see that file's header for why it exists alongside
+// partition_maintenance_runs.retention_status/retention_error rather than
+// instead of it.
+export * from "./schema/partition-retention-drops.js";
 export { TENANT_GUC_KEY } from "./rls.js";
 // Phase 14 plan 01 (D-13, DB-05/DB-06, OPS-04/OPS-05): the one shared
 // definition of "a migration is applied", consumed by scripts/migrate-runner.mjs
