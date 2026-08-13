@@ -13,6 +13,24 @@ import {
   type PartitionClient,
   type PartitionedTableConfig,
 } from "./ensure-partitions.js";
+import {
+  dropExpiredPartitions,
+  isRetentionEnabled,
+  PARTITION_RETENTION_MONTHS,
+  RETENTION_ELIGIBLE_TABLES,
+  type PartitionDropRecord,
+} from "./retention.js";
+
+/**
+ * Phase 14 plan 12 (DB-11, D-08): "disabled" is what every run writes while
+ * the retention enable flag is unset -- the only value any committed deploy
+ * of this codebase can reach. "ok" means the retention step ran (with or
+ * without anything actually eligible to drop); "failed" means the step
+ * itself threw. See `runPartitionMaintenance`'s own comment for why a
+ * retention failure never prevents the partition-CREATION half of this same
+ * run from being recorded.
+ */
+export type RetentionRunStatus = "disabled" | "ok" | "failed";
 
 export interface MaintenanceRunSnapshot {
   lastRunAt: Date;
@@ -25,6 +43,12 @@ export interface MaintenanceRunSnapshot {
   eventsDefaultCount: number;
   sendEventsDefaultCount: number;
   partitionsCreated: string[];
+  /** DB-11: disabled | ok | failed for THIS run's retention step -- never a default-true trap. */
+  retentionStatus: RetentionRunStatus;
+  /** Populated only alongside `retentionStatus === "failed"`. */
+  retentionError: string | null;
+  /** Names only (mirrors `partitionsCreated`) -- the full per-drop record lives in `partition_retention_drops`. */
+  partitionsDropped: string[];
 }
 
 export interface PartitionMaintenanceRunRow extends MaintenanceRunSnapshot {
@@ -37,6 +61,10 @@ export interface PartitionMaintenanceRunRow extends MaintenanceRunSnapshot {
 export interface RunPartitionMaintenanceOptions {
   lookaheadMonths: number;
   bufferAlertThresholdMonths: number;
+  /** Test-only override; defaults to the real `retention.ts` flag check against `process.env`. */
+  isRetentionEnabledFn?: typeof isRetentionEnabled;
+  /** Test-only override; defaults to the real `retention.ts` catalog-driven drop. */
+  dropExpiredPartitionsFn?: typeof dropExpiredPartitions;
 }
 
 /**
@@ -76,8 +104,9 @@ export async function recordMaintenanceRun(
     `INSERT INTO partition_maintenance_runs (
        id, last_run_at, lookahead_months, buffer_alert_threshold_months,
        events_buffer_months, send_events_buffer_months, buffer_months_remaining,
-       events_default_count, send_events_default_count, partitions_created, updated_at
-     ) VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+       events_default_count, send_events_default_count, partitions_created, updated_at,
+       retention_status, retention_error, partitions_dropped
+     ) VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, $9, now(), $10, $11, $12)
      ON CONFLICT (id) DO UPDATE SET
        last_run_at = EXCLUDED.last_run_at,
        lookahead_months = EXCLUDED.lookahead_months,
@@ -88,7 +117,10 @@ export async function recordMaintenanceRun(
        events_default_count = EXCLUDED.events_default_count,
        send_events_default_count = EXCLUDED.send_events_default_count,
        partitions_created = EXCLUDED.partitions_created,
-       updated_at = now()`,
+       updated_at = now(),
+       retention_status = EXCLUDED.retention_status,
+       retention_error = EXCLUDED.retention_error,
+       partitions_dropped = EXCLUDED.partitions_dropped`,
     [
       snapshot.lastRunAt,
       snapshot.lookaheadMonths,
@@ -99,8 +131,33 @@ export async function recordMaintenanceRun(
       snapshot.eventsDefaultCount,
       snapshot.sendEventsDefaultCount,
       snapshot.partitionsCreated,
+      snapshot.retentionStatus,
+      snapshot.retentionError,
+      snapshot.partitionsDropped,
     ],
   );
+}
+
+/**
+ * DB-11 / T-14-79: the append-only "what did retention remove and when"
+ * history the singleton `partition_maintenance_runs` row cannot hold (it is
+ * upserted every tick, so it only ever describes the MOST RECENT run). One
+ * INSERT per drop, called only when `dropExpiredPartitions` actually
+ * returned something -- an empty `drops` array is a genuine no-op, never an
+ * empty INSERT statement.
+ */
+export async function recordPartitionDrops(
+  client: PartitionClient,
+  drops: readonly PartitionDropRecord[],
+): Promise<void> {
+  for (const drop of drops) {
+    await client.query(
+      `INSERT INTO partition_retention_drops (
+         parent_table, partition_name, range_start, range_end, horizon_months, dropped_at
+       ) VALUES ($1, $2, $3, $4, $5, $6)`,
+      [drop.parentTable, drop.partitionName, drop.rangeStart, drop.rangeEnd, drop.horizonMonths, drop.droppedAt],
+    );
+  }
 }
 
 interface RawMaintenanceRunRow {
@@ -116,6 +173,9 @@ interface RawMaintenanceRunRow {
   partitions_created: string[];
   last_alert_sent_at: Date | null;
   updated_at: Date;
+  retention_status: RetentionRunStatus;
+  retention_error: string | null;
+  partitions_dropped: string[];
 }
 
 function mapRow(row: RawMaintenanceRunRow): PartitionMaintenanceRunRow {
@@ -133,6 +193,9 @@ function mapRow(row: RawMaintenanceRunRow): PartitionMaintenanceRunRow {
     partitionsCreated: row.partitions_created,
     lastAlertSentAt: row.last_alert_sent_at,
     updatedAt: row.updated_at,
+    retentionStatus: row.retention_status,
+    retentionError: row.retention_error,
+    partitionsDropped: row.partitions_dropped,
   };
 }
 
@@ -144,7 +207,7 @@ export async function readLatestMaintenanceRun(
     `SELECT id, last_run_at, lookahead_months, buffer_alert_threshold_months,
             events_buffer_months, send_events_buffer_months, buffer_months_remaining,
             events_default_count, send_events_default_count, partitions_created,
-            last_alert_sent_at, updated_at
+            last_alert_sent_at, updated_at, retention_status, retention_error, partitions_dropped
        FROM partition_maintenance_runs
       WHERE id = 1`,
   );
@@ -153,15 +216,33 @@ export async function readLatestMaintenanceRun(
 }
 
 /**
- * Composes the three: `ensurePartitions` (creates any missing months and
- * yields each table's pre-run buffer via the same forward walk),
- * `countDefaultRows` (D-10), then `recordMaintenanceRun` with
- * `buffer_months_remaining` set to the MINIMUM of the per-table buffers
- * (never an average -- one healthy table must never mask an exhausted one,
- * see the phase's assumption-delta decision on the now-primary
- * `(partitioned table, month)` pair). No internal try/catch: a DDL failure
- * inside `ensurePartitions` throws, the row is simply never written this
- * run, and the watchdog's own staleness check catches that on its next poll.
+ * Composes the tick's full body, in order: `ensurePartitions` (creates any
+ * missing months and yields each table's pre-run buffer via the same
+ * forward walk), `countDefaultRows` (D-10), the DB-11 retention step, then
+ * ONE `recordMaintenanceRun` call carrying everything. Creation runs FIRST
+ * deliberately (Phase 9's whole reason for existing -- creation has a real
+ * deadline; a day-late retention drop does not) and its own recorded fields
+ * are computed and captured BEFORE the retention step ever runs, so a
+ * retention failure can never affect them.
+ *
+ * Retention itself is wrapped in its OWN try/catch (unlike `ensurePartitions`
+ * above, which is deliberately left to throw and abort the whole run): D-08
+ * makes retention a lower-priority, catch-up-tolerant step, and Task 2's own
+ * acceptance criteria require a retention failure to still leave the
+ * creation work recorded, distinguishably from "retention was disabled" --
+ * `retentionStatus` carries that distinction (`disabled` | `ok` | `failed`),
+ * and `retentionError` carries the failure's own message for
+ * `retentionStatus === "failed"`. The caller (the worker's own
+ * `processPartitionMaintenance`) is responsible for LOGGING a `"failed"`
+ * status loudly -- this module stays pure DB composition, matching every
+ * other function in this file.
+ *
+ * `isRetentionEnabledFn`/`dropExpiredPartitionsFn` default to the real
+ * `retention.ts` implementations; overridable for tests only (mirrors this
+ * file's own existing test-injection precedent in
+ * `apps/worker/src/queues/partition-maintenance.worker.ts`'s
+ * `ProcessPartitionMaintenanceDeps`).
+ *
  * Returns the snapshot so a caller (the worker's own logging) can inspect
  * what just happened.
  */
@@ -183,6 +264,27 @@ export async function runPartitionMaintenance(
   const defaultCounts = await countDefaultRows(client, PARTITIONED_TABLES);
   const partitionsCreated = [...eventsResult.created, ...sendEventsResult.created];
 
+  const checkRetentionEnabled = options.isRetentionEnabledFn ?? isRetentionEnabled;
+  const dropExpiredPartitionsFn = options.dropExpiredPartitionsFn ?? dropExpiredPartitions;
+
+  let retentionStatus: RetentionRunStatus = "disabled";
+  let retentionError: string | null = null;
+  let partitionsDropped: string[] = [];
+
+  if (checkRetentionEnabled()) {
+    try {
+      const drops = await dropExpiredPartitionsFn(client, RETENTION_ELIGIBLE_TABLES, now, PARTITION_RETENTION_MONTHS);
+      if (drops.length > 0) {
+        await recordPartitionDrops(client, drops);
+      }
+      retentionStatus = "ok";
+      partitionsDropped = drops.map((d) => d.partitionName);
+    } catch (err) {
+      retentionStatus = "failed";
+      retentionError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
   const snapshot: MaintenanceRunSnapshot = {
     lastRunAt: now,
     lookaheadMonths: options.lookaheadMonths,
@@ -193,6 +295,9 @@ export async function runPartitionMaintenance(
     eventsDefaultCount: defaultCounts.events ?? 0,
     sendEventsDefaultCount: defaultCounts.send_events ?? 0,
     partitionsCreated,
+    retentionStatus,
+    retentionError,
+    partitionsDropped,
   };
 
   await recordMaintenanceRun(client, snapshot);

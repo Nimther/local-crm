@@ -137,6 +137,9 @@ describe("partition maintenance worker (09-02, DB-01/DB-02)", () => {
       eventsDefaultCount: 0,
       sendEventsDefaultCount: 0,
       partitionsCreated: [],
+      retentionStatus: "disabled",
+      retentionError: null,
+      partitionsDropped: [],
     };
     const runMaintenance = vi.fn().mockResolvedValue(fakeSnapshot);
 
@@ -188,6 +191,9 @@ describe("partition maintenance worker (09-02, DB-01/DB-02)", () => {
       eventsDefaultCount: 0,
       sendEventsDefaultCount: 0,
       partitionsCreated: [],
+      retentionStatus: "disabled",
+      retentionError: null,
+      partitionsDropped: [],
     };
     const runMaintenance = vi.fn().mockResolvedValue(fakeSnapshot);
 

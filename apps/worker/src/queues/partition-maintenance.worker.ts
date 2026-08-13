@@ -142,7 +142,27 @@ export async function processPartitionMaintenance(
     eventsDefaultCount: snapshot.eventsDefaultCount,
     sendEventsDefaultCount: snapshot.sendEventsDefaultCount,
     partitionsCreated: snapshot.partitionsCreated,
+    // Phase 14 plan 12 (DB-11): retentionStatus is "disabled" on every
+    // committed deployment of this codebase (the enable flag is never set
+    // in any committed config) -- included here unconditionally so an
+    // operator reading this line while enablement is under discussion can
+    // confirm that for themselves without a separate query.
+    retentionStatus: snapshot.retentionStatus,
+    partitionsDropped: snapshot.partitionsDropped,
   });
+
+  // T-14-79/T-14-81: a retention failure must never be silent, and must
+  // never prevent the creation work's own recording above -- which already
+  // happened (runPartitionMaintenance records the full row, including a
+  // "failed" retentionStatus, in the SAME upsert as the creation fields).
+  // This is the loud half of that contract: the same channel every other
+  // partition-maintenance error already logs through.
+  if (snapshot.retentionStatus === "failed") {
+    scrubbedConsole.error("partition-maintenance: retention step failed", {
+      lastRunAt: snapshot.lastRunAt.toISOString(),
+      retentionError: snapshot.retentionError,
+    });
+  }
 
   return snapshot;
 }

@@ -48,6 +48,13 @@ function buildRow(overrides: Partial<PartitionMaintenanceRunRow> = {}): Partitio
     partitionsCreated: [],
     lastAlertSentAt: null,
     updatedAt: new Date(),
+    // Phase 14 plan 12 (DB-11): defaults matching what every run writes on
+    // any committed deployment of this codebase (the retention flag is
+    // never set) -- no test in this file exercises retention, so these are
+    // never overridden.
+    retentionStatus: "disabled",
+    retentionError: null,
+    partitionsDropped: [],
     ...overrides,
   };
 }
