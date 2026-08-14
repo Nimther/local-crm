@@ -18,35 +18,32 @@
 # the shared PGDATA volume and connect over the shared Unix-socket volume
 # without any UID-mapping tricks.
 #
-# `postgres:17` is Debian bookworm-slim (confirmed via
-# docker-library/postgres's own generated Dockerfile at
-# github.com/docker-library/postgres/blob/master/17/bookworm/Dockerfile,
-# `FROM debian:bookworm-slim`) -- pgBackRest and cron below are installed
-# from Debian's OWN bookworm apt repository (already this image's trust
-# boundary), never a third-party apt source or a manually-downloaded binary.
+# `postgres:17` currently resolves to Debian trixie (confirmed by real arm64
+# and amd64 builds on 2026-08-14). pgBackRest, cron, and the system CA bundle
+# below are installed from the official image's configured Debian/PostgreSQL
+# apt repositories (already this image's trust boundary), never an added
+# third-party source or a
+# manually-downloaded binary. The CA bundle is explicit because
+# `--no-install-recommends` otherwise leaves this slim image unable to verify
+# the HTTPS certificate of an S3-compatible backup repository such as
+# Cloudflare R2; disabling pgBackRest TLS verification is never an acceptable
+# substitute.
 #
-# Installed pgBackRest version: Debian bookworm ships 2.45-1 in `main`
-# (confirmed via packages.debian.org/bookworm/pgbackrest at authoring time --
-# RESEARCH.md's "2.5x [ASSUMED]" was explicitly NOT trusted, per this plan's
-# own instruction). Every pgbackrest.conf key this plan uses
+# Installed pgBackRest version: 2.59.0, verified in real arm64 and amd64
+# builds on 2026-08-14. Every pgbackrest.conf key this plan uses
 # (repo1-type/repo1-s3-*/repo1-cipher-*/repo1-retention-*/process-max/
 # pg1-path/pg1-user/pg1-socket-path) and every command
 # (stanza-create/archive-push/check/backup/info) was verified directly
-# against a REAL pgBackRest binary (Homebrew 2.59.0, this sandbox has no
-# Docker daemon -- see docs/runbooks/backups.md's "What this plan verified
-# locally" section) against a real Postgres 17 cluster and a real
+# against a REAL pgBackRest binary (Homebrew 2.59.0) against a real Postgres
+# 17 cluster and a real
 # filesystem-type repository: stanza-create, archive_mode=on +
 # archive_command producing real archived WAL (confirmed via
 # `pg_stat_archiver`), `check`, a real `--type=full backup`, and `info`
 # reporting the repository as `cipher: aes-256-cbc` all passed end-to-end.
-# 2.45 vs 2.59 is a version gap this sandbox could not close (no Docker
-# daemon to install the EXACT Debian package) -- these option names have
-# been stable across that range (unlike, say, S3 key-type auto-detection,
-# which is newer); a real `docker build` + `pgbackrest version` (this plan's
-# own <verify> block) re-confirms the exact shipped version and is the
-# authoritative record for SPECIFICATION.md, not this comment.
+# A real `docker build` + `pgbackrest version` remains the authoritative
+# check after any future base-tag rebuild because `postgres:17` is mutable.
 FROM postgres:17
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends pgbackrest cron \
+ && apt-get install -y --no-install-recommends pgbackrest cron ca-certificates \
  && rm -rf /var/lib/apt/lists/*

@@ -34,24 +34,26 @@ Two things run continuously, not one:
    full reasoning.
 
 Both containers run the SAME custom image (`docker/postgres/Dockerfile`,
-`postgres:17` plus the `pgbackrest`/`cron` packages) — one Dockerfile, two
-entrypoints. `archive_command` executes INSIDE the `db` container's own
+`postgres:17` plus the `pgbackrest`/`cron`/`ca-certificates` packages) — one
+Dockerfile, two entrypoints. `archive_command` executes INSIDE the `db` container's own
 process, so a sidecar-only pgBackRest install (no binary in `db` itself)
 would look configured while archiving nothing — the single most consequential
 fact this plan's own objective names.
 
-**Installed pgBackRest version**: Debian bookworm's `pgbackrest` apt package
-is `2.45-1` at authoring time (`postgres:17` is Debian bookworm-slim —
-confirmed via docker-library/postgres's own Dockerfile). This sandbox has no
-Docker daemon to install that EXACT package and confirm the version a real
-build produces (see "What this plan verified locally" below) — every
-configuration key and command this plan uses was instead verified directly
-against a real pgBackRest 2.59.0 (Homebrew) against a real Postgres 17
-cluster and a real filesystem-type repository. A real `docker build -f
+`ca-certificates` is explicit rather than left to a recommendation chain:
+both the database's WAL archiver and the backup sidecar must verify the HTTPS
+certificate of the S3-compatible repository. A missing trust store is a loud
+configuration failure; certificate verification must never be disabled to
+work around it.
+
+**Installed pgBackRest version**: **2.59.0**, confirmed by real arm64 and
+amd64 builds on 2026-08-14 after the mutable `postgres:17` base moved to
+Debian trixie. Every configuration key and command this plan uses was also
+verified directly against a real pgBackRest 2.59.0 (Homebrew) against a real
+Postgres 17 cluster and a real filesystem-type repository. A real `docker build -f
 docker/postgres/Dockerfile -t megacrm-postgres:local .` followed by `docker
 run --rm megacrm-postgres:local pgbackrest version` is the authoritative
-record of the exact shipped version, for SPECIFICATION.md §2/§8 (plan
-14-13's own deferred filing).
+check after any future base-image rebuild.
 
 ## Cadence and retention
 
@@ -186,12 +188,14 @@ password manager or equivalent, never a location that would be lost together
 with the VPS itself. This is a checkpoint gate for this plan's own Task 3,
 not merely a recommendation.
 
-## What this plan verified locally (no Docker daemon in this sandbox)
+## Verification record
 
-No Docker daemon, no production VPS, and no S3 bucket exist in this sandbox.
-Everything genuinely requiring any of those three is deferred to this plan's
-own checkpoint task. What COULD be verified locally was verified directly,
-not merely reasoned through:
+The original planning sandbox had no Docker daemon, production VPS, or S3
+bucket, so the real-host cases were deferred to this plan's checkpoint. On
+2026-08-14 the image was built on real arm64 and amd64 Docker hosts: both
+installed pgBackRest 2.59.0, and the image-level CA-bundle regression check
+passed. The remaining pre-checkpoint evidence was verified directly, not
+merely reasoned through:
 
 - **A real pgBackRest binary (Homebrew 2.59.0) against a real Postgres 17
   cluster and a real filesystem-type (`repo1-type=posix`) repository**:
@@ -206,8 +210,8 @@ not merely reasoned through:
   `repo1-cipher-pass`, `repo1-retention-full(-type)`, `process-max`,
   `pg1-path`, `pg1-user`, `pg1-socket-path`) and every command
   (`stanza-create`/`archive-push`/`check`/`backup`/`info`) is accepted and
-  functions correctly — the version gap (2.45 Debian vs. 2.59 Homebrew) is
-  the one thing a real `docker build` closes that this could not.
+  functions correctly. The later real image builds closed the original
+  installed-version gap.
 - **`docker/pgbackrest/backup-entrypoint.sh`'s `run_job` failure/success
   logic**, run directly (not just read): a real `incr` backup against the
   same local repository produced the exact `OK` log line this runbook's
