@@ -61,8 +61,8 @@
 | OPS-08 | Sentry принимает исключения frontend, API и worker | Standard Stack (`@sentry/node` for API+worker, `@sentry/react` for web — 3 separate DSNs per D-06); confirmed no separate `@sentry/fastify` package exists |
 | OPS-09 | Секреты и PII не попадают в Sentry — подтверждено тестом | Pitfall 3 (Pitfall 18, the phase's highest-priority finding); Code Examples `sentry-scrub.ts` reusing `scrub()`; Wave 0 test `sentry-scrub-fixtures.test.ts` as a required blocking CI check |
 | OPS-10 | Логи уходят в hosted-провайдер с настроенными алертами | Architecture diagram (Alloy sidecar → Loki); Pitfall 5 (json-file log rotation); Environment Availability (Grafana Cloud account is an operator prerequisite) |
-| OPS-11 | `request_id`, `tenant_id`, `job_id` и `send_id` проходят сквозь HTTP, очередь и worker | Pattern 1 (ALS `mixin()`); Pitfall 6 (Fastify `genReqId` default is per-process, not globally unique) |
-| OPS-12 | Trace correlation связывает HTTP-запрос, job и запрос к Postgres | Pattern 4 (`application_name` folded into existing `SET LOCAL`); Architecture diagram shows the full HTTP→queue→Postgres path |
+| OPS-11 | `request_id`, `tenant_id`, `job_id` и `send_id` проходят сквозь HTTP, очередь и worker | Pattern 1 (ALS `mixin()`); Pitfall 6 (Fastify `genReqId` default is per-process, not globally unique); **Pitfall 7 (highest-severity finding in this research) — nested `AsyncLocalStorage.run()` replaces rather than merges the store, silently dropping `requestId`/`jobId` the moment tenant-scoped code calls `withTenant`/`withTenantTransaction`** |
+| OPS-12 | Trace correlation связывает HTTP-запрос, job и запрос к Postgres | Pattern 4 (`application_name` folded into existing `SET LOCAL`); Architecture diagram shows the full HTTP→queue→Postgres path; depends on Pitfall 7's merge fix landing first, or the `application_name` value will be missing its `req=`/`job=` fields for all tenant-scoped queries |
 | OPS-13 | Алерты настроены на queue depth, oldest job age, webhook lag и долю неуспешных отправок | Recommended Project Structure (three new watchdog files under `apps/api/src/modules/ops/`); Open Question 2 (shared vs. per-alert dedup storage); Pitfall re: control-flow-error allowlist affecting the failed-send-share denominator |
 | OPS-14 | Bull Board доступен под закрытым административным доступом | Pitfall 4 (`Worker[]` vs `Queue[]`); Pitfall re: `fastify` moving from devDependency to dependency; Security Domain (V4 — loopback bind + SSH tunnel as the control) |
 | OPS-15 | Runbook'и описывают типовые инциденты и порядок восстановления | Recommended Project Structure lists five new runbook files under `docs/runbooks/`, matching Phase 14's existing runbook location convention |
@@ -319,6 +319,7 @@ export const logger = pino({
   },
 });
 ```
+**This pattern only works if the ALS extension MERGES into the existing store rather than replacing it — see Pitfall 7 below. This is not optional plumbing; it is the difference between correlation IDs surviving into tenant-scoped code or silently vanishing there.**
 
 ### Pattern 2: Data-router migration preserving existing JSX (D-13 prerequisite)
 
@@ -346,6 +347,8 @@ export default function App() {
 }
 ```
 Then, inside the flow canvas component: `const blocker = useBlocker(({ currentLocation, nextLocation }) => isDirty && currentLocation.pathname !== nextLocation.pathname);`
+
+**Documents that must be updated in the same change** (per `15-CONTEXT.md`'s own `canonical_refs`, carried forward here so the planner does not have to re-derive it from CONTEXT.md alone): `SPECIFICATION.md` §2 (Sentry SDKs, `@bull-board/*`, worker's new `pino` dependency, `fastify` promoted from dev- to real dependency in `apps/worker`), §3 (Grafana Cloud + Sentry DSN env vars — already gated by `check:spec-env-coverage`), §5 (four new watchdog ticks), §6 (Bull Board mount point), §7 (this phase is largely what *writes* this section for the first time); `ARCHITECTURE.md` (correlation model, alerting topology — the diagram above is a starting point for that section, not a replacement for it).
 
 ### Pattern 3: Shared BullMQ processor wrapper with control-flow-error allowlist
 
@@ -475,6 +478,12 @@ export default defineConfig({
 **How to avoid:** Override `genReqId` in the Fastify server options: `genReqId: (req) => req.headers["x-request-id"] as string ?? crypto.randomUUID()` — this both accepts an upstream-supplied ID (useful behind a future reverse proxy that generates its own) and guarantees global uniqueness when none is supplied. `crypto.randomUUID()` needs no new dependency (Node 22 built-in); `nanoid` (already an `apps/api` dependency) is an equally valid alternative if a shorter ID is preferred.
 **Warning signs:** A Loki query for a specific small-integer `request_id` returning log lines from multiple, clearly-unrelated requests.
 
+### Pitfall 7 (highest-severity design gap found in this research): nested `AsyncLocalStorage.run()` REPLACES the store, it does not merge into it
+**What goes wrong:** `packages/tenant-context`'s current `withTenant(workspaceId, fn)` calls `tenantContext.run({ workspaceId }, fn)` — a brand-new store object. If a `requestId`/`jobId` was already bound to the ALS context by an outer `run()` call (exactly what OPS-11's extension requires: the API's `onRequest` hook binds `requestId` before the workspace is even known; the worker's shared processor wrapper binds `jobId`/`requestId` before the handler calls into tenant-scoped code), then the **inner** `withTenant` call's `run({ workspaceId }, fn)` silently drops those outer fields for the entire duration of `fn` — which, on both the API and worker paths, is essentially all of the tenant-scoped business logic. The pino `mixin()` pattern (Pattern 1) and the `application_name` correlation (Pattern 4) would both then report a real `workspaceId` but a **missing** `requestId`/`jobId` for exactly the code paths OPS-11's success criterion needs them for. This is not a hypothetical — it follows directly from reading `tenant-context/src/index.ts`'s current `run()` call this session, and every one of D-07's stated correlation targets (mixin, `application_name`, Sentry tags) sits downstream of `withTenant`, not upstream of it.
+**Why it happens:** `AsyncLocalStorage.run(store, fn)` establishes `store` as the *entire* context for `fn`'s async scope — nesting two `run()` calls does not merge their stores by default; the inner one wins completely.
+**How to avoid:** `withTenant` (and any new correlation-binding helper) must read the **current** store and spread it forward: `tenantContext.run({ ...tenantContext.getStore(), workspaceId }, fn)`. Apply the same merge discipline to whatever new `withCorrelation({ requestId, jobId })` helper OPS-11 introduces — it must be spreadable in either nesting order (correlation-then-tenant, or tenant-then-correlation), since the API and worker call sequences differ (API: `requestId` bound first, `workspaceId` resolved later by membership lookup; worker: both may be known at the same point, but the shared processor wrapper still wraps a handler that itself calls `withTenant`/`withTenantTransaction` deeper in the call stack).
+**Warning signs:** A unit test that binds only one ALS field at a time will never catch this (each test's single `run()` call has nothing to clobber). Only a test that nests `withCorrelation(...)` calling into a handler that itself calls `withTenant(...)` — mirroring the REAL call shape in both `apps/api` and `apps/worker` — will surface it. This is exactly the shape `packages/tenant-context/src/__tests__/correlation-context.test.ts` (Wave 0 gap, OPS-11) must exercise, not a simpler single-field-binding test.
+
 ## Code Examples
 
 ### Deepening pino redaction beyond two levels (Pitfall 18's explicit instruction)
@@ -511,15 +520,19 @@ export const PINO_REDACT_OPTIONS: { paths: string[]; censor: string } = {
 
 ```typescript
 // packages/redaction/src/sentry-scrub.ts — NEW
-// Source pattern: Sentry official docs (beforeSend signature) — CITED
-import * as Sentry from "@sentry/node"; // or @sentry/react for the web init
+// Source pattern: Sentry official docs (beforeSend signature: (event: ErrorEvent,
+// hint: EventHint) => ErrorEvent | PromiseLike<ErrorEvent | null> | null) — CITED
+import type { ErrorEvent, EventHint } from "@sentry/node"; // same types re-exported from @sentry/react
 import { scrub } from "./scrub.js";
 
-export const sentryBeforeSend: Sentry.EventHintOrCaptureContext["beforeSend"] = (event) => {
-  return scrub(event) as typeof event; // recursively walks the ENTIRE event body,
+export function sentryBeforeSend(event: ErrorEvent, _hint: EventHint): ErrorEvent | null {
+  return scrub(event) as ErrorEvent; // recursively walks the ENTIRE event body,
   // including extra/context/breadcrumbs — the depth-unbounded tool this
   // package already built for exactly this freeform-payload problem.
-};
+}
+
+// Wired in at each of the three Sentry.init() call sites:
+// Sentry.init({ dsn: ..., beforeSend: sentryBeforeSend, beforeSendTransaction: sentryBeforeSend });
 ```
 
 ## State of the Art
