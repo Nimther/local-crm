@@ -501,7 +501,7 @@ Plans:
   4. A point-in-time restore from backup has actually been performed and written up, not merely configured.
   5. Postgres connections use TLS, every pool has an error handler, the missing constraints exist and are verifiably enforced, and retention deletes aged data on a defined schedule.
 
-**Plans**: 13/14 plans executed
+**Plans**: 14/14 plans executed
 
 Plans:
 **Wave 1**
@@ -532,7 +532,7 @@ Plans:
 
 **Wave 6**
 
-- [ ] 14-11-PLAN.md — DB-10: scripted PITR drill into a scratch container with a tested verification query set, actually performed (DB-10)
+- [x] 14-11-PLAN.md — DB-10: scripted PITR drill into a scratch container with a tested verification query set, actually performed (DB-10)
 
 **Wave 7**
 
@@ -669,7 +669,7 @@ Phase 9 has no dependents and may be scheduled in parallel at any point after Ph
 | 11. Delivery Correctness | v1.1 | 11/11 | Complete    | 2026-08-09 |
 | 12. Worker Reliability & Tenant Fairness | v1.1 | 14/14 | Complete    | 2026-08-11 |
 | 13. Compliance & Analytics Integrity | v1.1 | 16/16 | Complete    | 2026-08-12 |
-| 14. Deployment & Database Durability | v1.1 | 13/14 | In Progress|  |
+| 14. Deployment & Database Durability | v1.1 | 14/14 | In Progress|  |
 | 15. Observability, Alerting & Frontend Resilience | v1.1 | 0/TBD | Not started | - |
 | 16. Live SendGrid Verification | v1.1 | 0/TBD | Not started | - |
 

@@ -5,16 +5,16 @@ milestone_name: Production Hardening
 current_phase: 14
 current_phase_name: deployment-database-durability
 status: executing
-stopped_at: Completed 14-10-PLAN.md (checkpoint approved)
-last_updated: "2026-08-14T12:30:00.000Z"
+stopped_at: Completed 14-11-PLAN.md (checkpoint approved)
+last_updated: "2026-08-14T12:26:27.711Z"
 last_activity: 2026-08-14
 last_activity_desc: Phase 14 execution resumed (wave continue)
 progress:
   total_phases: 9
-  completed_phases: 6
+  completed_phases: 7
   total_plans: 93
-  completed_plans: 92
-  percent: 68
+  completed_plans: 93
+  percent: 78
 ---
 
 # Project State
@@ -30,24 +30,24 @@ See: .planning/PROJECT.md (updated 2026-08-12)
 
 Milestone: v1.1 Production Hardening (Phases 8-16, 95 requirements)
 Phase: 14 (deployment-database-durability) — EXECUTING
-Plan: 1 of 13
+Plan: 14 of 14 executed (phase verification pending)
 Status: Executing Phase 14
 Last activity: 2026-08-14 — Phase 14 execution resumed (wave continue)
-Progress: [████████████████████] 79/79 plans ([██████████] 98%) — 6/9 v1.1 phases complete (8–13), 54/95 requirements
+Progress: [████████████████████] 79/79 plans ([██████████] 100%) — 6/9 v1.1 phases complete (8–13), 54/95 requirements
 
 ✓ **Deadline closed (2026-08-07):** Phase 9 (DB-01/DB-02 partition automation) completed ahead of the hard **2026-09-01** deadline — 20 attached monthly partitions (2026-09…2027-06) confirmed by catalog query against a migrated database.
 
 ## Pending Checkpoints (Phase 14)
 
-One plan remains paused at a blocking real-host `checkpoint:human-verify` gate (2/3 tasks committed, no SUMMARY yet — this is a legal paused state, NOT lost work; on cold resume choose 'close out manually', never 're-execute from scratch'):
-
-- **14-11** restore drill — awaiting the real PITR drill against the off-host repository (see docs/runbooks/restore-drill.md)
+All three real-host blocking checkpoints for Phase 14 are resolved. None remain pending.
 
 ✓ **14-09** deploy/rollback — RESOLVED 2026-08-14: checkpoint approved, real deploy + second deploy + rollback confirmed on the production VPS. See 14-09-SUMMARY.md.
 
 ✓ **14-10** pgBackRest backups — RESOLVED 2026-08-14: checkpoint approved, real full backup + WAL segments confirmed in the off-host Cloudflare R2 repository, scheduled backup ran unattended, bucket non-public, cipher passphrase escrowed. See 14-10-SUMMARY.md.
 
-Resolution path: user reports "approved" or issues per plan → spawn continuation executor to record results and write the plan SUMMARY → then phase verification.
+✓ **14-11** restore drill — RESOLVED 2026-08-14: checkpoint approved, real PITR restore performed twice against the real off-host repository (marker absent before target, present after — both directions of PITR demonstrated), verification passed, production untouched, scratch resources destroyed. Restore duration and disk high-water mark not reported at approval — capture at the next scheduled drill. See 14-11-SUMMARY.md. This satisfies the restore-drill precondition (D-08) for enabling plan 14-12's retention deletion; the operator pre-enable checklist in docs/runbooks/data-retention.md (widen pgBackRest's repo1-retention-full from 2 to 4-6, then flip PARTITION_RETENTION_ENABLED) still applies before retention is actually turned on.
+
+All 14 phase-14 plans now have committed SUMMARYs (14-01 through 14-14, including the gaps-only wave). Phase verification is the next step, not yet run.
 
 ## Performance Metrics
 
@@ -273,6 +273,9 @@ Full decision log for v1.0 lives in PROJECT.md (Key Decisions) and the archived 
 - [Phase ?]: 14-09: Rollback reuses the same deploy sequence against an older SHA, printing a migration-tier warning rather than deciding the tier itself -- the runbook is where that judgement is made
 - [Phase ?]: 14-10: One Dockerfile, two entrypoints -- `db` and the `pgbackrest` sidecar both build from the same custom Postgres 17 image (pgBackRest 2.59.0), sharing an identical binary, OS user and filesystem layout, because archive_command runs inside `db`'s own Postgres process
 - [Phase ?]: 14-10: Retention is 2 full backups, count-based -- the actual recovery horizon plan 14-12's partition-drop retention tick depends on; post-checkpoint iteration added a CA trust store (20edff7, PR #10) so the image could verify the Cloudflare R2 repository's TLS certificate
+- [Phase ?]: 14-11: PITR restore drill performed twice against the real off-host repository (marker absent before target, present after — both directions demonstrated); verification passed (partitions, RLS enabled-and-forced, row counts vs baseline); production untouched; scratch resources destroyed. DB-10 closed; satisfies the restore-drill precondition (D-08) for 14-12's retention deletion — the operator pre-enable checklist in data-retention.md (widen pgBackRest retention, flip PARTITION_RETENTION_ENABLED) still applies.
+- [Phase ?]: 14-11: restore duration and disk high-water mark not reported at checkpoint approval — recorded as an open item to capture at the next scheduled drill, not invented.
+- [Phase ?]: 14-11: post-checkpoint real-host iteration (8d31abe) — drill script's verification step needed to target the scratch database explicitly in local mode.
 
 ### Pending Todos
 
@@ -321,8 +324,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-14T12:30:00.000Z
-Stopped at: Completed 14-10-PLAN.md (checkpoint approved)
+Last session: 2026-08-14T12:25:53.776Z
+Stopped at: Completed 14-11-PLAN.md (checkpoint approved)
 Resume file: None
 
 ## Operator Next Steps
