@@ -87,6 +87,13 @@ already carries, and the six `PGBACKREST_*` repository credentials
 `docs/runbooks/backups.md` documents). Nothing else needs to be exported by
 hand.
 
+The verifier subprocess explicitly runs with `NODE_ENV=test` only while it
+connects to `127.0.0.1:${RESTORE_DRILL_SCRATCH_PORT:-55611}`. That is not a
+relaxation for production: the scratch Postgres port is loopback-only and
+the throwaway container intentionally has no production TLS certificate
+volume. Every real service and operator connection keeps the shared pool
+factory's fail-closed production `sslmode=require|verify-*` rule.
+
 ## Choosing a PITR target, and confirming the restored cluster reflects it
 
 Picking a target and confirming the restore reflects it (not merely "a
