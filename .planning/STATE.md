@@ -5,15 +5,15 @@ milestone_name: Production Hardening
 current_phase: 14
 current_phase_name: deployment-database-durability
 status: executing
-stopped_at: Phase 14 context gathered
-last_updated: "2026-08-13T09:22:26.564Z"
-last_activity: 2026-08-13
+stopped_at: Completed 14-09-PLAN.md (checkpoint approved)
+last_updated: "2026-08-14T12:19:56.404Z"
+last_activity: 2026-08-14
 last_activity_desc: Phase 14 execution resumed (wave continue)
 progress:
   total_phases: 9
   completed_phases: 6
   total_plans: 93
-  completed_plans: 89
+  completed_plans: 91
   percent: 67
 ---
 
@@ -32,18 +32,19 @@ Milestone: v1.1 Production Hardening (Phases 8-16, 95 requirements)
 Phase: 14 (deployment-database-durability) — EXECUTING
 Plan: 1 of 13
 Status: Executing Phase 14
-Last activity: 2026-08-13 — Phase 14 execution resumed (wave continue)
-Progress: [████████████████████] 79/79 plans (100%) — 6/9 v1.1 phases complete (8–13), 53/95 requirements
+Last activity: 2026-08-14 — Phase 14 execution resumed (wave continue)
+Progress: [████████████████████] 79/79 plans ([██████████] 98%) — 6/9 v1.1 phases complete (8–13), 53/95 requirements
 
 ✓ **Deadline closed (2026-08-07):** Phase 9 (DB-01/DB-02 partition automation) completed ahead of the hard **2026-09-01** deadline — 20 attached monthly partitions (2026-09…2027-06) confirmed by catalog query against a migrated database.
 
 ## Pending Checkpoints (Phase 14)
 
-Three plans are paused at blocking real-host `checkpoint:human-verify` gates (each 2/3 tasks committed, no SUMMARY yet — this is a legal paused state, NOT lost work; on cold resume choose 'close out manually', never 're-execute from scratch'):
+Two plans remain paused at blocking real-host `checkpoint:human-verify` gates (each 2/3 tasks committed, no SUMMARY yet — this is a legal paused state, NOT lost work; on cold resume choose 'close out manually', never 're-execute from scratch'):
 
-- **14-09** deploy/rollback — awaiting first real deploy + rollback on the production VPS (see docs/runbooks/deploy-and-rollback.md)
 - **14-10** pgBackRest backups — awaiting first real backup + WAL shipment to the off-host bucket (see docs/runbooks/backups.md)
 - **14-11** restore drill — awaiting the real PITR drill against the off-host repository (see docs/runbooks/restore-drill.md)
+
+✓ **14-09** deploy/rollback — RESOLVED 2026-08-14: checkpoint approved, real deploy + second deploy + rollback confirmed on the production VPS. See 14-09-SUMMARY.md.
 
 Resolution path: user reports "approved" or issues per plan → spawn continuation executor to record results and write the plan SUMMARY → then phase verification.
 
@@ -267,6 +268,8 @@ Full decision log for v1.0 lives in PROJECT.md (Key Decisions) and the archived 
 - [Phase ?]: email-broadcast.worker.ts/email-triggered.worker.ts processors factored into exported handleEmailBroadcastJob/handleEmailTriggeredJob (deps default {}) so the unknown-outcome-never-throws behavior is directly testable without duplicating branching logic.
 - [Phase ?]: 11-11: boundary 3 covered state-based (arrangeCrashedBeforeResultWrite), not a second kill harness -- boundaries 2/3 are ledger-indistinguishable
 - [Phase ?]: 11-11: reconciler-vs-retry race tolerates bounded follow-up ticks for liveness (dispatchSendGate's plain FOR UPDATE can legitimately win the lock ahead of the reconciler's SKIP LOCKED); the hard per-iteration invariant is the retry worker's own zero-call/never-transitions behavior
+- [Phase ?]: 14-09: Worker replaced stop-old-then-start-new (R-05) with an explicit gone-check between; readiness observed via container health status, not an HTTP call from the host
+- [Phase ?]: 14-09: Rollback reuses the same deploy sequence against an older SHA, printing a migration-tier warning rather than deciding the tier itself -- the runbook is where that judgement is made
 
 ### Pending Todos
 
@@ -315,9 +318,9 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-12T15:53:47.975Z
-Stopped at: Phase 14 context gathered
-Resume file: .planning/phases/14-deployment-database-durability/14-CONTEXT.md
+Last session: 2026-08-14T12:19:51.419Z
+Stopped at: Completed 14-09-PLAN.md (checkpoint approved)
+Resume file: None
 
 ## Operator Next Steps
 

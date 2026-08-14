@@ -111,8 +111,8 @@
 ### Observability, Deployment & Performance
 
 - [ ] **OPS-01**: Есть Dockerfiles для api, web и worker
-- [ ] **OPS-02**: Деплой на VPS выполняется воспроизводимой командой
-- [ ] **OPS-03**: Процедура отката деплоя задокументирована
+- [x] **OPS-02**: Деплой на VPS выполняется воспроизводимой командой
+- [x] **OPS-03**: Процедура отката деплоя задокументирована
 - [ ] **OPS-04**: `/healthz` отвечает о живости процесса
 - [ ] **OPS-05**: `/readyz` проверяет доступность PostgreSQL и Redis и не сообщает готовность до завершения миграций
 - [ ] **OPS-06**: Worker логирует структурно через Pino
@@ -244,8 +244,8 @@
 | DB-13 | Phase 14 | Pending |
 | DB-14 | Phase 14 | Pending |
 | OPS-01 | Phase 14 | Pending |
-| OPS-02 | Phase 14 | Pending |
-| OPS-03 | Phase 14 | Pending |
+| OPS-02 | Phase 14 | Complete |
+| OPS-03 | Phase 14 | Complete |
 | OPS-04 | Phase 14 | Pending |
 | OPS-05 | Phase 14 | Pending |
 | OPS-06 | Phase 15 | Pending |
