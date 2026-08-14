@@ -97,24 +97,24 @@
 - [x] **DB-02**: Отсутствие следующей партиции вызывает алерт *(дедлайн 2026-09-01)*
 - [x] **DB-03**: Есть процедура переноса данных из DEFAULT-партиции без длительной блокировки таблицы
 - [x] **DB-04**: Переход через границу месяца покрыт тестом
-- [ ] **DB-05**: Миграции при деплое применяются ровно одним процессом
-- [ ] **DB-06**: Приложение не принимает трафик до завершения миграций
-- [ ] **DB-07**: Процедура rollback / roll-forward задокументирована и отработана
+- [x] **DB-05**: Миграции при деплое применяются ровно одним процессом
+- [x] **DB-06**: Приложение не принимает трафик до завершения миграций
+- [x] **DB-07**: Процедура rollback / roll-forward задокументирована и отработана
 - [x] **DB-08**: Дисциплина expand/contract зафиксирована как обязательная для миграций
 - [x] **DB-09**: Бэкапы выполняются автоматически, PITR доступен
 - [x] **DB-10**: Восстановление из бэкапа отработано на практике и задокументировано
-- [ ] **DB-11**: Retention данных определён и применяется
-- [ ] **DB-12**: Недостающие constraints добавлены после проверки и очистки существующих данных
-- [ ] **DB-13**: Соединение с PostgreSQL использует TLS
-- [ ] **DB-14**: Connection pooling настроен; все пулы имеют обработчик ошибок
+- [x] **DB-11**: Retention данных определён и применяется
+- [x] **DB-12**: Недостающие constraints добавлены после проверки и очистки существующих данных
+- [x] **DB-13**: Соединение с PostgreSQL использует TLS
+- [x] **DB-14**: Connection pooling настроен; все пулы имеют обработчик ошибок
 
 ### Observability, Deployment & Performance
 
-- [ ] **OPS-01**: Есть Dockerfiles для api, web и worker
+- [x] **OPS-01**: Есть Dockerfiles для api, web и worker
 - [x] **OPS-02**: Деплой на VPS выполняется воспроизводимой командой
 - [x] **OPS-03**: Процедура отката деплоя задокументирована
-- [ ] **OPS-04**: `/healthz` отвечает о живости процесса
-- [ ] **OPS-05**: `/readyz` проверяет доступность PostgreSQL и Redis и не сообщает готовность до завершения миграций
+- [x] **OPS-04**: `/healthz` отвечает о живости процесса
+- [x] **OPS-05**: `/readyz` проверяет доступность PostgreSQL и Redis и не сообщает готовность до завершения миграций
 - [ ] **OPS-06**: Worker логирует структурно через Pino
 - [ ] **OPS-07**: Redaction применяется к логам worker и API единообразно
 - [ ] **OPS-08**: Sentry принимает исключения frontend, API и worker
@@ -233,21 +233,21 @@
 | DB-02 | Phase 9 | Complete |
 | DB-03 | Phase 9 | Complete |
 | DB-04 | Phase 9 | Complete |
-| DB-05 | Phase 14 | Pending |
-| DB-06 | Phase 14 | Pending |
-| DB-07 | Phase 14 | Pending |
+| DB-05 | Phase 14 | Complete |
+| DB-06 | Phase 14 | Complete |
+| DB-07 | Phase 14 | Complete |
 | DB-08 | Phase 8 | Complete |
 | DB-09 | Phase 14 | Complete |
 | DB-10 | Phase 14 | Complete |
-| DB-11 | Phase 14 | Pending |
-| DB-12 | Phase 14 | Pending |
-| DB-13 | Phase 14 | Pending |
-| DB-14 | Phase 14 | Pending |
-| OPS-01 | Phase 14 | Pending |
+| DB-11 | Phase 14 | Complete |
+| DB-12 | Phase 14 | Complete |
+| DB-13 | Phase 14 | Complete |
+| DB-14 | Phase 14 | Complete |
+| OPS-01 | Phase 14 | Complete |
 | OPS-02 | Phase 14 | Complete |
 | OPS-03 | Phase 14 | Complete |
-| OPS-04 | Phase 14 | Pending |
-| OPS-05 | Phase 14 | Pending |
+| OPS-04 | Phase 14 | Complete |
+| OPS-05 | Phase 14 | Complete |
 | OPS-06 | Phase 15 | Pending |
 | OPS-07 | Phase 15 | Pending |
 | OPS-08 | Phase 15 | Pending |
