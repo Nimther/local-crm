@@ -40,6 +40,7 @@
     "test:deploy-script": "vitest run --root scripts __tests__/deploy-script.test.mjs",
     "test:restore-drill-script": "vitest run --root scripts __tests__/restore-drill-script.test.mjs",
     "test:e2e": "npm run test:e2e -w apps/web",
+    "precoverage": "npm run build -w apps/worker",
     "coverage": "vitest run --coverage --testTimeout=60000",
     "failure:sigkill": "vitest run --root apps/worker src/queues/__tests__/failure-injection/sigkill.test.ts",
     "failure:crash-post-accept": "vitest run --root apps/worker src/queues/__tests__/failure-injection/crash-post-accept.test.ts",

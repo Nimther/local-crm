@@ -71,6 +71,18 @@ export default defineConfig({
       // would leak it into unsubscribe-URL assertions. TEST_-prefixed override
       // mirrors the TEST_DATABASE_URL / TEST_REDIS_URL convention above.
       PUBLIC_APP_URL: process.env.TEST_PUBLIC_APP_URL ?? "https://api.test.local",
+      // Phase 13's erasure-enqueue failure-injection test imports the API's
+      // contact repository as a test-only dependency.  Keep that import
+      // deterministic on clean CI machines instead of relying on a developer
+      // .env to satisfy the API module's boot-time schema.
+      BETTER_AUTH_SECRET:
+        process.env.BETTER_AUTH_SECRET ?? "test-only-better-auth-secret-value",
+      BETTER_AUTH_URL: process.env.BETTER_AUTH_URL ?? "http://localhost:4000",
+      WEB_URL: process.env.WEB_URL ?? "http://localhost:5173",
+      PLATFORM_SENDGRID_API_KEY:
+        process.env.PLATFORM_SENDGRID_API_KEY ?? "SG.test_platform_key_0000000000000000",
+      PLATFORM_MAIL_FROM: process.env.PLATFORM_MAIL_FROM ?? "noreply@megacrm.test",
+      OPERATOR_ALERT_EMAIL: process.env.OPERATOR_ALERT_EMAIL ?? "ops@megacrm.test",
     },
   },
 });

@@ -29,5 +29,14 @@ export default defineConfig({
     hookTimeout: 60_000,
     globalSetup: ["../test-support/src/global-setup.ts"],
     exclude: [...configDefaults.exclude, "dist/**"],
+    env: {
+      // suppression-hash-migration.test.ts exercises the real local envelope
+      // provider.  A fixed test-only KEK makes the package reproducible on a
+      // clean CI runner and is intentionally identical to the other Vitest
+      // projects' non-production fixture.
+      KMS_PROVIDER: process.env.KMS_PROVIDER ?? "local",
+      KMS_LOCAL_KEK:
+        process.env.KMS_LOCAL_KEK ?? "grdVCb1fxmhPzylKEPqafcPW4xOMaynE0UwaFUo2OUE=",
+    },
   },
 });
