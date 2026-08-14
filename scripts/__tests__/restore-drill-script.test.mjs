@@ -83,7 +83,7 @@ exit 0
   writeFileSync(
     path.join(binDir, "npm"),
     `#!/usr/bin/env bash
-echo "npm $*" >> "$DRILL_TEST_LOG"
+echo "NODE_ENV=$NODE_ENV npm $*" >> "$DRILL_TEST_LOG"
 exit "\${DRILL_TEST_VERIFY_EXIT_CODE:-0}"
 `,
     { mode: 0o755 },
@@ -102,7 +102,10 @@ function makeScratch() {
   const logFile = path.join(dir, "docker-calls.log");
   writeFileSync(logFile, "");
   const envFile = path.join(dir, "fake.env");
-  writeFileSync(envFile, "POSTGRES_PASSWORD=drill-test-password\nPOSTGRES_DB=mega_crm\n");
+  // The real operator file sets production mode. The scratch verifier must
+  // explicitly override that inherited value because it connects only to
+  // the loopback-only throwaway Postgres container, not production.
+  writeFileSync(envFile, "NODE_ENV=production\nPOSTGRES_PASSWORD=drill-test-password\nPOSTGRES_DB=mega_crm\n");
   const baselineFile = path.join(dir, "baseline.json");
   return { dir, binDir, logFile, envFile, baselineFile };
 }
@@ -353,6 +356,16 @@ describe("real invocation: full successful sequence", () => {
     const verifyCall = calls.find((l) => l.includes("db:verify-restored"));
     expect(verifyCall).toContain(`--as-of=${VALID_TARGET}`);
     expect(verifyCall).toContain(`--baseline=${scratch.baselineFile}`);
+  });
+
+  it("runs only the loopback scratch verifier outside production mode", () => {
+    const scratch = makeScratch();
+    const run = runCli([VALID_TARGET], { env: baseRealEnv(scratch) });
+    expect(run.exitCode).toBe(0);
+
+    const calls = callLines(scratch.logFile);
+    const verifyCall = calls.find((l) => l.includes("db:verify-restored"));
+    expect(verifyCall).toMatch(/^NODE_ENV=test npm /);
   });
 });
 

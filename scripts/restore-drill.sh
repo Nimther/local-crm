@@ -284,7 +284,7 @@ print_dry_run() {
   echo "docker compose -f $COMPOSE_FILE exec -T db psql -U postgres -d \${POSTGRES_DB:-mega_crm} -tAc \"<row-count baseline query -- see restore-drill.sh's own baseline_query()>\" > $BASELINE_FILE"
   echo "docker run -d --name $SCRATCH_CONTAINER_NAME -v $SCRATCH_VOLUME_NAME:/var/lib/postgresql/data -v $REPO_ROOT/$PGBACKREST_CONF:/etc/pgbackrest/pgbackrest.conf:ro --env-file \"\$MEGA_CRM_ENV_FILE\" -p 127.0.0.1:$SCRATCH_PORT:5432 --entrypoint /bin/bash megacrm-postgres:\${POSTGRES_IMAGE_TAG:-local} -c \"$restore_cmd\""
   echo "docker exec $SCRATCH_CONTAINER_NAME pg_isready -U postgres   # polled, bounded by RESTORE_DRILL_READY_TIMEOUT_SECONDS (default 120s)"
-  echo "VERIFY_RESTORED_DATABASE_URL=postgresql://postgres:***@127.0.0.1:$SCRATCH_PORT/\${POSTGRES_DB:-mega_crm} npm run db:verify-restored --workspace=packages/db -- --baseline=$BASELINE_FILE --as-of=\"$target\""
+  echo "NODE_ENV=test VERIFY_RESTORED_DATABASE_URL=postgresql://postgres:***@127.0.0.1:$SCRATCH_PORT/\${POSTGRES_DB:-mega_crm} npm run db:verify-restored --workspace=packages/db -- --baseline=$BASELINE_FILE --as-of=\"$target\""
   echo "docker rm -f $SCRATCH_CONTAINER_NAME"
   echo "docker volume rm $SCRATCH_VOLUME_NAME"
 }
@@ -371,7 +371,15 @@ run_real_drill() {
   # confusing parse/auth error instead of the actual verification outcome.
   local encoded_postgres_password
   encoded_postgres_password="$(node -e 'process.stdout.write(encodeURIComponent(process.argv[1]))' "$POSTGRES_PASSWORD")"
-  if ! VERIFY_RESTORED_DATABASE_URL="postgresql://postgres:${encoded_postgres_password}@127.0.0.1:${SCRATCH_PORT}/${POSTGRES_DB:-mega_crm}" \
+  # The operator env is intentionally production-shaped and normally sets
+  # NODE_ENV=production. This one verifier connection is deliberately NOT a
+  # production connection: it targets only the loopback-published scratch
+  # container above, whose Postgres process has no public/network path and
+  # starts without the production TLS-cert volume. Declare that local mode
+  # explicitly here rather than weakening createPgPool's production TLS
+  # guard (which must remain fail-closed for every real service/CLI DSN).
+  if ! NODE_ENV=test \
+        VERIFY_RESTORED_DATABASE_URL="postgresql://postgres:${encoded_postgres_password}@127.0.0.1:${SCRATCH_PORT}/${POSTGRES_DB:-mega_crm}" \
         npm run db:verify-restored --workspace=packages/db -- --baseline="$BASELINE_FILE" --as-of="$target"; then
     echo "restore-drill.sh: VERIFICATION FAILED -- scratch resources left in place for inspection." >&2
     print_cleanup_command >&2
