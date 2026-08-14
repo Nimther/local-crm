@@ -5,16 +5,16 @@ milestone_name: Production Hardening
 current_phase: 14
 current_phase_name: deployment-database-durability
 status: executing
-stopped_at: Completed 14-09-PLAN.md (checkpoint approved)
-last_updated: "2026-08-14T12:19:56.404Z"
+stopped_at: Completed 14-10-PLAN.md (checkpoint approved)
+last_updated: "2026-08-14T12:30:00.000Z"
 last_activity: 2026-08-14
 last_activity_desc: Phase 14 execution resumed (wave continue)
 progress:
   total_phases: 9
   completed_phases: 6
   total_plans: 93
-  completed_plans: 91
-  percent: 67
+  completed_plans: 92
+  percent: 68
 ---
 
 # Project State
@@ -33,18 +33,19 @@ Phase: 14 (deployment-database-durability) — EXECUTING
 Plan: 1 of 13
 Status: Executing Phase 14
 Last activity: 2026-08-14 — Phase 14 execution resumed (wave continue)
-Progress: [████████████████████] 79/79 plans ([██████████] 98%) — 6/9 v1.1 phases complete (8–13), 53/95 requirements
+Progress: [████████████████████] 79/79 plans ([██████████] 98%) — 6/9 v1.1 phases complete (8–13), 54/95 requirements
 
 ✓ **Deadline closed (2026-08-07):** Phase 9 (DB-01/DB-02 partition automation) completed ahead of the hard **2026-09-01** deadline — 20 attached monthly partitions (2026-09…2027-06) confirmed by catalog query against a migrated database.
 
 ## Pending Checkpoints (Phase 14)
 
-Two plans remain paused at blocking real-host `checkpoint:human-verify` gates (each 2/3 tasks committed, no SUMMARY yet — this is a legal paused state, NOT lost work; on cold resume choose 'close out manually', never 're-execute from scratch'):
+One plan remains paused at a blocking real-host `checkpoint:human-verify` gate (2/3 tasks committed, no SUMMARY yet — this is a legal paused state, NOT lost work; on cold resume choose 'close out manually', never 're-execute from scratch'):
 
-- **14-10** pgBackRest backups — awaiting first real backup + WAL shipment to the off-host bucket (see docs/runbooks/backups.md)
 - **14-11** restore drill — awaiting the real PITR drill against the off-host repository (see docs/runbooks/restore-drill.md)
 
 ✓ **14-09** deploy/rollback — RESOLVED 2026-08-14: checkpoint approved, real deploy + second deploy + rollback confirmed on the production VPS. See 14-09-SUMMARY.md.
+
+✓ **14-10** pgBackRest backups — RESOLVED 2026-08-14: checkpoint approved, real full backup + WAL segments confirmed in the off-host Cloudflare R2 repository, scheduled backup ran unattended, bucket non-public, cipher passphrase escrowed. See 14-10-SUMMARY.md.
 
 Resolution path: user reports "approved" or issues per plan → spawn continuation executor to record results and write the plan SUMMARY → then phase verification.
 
@@ -270,6 +271,8 @@ Full decision log for v1.0 lives in PROJECT.md (Key Decisions) and the archived 
 - [Phase ?]: 11-11: reconciler-vs-retry race tolerates bounded follow-up ticks for liveness (dispatchSendGate's plain FOR UPDATE can legitimately win the lock ahead of the reconciler's SKIP LOCKED); the hard per-iteration invariant is the retry worker's own zero-call/never-transitions behavior
 - [Phase ?]: 14-09: Worker replaced stop-old-then-start-new (R-05) with an explicit gone-check between; readiness observed via container health status, not an HTTP call from the host
 - [Phase ?]: 14-09: Rollback reuses the same deploy sequence against an older SHA, printing a migration-tier warning rather than deciding the tier itself -- the runbook is where that judgement is made
+- [Phase ?]: 14-10: One Dockerfile, two entrypoints -- `db` and the `pgbackrest` sidecar both build from the same custom Postgres 17 image (pgBackRest 2.59.0), sharing an identical binary, OS user and filesystem layout, because archive_command runs inside `db`'s own Postgres process
+- [Phase ?]: 14-10: Retention is 2 full backups, count-based -- the actual recovery horizon plan 14-12's partition-drop retention tick depends on; post-checkpoint iteration added a CA trust store (20edff7, PR #10) so the image could verify the Cloudflare R2 repository's TLS certificate
 
 ### Pending Todos
 
@@ -318,8 +321,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-14T12:19:51.419Z
-Stopped at: Completed 14-09-PLAN.md (checkpoint approved)
+Last session: 2026-08-14T12:30:00.000Z
+Stopped at: Completed 14-10-PLAN.md (checkpoint approved)
 Resume file: None
 
 ## Operator Next Steps

@@ -501,7 +501,7 @@ Plans:
   4. A point-in-time restore from backup has actually been performed and written up, not merely configured.
   5. Postgres connections use TLS, every pool has an error handler, the missing constraints exist and are verifiably enforced, and retention deletes aged data on a defined schedule.
 
-**Plans**: 12/14 plans executed
+**Plans**: 13/14 plans executed
 
 Plans:
 **Wave 1**
@@ -528,7 +528,7 @@ Plans:
 **Wave 5**
 
 - [x] 14-09-PLAN.md — `deploy.sh <sha>`: readiness-gated, fail-before-replace, stop-old-then-start-new worker; deploy/rollback runbook (OPS-02, OPS-03)
-- [ ] 14-10-PLAN.md — pgBackRest: WAL archiving, scheduled backups, off-host encrypted S3 repository (DB-09)
+- [x] 14-10-PLAN.md — pgBackRest: WAL archiving, scheduled backups, off-host encrypted S3 repository (DB-09)
 
 **Wave 6**
 
@@ -669,7 +669,7 @@ Phase 9 has no dependents and may be scheduled in parallel at any point after Ph
 | 11. Delivery Correctness | v1.1 | 11/11 | Complete    | 2026-08-09 |
 | 12. Worker Reliability & Tenant Fairness | v1.1 | 14/14 | Complete    | 2026-08-11 |
 | 13. Compliance & Analytics Integrity | v1.1 | 16/16 | Complete    | 2026-08-12 |
-| 14. Deployment & Database Durability | v1.1 | 12/14 | In Progress|  |
+| 14. Deployment & Database Durability | v1.1 | 13/14 | In Progress|  |
 | 15. Observability, Alerting & Frontend Resilience | v1.1 | 0/TBD | Not started | - |
 | 16. Live SendGrid Verification | v1.1 | 0/TBD | Not started | - |
 
