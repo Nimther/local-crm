@@ -559,22 +559,27 @@ export function sentryBeforeSend(event: ErrorEvent, _hint: EventHint): ErrorEven
 
 **If this table is empty:** N/A — see rows above.
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+All three questions below were resolved during planning; each carries its resolution and the plan that implements it.
 
 1. **`docker/redis.conf`'s `maxmemory 512mb` sizing — explicitly flagged in that file's own comment as "Phase 15's concern" — is not named in any OPS-06…19 requirement or CONTEXT.md decision.**
    - What we know: The comment in `docker/redis.conf` (found this session) reads that sizing Redis's `maxmemory` against the real production VPS host belongs to Phase 15.
    - What's unclear: Whether this phase's scope silently includes revisiting that number, or whether it was simply mis-tagged and belongs to Phase 14 (already complete) or a future SCALE item.
    - Recommendation: Surface this explicitly to the user/planner as an in-scope-or-out-of-scope call rather than silently adopting or ignoring it — it is cheap to resolve with one sentence in the phase plan's scope note, and expensive to discover as a gap during Phase 15's own verification.
+   - **RESOLVED: declared OUT of scope for Phase 15.** `15-01-PLAN.md` Task 3 reads `docker/redis.conf` and amends its `maxmemory` comment to state that sizing against the real production VPS host is NOT part of Phase 15 (no OPS-06…19 requirement and no CONTEXT.md decision covers it), naming the milestone item that owns it instead (SCALE, alongside the deferred PgBouncer/DB-14 decision). The `maxmemory` directive's value itself is explicitly left unchanged from HEAD. **Implementing plan:** `15-01-PLAN.md`.
 
 2. **Storage/dedup mechanism for the four new OPS-13 watchdog alerts.**
    - What we know: The existing pattern (`claimAlertSlot`) is a single dedicated row per watchdog (`partition_maintenance_runs.id = 1`, `send_reconciler` equivalent, etc.) with its own `last_alert_sent_at` column, atomically claimed via `UPDATE ... RETURNING`.
    - What's unclear: Whether the four new alerts (queue depth, oldest job age, webhook lag, failed-send share) each get their own dedicated single-row table (matching precedent exactly) or share one new small `ops_alert_state` table keyed by alert name — CONTEXT.md leaves this to "Claude's Discretion."
    - Recommendation: A single `ops_alert_state(alert_name text primary key, last_alert_sent_at timestamptz)` table is lower-migration-overhead than four new dedicated tables and preserves the exact same atomic-claim SQL shape (`UPDATE ... WHERE alert_name = $1 AND (...) RETURNING`) — recommend this as the default unless the planner has a reason to prefer per-alert tables for consistency with the existing three watchdogs' exact shape.
+   - **RESOLVED: the recommended shared, alert-name-keyed table was adopted** — one table, not four per-alert tables, and explicitly not a singleton row. `15-12-PLAN.md` Task 1 creates `ops_alert_state` in migration `packages/db/migrations/0064_ops_alert_state_and_rollup_watermark.sql` with the alert name as PRIMARY KEY and no `CHECK (id = 1)` singleton clause (four alerts sharing one row would make each alert's dedup window suppress the other three). Task 2 adds `packages/db/src/ops/alert-state.ts` with the claim/release helpers, preserving the existing watchdogs' atomic `UPDATE ... RETURNING` discipline and extending it with an upsert so a first-ever claim for a name works without a seeded row. The table carries no `workspace_id` and no RLS policy, matching `dead_letter_alert_state`/`partition_maintenance_runs`. **Implementing plan:** `15-12-PLAN.md` (consumed by `15-13-PLAN.md` and `15-14-PLAN.md`).
 
 3. **Frontend Sentry DSN delivery mechanism — build-time `VITE_SENTRY_DSN` baked into the GHCR-published web image, vs. runtime injection.**
    - What we know: `apps/web` is built once per deploy SHA into a static bundle served by Caddy (Phase 14's topology) — there is no runtime environment-variable injection point for a static SPA bundle the way `apps/api`/`apps/worker` have via `MEGA_CRM_ENV_FILE`.
    - What's unclear: Whether the DSN should be a `VITE_*` build-time env var (baked into the bundle at `docker build` time, requiring the CI image-build workflow to receive it) or whether a small runtime-config endpoint (`/api/config` returning the DSN) is preferred.
    - Recommendation: A Sentry DSN is **not a secret** by Sentry's own design (it authorizes sending events TO a project, not reading FROM it) — bake it in at build time via a `VITE_SENTRY_DSN` build arg in the CI image workflow. This also means it should NOT be routed through `MEGA_CRM_ENV_FILE` (which exists specifically for genuine secrets) — flag this explicitly in `SPECIFICATION.md` §3 so a future contributor does not "fix" it into the secrets file by habit.
+   - **RESOLVED: the recommended build-time build-arg delivery was adopted**, with no runtime-config endpoint and deliberate exclusion from the secrets file. `15-01-PLAN.md` declares the web DSN in its `user_setup` block sourced from the `mega-crm-web` project's Client Keys and annotated build-time only, not a secret, not in `MEGA_CRM_ENV_FILE`. `15-11-PLAN.md` initializes the web SDK from that build-time value (staying uninitialized when it is absent, so local builds still work), supplies it to the web image as a build argument, holds the must-have truth that it must not be added to `MEGA_CRM_ENV_FILE` or to `docker/prod.env.example`, and enforces that with an acceptance-criteria grep asserting zero occurrences in `docker/prod.env.example`. The `SPECIFICATION.md` §3 note recording it as build-time-and-not-secret rides along in the same plans. **Implementing plans:** `15-01-PLAN.md`, `15-11-PLAN.md`.
 
 ## Environment Availability
 
