@@ -1,0 +1,12 @@
+-- GSD 08-05 linter fixture — NOT a real migration, never applied to any database.
+-- Violation: the drizzle statement delimiter appears inside a comment that is
+-- merely DISCUSSING the convention, with prose after it on the same line.
+--
+-- This is the exact shape migration 0057 shipped. drizzle-orm's
+-- readMigrationFiles splits the raw file bytes on the literal with no comment
+-- awareness, so the chunk after the split starts with the closing backtick of
+-- the code span below and Postgres rejects it with 42601.
+--
+-- A migration cannot loop, because the `--> statement-breakpoint` convention
+-- gives no loop construct at all.
+CREATE INDEX some_idx ON some_table (some_column);

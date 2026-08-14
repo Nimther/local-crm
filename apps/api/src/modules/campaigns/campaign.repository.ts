@@ -1,4 +1,5 @@
 import { getWorkspaceId, withTenantTransaction } from "../../middleware/tenant-context.js";
+import { SEND_STATUSES, type SendStatus } from "@mega-crm/delivery-core";
 
 export type CampaignStatus = "draft" | "scheduled" | "sending" | "sent" | "canceled";
 
@@ -389,12 +390,21 @@ export interface CampaignProgress {
   clickedCount: number;
   bouncedCount: number;
   unsubscribedCount: number;
-  ledger: {
-    sent: number;
-    failed: number;
-    excluded: number;
-    dispatching: number;
-  };
+  /**
+   * D-16 (Phase 13, closing Phase 11 D-13's deferral): `reconciling` and
+   * `unknown` are ledger states, not delivery facts -- a send in either
+   * state has an outcome the platform has not observed, so it is reported
+   * as its own count next to `sent` and `failed` and is never folded into
+   * either. This is deliberately asymmetric with `workspace_daily_rollup`,
+   * which continues to exclude both states per Phase 11 D-13: a campaign
+   * card answers "where are my sends right now" (an unobserved outcome
+   * belongs there), while a daily rollup answers "what happened on this
+   * day" (an unobserved outcome has no place there). `ledger` is typed as
+   * `Record<SendStatus, number>` over the full shared vocabulary so a
+   * future seventh status becomes a compile-time error here, not a silent
+   * zero.
+   */
+  ledger: Record<SendStatus, number>;
   /** D-07: excluded sends grouped by exclusion_reason, for the «Пропущено» breakdown row. Empty array when none. */
   excludedBreakdown: CampaignExcludedBreakdownItem[];
 }
@@ -423,10 +433,20 @@ export async function getCampaignProgress(id: string): Promise<CampaignProgress 
        GROUP BY status`,
       [workspaceId, id]
     );
-    const ledger = { sent: 0, failed: 0, excluded: 0, dispatching: 0 };
+    // D-16: initialize every status in the shared vocabulary at zero so a
+    // status this query returns can never be silently dropped -- the
+    // previous four-key allow-list is exactly how `reconciling`/`unknown`
+    // became invisible. `knownStatuses` is built from `SEND_STATUSES`
+    // rather than restating the literals, so the accepted set and the
+    // `Record<SendStatus, number>` initializer can never drift apart.
+    const ledger = Object.fromEntries(SEND_STATUSES.map((status) => [status, 0])) as Record<
+      SendStatus,
+      number
+    >;
+    const knownStatuses = new Set<string>(SEND_STATUSES);
     for (const row of ledgerRows) {
-      if (row.status === "sent" || row.status === "failed" || row.status === "excluded" || row.status === "dispatching") {
-        ledger[row.status] = Number(row.count);
+      if (knownStatuses.has(row.status)) {
+        ledger[row.status as SendStatus] = Number(row.count);
       }
     }
 

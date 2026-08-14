@@ -3,6 +3,9 @@ import type { Redis } from "ioredis";
 import type { Job, Worker } from "bullmq";
 import { scrubbedConsole } from "@mega-crm/redaction";
 import { attachSharedErrorListeners, buildRedisConnectionOptions, createRedisConnection } from "@mega-crm/queue-core";
+import { pool } from "@mega-crm/tenant-context";
+import { assertMigrationsCurrent } from "@mega-crm/db";
+import { markWorkerDraining, startWorkerHealthServer, type WorkerHealthServer } from "./health-server.js";
 import { closeTrackedQueues } from "./queues/queue-registry.js";
 import { isTerminalJobFailure, writeDeadLetterOnTerminalFailure } from "./queues/dead-letter/dead-letter-writer.js";
 import { createEventsIngestWorker } from "./queues/events-ingest.worker.js";
@@ -21,6 +24,10 @@ import { createFlowSegmentSweepFlowWorker } from "./queues/flows/flow-segment-sw
 import { createFlowEnrollExistingWorker } from "./queues/flows/flow-enroll-existing.worker.js";
 import { createPartitionMaintenanceWorker } from "./queues/partition-maintenance.worker.js";
 import { createSendReconcilerWorker } from "./queues/send-reconciler.worker.js";
+import { createWebhookReplaySweepWorker } from "./queues/webhook-replay-sweep.worker.js";
+import { createReputationTickWorker } from "./queues/reputation-tick.worker.js";
+import { createErasureScrubWorker } from "./queues/erasure-scrub.worker.js";
+import { createErasureScrubReclaimWorker } from "./queues/erasure-scrub-reclaim.worker.js";
 
 /**
  * The worker process's runtime handle: a standalone shared ioredis
@@ -44,6 +51,8 @@ import { createSendReconcilerWorker } from "./queues/send-reconciler.worker.js";
 export interface WorkerRuntime {
   connection: ReturnType<typeof createRedisConnection>;
   workers: Worker[];
+  /** Phase 14 plan 04 (D-14, OPS-04/OPS-05): the worker's own `/healthz`+`/readyz` listener -- see `closeWorkerRuntime`'s ordering comment for why it closes LAST. */
+  healthServer: WorkerHealthServer;
   close: () => Promise<void>;
 }
 
@@ -55,19 +64,35 @@ export interface WorkerRuntime {
  *
  * Order matters: every registered `Worker` closes FIRST (draining any
  * in-flight job to completion, BullMQ's own default), THEN every tracked
- * long-lived `Queue` handle (`queue-registry.ts`) closes, and ONLY THEN does
- * the shared connection disconnect. A producer `Queue` close racing a
- * still-draining `Worker` could drop an enqueue the worker was mid-making;
- * closing workers first removes that race entirely. Idempotent: calling
- * this twice is safe -- `closeTrackedQueues()` drains its own registry
- * before closing, so a second call has nothing left to close, and BullMQ's
+ * long-lived `Queue` handle (`queue-registry.ts`) closes, THEN the shared
+ * connection disconnects, and -- Phase 14 plan 04 (D-14, R-05) -- the health
+ * server closes LAST, after all three of those. A producer `Queue` close
+ * racing a still-draining `Worker` could drop an enqueue the worker was
+ * mid-making; closing workers first removes that race entirely. The health
+ * server closes last because the entire point of `markWorkerDraining()` is
+ * that a draining process can still be ASKED what it is doing while it
+ * drains -- closing the listener before the drain finishes would blind the
+ * deploy script at exactly the moment it most needs visibility.
+ * `healthServer` is optional so this function's existing two-argument call
+ * sites (`graceful-shutdown.test.ts`'s pre-existing Phase 12 tests, which
+ * construct neither a real `WorkerRuntime` nor a health server) keep
+ * working unchanged. Idempotent: calling this twice is safe --
+ * `closeTrackedQueues()` drains its own registry before closing, BullMQ's
  * own `Worker.close()` and `Redis.disconnect()` both tolerate being called
- * more than once.
+ * more than once, and `startWorkerHealthServer`'s own `close()` guards
+ * against a second `node:http` close (which would otherwise reject).
  */
-export async function closeWorkerRuntime(workers: Worker[], connection: Redis): Promise<void> {
+export async function closeWorkerRuntime(
+  workers: Worker[],
+  connection: Redis,
+  healthServer?: WorkerHealthServer
+): Promise<void> {
   await Promise.all(workers.map((worker) => worker.close()));
   await closeTrackedQueues();
   connection.disconnect();
+  if (healthServer) {
+    await healthServer.close();
+  }
 }
 
 /**
@@ -110,7 +135,9 @@ export function attachSharedListeners(workers: Worker[]): void {
  * No HTTP listener; this is a long-running background process, not a
  * server.
  */
-// eslint-disable-next-line @typescript-eslint/require-await -- composition root: the declared Promise<WorkerRuntime> is the contract server.ts awaits, and boot ordering is not something to reshape for a lint rule
+// Phase 14 plan 04: buildWorker() now genuinely awaits (startWorkerHealthServer),
+// so the require-await disable this function needed before that change is
+// stale -- removed rather than left as a now-inert directive.
 export async function buildWorker(): Promise<WorkerRuntime> {
   const redisUrl = process.env.REDIS_URL;
   if (!redisUrl) {
@@ -207,6 +234,35 @@ export async function buildWorker(): Promise<WorkerRuntime> {
     // claims each one exclusively per-tenant, and resolves it to `sent`
     // from webhook evidence already on disk. Never calls SendGrid (D-01).
     createSendReconcilerWorker(buildRedisConnectionOptions(redisUrl)),
+    // CMP-08 (D-06/D-07, 13-06): the recovery half of the webhook-ingress
+    // durability journal (13-01) -- finds journal rows with no
+    // ingestion-complete mark past the stuck threshold and re-enqueues them
+    // onto webhook-events, then prunes/tombstones the journal at its
+    // retention horizon in the same tick.
+    createWebhookReplaySweepWorker(buildRedisConnectionOptions(redisUrl)),
+    // CMP-09 (D-09 through D-12, 13-09): measures each tenant's
+    // spam-complaint and hard-bounce rates over a rolling 7-day window from
+    // delivery fact columns already on `sends`, tiers them, and records the
+    // observation per workspace per metric. Measurement only -- nothing here
+    // pauses, throttles, or blocks sending; plan 13-11 carries the alert.
+    createReputationTickWorker(buildRedisConnectionOptions(redisUrl)),
+    // CMP-04 (D-01/D-04, 13-13): the asynchronous evidence-hygiene half of
+    // contact erasure -- consumes the job plan 13-10's deleteContact
+    // enqueues, walking the erased contact's linked send_events.payload and
+    // events.properties rows in bounded, checkpointed pages and rewriting
+    // each JSONB value from an explicit evidence allowlist. Job-per-erasure,
+    // not a repeatable tick -- registers no job scheduler.
+    createErasureScrubWorker(buildRedisConnectionOptions(redisUrl)),
+    // CMP-04 (D-04, R-05, 13-15): closes the last gap in CMP-04's durability
+    // chain -- plan 13-10's deleteContact enqueues the scrub job AFTER its
+    // transaction commits, which leaves exactly one failure mode: a crash
+    // between the commit and the enqueue strands a durable pending
+    // erasure_records row with no job behind it. This scheduled tick finds
+    // such stranded pending/scrubbing records past a 15-minute lease and
+    // re-enqueues their scrub through the SAME shared job-id derivation the
+    // request path uses, so a reclaim of an already-queued record is a
+    // no-op rather than a second scrub.
+    createErasureScrubReclaimWorker(buildRedisConnectionOptions(redisUrl)),
   ];
 
   // Phase 12 (WRK-08/WRK-10): attach the shared error/failed listener,
@@ -215,9 +271,39 @@ export async function buildWorker(): Promise<WorkerRuntime> {
   // for why this happens over the array rather than per-factory.
   attachSharedListeners(workers);
 
-  const close = (): Promise<void> => closeWorkerRuntime(workers, connection);
+  // Phase 14 plan 04 (D-14, OPS-04/OPS-05): the worker's own health server --
+  // same three checks apps/api's /readyz runs, reusing the SAME
+  // `@mega-crm/tenant-context` pool the worker already holds (never a
+  // second Postgres connection) and the SAME shared ioredis `connection`
+  // constructed above (never a second Redis connection). `checkMigrationsCurrent`
+  // is `assertMigrationsCurrent` (D-13, packages/db/src/migration-journal.ts)
+  // bound to that pool -- the identical applied-vs-shipped definition
+  // apps/api's /readyz uses, never a second comparison.
+  const healthServer = await startWorkerHealthServer({
+    queryPostgres: () => pool.query("SELECT 1"),
+    redisConnection: connection,
+    checkMigrationsCurrent: () => assertMigrationsCurrent(pool),
+  });
 
-  return { connection, workers, close };
+  const close = (): Promise<void> => closeWorkerRuntime(workers, connection, healthServer);
+
+  return { connection, workers, healthServer, close };
+}
+
+/**
+ * R-05 (stop-old-then-start-new): the exact shutdown path the SIGTERM/SIGINT
+ * handler below invokes, factored out so tests can drive it directly rather
+ * than sending a real signal to the test process
+ * (`health-server.test.ts`'s `WorkerRuntime` lifecycle suite).
+ * `markWorkerDraining()` runs BEFORE `runtime.close()` begins -- this
+ * ordering IS the observable half of R-05: the deploy script needs "the old
+ * worker has stopped accepting work" as a fact, and a flag flipped at the
+ * very start of shutdown, before any Worker/Queue/connection starts
+ * closing, is that fact.
+ */
+export function requestWorkerRuntimeShutdown(runtime: WorkerRuntime): Promise<void> {
+  markWorkerDraining();
+  return runtime.close();
 }
 
 async function main(): Promise<void> {
@@ -225,8 +311,7 @@ async function main(): Promise<void> {
 
   const shutdown = (signal: NodeJS.Signals) => {
     scrubbedConsole.log(`apps/worker received ${signal}, shutting down gracefully`);
-    runtime
-      .close()
+    requestWorkerRuntimeShutdown(runtime)
       .then(() => process.exit(0))
       .catch((err) => {
         scrubbedConsole.error("apps/worker shutdown error", err);
@@ -238,7 +323,7 @@ async function main(): Promise<void> {
   process.on("SIGTERM", shutdown);
 
   scrubbedConsole.log(
-    `apps/worker started (${runtime.workers.length} BullMQ worker(s) registered: events:ingest, imports:csv, email-broadcast, email-triggered, campaign-kickoff, campaign-scheduler, webhook-events, analytics-reconciliation, flow-run-advance, flow-reconciliation, flow-trigger-evaluator, flow-segment-sweep, flow-segment-sweep-flow, flow-enroll-existing, partition-maintenance, send-reconciler)`
+    `apps/worker started (${runtime.workers.length} BullMQ worker(s) registered: events:ingest, imports:csv, email-broadcast, email-triggered, campaign-kickoff, campaign-scheduler, webhook-events, analytics-reconciliation, flow-run-advance, flow-reconciliation, flow-trigger-evaluator, flow-segment-sweep, flow-segment-sweep-flow, flow-enroll-existing, partition-maintenance, send-reconciler, webhook-replay-sweep, reputation-tick, erasure-scrub, erasure-scrub-reclaim)`
   );
 }
 

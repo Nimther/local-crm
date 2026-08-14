@@ -1,4 +1,4 @@
-import { boolean, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { boolean, pgTable, text, timestamp, unique, uuid } from "drizzle-orm/pg-core";
 
 /**
  * better-auth core + `organization` plugin schema, hand-authored to match
@@ -91,17 +91,27 @@ export const organization = pgTable("organization", {
   deletedAt: timestamp("deletedAt"),
 });
 
-export const member = pgTable("member", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  organizationId: uuid("organizationId")
-    .notNull()
-    .references(() => organization.id, { onDelete: "cascade" }),
-  userId: uuid("userId")
-    .notNull()
-    .references(() => user.id, { onDelete: "cascade" }),
-  role: text("role").notNull().default("member"),
-  createdAt: timestamp("createdAt").notNull().defaultNow(),
-});
+export const member = pgTable(
+  "member",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organizationId")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    userId: uuid("userId")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    role: text("role").notNull().default("member"),
+    createdAt: timestamp("createdAt").notNull().defaultNow(),
+  },
+  // Phase 14 (DB-12, plan 14-02): migration 0062 adds this exact
+  // constraint, by this exact name, to the live database -- closes the
+  // one confirmed structural gap this plan's live pg_constraint/pg_index
+  // introspection found (member carried only its primary key). Declared
+  // here too so `drizzle-kit generate` (plan 14-05's empty-diff gate) does
+  // not see the database's constraint as a schema drift to re-add.
+  (t) => [unique("member_organization_user_unique").on(t.organizationId, t.userId)],
+);
 
 export const invitation = pgTable("invitation", {
   id: uuid("id").primaryKey().defaultRandom(),

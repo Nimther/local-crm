@@ -91,6 +91,11 @@ describe("webhook-events worker: repeat open/click counters (07-01, A4/D-11)", (
     );
   }
 
+  // Phase 13 (CMP-05, plan 13-04): a fixed 2023-era timestamp is now OLD
+  // ENOUGH to fall outside classifyOccurredAt's [now-7d, now+5min] window and
+  // get quarantined instead of inserted.
+  const FIXED_TIMESTAMP = Math.floor(Date.now() / 1000) - 3600;
+
   function sendgridEvent(
     workspaceId: string,
     campaignId: string,
@@ -101,7 +106,7 @@ describe("webhook-events worker: repeat open/click counters (07-01, A4/D-11)", (
       email: "hello@world.com",
       event: "open",
       sg_event_id: `sg-${randomUUID()}`,
-      timestamp: 1_700_000_000,
+      timestamp: FIXED_TIMESTAMP,
       send_id: sendId,
       workspace_id: workspaceId,
       campaign_id: campaignId,
@@ -109,7 +114,15 @@ describe("webhook-events worker: repeat open/click counters (07-01, A4/D-11)", (
     };
   }
 
-  it("Test D: opens -- a new open sets 0->1, a second distinct open sets 1->2, a replayed batch (same sg_event_id) leaves it unchanged", async () => {
+  it("Test D: opens -- a new open sets 0->1, a second distinct open ONE SECOND LATER sets 1->2, a replayed batch (same sg_event_id) leaves it unchanged", async () => {
+    // Phase 13 (CMP-07, plan 13-07) deviation: the dedup key is now
+    // (workspace_id, send_id, event_type, occurred_at). Two opens on the
+    // SAME send at the exact SAME occurred_at (the original fixture's
+    // shared FIXED_TIMESTAMP) now collapse to ONE row under the new key
+    // (T-13-07-06, pinned by webhook-events-dedup-rebase.test.ts) --
+    // this test's "second distinct open increments the counter" intent
+    // requires a DIFFERENT occurred_at, not merely a different sg_event_id,
+    // to be a genuinely-new row under the new key.
     const workspaceId = await freshWorkspaceId("open-count");
     const campaignId = await createFixtureCampaign(workspaceId);
     const contactId = await createFixtureContact(workspaceId);
@@ -119,17 +132,21 @@ describe("webhook-events worker: repeat open/click counters (07-01, A4/D-11)", (
     await processWebhookEventBatch({ workspaceId, events: firstOpen });
     expect((await sendCounts(workspaceId, sendId)).openCount).toBe(1);
 
-    const secondOpen = [sendgridEvent(workspaceId, campaignId, sendId, { event: "open" })];
+    const secondOpen = [
+      sendgridEvent(workspaceId, campaignId, sendId, { event: "open", timestamp: FIXED_TIMESTAMP + 1 }),
+    ];
     await processWebhookEventBatch({ workspaceId, events: secondOpen });
     expect((await sendCounts(workspaceId, sendId)).openCount).toBe(2);
 
-    // Replay the exact same batch (identical sg_event_id) -- dedup insert
-    // returns zero new rows, so zero additional side effects fire.
+    // Replay the exact same batch (identical sg_event_id AND occurred_at) --
+    // dedup insert returns zero new rows, so zero additional side effects fire.
     await processWebhookEventBatch({ workspaceId, events: secondOpen });
     expect((await sendCounts(workspaceId, sendId)).openCount).toBe(2);
   });
 
-  it("Test D: clicks -- a new click sets 0->1, a second distinct click sets 1->2, a replayed batch leaves it unchanged", async () => {
+  it("Test D: clicks -- a new click sets 0->1, a second distinct click ONE SECOND LATER sets 1->2, a replayed batch leaves it unchanged", async () => {
+    // See the opens test above for why the second event needs a distinct
+    // occurred_at under the Phase 13 (CMP-07) dedup key.
     const workspaceId = await freshWorkspaceId("click-count");
     const campaignId = await createFixtureCampaign(workspaceId);
     const contactId = await createFixtureContact(workspaceId);
@@ -139,7 +156,9 @@ describe("webhook-events worker: repeat open/click counters (07-01, A4/D-11)", (
     await processWebhookEventBatch({ workspaceId, events: firstClick });
     expect((await sendCounts(workspaceId, sendId)).clickCount).toBe(1);
 
-    const secondClick = [sendgridEvent(workspaceId, campaignId, sendId, { event: "click" })];
+    const secondClick = [
+      sendgridEvent(workspaceId, campaignId, sendId, { event: "click", timestamp: FIXED_TIMESTAMP + 1 }),
+    ];
     await processWebhookEventBatch({ workspaceId, events: secondClick });
     expect((await sendCounts(workspaceId, sendId)).clickCount).toBe(2);
 

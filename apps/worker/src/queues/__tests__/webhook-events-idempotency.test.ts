@@ -36,13 +36,19 @@ describe("webhook-events worker (WBHK-03, D-14)", () => {
     return insertFixtureOrganization(nameSeed);
   }
 
+  // Phase 13 (CMP-05, plan 13-04): a fixed 2023-era timestamp is now OLD
+  // ENOUGH to fall outside classifyOccurredAt's [now-7d, now+5min] window and
+  // get quarantined instead of inserted -- module-scoped so every replay call
+  // in this file reuses the identical value (dedup determinism preserved).
+  const FIXED_TIMESTAMP = Math.floor(Date.now() / 1000) - 3600;
+
   function sendgridEvent(overrides: Record<string, unknown> = {}): Record<string, unknown> {
     return {
       email: "hello@world.com",
       event: "delivered",
       sg_event_id: `sg-${randomUUID()}`,
       sg_message_id: "abc.filterdrecv-x",
-      timestamp: 1_700_000_000,
+      timestamp: FIXED_TIMESTAMP,
       ...overrides,
     };
   }
@@ -143,8 +149,23 @@ describe("webhook-events worker (WBHK-03, D-14)", () => {
   });
 
   it("WBHK-03: a replayed identical batch inserts zero additional rows", async () => {
+    // Phase 13 (CMP-07, plan 13-07) deviation: the dedup key is now
+    // (workspace_id, send_id, event_type, occurred_at) -- a null send_id is
+    // NEVER deduped against another null send_id (Postgres treats NULL as
+    // always distinct in a unique index, an accepted trade-off of the new
+    // key). This test's intent is "a replayed batch inserts nothing new",
+    // which requires each event to carry a REAL send_id so the new key has
+    // something to dedupe on; two bare `sendgridEvent()` calls (orphan,
+    // null send_id) would each insert as a genuinely new row on replay,
+    // which is a different (and separately covered) behavior --see
+    // webhook-events-dedup-rebase.test.ts's own orphan-events case.
     const workspaceId = await freshWorkspaceId("wh-replay");
-    const events = [sendgridEvent(), sendgridEvent()];
+    const campaignId = await createFixtureCampaign(workspaceId);
+    const contactA = await createFixtureContact(workspaceId);
+    const contactB = await createFixtureContact(workspaceId);
+    const sendA = await createFixtureSend(workspaceId, campaignId, contactA);
+    const sendB = await createFixtureSend(workspaceId, campaignId, contactB);
+    const events = [sendgridEvent({ send_id: sendA }), sendgridEvent({ send_id: sendB })];
 
     const first = await processWebhookEventBatch({ workspaceId, events });
     expect(first.inserted).toBe(2);
@@ -155,11 +176,22 @@ describe("webhook-events worker (WBHK-03, D-14)", () => {
   });
 
   it("a batch mixing 2 already-seen and 3 new sg_event_ids inserts exactly the 3 new rows", async () => {
+    // Phase 13 (CMP-07, plan 13-07) deviation: see the replay test above --
+    // every event needs a real, distinct send_id for the new key to dedupe
+    // the "already-seen" half against the earlier batch.
     const workspaceId = await freshWorkspaceId("wh-mixed");
-    const seen = [sendgridEvent(), sendgridEvent()];
+    const campaignId = await createFixtureCampaign(workspaceId);
+    const contacts = await Promise.all([1, 2, 3, 4, 5].map(() => createFixtureContact(workspaceId)));
+    const sendIds = await Promise.all(contacts.map((contactId) => createFixtureSend(workspaceId, campaignId, contactId)));
+
+    const seen = [sendgridEvent({ send_id: sendIds[0] }), sendgridEvent({ send_id: sendIds[1] })];
     await processWebhookEventBatch({ workspaceId, events: seen });
 
-    const fresh = [sendgridEvent(), sendgridEvent(), sendgridEvent()];
+    const fresh = [
+      sendgridEvent({ send_id: sendIds[2] }),
+      sendgridEvent({ send_id: sendIds[3] }),
+      sendgridEvent({ send_id: sendIds[4] }),
+    ];
     const mixedResult = await processWebhookEventBatch({ workspaceId, events: [...seen, ...fresh] });
 
     expect(mixedResult.inserted).toBe(3);

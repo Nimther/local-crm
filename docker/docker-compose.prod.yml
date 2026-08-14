@@ -1,0 +1,374 @@
+# Phase 14 plan 08 (D-01, D-02, D-03, D-09, D-10, DB-13, OPS-01, OPS-02,
+# Pitfall 7, Pitfall 19, RESEARCH.md Pattern 3/4). The production topology
+# D-01 chose: one VPS, everything containerized under docker compose --
+# Postgres, Redis, api, worker, Caddy, plus a one-shot migrate service.
+# Promotes docker-compose.yml's (the development file's) own vocabulary
+# rather than inventing a second dialect -- same named-volume style, same
+# healthcheck style, and `redis` carries the SAME `docker/redis.conf` mount
+# and `command:` override, because that configuration is Phase 8's WRK-12
+# durability work, not a development convenience.
+#
+# Every genuinely secret value is read from `${MEGA_CRM_ENV_FILE}` (the
+# operator's own externally-resolved env file, outside any git working
+# tree -- scripts/env-path.mjs's convention, the same one every secret in
+# this project has followed since Phase 8) -- NEVER a literal in this file.
+# Every non-secret sizing knob below is `${VAR:-default}` -- an environment
+# variable with a conservative default, per this plan's checkpoint decision
+# (RESEARCH.md Open Question 3's "parameterize-with-minimum" option).
+# docker/prod.env.example documents every variable this file references;
+# docs/runbooks/production-topology.md documents the sizing derivation and
+# the revisit triggers for every default.
+#
+# `docker compose -f docker/docker-compose.prod.yml --env-file
+# docker/prod.env.example config` is this file's own local proof; the first
+# real bring-up belongs to plan 14-09's deploy script against a real host
+# and a real domain, never this plan.
+#
+# Plan 14-10 (Rule 1 bug fix, found via direct empirical testing with a real
+# `docker compose config` -- Homebrew's `docker-compose` v5.4.0 CLI plugin,
+# which resolves/interpolates without needing a daemon): every bind-mount
+# `source:` below is relative to THIS FILE'S OWN DIRECTORY (`docker/`) --
+# Compose's own documented default project-directory rule ("the path of the
+# first specified Compose file") -- NOT the repository root. `deploy.sh`
+# invokes `docker compose -f docker/docker-compose.prod.yml ...` from the
+# REPO ROOT, so a path written as `./postgres/foo` resolves to
+# `<repo-root>/docker/docker/postgres/foo` -- a nonexistent, doubled
+# `docker/docker/` prefix that would make EVERY bind mount in this file fail
+# at container-creation time on a real deploy. Confirmed directly: copied
+# this file into `<tmp>/docker/docker-compose.prod.yml` and ran
+# `docker-compose -f docker/docker-compose.prod.yml config` from `<tmp>`
+# (mirroring deploy.sh's own cwd/`-f` combination exactly) -- the resolved
+# `source:` was genuinely `<tmp>/docker/docker/postgres/...` before this fix,
+# and `<tmp>/docker/postgres/...` (correct) after removing the redundant
+# leading `docker/` segment from every relative volume path in this file.
+# Every relative path below is therefore `./postgres/...`, `./pgbackrest/...`
+# or `./redis.conf` -- never `./docker/...`.
+
+services:
+  db:
+    # Phase 14 plan 10 (DB-09, D-05, D-06, T-14-62): a LOCALLY BUILT image,
+    # not the official `postgres:17` directly -- `archive_command` below is
+    # executed by the Postgres server process itself, inside THIS container,
+    # so the pgBackRest binary has to live here (docker/postgres/Dockerfile
+    # adds it on top of the same `postgres:17` base). This plan's own
+    # acceptance criteria explicitly allow "builds or references" a custom
+    # image; `build:` was chosen over a GHCR-published image because this
+    # image changes rarely (an OS package layer, not application code) and
+    # extending .github/workflows/images.yml's matrix + adding `db`/
+    # `pgbackrest` to scripts/validate-prod-compose.mjs's
+    # FIRST_PARTY_IMAGE_SERVICES immutable-tag check was judged out of this
+    # plan's own declared file scope -- recorded as a forward flag in
+    # docs/runbooks/backups.md, not silently decided. NOTE for the operator:
+    # scripts/deploy.sh's own `compose pull api worker web` never rebuilds
+    # this image -- run `docker compose -f docker/docker-compose.prod.yml
+    # build db pgbackrest` by hand after any docker/postgres/Dockerfile or
+    # docker/pgbackrest/pgbackrest.conf change, BEFORE the next deploy.
+    image: megacrm-postgres:${POSTGRES_IMAGE_TAG:-local}
+    # `context: .` is THIS file's own directory (docker/) -- the Dockerfile
+    # has no `COPY` of any repository source (it only adds an apt package to
+    # the official base), so the build context is deliberately narrow rather
+    # than the whole monorepo (which docker/Dockerfile.{api,worker,web}
+    # legitimately need, but this image does not).
+    build:
+      context: .
+      dockerfile: postgres/Dockerfile
+    restart: unless-stopped
+    # SEPARATE from docker/pg-tls-entrypoint.sh (the dev/CI entrypoint) --
+    # see docker/postgres/prod-tls-entrypoint.sh's own header for why this
+    # plan keeps two scripts rather than one with a runtime branch.
+    entrypoint: ["/usr/local/bin/prod-tls-entrypoint.sh"]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-mega_crm}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # D-09: floor is 84 (plan 14-03's PG_POOL_SIZES summed total for one
+      # instance each of apps/api + apps/worker) -- see
+      # docs/runbooks/production-topology.md for the full arithmetic.
+      # scripts/validate-prod-compose.mjs's CI gate fails if this resolves
+      # to <= 84.
+      PG_MAX_CONNECTIONS: ${PG_MAX_CONNECTIONS:-200}
+      PG_SHARED_BUFFERS: ${PG_SHARED_BUFFERS:-512MB}
+      # docker/postgres/init-prod-roles.sql reads these via psql's
+      # `\getenv` -- never embedded in that SQL file itself.
+      MEGA_CRM_APP_PASSWORD: ${MEGA_CRM_APP_PASSWORD}
+      MEGA_CRM_SCAN_PASSWORD: ${MEGA_CRM_SCAN_PASSWORD}
+      MEGA_CRM_AUTH_PASSWORD: ${MEGA_CRM_AUTH_PASSWORD}
+      # Plan 14-10 (DB-09): read by the `archive_command`
+      # prod-tls-entrypoint.sh sets (pgbackrest archive-push runs INSIDE
+      # this container, as a child of the Postgres server process, so it
+      # inherits this same environment). Same six names, same
+      # PGBACKREST_<OPTION> override convention, same MEGA_CRM_ENV_FILE
+      # provenance as the `pgbackrest` sidecar below -- one set of secrets,
+      # read by both containers that need repository access.
+      PGBACKREST_STANZA: mega_crm
+      PGBACKREST_REPO1_S3_ENDPOINT: ${PGBACKREST_REPO1_S3_ENDPOINT}
+      PGBACKREST_REPO1_S3_BUCKET: ${PGBACKREST_REPO1_S3_BUCKET}
+      PGBACKREST_REPO1_S3_REGION: ${PGBACKREST_REPO1_S3_REGION}
+      PGBACKREST_REPO1_S3_KEY: ${PGBACKREST_REPO1_S3_KEY}
+      PGBACKREST_REPO1_S3_KEY_SECRET: ${PGBACKREST_REPO1_S3_KEY_SECRET}
+      PGBACKREST_REPO1_CIPHER_PASS: ${PGBACKREST_REPO1_CIPHER_PASS}
+    # Pitfall 19: both halves required, neither works alone -- an unset
+    # memory limit lets a container exhaust host RAM before the kernel ever
+    # compares scores, so the score adjustment below achieves nothing without
+    # this. See docs/runbooks/production-topology.md for the derivation.
+    mem_limit: ${DB_MEM_LIMIT:-2048m}
+    # Negative favors survival. -500 (not -1000) is the pragmatic default:
+    # dockerd itself runs at -500; -1000 is "never kill," which risks a
+    # leaking Postgres freezing the whole host with nothing left for the OOM
+    # killer to reap.
+    oom_score_adj: ${DB_OOM_SCORE_ADJ:--500}
+    volumes:
+      - mega_crm_db_data_prod:/var/lib/postgresql/data
+      - ./postgres/init-prod-roles.sql:/docker-entrypoint-initdb.d/01-init-prod-roles.sql:ro
+      - ./postgres/prod-tls-entrypoint.sh:/usr/local/bin/prod-tls-entrypoint.sh:ro
+      # DEDICATED volume, separate from the data volume -- certificate
+      # lifetime is independent of the database volume (mirrors
+      # docker-compose.yml's dev `mega_crm_db_certs` precedent exactly).
+      - mega_crm_db_certs_prod:/certs
+      # Plan 14-10 (DB-09): read by `archive_command` (archive-push) and,
+      # were it ever needed, by an operator running `pgbackrest` by hand
+      # inside this container -- the SAME file the `pgbackrest` sidecar
+      # mounts below, never a second copy.
+      - ./pgbackrest/pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro
+      # Shared with `pgbackrest` (T-14-62's mechanism): the sidecar's own
+      # backup/check/info commands need a control connection to run
+      # Postgres's backup-start/backup-stop functions, and PostgreSQL's
+      # `initdb` defaults an unauthenticated `local` (Unix-socket)
+      # pg_hba.conf entry to `trust` -- see docker/pgbackrest/pgbackrest.conf's
+      # own comment for the full reasoning. A named volume (not a bind
+      # mount) because the path itself never needs host visibility.
+      - mega_crm_pg_socket_prod:/var/run/postgresql
+    healthcheck:
+      # WR-01: no -h forces the client-library default (the Unix socket),
+      # which on a fresh volume can resolve to Postgres's own TEMPORARY
+      # bootstrap server (initdb runs docker-entrypoint-initdb.d/* against a
+      # socket-only server before the real TCP listener with ssl=on comes
+      # up) -- a dependent container gating on service_healthy could start
+      # against that bootstrap server instead. Force a TCP probe of the real
+      # listener so this can only pass once the real server is up.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # No `ports:` -- reachable only on the compose network (T-14-43).
+
+  # Phase 14 plan 10 (DB-09, D-05, D-06). The scheduled-backup sidecar --
+  # SAME image as `db` (a second entrypoint into the same custom Postgres+
+  # pgBackRest image, never a second Dockerfile), running
+  # docker/pgbackrest/backup-entrypoint.sh's cron schedule
+  # (docker/pgbackrest/crontab) instead of the Postgres server itself.
+  # Shares TWO volumes with `db`, and nothing else -- no TCP credential of
+  # its own, no copy of any application secret it doesn't also need:
+  #   - the Postgres data volume, READ-ONLY (it only ever needs to READ
+  #     PGDATA/WAL for a backup, never write to it)
+  #   - the Unix-socket volume, read-write (its own backup/check/info
+  #     commands need a control connection to `db`'s Postgres process to
+  #     run the backup-start/backup-stop functions -- see
+  #     docker/pgbackrest/pgbackrest.conf's own comment for why a shared
+  #     socket + PostgreSQL's own `local`-connection `trust` default, not a
+  #     TCP role/password, is what makes this work with no new credential)
+  pgbackrest:
+    image: megacrm-postgres:${POSTGRES_IMAGE_TAG:-local}
+    build:
+      context: .
+      dockerfile: postgres/Dockerfile
+    restart: unless-stopped
+    entrypoint: ["/usr/local/bin/backup-entrypoint.sh"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGBACKREST_STANZA: mega_crm
+      PGBACKREST_REPO1_S3_ENDPOINT: ${PGBACKREST_REPO1_S3_ENDPOINT}
+      PGBACKREST_REPO1_S3_BUCKET: ${PGBACKREST_REPO1_S3_BUCKET}
+      PGBACKREST_REPO1_S3_REGION: ${PGBACKREST_REPO1_S3_REGION}
+      PGBACKREST_REPO1_S3_KEY: ${PGBACKREST_REPO1_S3_KEY}
+      PGBACKREST_REPO1_S3_KEY_SECRET: ${PGBACKREST_REPO1_S3_KEY_SECRET}
+      PGBACKREST_REPO1_CIPHER_PASS: ${PGBACKREST_REPO1_CIPHER_PASS}
+    # T-14-65: a backup process must never win an OOM contest against the
+    # database it protects -- an explicit limit (Pitfall 19) and the SAME
+    # non-negative (kernel-default) oom_score_adj treatment `api`/`worker`
+    # get, never `db`'s protective -500.
+    mem_limit: ${PGBACKREST_MEM_LIMIT:-256m}
+    volumes:
+      # SAME mount convention as db's own prod-tls-entrypoint.sh (plan
+      # 14-08) -- the script is bind-mounted, not baked into
+      # docker/postgres/Dockerfile, so Task 2's own script changes never
+      # require a Task-1-owned image rebuild.
+      - ./pgbackrest/backup-entrypoint.sh:/usr/local/bin/backup-entrypoint.sh:ro
+      - ./pgbackrest/pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro
+      - ./pgbackrest/crontab:/etc/pgbackrest-crontab.d/crontab:ro
+      - mega_crm_db_data_prod:/var/lib/postgresql/data:ro
+      - mega_crm_pg_socket_prod:/var/run/postgresql
+    # No `ports:`, no `healthcheck:` -- a scheduled batch process, not a
+    # request-serving service (T-14-43).
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    # 08-04 (WRK-12): the SAME durability config as development -- sizing
+    # the VPS host for Redis's own `maxmemory` belongs to Phase 15
+    # (docker/redis.conf's own comment); REDIS_MEM_LIMIT below is only the
+    # CONTAINER ceiling around that fixed 512mb data ceiling, this plan's
+    # concern.
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    mem_limit: ${REDIS_MEM_LIMIT:-768m}
+    volumes:
+      - mega_crm_redis_data_prod:/data
+      - ./redis.conf:/usr/local/etc/redis/redis.conf:ro
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # No `ports:` -- reachable only on the compose network (T-14-43).
+
+  api:
+    image: ${GHCR_IMAGE_BASE}/api:${IMAGE_TAG}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # `required: false` so this file (and `docker compose config` run
+    # against docker/prod.env.example, which cannot point at a real
+    # operator secrets file) resolves cleanly without one existing --
+    # at a real deploy the path MUST exist, or every var below this
+    # comment is simply absent from the container's environment.
+    env_file:
+      - path: ${MEGA_CRM_ENV_FILE}
+        required: false
+    environment:
+      NODE_ENV: production
+    mem_limit: ${API_MEM_LIMIT:-512m}
+    # Probes /readyz, not just /healthz -- the API's own port is never
+    # published (T-14-43), so this container's OWN health status is the
+    # ONLY way the deploy script (plan 14-09) can observe true readiness
+    # (Postgres + Redis + migration currency), not just liveness.
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    # No `ports:` -- `web` (Caddy) is the ONLY published surface (T-14-43);
+    # Caddy reaches this container by compose service name (docker/Caddyfile).
+
+  worker:
+    image: ${GHCR_IMAGE_BASE}/worker:${IMAGE_TAG}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - path: ${MEGA_CRM_ENV_FILE}
+        required: false
+    environment:
+      NODE_ENV: production
+    mem_limit: ${WORKER_MEM_LIMIT:-1024m}
+    # ARCHITECTURE.md §10 / Pitfall 7: MUST come from the published constant,
+    # NEVER a hand-typed literal -- the deploy script (plan 14-09) exports
+    # WORKER_STOP_GRACE_PERIOD_SECONDS from
+    # `node scripts/print-stop-grace-period.mjs`'s output before every
+    # `up`/`run`. scripts/validate-prod-compose.mjs's drift check fails if
+    # this ever disagrees with that script's current output.
+    stop_grace_period: ${WORKER_STOP_GRACE_PERIOD_SECONDS}s
+    # Same readiness reasoning as `api` above -- WORKER_HEALTH_HOST is
+    # 127.0.0.1-only by design (plan 14-04, D-14); this container's health
+    # status is the only way to observe it from outside.
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4100/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    # No `ports:` -- publishing WORKER_HEALTH_PORT would expose an
+    # unauthenticated probe endpoint to the internet (T-14-43).
+
+  web:
+    image: ${GHCR_IMAGE_BASE}/web:${IMAGE_TAG}
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      # docker/Caddyfile's own `{$SITE_ADDRESS}` placeholder syntax --
+      # Caddy reads this from its OWN process environment, not compose-level
+      # interpolation of the Caddyfile (D-02).
+      SITE_ADDRESS: ${SITE_ADDRESS}
+    mem_limit: ${WEB_MEM_LIMIT:-256m}
+    # Rule 2 completion (not in the plan's own text): persistent ACME
+    # state. Without these, every container restart re-issues a fresh
+    # Let's Encrypt certificate for the same domain, which risks tripping
+    # ACME's own rate limits -- Caddy's default `/data`/`/config` paths
+    # inside its image, given real volumes here, survive a restart.
+    volumes:
+      - mega_crm_caddy_data_prod:/data
+      - mega_crm_caddy_config_prod:/config
+    # The ONLY service that publishes ports (T-14-43) -- exactly 80 and 443,
+    # because ACME needs both (HTTP-01 challenge + the served HTTPS site).
+    ports:
+      - "80:80"
+      - "443:443"
+    # WR-07: every other long-lived service in this file has a healthcheck;
+    # `web` -- the ONLY service this topology publishes to the internet
+    # (T-14-43) -- had none, making a broken container (e.g. CR-01's
+    # storage-permission failure) invisible to both Docker and
+    # `scripts/deploy.sh`. Probes Caddy's own admin API on 127.0.0.1:2019
+    # (bound to loopback only, never published) rather than the public
+    # {$SITE_ADDRESS} site -- the admin listener comes up as soon as the
+    # Caddy process starts, with no dependency on ACME cert issuance or
+    # DNS/hostname resolution for the real domain, so this reflects "the
+    # Caddy process is alive and serving its config", not a redirect/TLS
+    # handshake outcome that would make the check itself SITE_ADDRESS-
+    # dependent.
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:2019/config/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # One-shot migrate step (plan 14-01's `npm run migrate:prod` ==
+  # `node scripts/migrate-runner.mjs`), built from the SAME api image --
+  # no separate Dockerfile, no separate build. RESEARCH.md Pitfall C /
+  # T-14-48: NEVER expressed via a `depends_on: { condition:
+  # service_completed_successfully }` from api/worker -- that documented
+  # Compose bug can re-run a completed one-shot container on a later `up`.
+  # The deploy script (plan 14-09) instead runs
+  # `docker compose run --rm migrate` explicitly and checks its exit code,
+  # sequencing db-healthy -> migrate -> api/worker itself outside compose.
+  # The `manual` profile is this file's OTHER half of that defense: no
+  # service below declares that profile, so a plain `docker compose up`
+  # never starts this service at all -- `docker compose run migrate`
+  # targets it BY NAME regardless of profile activation, which is the exact
+  # mechanism this depends on.
+  migrate:
+    image: ${GHCR_IMAGE_BASE}/api:${IMAGE_TAG}
+    profiles: ["manual"]
+    command: ["node", "scripts/migrate-runner.mjs"]
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - path: ${MEGA_CRM_ENV_FILE}
+        required: false
+    environment:
+      NODE_ENV: production
+    mem_limit: ${MIGRATE_MEM_LIMIT:-512m}
+    # No `ports:`, no `healthcheck:` -- a one-shot process the deploy script
+    # awaits by exit code, never a long-lived container.
+
+volumes:
+  mega_crm_db_data_prod:
+  mega_crm_db_certs_prod:
+  # Phase 14 plan 10 (DB-09): shared between `db` and `pgbackrest` so the
+  # sidecar's own control connection reaches `db`'s Postgres process over
+  # the SAME Unix socket file, not a second one -- see
+  # docker/pgbackrest/pgbackrest.conf's own comment for the full reasoning.
+  mega_crm_pg_socket_prod:
+  mega_crm_redis_data_prod:
+  mega_crm_caddy_data_prod:
+  mega_crm_caddy_config_prod:

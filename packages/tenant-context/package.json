@@ -10,7 +10,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "pg": "8.22.0"
+    "pg": "8.22.0",
+    "@mega-crm/db": "0.1.0"
   },
   "devDependencies": {
     "@mega-crm/test-support": "0.1.0",

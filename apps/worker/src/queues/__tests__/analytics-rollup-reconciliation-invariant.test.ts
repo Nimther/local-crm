@@ -109,7 +109,18 @@ describe("workspace_daily_rollup dual-write invariant (07-09, ANLT-04)", () => {
   // UTC-day bucket and reconciliation's `::date` cast resolve to the same
   // calendar day regardless of the test DB session's timezone (side-steps
   // the WR-01 session-timezone `::date` caveat, out of scope here).
-  const FIXED_TIMESTAMP = 1_768_478_400; // -> 2026-01-15T12:00:00.000Z
+  //
+  // Phase 13 (CMP-05, plan 13-04): the previous hardcoded 2026-01-15 date is
+  // now OLD ENOUGH to fall outside classifyOccurredAt's [now-7d, now+5min]
+  // window and get quarantined instead of inserted -- computed as YESTERDAY
+  // at noon UTC instead, which preserves the noon-UTC day-bucket guarantee
+  // above while staying comfortably inside the 7-day window and strictly in
+  // the past (never a future-skew rejection) regardless of what time of day
+  // this suite runs.
+  const yesterdayNoonUtc = new Date();
+  yesterdayNoonUtc.setUTCDate(yesterdayNoonUtc.getUTCDate() - 1);
+  yesterdayNoonUtc.setUTCHours(12, 0, 0, 0);
+  const FIXED_TIMESTAMP = Math.floor(yesterdayNoonUtc.getTime() / 1000);
   const FIXED_ISO = new Date(FIXED_TIMESTAMP * 1000).toISOString();
   const DAY = FIXED_ISO.slice(0, 10);
 

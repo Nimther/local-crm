@@ -8,12 +8,17 @@
 
 export interface MigrationLintViolation {
   file: string;
-  rule: "enum-add-value-used-same-file" | "destructive-ddl-unmarked";
+  rule:
+    | "enum-add-value-used-same-file"
+    | "destructive-ddl-unmarked"
+    | "statement-breakpoint-misplaced";
   line: number | null;
   detail: string;
 }
 
 export function stripSqlComments(sql: string): string;
+export function maskSqlComments(rawSql: string): string;
+export function checkStatementBreakpointPlacement(file: string, rawSql: string): MigrationLintViolation[];
 export function checkEnumAddValueSameFile(file: string, rawSql: string): MigrationLintViolation[];
 export function checkDestructiveDdl(file: string, rawSql: string): MigrationLintViolation[];
 export function lintMigrationFile(file: string, rawSql: string): MigrationLintViolation[];

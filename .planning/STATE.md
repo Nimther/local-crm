@@ -2,46 +2,56 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Production Hardening
-current_phase: 13
-current_phase_name: Compliance & Analytics Integrity
-status: planning
-stopped_at: Phase 12 complete, ready to plan Phase 13
-last_updated: "2026-08-11T08:38:01.360Z"
-last_activity: 2026-08-11
-last_activity_desc: Phase 12 complete, transitioned to Phase 13
+current_phase: 14
+current_phase_name: deployment-database-durability
+status: executing
+stopped_at: Phase 14 context gathered
+last_updated: "2026-08-13T09:22:26.564Z"
+last_activity: 2026-08-13
+last_activity_desc: Phase 14 execution resumed (wave continue)
 progress:
   total_phases: 9
-  completed_phases: 5
-  total_plans: 63
-  completed_plans: 63
-  percent: 56
+  completed_phases: 6
+  total_plans: 93
+  completed_plans: 89
+  percent: 67
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-08-11)
+See: .planning/PROJECT.md (updated 2026-08-12)
 
 **Core value:** Маркетолог настраивает триггерную цепочку или кампанию — и письма надёжно и вовремя доходят до нужных контактов, со сквозным отслеживанием статусов (delivered/opened/clicked/bounced).
-**Current focus:** Phase 13 — Compliance & Analytics Integrity
+**Current focus:** Phase 14 — deployment-database-durability
 
 ## Current Position
 
 Milestone: v1.1 Production Hardening (Phases 8-16, 95 requirements)
-Phase: 13 — Compliance & Analytics Integrity
-Plan: Not started
-Status: Ready to plan
-Last activity: 2026-08-11 — Phase 12 complete, transitioned to Phase 13
-Progress: [████████████████████] 63/63 plans (100%) — 5/9 v1.1 phases complete (8–12), 44/95 requirements
+Phase: 14 (deployment-database-durability) — EXECUTING
+Plan: 1 of 13
+Status: Executing Phase 14
+Last activity: 2026-08-13 — Phase 14 execution resumed (wave continue)
+Progress: [████████████████████] 79/79 plans (100%) — 6/9 v1.1 phases complete (8–13), 53/95 requirements
 
 ✓ **Deadline closed (2026-08-07):** Phase 9 (DB-01/DB-02 partition automation) completed ahead of the hard **2026-09-01** deadline — 20 attached monthly partitions (2026-09…2027-06) confirmed by catalog query against a migrated database.
+
+## Pending Checkpoints (Phase 14)
+
+Three plans are paused at blocking real-host `checkpoint:human-verify` gates (each 2/3 tasks committed, no SUMMARY yet — this is a legal paused state, NOT lost work; on cold resume choose 'close out manually', never 're-execute from scratch'):
+
+- **14-09** deploy/rollback — awaiting first real deploy + rollback on the production VPS (see docs/runbooks/deploy-and-rollback.md)
+- **14-10** pgBackRest backups — awaiting first real backup + WAL shipment to the off-host bucket (see docs/runbooks/backups.md)
+- **14-11** restore drill — awaiting the real PITR drill against the off-host repository (see docs/runbooks/restore-drill.md)
+
+Resolution path: user reports "approved" or issues per plan → spawn continuation executor to record results and write the plan SUMMARY → then phase verification.
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 159
+- Total plans completed: 175
 - Average duration: — min
 - Total execution time: 0 hours
 
@@ -61,6 +71,7 @@ Progress: [████████████████████] 63/63 p
 | 10 | 15 | - | - |
 | 11 | 11 | - | - |
 | 12 | 14 | - | - |
+| 13 | 16 | - | - |
 
 **Recent Trend:**
 
@@ -186,6 +197,15 @@ Progress: [████████████████████] 63/63 p
 
 Full decision log for v1.0 lives in PROJECT.md (Key Decisions) and the archived phase summaries in .planning/milestones/v1.0-phases/.
 
+**Phase 13 decisions (2026-08-12, full log in PROJECT.md and phase summaries):**
+
+- Dedup-ключ `send_events` пересажен с нестабильного `sg_event_id` на `(workspace_id, send_id, event_type, occurred_at)` (миграция 0057, expand/contract без DELETE, RAISE при выживших дублях); `sg_event_id` остаётся NOT NULL forensic-колонкой
+- Erasure = обезличивание + hashed suppression (per-workspace HMAC-ключи, KMS-wrapped, TTL-кэш с зануляемым key material; плейнтекст email удалён из suppression — миграция 0061) + checkpointed scrub `send_events.payload`/`events.properties` по evidence-**allowlist** (deny-list не покрывает tenant-defined ключи) + reclaim-воркер для erasure, застрявших между commit и enqueue
+- Webhook-батч журналируется в `ingress_journal` до enqueue; недоступность журнала → fail-closed 5xx (SendGrid ретраит); replay-sweep добирает не-ингестированные строки exactly-once; PII-prune оставляет tombstone-строки как evidence
+- Дневные метрики: единая UTC-семантика (`AT TIME ZONE 'UTC'` во всех кастах) + dirty-day reconciliation абсолютной перезаписью дня (bounded 50 дней/тик, `dirtied_at <= sweep_start` против clear-race)
+- Оба unsubscribe entry-пойнта сходятся в общем `applyUnsubscribeWithSendFact` (одна транзакция: статус + consent history + send fact + счётчик, идемпотентно к порядку и replay); public route отвечает byte-identical на все четыре исхода
+- `occurred_at` ограничен до partition routing; out-of-range события — per-event в `send_event_quarantine` (7-дневный retention по server-set `received_at`, gap 13-16), батч не падает
+
 **Phase 12 decisions (2026-08-11, full log in PROJECT.md and phase summaries):**
 
 - Tenant-scoped rate_limited deferral (`job.moveToDelayed` + `DelayedError` через общий helper обоих send-лейнов) вместо worker-wide `worker.rateLimit()`; per-tenant-per-lane concurrency — TTL-leased Redis-семафор, release в `finally` на всех трёх dispatch-путях
@@ -253,7 +273,7 @@ Full decision log for v1.0 lives in PROJECT.md (Key Decisions) and the archived 
 Open decisions to resolve at `/gsd-discuss-phase` (recorded in ROADMAP.md § Open Decisions):
 
 - [x] **Phase 12 / WRK-02** — RESOLVED 2026-08-10 (D-01): Redis semaphore at the application layer, keyed per tenant + lane, TTL-leased; over-cap jobs defer through the same tenant-scoped path as the RPS ceiling.
-- [ ] **Phase 14 / DB-14** — introduce PgBouncer now vs. explicitly defer to SCALE-02.
+- [x] **Phase 14 / DB-14** — RESOLVED 2026-08-12 (D-09): deferred to SCALE-02 as an explicit accepted decision; revisit trigger = real `max_connections` pressure. App-level pools get sizes + error handlers via shared `createPgPool` factory. See `.planning/phases/14-deployment-database-durability/14-CONTEXT.md`.
 
 ### Blockers/Concerns
 
@@ -264,7 +284,7 @@ Open decisions to resolve at `/gsd-discuss-phase` (recorded in ROADMAP.md § Ope
 - **Phase 11 (Pitfall 5):** the SendGrid `AbortController` timeout must be strictly below BullMQ's `lockDuration`, or a hung request gets stall-detected and double-scheduled.
 - **Phase 11 (Pitfall 2):** the `send_status` enum change must not backfill historical rows in the same migration; verify `workspace_daily_rollup` totals are unchanged afterwards.
 - **Phase 10 / SEC-05 (Pitfall 12):** adding RLS to Better Auth tables as a checklist item breaks login/signup/session validation platform-wide, with no SQL error.
-- **Phase 14 (Pitfall 17):** `CREATE UNIQUE INDEX CONCURRENTLY` over existing duplicates leaves an `INVALID`, non-enforcing index with no migration-time error — pre-check duplicates, assert `pg_index.indisvalid`.
+- ~~Phase 14 (Pitfall 17): `CREATE UNIQUE INDEX CONCURRENTLY` over existing duplicates leaves an INVALID index~~ — closed by Phase 13 (миграция 0057: blocking parent-level build, RAISE unless `pg_index.indisvalid`, duplicate pre-check without DELETE).
 - **Phase 15 (Pitfall 18):** Sentry has no retroactive redaction — `beforeSend` scrub rules must be tested against representative leak payloads *before* Sentry receives live traffic.
 
 Research flags carried from v1.0:
@@ -283,6 +303,7 @@ Research flags carried from v1.0:
 | 260722-q4t | Создать README.md в корне репозитория | 2026-07-22 | 939b816 | | [260722-q4t-readme-md](./quick/260722-q4t-readme-md/) |
 | 260727-sfk | Audit SPECIFICATION.md as-built + relocate CLAUDE.md maintenance rule | 2026-07-27 | b63ca82 | Verified | [260727-sfk-specification-md-as-built-claude-md-spec](./quick/260727-sfk-specification-md-as-built-claude-md-spec/) |
 | 260809-eqr | Close Phase 10 residual review findings WR-06/WR-07 + sync STATE.md to Phase 11 | 2026-08-09 | ebc754c | Complete | [260809-eqr-close-phase-10-residual-review-findings-](./quick/260809-eqr-close-phase-10-residual-review-findings-/) |
+| 260811-qit | Append Codex follow-up review section to Phase 13 REVIEWS.md | 2026-08-11 | b37e7bd | Verified | [260811-qit-append-codex-follow-up-review-section-to](./quick/260811-qit-append-codex-follow-up-review-section-to/) |
 
 ## Deferred Items
 
@@ -294,13 +315,13 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-11
-Stopped at: Phase 12 complete, ready to plan Phase 13
-Resume file: None
+Last session: 2026-08-12T15:53:47.975Z
+Stopped at: Phase 14 context gathered
+Resume file: .planning/phases/14-deployment-database-durability/14-CONTEXT.md
 
 ## Operator Next Steps
 
-- Phase 12 complete (2026-08-11): 14/14 plans (11 scoped + 3 gap-closure), UAT 43/43 passed, verification 16/16, security review verified (0 open threats)
-- Known operational item carried from Phase 12: `npm run db:migrate` (drizzle-kit CLI) hangs in the dev sandbox under Node v26 — migrations 0053/0054 proven via test:migrations but not applied to the dev DB
-- Next: `/gsd-discuss-phase 13` → `/gsd-plan-phase 13` — Compliance & Analytics Integrity (no CONTEXT.md yet)
-- Branch note: `gsd/phase-12-worker-reliability-tenant-fairness` is stacked on phase-11; per convention Phase 13 starts a new `gsd/phase-13-{slug}` branch
+- Phase 13 complete (2026-08-12): 16/16 plans (14 scoped + 2 gap-closure), UAT 5/5 passed, verification passed, security review verified (122/122 threats closed, 0 open)
+- Known operational item carried from Phase 12: `npm run db:migrate` (drizzle-kit CLI) hangs in the dev sandbox under Node v26 — migrations proven via test:migrations but not applied to the dev DB (now also covers Phase 13 migrations 0055–0061)
+- Next: `/gsd-discuss-phase 14` → `/gsd-plan-phase 14` — Deployment & Database Durability (no CONTEXT.md yet); open decision DB-14 (PgBouncer now vs defer to SCALE-02) resolves at discuss
+- Branch note: per convention Phase 14 starts a new `gsd/phase-14-{slug}` branch (Phase 13 branch: `gsd/phase-13-compliance-analytics-integrity`)

@@ -1,4 +1,6 @@
 import type { FastifyInstance } from "fastify";
+import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
+import { writeIngressJournal } from "@mega-crm/db/src/webhooks/ingress-journal.js";
 import { findWebhookEndpointByToken } from "./webhook-endpoint.repository.js";
 import { verifyWebhookSignature, isWebhookTimestampFresh } from "./signature-verify.js";
 import { enqueueWebhookBatch } from "./enqueue.js";
@@ -38,6 +40,22 @@ import { env } from "../../env.js";
  *   (RESEARCH.md Pattern 2: ack-fast, never per-event) -- all real
  *   processing (dedup insert into `send_events`) happens asynchronously in
  *   apps/worker.
+ * - Phase 13 (CMP-08, D-05, plan 13-01): between "parse" and "enqueue" above,
+ *   the verified batch is now journaled -- `writeIngressJournal` runs inside
+ *   `withTenant`/`withTenantTransaction` and its returned id is forwarded to
+ *   `enqueueWebhookBatch`. This is the sole ordering this plan enforces: the
+ *   journal write sits strictly AFTER verification (T-13-01-01 -- an
+ *   unverified payload must never be journaled) and strictly BEFORE the
+ *   BullMQ enqueue, and the enqueue call itself sits OUTSIDE the journal's
+ *   own transaction (after it has already committed) -- enqueuing from
+ *   inside the transaction risks a worker claiming the job and calling
+ *   `markIngestionComplete` before the journal row is even visible to it,
+ *   and a later rollback of an already-enqueued job would violate "a
+ *   journal-write failure enqueues nothing". If `writeIngressJournal` throws,
+ *   the request fails closed with a 500 and `enqueueWebhookBatch` is never
+ *   called -- the journal is a precondition for accepting the delivery, and
+ *   SendGrid's own ~24h retry window is the recovery path, not a fallback
+ *   enqueue-without-journal path.
  */
 // eslint-disable-next-line @typescript-eslint/require-await -- Fastify plugin contract: app.register() resolves the returned promise, and the declared Promise<void> is part of that signature -- dropping async would change it, not simplify it
 export async function registerWebhookRoutes(fastify: FastifyInstance): Promise<void> {
@@ -123,7 +141,22 @@ export async function registerWebhookRoutes(fastify: FastifyInstance): Promise<v
         return reply.code(400).send();
       }
 
-      await enqueueWebhookBatch(endpoint.workspaceId, events);
+      // Phase 13 (CMP-08, D-05): journal the verified batch BEFORE enqueue.
+      // A journal-write failure fails the request closed (500) -- no
+      // enqueue -- rather than falling through to enqueue-without-journal,
+      // which would silently reintroduce the exact unreplayable-loss gap
+      // this table exists to close. SendGrid's own retry window recovers a
+      // 5xx the same way it recovers any other transient failure.
+      let journalId: string;
+      try {
+        journalId = await withTenant(endpoint.workspaceId, () =>
+          withTenantTransaction((client) => writeIngressJournal(client, endpoint.workspaceId, events))
+        );
+      } catch {
+        return reply.code(500).send();
+      }
+
+      await enqueueWebhookBatch(endpoint.workspaceId, events, journalId);
 
       // Ack fast (RESEARCH.md Pattern 2) -- all real processing happens in
       // apps/worker/src/queues/webhook-events.worker.ts.

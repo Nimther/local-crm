@@ -1,0 +1,9 @@
+# Fixture: `api` carries a negative oom_score_adj -- Pitfall 19 reserves
+# that only for `db`; `api`/`worker` must stay at the kernel default so
+# Postgres is the one favored to survive an OOM event, not a coincidence of
+# which process the operator remembered to protect.
+services:
+  api:
+    image: ghcr.io/example/repo/api:abc123
+    mem_limit: 512m
+    oom_score_adj: -10

@@ -25,6 +25,21 @@ proof.
 | 4 | The worker process dies mid-dispatch | `npm run failure:sigkill` | `apps/worker/src/queues/__tests__/failure-injection/sigkill.test.ts` | the child's exit signal is **`SIGKILL`** with a null code; `sends` status **`dispatching`** immediately after the kill; the restart makes **0** send calls, resolves to **`failed`**, row count 1 | a real forked process running the real `processSendJob`; the injected `sendMail` posts an IPC marker and then never settles, and the parent kills on that marker |
 | 5 | Redis restarts under a live queue | `npm run failure:redis-restart` | `apps/worker/src/queues/__tests__/failure-injection/redis-restart.test.ts` | the waiting count before and after the restart are equal and non-zero; a worker attached afterwards processes **all** of them; and — separately — the same sequence against a server without the versioned config **loses every job** | a real `redis-server` booted from `docker/redis.conf`, stopped with SIGTERM and started again from the same data directory |
 
+## Phase 14 (deployment/database durability) additions
+
+This table predates Phase 14 and was never fully kept current as later phases (11-13) added
+further scenarios to `failure:all` (see `package.json`'s own script list for the complete,
+authoritative set at any given commit — this file's own header already names the coverage
+number as a distinct claim from "which scenarios exist"). The three rows below are Phase 14
+plan 07's own additions; earlier gaps between this table and `package.json` are a pre-existing
+documentation-staleness item, not something this plan corrects.
+
+| # | Failure mode | Command | Test file | What is asserted | Injection mechanism |
+|---|---|---|---|---|---|
+| 6 | The migration runner dies mid-run, holding the advisory lock (DB-05, ROADMAP-locked) | `npm run failure:migrate-unclean-death` | `apps/worker/src/queues/__tests__/failure-injection/migrate-unclean-death.test.ts` | no advisory lock for the migration key survives the kill (`pg_locks` empty); the journal contains no entry for a migration that did not fully apply; a second runner acquires the lock, exits 0, and drives the journal to the full shipped set | a real forked `scripts/migrate-runner.mjs` process, SIGKILLed the instant it signals (via its own inert-unless-enabled test hook) that it holds the lock but has not yet called `migrate()` |
+| 7 | A worker meets a job payload `schemaVersion` it does not recognize, in both directions (R-05) | `npm run failure:two-version-compat` | `apps/worker/src/queues/__tests__/failure-injection/two-version-compat.test.ts` | an unrecognized-version job is neither processed (no `send_events` row) nor marked failed; a recognized-version job interleaved with it still completes; a legacy pre-versioned payload (no `schemaVersion` field at all) is still processed by the current worker | real jobs enqueued onto a real `WEBHOOK_EVENTS_QUEUE` Worker (`createWebhookEventsWorker`) against a throwaway `startTempRedis()` instance |
+| 8 | A real SIGTERM arrives mid-load and the worker must self-terminate inside its stop-grace-period (Pitfall 7) | `npm run failure:sigterm-mid-load` | `apps/worker/src/queues/__tests__/failure-injection/sigterm-mid-load.test.ts` | the child exits on its own, with a clean status, before `WORKER_STOP_GRACE_PERIOD_SECONDS` elapses (no SIGKILL fallback); `/readyz` returns 503 shortly after the signal; no send is left in `dispatching` once the process has exited | a real forked worker process (health server + one BullMQ Worker under sustained fake-send load), sent a real `SIGTERM` |
+
 ### Scenario 5 is also WRK-12's survival check
 
 It is the only thing that makes `docker/redis.conf`'s `appendonly yes` / `appendfsync everysec`

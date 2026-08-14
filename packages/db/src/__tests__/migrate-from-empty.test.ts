@@ -46,6 +46,24 @@ const CORE_DOMAIN_TABLES = [
   "workspace_sendgrid_keys",
 ] as const;
 
+/**
+ * Phase 13 (CMP-09, migration 0058, threat T-13-09-03, disposition: accept).
+ * `reputation_alert_state` carries a `workspace_id` column (its composite
+ * `PRIMARY KEY (workspace_id, metric)` requires one, and plan 13-11's future
+ * watchdog claim needs it in its own WHERE clause) but is a REVIEWED,
+ * DELIBERATE exception to the blanket "every workspace_id-bearing table
+ * gets RLS" invariant below -- not a missed table. It is read/written
+ * exclusively by platform-side jobs (the reputation tick worker, plan
+ * 13-11's watchdog), never a tenant-facing surface, matching the
+ * `organization`/`dead_letter_jobs` "role identity is the boundary"
+ * precedent (see migration 0058's own table comment for the full
+ * reasoning). If a future phase adds a tenant-facing read (the reputation
+ * dashboard, deferred to Phase 15), THAT phase must add an ordinary
+ * `workspace_isolation` policy and this exemption must be removed at that
+ * time -- it is not a permanent carve-out.
+ */
+const RLS_ACCEPT_EXEMPT = new Set(["reputation_alert_state"]);
+
 describe("migration chain: empty database (QG-05 run A)", () => {
   let pool: Pool;
   let databaseName: string;
@@ -128,10 +146,22 @@ describe("migration chain: empty database (QG-05 run A)", () => {
       10,
     );
 
-    const unprotected = rows.filter((r) => !r.relrowsecurity || !r.relforcerowsecurity);
+    // The exemption set must name a table that actually exists in this
+    // result — a stale entry (the table renamed or dropped) must fail this
+    // loudly rather than silently widen the exemption to nothing.
+    for (const exempt of RLS_ACCEPT_EXEMPT) {
+      expect(
+        rows.some((r) => r.table_name === exempt),
+        `RLS_ACCEPT_EXEMPT names '${exempt}', which no longer appears among workspace_id-bearing tables — remove the stale exemption`,
+      ).toBe(true);
+    }
+
+    const unprotected = rows.filter(
+      (r) => (!r.relrowsecurity || !r.relforcerowsecurity) && !RLS_ACCEPT_EXEMPT.has(r.table_name),
+    );
     expect(
       unprotected.map((r) => r.table_name),
-      "every workspace_id-bearing table must have RLS both ENABLED and FORCED",
+      "every workspace_id-bearing table must have RLS both ENABLED and FORCED, unless explicitly exempted in RLS_ACCEPT_EXEMPT with a documented accept-disposition threat",
     ).toEqual([]);
   });
 

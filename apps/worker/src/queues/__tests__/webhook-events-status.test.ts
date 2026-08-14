@@ -123,6 +123,12 @@ describe("webhook-events worker: delivery facts + counters (WBHK-04, D-06/D-09)"
     );
   }
 
+  // Phase 13 (CMP-05, plan 13-04): a fixed 2023-era timestamp is now OLD
+  // ENOUGH to fall outside classifyOccurredAt's [now-7d, now+5min] window and
+  // get quarantined instead of inserted -- module-scoped so the relative
+  // +100s offsets used below to test out-of-order arrival stay meaningful.
+  const FIXED_TIMESTAMP = Math.floor(Date.now() / 1000) - 3600;
+
   // SendGrid's Event Webhook flattens the mail/send markers directly onto
   // the event object's TOP LEVEL (no nested wrapper) -- this fixture
   // matches the real shape the corrected worker reads.
@@ -137,7 +143,7 @@ describe("webhook-events worker: delivery facts + counters (WBHK-04, D-06/D-09)"
       event: "delivered",
       sg_event_id: `sg-${randomUUID()}`,
       sg_message_id: "abc.filterdrecv-x",
-      timestamp: 1_700_000_000,
+      timestamp: FIXED_TIMESTAMP,
       send_id: sendId,
       workspace_id: workspaceId,
       campaign_id: campaignId,
@@ -210,14 +216,20 @@ describe("webhook-events worker: delivery facts + counters (WBHK-04, D-06/D-09)"
     const contactId = await createFixtureContact(workspaceId);
     const sendId = await createFixtureSend(workspaceId, campaignId, contactId);
 
-    const first = sendgridEvent(workspaceId, campaignId, sendId, { event: "delivered", timestamp: 1_700_000_100 });
+    const first = sendgridEvent(workspaceId, campaignId, sendId, {
+      event: "delivered",
+      timestamp: FIXED_TIMESTAMP + 100,
+    });
     await processWebhookEventBatch({ workspaceId, events: [first] });
     const factsAfterFirst = await sendFacts(workspaceId, sendId);
 
     // A second, distinct sg_event_id also reporting "delivered" with an
     // EARLIER timestamp than the first -- must not overwrite the
     // already-set delivered_at (first-write-wins, not earliest-wins).
-    const second = sendgridEvent(workspaceId, campaignId, sendId, { event: "delivered", timestamp: 1_700_000_000 });
+    const second = sendgridEvent(workspaceId, campaignId, sendId, {
+      event: "delivered",
+      timestamp: FIXED_TIMESTAMP,
+    });
     await processWebhookEventBatch({ workspaceId, events: [second] });
 
     const factsAfterSecond = await sendFacts(workspaceId, sendId);
@@ -233,7 +245,7 @@ describe("webhook-events worker: delivery facts + counters (WBHK-04, D-06/D-09)"
 
     const delivered = sendgridEvent(workspaceId, campaignId, sendId, {
       event: "delivered",
-      timestamp: 1_700_000_100,
+      timestamp: FIXED_TIMESTAMP + 100,
     });
     await processWebhookEventBatch({ workspaceId, events: [delivered] });
     const factsAfterDelivered = await sendFacts(workspaceId, sendId);
@@ -243,7 +255,7 @@ describe("webhook-events worker: delivery facts + counters (WBHK-04, D-06/D-09)"
       event: "bounce",
       type: "bounce",
       reason: "550 5.1.1 mailbox unavailable",
-      timestamp: 1_700_000_000,
+      timestamp: FIXED_TIMESTAMP,
     });
     await processWebhookEventBatch({ workspaceId, events: [earlierBounce] });
 
@@ -274,7 +286,7 @@ describe("webhook-events worker: delivery facts + counters (WBHK-04, D-06/D-09)"
         email: "hello@world.com",
         event: "delivered",
         sg_event_id: `sg-${randomUUID()}`,
-        timestamp: 1_700_000_000,
+        timestamp: FIXED_TIMESTAMP,
         send_id: sendId,
         workspace_id: workspaceId,
       },

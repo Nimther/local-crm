@@ -31,6 +31,18 @@ import {
   DEAD_LETTER_ALERT_DEDUP_HOURS,
   type DeadLetterAlertMessage,
 } from "./modules/ops/dead-letter-watchdog.js";
+import {
+  startIngestionHealthWatchdog,
+  INGESTION_WATCHDOG_INTERVAL_MS,
+  INGESTION_ALERT_DEDUP_HOURS,
+  type IngestionAlertMessage,
+} from "./modules/ops/ingestion-health-watchdog.js";
+import {
+  startReputationWatchdog,
+  REPUTATION_WATCHDOG_INTERVAL_MS,
+  REPUTATION_ALERT_DEDUP_HOURS,
+  type ReputationAlertMessage,
+} from "./modules/ops/reputation-watchdog.js";
 import { authPlugin } from "./modules/auth/plugin.js";
 import { registerWorkspaceRoutes } from "./modules/tenancy/workspaces.js";
 import { registerProfileRoutes } from "./modules/tenancy/profile.js";
@@ -51,6 +63,7 @@ import { registerWebhookRoutes } from "./modules/webhooks/webhooks.routes.js";
 import { registerWebhookSettingsRoutes } from "./modules/webhooks/webhook-settings.routes.js";
 import { registerAnalyticsRoutes } from "./modules/analytics/index.js";
 import { registerSendLogRoutes } from "./modules/send-log/send-log.routes.js";
+import { ensureMigrationsCurrentOnce, registerOpsHealthRoutes } from "./modules/ops/health.js";
 
 /**
  * Options for `buildServer`. The only override that exists today is the
@@ -187,6 +200,39 @@ export async function buildServer(options: BuildServerOptions = {}) {
     },
   });
 
+  await app.register(registerOpsHealthRoutes);
+
+  // DB-06 (paired with OPS-05, ROADMAP § Phase 14): "does not accept traffic
+  // until migrations complete" is implemented as a request-time refusal,
+  // not a startup sleep. Runs before every route's own preHandler/handler
+  // (Fastify's onRequest fires earliest in the lifecycle, before body
+  // parsing) and deliberately never reads or consumes `request.body` --
+  // the SendGrid webhook route's raw-body ECDSA signature verification
+  // depends on those exact bytes reaching its own content-type parser
+  // untouched (RESEARCH.md: body-parsing-before-verification is the most
+  // common SendGrid integration bug).
+  //
+  // Migration currency ONLY -- never Postgres-liveness-in-general, never
+  // Redis. See `ensureMigrationsCurrentOnce`'s own header comment in
+  // health.ts for the full DB-06-vs-OPS-05 split rationale: widening this
+  // guard would make every apps/api integration suite depend on a live
+  // Redis for routes that never touch it. `/readyz` is where all three
+  // checks live; this guard is where the migration half is enforced
+  // against every request. Do not "fix" this asymmetry without re-reading
+  // that comment first.
+  app.addHook("onRequest", async (request, reply) => {
+    if (request.url === "/healthz" || request.url === "/readyz") return;
+    try {
+      await ensureMigrationsCurrentOnce();
+    } catch (err) {
+      await reply.code(503).send({
+        ready: false,
+        error: "migrations_pending",
+        detail: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   await app.register(authPlugin);
   await app.register(registerWorkspaceRoutes);
   await app.register(registerProfileRoutes);
@@ -270,6 +316,37 @@ async function sendDeadLetterOperatorAlert(message: DeadLetterAlertMessage): Pro
   });
 }
 
+/**
+ * Phase 13 (CMP-08, plan 13-11): the ingestion-health watchdog's own real
+ * dispatch -- same platform-key-only, plain-text discipline as every
+ * sibling above, a fourth distinct subject line so all four alert channels
+ * stay distinguishable in an operator's inbox.
+ */
+async function sendIngestionHealthOperatorAlert(message: IngestionAlertMessage): Promise<void> {
+  await sgMail.send({
+    to: message.to,
+    from: env.PLATFORM_MAIL_FROM,
+    subject: "Mega CRM ingestion health alert",
+    text: message.text,
+  });
+}
+
+/**
+ * Phase 13 (CMP-09, plan 13-11): the reputation watchdog's own real dispatch
+ * -- same platform-key-only discipline as every sibling above, used for
+ * BOTH the operator alert and every workspace member's tenant alert (D-09:
+ * a tenant's own SendGrid key must never carry this message -- see
+ * reputation-watchdog.ts's own header for why).
+ */
+async function sendReputationAlert(message: ReputationAlertMessage): Promise<void> {
+  await sgMail.send({
+    to: message.to,
+    from: env.PLATFORM_MAIL_FROM,
+    subject: "Mega CRM reputation alert",
+    text: message.text,
+  });
+}
+
 async function main(): Promise<void> {
   const app = await buildServer();
   await app.listen({ port: env.API_PORT, host: "0.0.0.0" });
@@ -315,6 +392,28 @@ async function main(): Promise<void> {
     operatorEmail: env.OPERATOR_ALERT_EMAIL,
     sendMail: sendDeadLetterOperatorAlert,
   });
+  // Phase 13 (CMP-08, plan 13-11): a FOURTH independent dead-man's switch,
+  // over ingress_journal's stuck/attempt-capped/tombstoned rows -- its own
+  // read goes through the dedicated mega_crm_scan role (the cross-workspace
+  // scan helper, wrapped inside checkIngestionHealthAndAlert itself), its
+  // claim/dedup state
+  // (ingestion_alert_state) lives on its own table, so it cannot mask or be
+  // masked by any watchdog above.
+  startIngestionHealthWatchdog({
+    client: pool,
+    operatorEmail: env.OPERATOR_ALERT_EMAIL,
+    sendMail: sendIngestionHealthOperatorAlert,
+  });
+  // Phase 13 (CMP-09, plan 13-11): a FIFTH independent dead-man's switch,
+  // over reputation_alert_state -- the first of these five to also alert a
+  // TENANT audience (every workspace member), never only the operator. Keyed
+  // by (workspace_id, metric) rather than singleton, and dedups per
+  // (workspace_id, metric) pair -- see reputation-watchdog.ts's own header.
+  startReputationWatchdog({
+    client: pool,
+    operatorEmail: env.OPERATOR_ALERT_EMAIL,
+    sendMail: sendReputationAlert,
+  });
 
   // Names only the interval/threshold numbers -- never the operator
   // address or anything derived from the SendGrid key (T-09-11).
@@ -333,6 +432,14 @@ async function main(): Promise<void> {
   logger.info(
     { pollIntervalMs: DEAD_LETTER_WATCHDOG_INTERVAL_MS, alertDedupHours: DEAD_LETTER_ALERT_DEDUP_HOURS },
     "dead-letter watchdog armed -- watching dead_letter_jobs for unacknowledged terminal failures"
+  );
+  logger.info(
+    { pollIntervalMs: INGESTION_WATCHDOG_INTERVAL_MS, alertDedupHours: INGESTION_ALERT_DEDUP_HOURS },
+    "ingestion-health watchdog armed -- watching ingress_journal for stuck/attempt-capped/unrecoverable webhook batches"
+  );
+  logger.info(
+    { pollIntervalMs: REPUTATION_WATCHDOG_INTERVAL_MS, alertDedupHours: REPUTATION_ALERT_DEDUP_HOURS },
+    "reputation watchdog armed -- watching reputation_alert_state for warn/critical tier crossings"
   );
 }
 

@@ -436,4 +436,81 @@ describe("Contact CRUD (CONT-01, CONT-05)", () => {
     });
     expect(getRes.json().timezone).toBe("America/New_York");
   });
+
+  /**
+   * CMP-04 (plan 13-10, Task 3): the read-side half of the erasure semantics
+   * shift -- `anonymized_at IS NULL` on the list/count/create/update paths.
+   * `contact-erasure.test.ts` covers `deleteContact`'s own writes and the
+   * shared `contacts-core` identity lookups directly; these assert the
+   * SAME guarantee at the HTTP surface a tenant actually sees.
+   */
+  it("CMP-04: the list read excludes an anonymized contact, and the workspace count excludes it too", async () => {
+    const { cookie, workspace } = await owner("crud-list-excludes-anon");
+    const email = `list-excl-${Date.now()}@example.com`;
+    const created = (
+      await app.inject({
+        method: "POST",
+        url: contactsUrl(workspace.slug),
+        headers: { cookie },
+        payload: { email },
+      })
+    ).json();
+
+    const beforeList = await app.inject({ method: "GET", url: contactsUrl(workspace.slug), headers: { cookie } });
+    expect(beforeList.json().items.some((c: { id: string }) => c.id === created.id)).toBe(true);
+    const totalBefore = beforeList.json().total;
+
+    await app.inject({ method: "DELETE", url: contactsUrl(workspace.slug, created.id), headers: { cookie } });
+
+    const afterList = await app.inject({ method: "GET", url: contactsUrl(workspace.slug), headers: { cookie } });
+    expect(afterList.json().items.some((c: { id: string }) => c.id === created.id)).toBe(false);
+    expect(afterList.json().total).toBe(totalBefore - 1);
+  });
+
+  it("CMP-04: creating a contact with an erased contact's former email succeeds and yields a different id", async () => {
+    const { cookie, workspace } = await owner("crud-recreate-former-email");
+    const email = `recreate-${Date.now()}@example.com`;
+    const created = (
+      await app.inject({
+        method: "POST",
+        url: contactsUrl(workspace.slug),
+        headers: { cookie },
+        payload: { email },
+      })
+    ).json();
+
+    await app.inject({ method: "DELETE", url: contactsUrl(workspace.slug, created.id), headers: { cookie } });
+
+    const recreatedRes = await app.inject({
+      method: "POST",
+      url: contactsUrl(workspace.slug),
+      headers: { cookie },
+      payload: { email },
+    });
+    expect(recreatedRes.statusCode, `re-create failed: ${recreatedRes.body}`).toBe(201);
+    expect(recreatedRes.json().id).not.toBe(created.id);
+  });
+
+  it("CMP-04: PATCHing an anonymized (erased) contact returns 404, identical to a genuinely absent contact", async () => {
+    const { cookie, workspace } = await owner("crud-patch-anonymized");
+    const created = (
+      await app.inject({
+        method: "POST",
+        url: contactsUrl(workspace.slug),
+        headers: { cookie },
+        payload: { email: `patch-anon-${Date.now()}@example.com` },
+      })
+    ).json();
+
+    await app.inject({ method: "DELETE", url: contactsUrl(workspace.slug, created.id), headers: { cookie } });
+
+    const patchRes = await app.inject({
+      method: "PATCH",
+      url: contactsUrl(workspace.slug, created.id),
+      headers: { cookie },
+      payload: { firstName: "Resurrected" },
+    });
+    expect(patchRes.statusCode).toBe(404);
+    expect(patchRes.json().error).toBe("Contact not found");
+  });
 });

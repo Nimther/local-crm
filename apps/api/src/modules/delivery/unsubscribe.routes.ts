@@ -1,6 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import { verifyUnsubscribeToken } from "@mega-crm/delivery-core";
-import { recordSubscriptionStatusChange } from "@mega-crm/contacts-core";
+import { applyUnsubscribeWithSendFact } from "@mega-crm/contacts-core";
+import { incrementCampaignCounter } from "@mega-crm/db/src/sends/fact-columns.js";
+import { incrementWorkspaceDailyRollup } from "@mega-crm/db/src/analytics/daily-rollup.js";
 import { withTenant, withTenantTransaction } from "../../middleware/tenant-context.js";
 
 /**
@@ -188,32 +190,41 @@ export async function registerUnsubscribeRoutes(fastify: FastifyInstance): Promi
       // falls through to the exact same response-construction block below --
       // no new branch on the reply -- so it stays byte-identical to the
       // unknown-contact and forged-token cases (T-04-19-02).
+      // Phase 13 (CMP-01, plan 13-08): the status change, the consent-history
+      // write, and (new as of this plan) the originating send's
+      // `sends.unsubscribed_at` fact write all go through the one shared
+      // helper the webhook path already uses -- "mirroring the webhook
+      // side's gating exactly" means calling the SAME two counter-increment
+      // functions, not writing equivalent SQL, so the campaign counter and
+      // the daily rollup import the relocated fact-columns/daily-rollup
+      // modules directly rather than re-deriving the gate here. Both
+      // increments are gated on `sendFactJustSet`, the same idempotency
+      // gate the webhook path uses, so route-then-webhook and
+      // webhook-then-route on the same send converge on identical state
+      // regardless of arrival order.
+      const occurredAt = new Date().toISOString();
       await withTenant(payload.workspaceId, () =>
         withTenantTransaction(async (client) => {
-          // D-09 (07-01): read the contact's current status BEFORE the
-          // UPDATE so oldStatus is accurate, and skip the history write
-          // entirely if it's already unsubscribed (no-op update, no value
-          // change -- an unknown/nonexistent contactId also resolves to
-          // "no row found", which correctly writes nothing).
-          const { rows } = await client.query<{ subscriptionStatus: string }>(
-            `SELECT subscription_status as "subscriptionStatus" FROM contacts WHERE id = $1`,
-            [payload.contactId]
-          );
-          const existingStatus = rows[0]?.subscriptionStatus ?? null;
-
-          await client.query(
-            `UPDATE contacts SET subscription_status = 'unsubscribed', updated_at = now() WHERE id = $1`,
-            [payload.contactId]
-          );
-
-          if (existingStatus !== null && existingStatus !== "unsubscribed") {
-            await recordSubscriptionStatusChange(client, {
-              workspaceId: payload.workspaceId,
-              contactId: payload.contactId,
-              oldStatus: existingStatus,
-              newStatus: "unsubscribed",
-              source: "unsubscribe_route",
-            });
+          const result = await applyUnsubscribeWithSendFact(client, {
+            workspaceId: payload.workspaceId,
+            contactId: payload.contactId,
+            sendId: payload.sendId,
+            occurredAt,
+            source: "unsubscribe_route",
+          });
+          if (result.sendFactJustSet) {
+            if (result.campaignId) {
+              await incrementCampaignCounter(client, result.campaignId, "unsubscribed_count");
+            }
+            // Second behavior change surfaced by the cross-AI review
+            // (13-08 flagged_assumptions): the route now also increments
+            // workspace_daily_rollup.unsubscribed_count, which it never
+            // did before this plan (it had no way to reach this function).
+            // Daily unsubscribe counts include route unsubscribes from this
+            // point forward -- a documented discontinuity in the series,
+            // not a bug (plan 13-14 files this in the day-semantics
+            // contract).
+            await incrementWorkspaceDailyRollup(client, payload.workspaceId, occurredAt, "unsubscribed");
           }
         })
       );

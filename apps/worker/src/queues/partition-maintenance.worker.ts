@@ -1,6 +1,6 @@
 import { Queue, Worker, type ConnectionOptions } from "bullmq";
-import { Pool } from "pg";
 import { scrubbedConsole } from "@mega-crm/redaction";
+import { createPgPool } from "@mega-crm/db/src/pool.js";
 import { buildJobOptions, STANDARD_JOB_RETENTION } from "@mega-crm/queue-core";
 import {
   BUFFER_ALERT_THRESHOLD_MONTHS,
@@ -88,15 +88,13 @@ const DEFAULT_JOB_OPTIONS = buildJobOptions(STANDARD_JOB_RETENTION);
  * attach, so such a change would also need to plumb that credential through
  * deliberately, not merely reuse this pool.
  */
-const partitionMaintenancePool = new Pool({ connectionString: process.env.DATABASE_URL });
-
-// Mirrors @mega-crm/tenant-context's own pool.on("error", ...): without
-// this listener, an idle-connection termination (Postgres restart/failover/
-// idle timeout) on THIS dedicated pool would surface as an uncaught 'error'
-// event and crash the whole apps/worker process -- the same failure class
-// CR-04 (below) closes for the scheduler-registration path.
-partitionMaintenancePool.on("error", (err) => {
-  scrubbedConsole.error("partition-maintenance: idle pg pool client error (connection dropped)", err);
+// Phase 14 plan 03 (DB-14, D-11): built through the shared createPgPool
+// factory, named "worker-partition-maintenance" in PG_POOL_SIZES -- the
+// error handler this comment used to wire by hand now lives in the
+// factory, unconditionally, for every pool in the codebase.
+const partitionMaintenancePool = createPgPool({
+  connectionString: process.env.DATABASE_URL ?? "",
+  name: "worker-partition-maintenance",
 });
 
 export interface ProcessPartitionMaintenanceDeps {
@@ -144,7 +142,27 @@ export async function processPartitionMaintenance(
     eventsDefaultCount: snapshot.eventsDefaultCount,
     sendEventsDefaultCount: snapshot.sendEventsDefaultCount,
     partitionsCreated: snapshot.partitionsCreated,
+    // Phase 14 plan 12 (DB-11): retentionStatus is "disabled" on every
+    // committed deployment of this codebase (the enable flag is never set
+    // in any committed config) -- included here unconditionally so an
+    // operator reading this line while enablement is under discussion can
+    // confirm that for themselves without a separate query.
+    retentionStatus: snapshot.retentionStatus,
+    partitionsDropped: snapshot.partitionsDropped,
   });
+
+  // T-14-79/T-14-81: a retention failure must never be silent, and must
+  // never prevent the creation work's own recording above -- which already
+  // happened (runPartitionMaintenance records the full row, including a
+  // "failed" retentionStatus, in the SAME upsert as the creation fields).
+  // This is the loud half of that contract: the same channel every other
+  // partition-maintenance error already logs through.
+  if (snapshot.retentionStatus === "failed") {
+    scrubbedConsole.error("partition-maintenance: retention step failed", {
+      lastRunAt: snapshot.lastRunAt.toISOString(),
+      retentionError: snapshot.retentionError,
+    });
+  }
 
   return snapshot;
 }

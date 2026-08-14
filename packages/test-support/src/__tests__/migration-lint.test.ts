@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   checkDestructiveDdl,
   checkEnumAddValueSameFile,
+  checkStatementBreakpointPlacement,
   lintMigrationDirectory,
   lintMigrationFile,
   stripSqlComments,
@@ -25,6 +26,11 @@ import {
  *      with no DEFAULT, must carry a reason-bearing marker on the immediately
  *      preceding line. Line-scoped, never file-scoped (D-31), mirroring the
  *      eslint-disable-next-line policy in D-06.
+ *   3. `statement-breakpoint-misplaced` — the drizzle delimiter
+ *      `--> statement-breakpoint` must sit at a statement boundary. Added after
+ *      migration 0057 quoted the literal inside a comment discussing the
+ *      convention; drizzle split the raw file there and Postgres rejected the
+ *      resulting chunk with `42601: syntax error at or near "\``"`.
  */
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "../../../..");
@@ -205,6 +211,61 @@ describe("checkDestructiveDdl", () => {
   });
 });
 
+describe("checkStatementBreakpointPlacement", () => {
+  const DELIMITER = "--> statement-breakpoint";
+
+  it("flags the delimiter quoted inside a comment with prose after it", () => {
+    const violations = checkStatementBreakpointPlacement(
+      "bad-breakpoint-in-comment.sql",
+      fixture("bad-breakpoint-in-comment.sql"),
+    );
+    expect(violations).toHaveLength(1);
+    expect(violations[0].rule).toBe("statement-breakpoint-misplaced");
+    expect(violations[0].line).toBe(10);
+  });
+
+  it("accepts both placements drizzle-kit generate emits", () => {
+    expect(
+      checkStatementBreakpointPlacement(
+        "good-breakpoint-placement.sql",
+        fixture("good-breakpoint-placement.sql"),
+      ),
+    ).toHaveLength(0);
+  });
+
+  // The failure mode itself, reduced to its minimum: one backtick of prose
+  // after the delimiter is enough to make the next chunk unparseable.
+  it("flags a single trailing character after the delimiter", () => {
+    expect(checkStatementBreakpointPlacement("min.sql", `-- \`${DELIMITER}\``)).toHaveLength(1);
+  });
+
+  // Boundary neighbours of the accepted forms — each of these still splits
+  // cleanly, so flagging any of them would be a false positive.
+  it("accepts trailing whitespace, indentation, start-of-file, and end-of-file placement", () => {
+    expect(checkStatementBreakpointPlacement("a.sql", `${DELIMITER}`)).toHaveLength(0);
+    expect(checkStatementBreakpointPlacement("b.sql", `${DELIMITER}\t  \nSELECT 1;`)).toHaveLength(0);
+    expect(checkStatementBreakpointPlacement("c.sql", `  ${DELIMITER}\nSELECT 1;`)).toHaveLength(0);
+    expect(checkStatementBreakpointPlacement("d.sql", `SELECT 1;\n${DELIMITER}`)).toHaveLength(0);
+    expect(checkStatementBreakpointPlacement("e.sql", `SELECT 1; ${DELIMITER}`)).toHaveLength(0);
+  });
+
+  it("flags a delimiter that cuts an unterminated statement in half", () => {
+    const violations = checkStatementBreakpointPlacement(
+      "unterminated.sql",
+      ['CREATE TABLE "t" (', `  "id" uuid${DELIMITER}`, "  );"].join("\n"),
+    );
+    expect(violations).toHaveLength(1);
+    expect(violations[0].line).toBe(2);
+  });
+
+  it("does not flag prose that names the convention without the arrow", () => {
+    const sql = ["-- the statement-breakpoint convention gives no loop construct", "SELECT 1;"].join(
+      "\n",
+    );
+    expect(checkStatementBreakpointPlacement("prose.sql", sql)).toHaveLength(0);
+  });
+});
+
 describe("lintMigrationFile", () => {
   it("concatenates violations from both rules", () => {
     expect(
@@ -214,11 +275,30 @@ describe("lintMigrationFile", () => {
       lintMigrationFile("bad-destructive-unmarked.sql", fixture("bad-destructive-unmarked.sql")),
     ).toHaveLength(2);
   });
+
+  it("includes statement-breakpoint violations", () => {
+    const violations = lintMigrationFile(
+      "bad-breakpoint-in-comment.sql",
+      fixture("bad-breakpoint-in-comment.sql"),
+    );
+    expect(violations).toHaveLength(1);
+    expect(violations[0].rule).toBe("statement-breakpoint-misplaced");
+  });
 });
 
 describe("lintMigrationDirectory", () => {
   it("reports zero violations across every real migration", () => {
     const violations = lintMigrationDirectory(MIGRATIONS);
     expect(violations).toEqual([]);
+  });
+
+  // Regression seed for the 0057 apply failure: no real migration may contain
+  // the drizzle delimiter anywhere other than a statement boundary. This is the
+  // assertion that was RED before the 0057 comment was reworded.
+  it("has no misplaced statement delimiter in any real migration", () => {
+    const misplaced = lintMigrationDirectory(MIGRATIONS).filter(
+      (v: { rule: string }) => v.rule === "statement-breakpoint-misplaced",
+    );
+    expect(misplaced).toEqual([]);
   });
 });

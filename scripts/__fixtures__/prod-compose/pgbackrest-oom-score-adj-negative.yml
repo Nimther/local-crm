@@ -1,0 +1,13 @@
+# WR-04 fixture: `pgbackrest` carries a negative oom_score_adj. The gate
+# used to only evaluate polarity for services literally named "db" or
+# "api"/"worker" -- pgbackrest (and web/migrate/redis) had no `else` branch
+# at all, so this exact regression would have passed CI silently. The
+# compose file's own comment for pgbackrest is explicit: a backup process
+# must never win an OOM contest against the database it protects, so it
+# must get the SAME non-negative (kernel-default) treatment api/worker get,
+# never db's protective -500 (T-14-65).
+services:
+  pgbackrest:
+    image: ghcr.io/example/repo/pgbackrest:abc123
+    mem_limit: 256m
+    oom_score_adj: -500

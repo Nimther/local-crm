@@ -1,0 +1,9 @@
+# Fixture: `web`'s image carries the mutable `:latest` tag instead of an
+# immutable SHA tag (T-14-49).
+services:
+  web:
+    image: ghcr.io/example/repo/web:latest
+    mem_limit: 256m
+    ports:
+      - "80:80"
+      - "443:443"

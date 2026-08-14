@@ -42,6 +42,18 @@ describe("send-log status vocabulary (11-10)", () => {
     expect(SEND_LOG_STATUS_VALUES.length).toBe(API_SEND_LOG_STATUSES.length);
   });
 
+  /**
+   * D-16 (Phase 13): membership alone (the `Set` comparison above) cannot
+   * catch a reordered union -- reordering changes nothing at runtime, but it
+   * does change what a reviewer believes the two committed copies agree on.
+   * Array equality pins order as well as membership between the web's
+   * `SEND_LOG_STATUS_VALUES` and this file's committed copy of the API's
+   * `SEND_LOG_STATUSES`.
+   */
+  it("the web vocabulary has exactly the same order as the API's SEND_LOG_STATUSES", () => {
+    expect(SEND_LOG_STATUS_VALUES).toEqual(API_SEND_LOG_STATUSES);
+  });
+
   it("has exactly 11 members including reconciling and unknown", () => {
     expect(SEND_LOG_STATUS_VALUES.length).toBe(11);
     expect(SEND_LOG_STATUS_VALUES).toContain("reconciling");

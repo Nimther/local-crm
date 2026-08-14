@@ -3,15 +3,25 @@ import { Worker, type Job, type ConnectionOptions } from "bullmq";
 import type { PoolClient } from "pg";
 import { scrubbedConsole } from "@mega-crm/redaction";
 import { withCrossWorkspaceScan, withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
-import { recordSubscriptionStatusChange } from "@mega-crm/contacts-core";
-import { incrementWorkspaceDailyRollup } from "./analytics-rollup.js";
 import {
+  recordSubscriptionStatusChange,
+  applyUnsubscribeWithSendFact,
+  ensureWorkspaceSuppressionKey,
+  hashSuppressionEmail,
+  normalizeSuppressionEmail,
+} from "@mega-crm/contacts-core";
+import { incrementWorkspaceDailyRollup } from "@mega-crm/db/src/analytics/daily-rollup.js";
+import { setFactColumnOnce, incrementCampaignCounter } from "@mega-crm/db/src/sends/fact-columns.js";
+import {
+  classifyOccurredAt,
   normalizeEventType,
   resolveSuppression,
   SOFT_BOUNCE_SUPPRESS_THRESHOLD,
   type NormalizedEventType,
 } from "@mega-crm/delivery-core";
 import { WEBHOOK_EVENTS_QUEUE, webhookEventsJobSchema, type WebhookEventsJob } from "@mega-crm/shared-schemas";
+import { markIngestionComplete } from "@mega-crm/db/src/webhooks/ingress-journal.js";
+import { writeQuarantinedEvent } from "@mega-crm/db/src/webhooks/quarantine.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -28,49 +38,106 @@ interface ExtractedEventRow {
   normalizedType: NormalizedEventType | null;
 }
 
-/** ECMAScript's maximum time value in milliseconds -- `new Date(ms)` never throws within this bound. */
-const MAX_DATE_TIME_VALUE_MS = 8.64e15;
+/**
+ * `occurred_at_candidate` is a TEXT column (migration 0055) -- this
+ * stringifies an `OccurredAtVerdict`'s `candidate: unknown` verbatim for
+ * storage, without ever collapsing a non-primitive candidate to
+ * `"[object Object]"` (`@typescript-eslint/no-base-to-string`'s own
+ * concern with a bare `String(candidate)`).
+ */
+function stringifyOccurredAtCandidate(candidate: unknown): string | null {
+  if (candidate === null || candidate === undefined) return null;
+  if (typeof candidate === "string") return candidate;
+  if (typeof candidate === "number" || typeof candidate === "boolean") return String(candidate);
+  try {
+    return JSON.stringify(candidate);
+  } catch {
+    return Object.prototype.toString.call(candidate);
+  }
+}
+
+/** A rejected/unusable event that carries a usable `sg_event_id` -- routed to `send_event_quarantine` (CMP-05, D-15). */
+interface QuarantineCandidate {
+  sgEventId: string;
+  eventType: string | null;
+  rawEvent: unknown;
+  reason: string;
+  occurredAtCandidate: string | null;
+}
+
+/**
+ * Three, and only three, outcomes of extracting one raw webhook event
+ * (CMP-05, D-15, plan 13-04):
+ *
+ * - `extracted` -- an accepted `occurred_at` verdict; carries the row as
+ *   before.
+ * - `quarantine` -- the event carries a usable `sg_event_id` and its
+ *   `classifyOccurredAt` verdict was either `rejected` (well-formed but out
+ *   of range) or `unusable` (structurally not a timestamp). BOTH verdict
+ *   kinds route here -- the verdict kind only selects the reason string an
+ *   operator reads (`occurred-at-bounds.ts`'s own doc comment), never
+ *   whether a quarantine row is written.
+ * - `skip` -- the event carries NO usable `sg_event_id`. Stays a plain skip
+ *   with no quarantine row: an unidentifiable payload gives the operator
+ *   nothing to correlate, a different failure from a timestamp the platform
+ *   refuses to trust.
+ */
+type ExtractEventOutcome =
+  | { kind: "extracted"; row: ExtractedEventRow }
+  | { kind: "quarantine"; candidate: QuarantineCandidate }
+  | { kind: "skip" };
 
 /**
  * Best-effort field extraction from a raw SendGrid webhook event (WBHK-01/02/
- * 03/04, D-14/D-15). Returns `null` for an event lacking a usable
- * `sg_event_id` (WBHK-03's sole dedup key) OR a usable `timestamp`, rather
- * than throwing -- one malformed event in a batch must not crash the whole
- * batch.
+ * 03/04, D-14/D-15, CMP-05). `now` is captured ONCE per batch by the caller
+ * and threaded through here, so every event in a batch is bounded against
+ * the same instant (`occurred-at-bounds.ts`'s determinism contract).
+ *
+ * CMP-05 ordering guarantee: the `occurred_at` bound is applied HERE, at
+ * extraction -- strictly before the value is used to construct the row the
+ * INSERT below routes to a partition, and strictly before it participates
+ * in the `ON CONFLICT` dedup key. An event past `classifyOccurredAt`
+ * returns `skip` (no usable `sg_event_id`, an unidentifiable payload) or
+ * `quarantine` (a usable `sg_event_id` but a rejected/unusable timestamp) --
+ * neither ever reaches the row construction below.
  */
-function extractEventRow(raw: unknown): ExtractedEventRow | null {
+function extractEventRow(raw: unknown, now: Date): ExtractEventOutcome {
   if (typeof raw !== "object" || raw === null) {
-    return null;
+    return { kind: "skip" };
   }
   const event = raw as Record<string, unknown>;
 
   const sgEventId = typeof event.sg_event_id === "string" ? event.sg_event_id.trim() : "";
   if (!sgEventId) {
-    return null;
+    return { kind: "skip" };
   }
+
+  const eventType = typeof event.event === "string" ? event.event : "unknown";
 
   // SendGrid's `timestamp` is Unix seconds. It must be deterministic
   // per-event -- the same replayed event always resolves to the same
   // occurred_at, which is what makes `ON CONFLICT (workspace_id,
   // sg_event_id, occurred_at)` dedupe correctly across redeliveries (see
-  // send-events.ts's doc-comment). A missing/non-numeric timestamp is
-  // therefore treated exactly like a missing sg_event_id (skip -- return
-  // null) rather than substituted with wall-clock time: a wall-clock
-  // fallback would differ on every redelivery, defeating the dedup key
-  // (WR-01). An out-of-range numeric timestamp would make `new Date(...)`
-  // throw a RangeError and crash the whole batch (WR-02), so it is
-  // bounds-checked against the ECMAScript Date-representable range before
-  // construction.
-  const isUsableTimestamp =
-    typeof event.timestamp === "number" &&
-    Number.isFinite(event.timestamp) &&
-    Math.abs(event.timestamp * 1000) <= MAX_DATE_TIME_VALUE_MS;
-  if (!isUsableTimestamp) {
-    return null;
+  // send-events.ts's doc-comment). `classifyOccurredAt` never substitutes a
+  // wall-clock fallback for a missing/unusable timestamp (WR-01: a
+  // substituted `now` differs on every redelivery, defeating dedup), and
+  // its `out_of_date_range` verdict is what stops an absurd numeric value
+  // from making `new Date(...)` throw and crash the whole batch (WR-02).
+  const verdict = classifyOccurredAt(event.timestamp, now);
+  if (verdict.kind !== "accepted") {
+    return {
+      kind: "quarantine",
+      candidate: {
+        sgEventId,
+        eventType: typeof event.event === "string" ? event.event : null,
+        rawEvent: event,
+        reason: verdict.reason,
+        occurredAtCandidate: stringifyOccurredAtCandidate(verdict.candidate),
+      },
+    };
   }
-  const occurredAt = new Date((event.timestamp as number) * 1000).toISOString();
+  const occurredAt = verdict.occurredAt;
 
-  const eventType = typeof event.event === "string" ? event.event : "unknown";
   const rawSubtype = typeof event.type === "string" ? event.type : undefined;
   const reason = typeof event.reason === "string" ? event.reason : null;
 
@@ -100,45 +167,19 @@ function extractEventRow(raw: unknown): ExtractedEventRow | null {
   const isTest = event.test === "true" || customArgs?.test === "true";
 
   return {
-    id: randomUUID(),
-    sgEventId,
-    sendId,
-    eventType,
-    reason,
-    payload: event,
-    isTest,
-    occurredAt,
-    normalizedType: normalizeEventType({ event: eventType, type: rawSubtype }),
+    kind: "extracted",
+    row: {
+      id: randomUUID(),
+      sgEventId,
+      sendId,
+      eventType,
+      reason,
+      payload: event,
+      isTest,
+      occurredAt,
+      normalizedType: normalizeEventType({ event: eventType, type: rawSubtype }),
+    },
   };
-}
-
-/**
- * Idempotent "first write wins" fact-column update (D-06 Pattern 4):
- * `WHERE <column> IS NULL` gates the write so a replayed or out-of-order
- * event can never overwrite an already-set fact. Returns whether THIS call
- * was the one that set the column -- the exactly-once counter-increment gate
- * (D-09).
- */
-async function setFactColumnOnce(
-  client: PoolClient,
-  sendId: string,
-  column: string,
-  occurredAt: string,
-  reasonWrite?: { reasonColumn: string; reason: string | null }
-): Promise<boolean> {
-  const sql = reasonWrite
-    ? `UPDATE sends SET ${column} = $2, ${reasonWrite.reasonColumn} = $3 WHERE id = $1 AND ${column} IS NULL RETURNING id`
-    : `UPDATE sends SET ${column} = $2 WHERE id = $1 AND ${column} IS NULL RETURNING id`;
-  const params = reasonWrite ? [sendId, occurredAt, reasonWrite.reason] : [sendId, occurredAt];
-  const { rows } = await client.query(sql, params);
-  return rows.length > 0;
-}
-
-/** Unique-recipient campaign counter increment (D-07/D-09), only ever called after a `setFactColumnOnce` just-set. */
-async function incrementCampaignCounter(client: PoolClient, campaignId: string, column: string): Promise<void> {
-  await client.query(`UPDATE campaigns SET ${column} = ${column} + 1, updated_at = now() WHERE id = $1`, [
-    campaignId,
-  ]);
 }
 
 /**
@@ -196,11 +237,19 @@ async function applySuppression(
   );
   const email = rows[0]?.email;
   if (email) {
+    // CMP-04 (D-02, plan 13-12): hash the address under this workspace's own
+    // key and write ONLY the hash -- never the plaintext `email` column,
+    // which this write site no longer populates. `ensureWorkspaceSuppressionKey`
+    // is safe to call unconditionally: this write site only runs when a
+    // suppression is actually being recorded, so creating the key on a
+    // workspace's first-ever suppression here is the intended, one-time cost.
+    const key = await ensureWorkspaceSuppressionKey(client, workspaceId);
+    const hash = hashSuppressionEmail(normalizeSuppressionEmail(email), key);
     await client.query(
-      `INSERT INTO workspace_suppressions (id, workspace_id, email, reason, created_at)
+      `INSERT INTO workspace_suppressions (id, workspace_id, email_hash, reason, created_at)
        VALUES (gen_random_uuid(), $1, $2, $3, now())
-       ON CONFLICT (workspace_id, email) DO NOTHING`,
-      [workspaceId, email, reason]
+       ON CONFLICT (workspace_id, email_hash) DO NOTHING`,
+      [workspaceId, hash, reason]
     );
   }
 
@@ -212,30 +261,6 @@ async function applySuppression(
       newStatus: "suppressed",
       source: "webhook_suppression",
       reason,
-    });
-  }
-}
-
-/** Unsubscribe outcome (D-11/D-13): status change ONLY -- never a `workspace_suppressions` row. */
-async function applyUnsubscribe(client: PoolClient, workspaceId: string, contactId: string): Promise<void> {
-  // D-09 (07-01): same capture-before-write pattern as applySuppression.
-  const { rows: priorRows } = await client.query<{ subscriptionStatus: string }>(
-    `SELECT subscription_status as "subscriptionStatus" FROM contacts WHERE id = $1`,
-    [contactId]
-  );
-  const priorStatus = priorRows[0]?.subscriptionStatus ?? null;
-
-  await client.query(`UPDATE contacts SET subscription_status = 'unsubscribed', updated_at = now() WHERE id = $1`, [
-    contactId,
-  ]);
-
-  if (priorStatus !== null && priorStatus !== "unsubscribed") {
-    await recordSubscriptionStatusChange(client, {
-      workspaceId,
-      contactId,
-      oldStatus: priorStatus,
-      newStatus: "unsubscribed",
-      source: "webhook_unsubscribe",
     });
   }
 }
@@ -288,6 +313,25 @@ async function applyEventSideEffects(
       // counter, independent of `justSet` -- this is the ONLY remaining
       // per-event (non-unique-send) counter; it stays outside the justSet
       // gate on purpose.
+      //
+      // Phase 13 (CMP-07, T-13-07-06): "genuinely-new" is now bounded by the
+      // dedup key, and that bound has a real, accepted consequence here --
+      // RESEARCH.md's own A1 assumption ("open_count/click_count increment
+      // independently of the dedup insert") is only half right: they
+      // increment independently of the `justSet` FACT-COLUMN gate above, but
+      // they are still entirely gated on this row having been a genuinely
+      // NEW insert in the first place (the `newRows` loop this switch runs
+      // inside). Two opens on the SAME send in the SAME second (SendGrid's
+      // own timestamp granularity) now collapse to ONE `send_events` row
+      // under the new key and therefore ONE `open_count` increment, where
+      // the OLD key would have counted two if the provider happened to
+      // assign them different `sg_event_id` values. Accepted, and arguably
+      // the more correct reading of that input: two same-second opens are
+      // far more likely to be one open reported twice than two distinct
+      // human actions. Pinned by test (both halves -- same-second collapses
+      // to 1, one-second-apart counts 2) in
+      // apps/worker/src/queues/__tests__/webhook-events-dedup-rebase.test.ts,
+      // so this is not left to drift silently.
       await client.query(`UPDATE sends SET open_count = open_count + 1 WHERE id = $1`, [send.id]);
       break;
     }
@@ -299,7 +343,9 @@ async function applyEventSideEffects(
         await incrementWorkspaceDailyRollup(client, workspaceId, event.occurredAt, "clicked");
       }
       // A4/D-11: mirror the open case -- climbs on every new click,
-      // independent of justSet.
+      // independent of justSet. Phase 13 (CMP-07, T-13-07-06): the SAME
+      // same-second-collapse trade-off documented at the `open` case above
+      // applies here identically.
       await client.query(`UPDATE sends SET click_count = click_count + 1 WHERE id = $1`, [send.id]);
       break;
     }
@@ -367,7 +413,29 @@ async function applyEventSideEffects(
         if (outcome?.status === "suppressed") {
           await applySuppression(client, workspaceId, send.contactId, outcome.reason);
         } else if (outcome?.status === "unsubscribed") {
-          await applyUnsubscribe(client, workspaceId, send.contactId);
+          // Phase 13 (CMP-01, plan 13-08): a deliberate behavior change, not
+          // a refactor -- this branch previously wrote status + history only
+          // and never touched `sends.unsubscribed_at`. The platform learned
+          // from the provider that this address is unsubscribed, and the
+          // originating send is the evidence for that consent change, so it
+          // now goes through the same shared helper as the other two
+          // unsubscribe-producing sites. Gated on `sendFactJustSet` (the
+          // helper's own `WHERE unsubscribed_at IS NULL` gate), so this
+          // cannot double-count against a subsequent explicit `unsubscribe`
+          // event for the same send. The campaign's `unsubscribed_count` for
+          // a dropped-unsubscribed send will therefore now increment where
+          // it previously did not -- no corresponding daily-rollup increment
+          // is added here, matching the plan's stated scope.
+          const dropUnsubResult = await applyUnsubscribeWithSendFact(client, {
+            workspaceId,
+            contactId: send.contactId,
+            sendId: send.id,
+            occurredAt: event.occurredAt,
+            source: "webhook_unsubscribe",
+          });
+          if (dropUnsubResult.sendFactJustSet && dropUnsubResult.campaignId) {
+            await incrementCampaignCounter(client, dropUnsubResult.campaignId, "unsubscribed_count");
+          }
         }
       }
       break;
@@ -389,10 +457,23 @@ async function applyEventSideEffects(
     }
     case "unsubscribe":
     case "group_unsubscribe": {
-      const justSet = await setFactColumnOnce(client, send.id, "unsubscribed_at", event.occurredAt);
-      if (justSet) {
-        await applyUnsubscribe(client, workspaceId, send.contactId);
-        if (send.campaignId) await incrementCampaignCounter(client, send.campaignId, "unsubscribed_count");
+      // Phase 13 (CMP-01, plan 13-08): routed through the shared helper,
+      // which performs the status change, the consent-history write, and the
+      // `sends.unsubscribed_at` fact write in one call on this transaction's
+      // client -- no more separate outer `setFactColumnOnce` gate here, since
+      // the helper owns that gate internally and reports it via
+      // `sendFactJustSet`. Counter increments stay the caller's
+      // responsibility (gated on `sendFactJustSet`), matching the route
+      // side's identical gating.
+      const result = await applyUnsubscribeWithSendFact(client, {
+        workspaceId,
+        contactId: send.contactId,
+        sendId: send.id,
+        occurredAt: event.occurredAt,
+        source: "webhook_unsubscribe",
+      });
+      if (result.sendFactJustSet) {
+        if (result.campaignId) await incrementCampaignCounter(client, result.campaignId, "unsubscribed_count");
         await incrementWorkspaceDailyRollup(client, workspaceId, event.occurredAt, "unsubscribed");
       }
       break;
@@ -489,134 +570,258 @@ async function dropSiblingWorkspaceEvents(
 }
 
 /**
- * The webhook-events job handler (WBHK-01/02/03/04, SUBS-02, D-14, SEC-09):
- * re-derives `workspaceId` from `job.data` (never ambient state). Before
- * opening the tenant transaction, resolves and drops sibling-workspace
- * events via `dropSiblingWorkspaceEvents` -- that ownership fact cannot come
- * from inside the tenant transaction (see that function's doc comment).
- * Then performs ONE multi-row parameterized INSERT into `send_events` with
- * `ON CONFLICT (workspace_id, sg_event_id, occurred_at) DO NOTHING
- * RETURNING id` -- only rows Postgres actually returns are "new"
- * (RESEARCH.md Pattern 3). For each genuinely-new, non-test event whose
- * `custom_args.send_id` resolves to a live `sends` row, applies the full
- * fact-column + counter + suppression side-effect contract, all inside the
- * SAME tenant-scoped transaction as the dedup insert. Finishes with a
- * debounced webhook-health timestamp write.
+ * Marks `journalId` complete (Phase 13, CMP-08, D-05, T-13-01-08) when one is
+ * present -- opens its OWN small `withTenant`/`withTenantTransaction`, since
+ * this is called from both the two zero-row early-return sites below (which
+ * never open the main tenant transaction at all) and, implicitly via that
+ * transaction's own tail, the normal insert path. `journalId` absent means a
+ * legacy (pre-13-01) payload -- there is no journal row to mark, and this is
+ * a silent no-op rather than a defensive throw, since an absent id is the
+ * EXPECTED shape for such a payload, not an error.
+ */
+async function markJournalCompleteIfPresent(workspaceId: string, journalId: string | undefined): Promise<void> {
+  if (journalId === undefined) return;
+  await withTenant(workspaceId, () => withTenantTransaction((client) => markIngestionComplete(client, journalId)));
+}
+
+/**
+ * The webhook-events job handler (WBHK-01/02/03/04, SUBS-02, D-14, SEC-09,
+ * CMP-05): re-derives `workspaceId` from `job.data` (never ambient state).
+ * Captures ONE `now` for the whole batch and threads it into every
+ * `extractEventRow` call so every event is bounded against the same
+ * instant. Before opening the tenant transaction, resolves and drops
+ * sibling-workspace events via `dropSiblingWorkspaceEvents` -- that
+ * ownership fact cannot come from inside the tenant transaction (see that
+ * function's doc comment). Then performs ONE multi-row parameterized INSERT
+ * into `send_events` with `ON CONFLICT (workspace_id, send_id, event_type,
+ * occurred_at) DO NOTHING RETURNING id` -- only rows Postgres actually
+ * returns are "new" (RESEARCH.md Pattern 3). For each genuinely-new,
+ * non-test event whose `custom_args.send_id` resolves to a live `sends`
+ * row, applies the full fact-column + counter + suppression side-effect
+ * contract, all inside the SAME tenant-scoped transaction as the dedup
+ * insert. Finishes with a debounced webhook-health timestamp write.
+ *
+ * Phase 13 (CMP-07, D-15, plan 13-07): the dedup identity is `(workspace_id,
+ * send_id, event_type, occurred_at)` -- NOT `sg_event_id`, which migration
+ * 0057 demoted to a stored forensic-correlation column after verifying it
+ * unstable across SendGrid webhook retries (Pitfall 14 second half).
+ * CMP-05's bounding (below) and CMP-07's re-base COMPOSE: bounding closes
+ * the vary-the-timestamp bypass of this key, re-basing closes the
+ * vary-the-event-id bypass -- either fix alone leaves the other bypass
+ * open. The `ON CONFLICT` column list here MUST match
+ * `send_events_dedup_v2_idx` (migration 0057) exactly, in a form Postgres
+ * can match as an arbiter index, or every insert in this file fails at
+ * runtime with "no unique or exclusion constraint matching the ON CONFLICT
+ * specification" while every type check and build still passes -- there is
+ * no compile-time link between this SQL string and that index's column
+ * list.
+ *
+ * CMP-05 ordering guarantee (D-15, Pitfall 14 first half, plan 13-04): the
+ * bound is applied at extraction (`extractEventRow`'s own doc comment),
+ * strictly before the value is used to construct the row the INSERT below
+ * routes to a partition and strictly before it participates in the
+ * `ON CONFLICT` key. A rejected or unusable timestamp is quarantined (see
+ * `writeQuarantinedEvent` below) per event, never a batch-level early
+ * return or throw -- one bad timestamp costs its batch-mates nothing.
+ *
+ * Phase 13 (CMP-08, D-05): validates the payload with `safeParse` rather than
+ * `parse` -- REVIEWS.md LOW finding. With `schemaVersion: z.literal(1).optional()`,
+ * a future version-2 payload fails `.parse()` and throws into BullMQ
+ * retries, the opposite of the "defer by logging and returning" the
+ * schema's own doc comment promises. A failed parse whose every issue is
+ * about `schemaVersion` is DEFERRED (logged via `scrubbedConsole`, returns
+ * `{ inserted: 0 }`, marks no journal row); a failed parse for any other
+ * reason (e.g. a missing/malformed `workspaceId`) keeps throwing -- a
+ * structurally broken payload is a real error, not a forward-compatibility
+ * case.
+ *
+ * Also restructures the zero-row early returns (a batch with no extractable
+ * AND no quarantine-worthy events, a batch whose every survivor belongs to
+ * a sibling workspace with no quarantine candidates either) to mark a
+ * supplied `journalId` complete before returning -- REVIEWS.md HIGH
+ * finding 1. A journaled batch that reached a terminal outcome is marked
+ * ingested, INCLUDING when the correct outcome was to insert nothing:
+ * sibling-only batches are not a hypothetical (`dropSiblingWorkspaceEvents`
+ * exists precisely because one BYO SendGrid key backing multiple
+ * workspaces makes them a proven production shape, Phase 10 SEC-09/WR-01),
+ * and an all-quarantined batch (plan 13-04) is likewise a correct terminal
+ * outcome, not a stuck one -- both are marked complete, the latter INSIDE
+ * the same transaction that writes the quarantine rows (no second
+ * transaction, no fourth zero-row return that bypasses the mark).
  *
  * Exported standalone (not only inside the Worker's inline processor) so
  * the webhook-events-*.test.ts suites can invoke it directly without a live
  * BullMQ Queue/Redis round-trip (mirrors processEventIngestJob's rationale).
  */
-export async function processWebhookEventBatch(data: WebhookEventsJob): Promise<{ inserted: number }> {
-  const { workspaceId, events } = webhookEventsJobSchema.parse(data);
+export async function processWebhookEventBatch(data: unknown): Promise<{ inserted: number }> {
+  const parsed = webhookEventsJobSchema.safeParse(data);
+  if (!parsed.success) {
+    const isUnrecognizedSchemaVersion = parsed.error.issues.every((issue) => issue.path[0] === "schemaVersion");
+    if (isUnrecognizedSchemaVersion) {
+      scrubbedConsole.error("webhook-events: deferring job with an unrecognized schemaVersion", {
+        issues: parsed.error.issues,
+      });
+      return { inserted: 0 };
+    }
+    throw parsed.error;
+  }
+  const { workspaceId, events, journalId } = parsed.data;
 
-  const extractedRows = events.map(extractEventRow).filter((row): row is ExtractedEventRow => row !== null);
-  if (extractedRows.length === 0) {
-    return { inserted: 0 };
+  const now = new Date();
+  const outcomes = events.map((raw) => extractEventRow(raw, now));
+
+  const extractedRows: ExtractedEventRow[] = [];
+  const quarantineCandidates: QuarantineCandidate[] = [];
+  for (const outcome of outcomes) {
+    if (outcome.kind === "extracted") extractedRows.push(outcome.row);
+    else if (outcome.kind === "quarantine") quarantineCandidates.push(outcome.candidate);
+    // "skip": no usable sg_event_id -- a plain drop, no quarantine row.
   }
 
+  // SEC-09: runs even on an empty extractedRows array -- dropSiblingWorkspaceEvents
+  // itself short-circuits (no candidateSendIds) without touching the scan pool.
   const rows = await dropSiblingWorkspaceEvents(workspaceId, extractedRows);
-  if (rows.length === 0) {
-    // Every surviving row was a sibling-workspace event -- nothing left to
-    // insert. Returning here also avoids an empty `VALUES ()` clause below,
-    // which the insert's placeholder-join would otherwise produce.
+
+  if (rows.length === 0 && quarantineCandidates.length === 0) {
+    // Nothing to insert AND nothing to quarantine -- every event was either
+    // a sibling-workspace drop or had no usable sg_event_id. Returning here
+    // also avoids an empty `VALUES ()` clause below, which the insert's
+    // placeholder-join would otherwise produce.
+    await markJournalCompleteIfPresent(workspaceId, journalId);
     return { inserted: 0 };
   }
 
   return withTenant(workspaceId, () =>
     withTenantTransaction(async (client) => {
-      // D-15: `send_events.send_id` carries a real FK to `sends(id)` --
-      // Postgres enforces referential integrity at INSERT time regardless of
-      // is_test/orphan intent, so a `custom_args.send_id` that never
-      // corresponds to a live send (deleted, or Pitfall 2's kind='test'
-      // dispatch that never writes a `sends` row at all) MUST be nulled out
-      // here before insertion, not passed through as a dangling FK value.
-      // (SEC-09: `rows` here has already had sibling-workspace events
-      // dropped by `dropSiblingWorkspaceEvents` above -- a send_id that
-      // resolves to THIS workspace or to nothing at all still needs this
-      // per-tenant re-check, which is unchanged.)
-      const candidateSendIds = [...new Set(rows.map((row) => row.sendId).filter((id): id is string => id !== null))];
-      let liveSendIds = new Set<string>();
-      if (candidateSendIds.length > 0) {
-        const { rows: liveSends } = await client.query<{ id: string }>(
-          `SELECT id FROM sends WHERE workspace_id = $1 AND id = ANY($2::uuid[])`,
-          [workspaceId, candidateSendIds]
-        );
-        liveSendIds = new Set(liveSends.map((r) => r.id));
-      }
-      const resolvedRows = rows.map((row) => ({
-        ...row,
-        sendId: row.sendId !== null && liveSendIds.has(row.sendId) ? row.sendId : null,
-      }));
-
-      const COLUMNS_PER_ROW = 9;
-      const placeholders: string[] = [];
-      const values: unknown[] = [];
-
-      resolvedRows.forEach((row, index) => {
-        const base = index * COLUMNS_PER_ROW;
-        placeholders.push(
-          `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}, now())`
-        );
-        values.push(
-          row.id,
-          workspaceId,
-          row.sgEventId,
-          row.sendId,
-          row.eventType,
-          row.reason,
-          row.payload,
-          row.isTest,
-          row.occurredAt
-        );
-      });
-
-      const { rows: insertedRows } = await client.query<{ id: string }>(
-        `INSERT INTO send_events (id, workspace_id, sg_event_id, send_id, event_type, reason, payload, is_test, occurred_at, received_at)
-         VALUES ${placeholders.join(", ")}
-         ON CONFLICT (workspace_id, sg_event_id, occurred_at) DO NOTHING
-         RETURNING id`,
-        values
-      );
-
-      // Pattern 3: only rows Postgres actually returned are genuinely new --
-      // a replayed/duplicate event is skipped with zero side effects.
-      const insertedIds = new Set(insertedRows.map((r) => r.id));
-      const newRows = resolvedRows.filter((row) => insertedIds.has(row.id));
-
-      for (const row of newRows) {
-        // D-15 (Pitfall 2): a test-marked event is stored (already done by
-        // the insert above) but produces zero status/counter/suppression
-        // side effects.
-        if (row.isTest) continue;
-        // Out-of-scope SendGrid event type (e.g. processed/deferred) --
-        // normalizeEventType already returned null for these.
-        if (row.normalizedType === null) continue;
-        // No send_id marker, or one that didn't resolve to a live send
-        // (already nulled out above) -- nothing to process (D-15).
-        if (row.sendId === null) continue;
-
-        const { rows: sendRows } = await client.query<ResolvedSend>(
-          `SELECT id, campaign_id as "campaignId", contact_id as "contactId"
-           FROM sends WHERE id = $1 AND workspace_id = $2`,
-          [row.sendId, workspaceId]
-        );
-        const send = sendRows[0];
-        // Defensive re-check (row.sendId already validated live above; this
-        // guards a same-transaction delete race).
-        if (!send) continue;
-
-        await applyEventSideEffects(client, workspaceId, send, {
-          normalizedType: row.normalizedType,
-          reason: row.reason,
-          occurredAt: row.occurredAt,
+      // Quarantine writes happen FIRST, in the SAME transaction as the
+      // insert below -- T-13-04-03: quarantine is per event, never a
+      // batch-level early return or throw, and `writeQuarantinedEvent`
+      // itself swallows its own failure (plan 13-01) so one quarantine
+      // write can never abort the surviving events' insert.
+      for (const candidate of quarantineCandidates) {
+        await writeQuarantinedEvent(client, workspaceId, {
+          sgEventId: candidate.sgEventId,
+          eventType: candidate.eventType,
+          rawEvent: candidate.rawEvent,
+          reason: candidate.reason,
+          occurredAtCandidate: candidate.occurredAtCandidate,
         });
       }
 
-      // D-03: debounced once per batch, not once per event.
+      let insertedCount = 0;
+
+      if (rows.length > 0) {
+        // D-15: `send_events.send_id` carries a real FK to `sends(id)` --
+        // Postgres enforces referential integrity at INSERT time regardless
+        // of is_test/orphan intent, so a `custom_args.send_id` that never
+        // corresponds to a live send (deleted, or Pitfall 2's kind='test'
+        // dispatch that never writes a `sends` row at all) MUST be nulled
+        // out here before insertion, not passed through as a dangling FK
+        // value. (SEC-09: `rows` here has already had sibling-workspace
+        // events dropped by `dropSiblingWorkspaceEvents` above -- a
+        // send_id that resolves to THIS workspace or to nothing at all
+        // still needs this per-tenant re-check, which is unchanged.)
+        const candidateSendIds = [
+          ...new Set(rows.map((row) => row.sendId).filter((id): id is string => id !== null)),
+        ];
+        let liveSendIds = new Set<string>();
+        if (candidateSendIds.length > 0) {
+          const { rows: liveSends } = await client.query<{ id: string }>(
+            `SELECT id FROM sends WHERE workspace_id = $1 AND id = ANY($2::uuid[])`,
+            [workspaceId, candidateSendIds]
+          );
+          liveSendIds = new Set(liveSends.map((r) => r.id));
+        }
+        const resolvedRows = rows.map((row) => ({
+          ...row,
+          sendId: row.sendId !== null && liveSendIds.has(row.sendId) ? row.sendId : null,
+        }));
+
+        const COLUMNS_PER_ROW = 9;
+        const placeholders: string[] = [];
+        const values: unknown[] = [];
+
+        resolvedRows.forEach((row, index) => {
+          const base = index * COLUMNS_PER_ROW;
+          placeholders.push(
+            `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, $${base + 9}, now())`
+          );
+          values.push(
+            row.id,
+            workspaceId,
+            row.sgEventId,
+            row.sendId,
+            row.eventType,
+            row.reason,
+            row.payload,
+            row.isTest,
+            row.occurredAt
+          );
+        });
+
+        const { rows: insertedRows } = await client.query<{ id: string }>(
+          `INSERT INTO send_events (id, workspace_id, sg_event_id, send_id, event_type, reason, payload, is_test, occurred_at, received_at)
+           VALUES ${placeholders.join(", ")}
+           ON CONFLICT (workspace_id, send_id, event_type, occurred_at) DO NOTHING
+           RETURNING id`,
+          values
+        );
+        insertedCount = insertedRows.length;
+
+        // Pattern 3: only rows Postgres actually returned are genuinely new
+        // -- a replayed/duplicate event is skipped with zero side effects.
+        const insertedIds = new Set(insertedRows.map((r) => r.id));
+        const newRows = resolvedRows.filter((row) => insertedIds.has(row.id));
+
+        for (const row of newRows) {
+          // D-15 (Pitfall 2): a test-marked event is stored (already done by
+          // the insert above) but produces zero status/counter/suppression
+          // side effects.
+          if (row.isTest) continue;
+          // Out-of-scope SendGrid event type (e.g. processed/deferred) --
+          // normalizeEventType already returned null for these.
+          if (row.normalizedType === null) continue;
+          // No send_id marker, or one that didn't resolve to a live send
+          // (already nulled out above) -- nothing to process (D-15).
+          if (row.sendId === null) continue;
+
+          const { rows: sendRows } = await client.query<ResolvedSend>(
+            `SELECT id, campaign_id as "campaignId", contact_id as "contactId"
+             FROM sends WHERE id = $1 AND workspace_id = $2`,
+            [row.sendId, workspaceId]
+          );
+          const send = sendRows[0];
+          // Defensive re-check (row.sendId already validated live above;
+          // this guards a same-transaction delete race).
+          if (!send) continue;
+
+          await applyEventSideEffects(client, workspaceId, send, {
+            normalizedType: row.normalizedType,
+            reason: row.reason,
+            occurredAt: row.occurredAt,
+          });
+        }
+      }
+
+      // D-03: debounced once per batch, not once per event. Runs even when
+      // `rows.length === 0` (an all-quarantined batch is still a batch this
+      // workspace's endpoint received).
       await debounceWebhookHealth(client, workspaceId);
 
-      return { inserted: insertedRows.length };
+      // Phase 13 (CMP-08, D-05, T-13-01-08, T-13-04's all-quarantined
+      // extension): a journaled batch that reached a terminal outcome is
+      // marked ingested, including when the correct outcome was to insert
+      // nothing (zero survivors, all quarantined, or a mix) -- completion
+      // means the batch was PROCESSED, not that rows were written. Kept in
+      // the SAME transaction as the insert/quarantine writes above (rather
+      // than a separate withTenantTransaction call like the
+      // nothing-to-insert-or-quarantine early return) so the completion
+      // mark and the rows it covers commit or roll back together.
+      if (journalId !== undefined) {
+        await markIngestionComplete(client, journalId);
+      }
+
+      return { inserted: insertedCount };
     })
   );
 }

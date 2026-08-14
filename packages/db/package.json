@@ -15,13 +15,28 @@
     "db:migrate": "drizzle-kit migrate",
     "relocate:default-partition-rows": "tsx scripts/relocate-default-partition-rows.ts",
     "db:audit-sends-history": "tsx scripts/audit-sends-history.ts",
+    "db:count-send-event-duplicates": "tsx scripts/count-send-event-duplicates.ts",
+    "db:resolve-send-event-duplicates": "tsx scripts/count-send-event-duplicates.ts --resolve",
+    "db:rehash-suppressions": "tsx scripts/rehash-suppressions.ts",
+    "replay:webhook-journal": "tsx scripts/replay-webhook-journal.ts",
+    "db:audit-missing-constraints": "tsx scripts/audit-missing-constraints.ts",
+    "db:count-member-duplicates": "tsx scripts/count-member-duplicates.ts",
+    "db:resolve-member-duplicates": "tsx scripts/count-member-duplicates.ts --resolve",
+    "db:check-empty-diff": "tsx scripts/check-empty-diff.ts",
+    "db:verify-restored": "tsx scripts/verify-restored-database.ts",
+    "test:rehearsal": "vitest run src/__tests__/migration-rollback-rehearsal.test.ts",
     "test": "vitest run"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",
-    "pg": "8.22.0"
+    "pg": "8.22.0",
+    "bullmq": "5.79.1",
+    "@mega-crm/redaction": "0.1.0",
+    "@mega-crm/shared-schemas": "0.1.0",
+    "@mega-crm/queue-core": "0.1.0"
   },
   "devDependencies": {
+    "@mega-crm/contacts-core": "0.1.0",
     "@mega-crm/delivery-core": "0.1.0",
     "@mega-crm/test-support": "0.1.0",
     "@types/pg": "^8.15.6",

@@ -84,8 +84,59 @@ jobs:
       - name: Session-state audit
         run: npm run lint:session-state
 
+      # Phase 14 plan 03 (DB-14, D-11): the machine half of "every first-party
+      # production Postgres pool goes through createPgPool() and therefore
+      # carries an error handler" -- a bare `new Pool(...)` reintroduced
+      # anywhere in the source tree fails here instead of only being caught
+      # by review.
+      - name: Pool factory audit
+        run: npm run lint:pg-pool-factory
+
+      # Phase 14 plan 14 (OPS-01, G-14-4 gap closure): the machine half of
+      # "package-lock.json satisfies both npm majors, not just dev/CI's".
+      # docker/Dockerfile.{api,worker,web} pin node:22-slim (npm 10); this
+      # repo's own .nvmrc/CI toolchain is Node 26 (npm 11). npm 11's ideal
+      # tree does not require every entry npm 10's does (see
+      # .planning/debug/docker-npm-ci-lockfile-desync.md), so a routine
+      # `npm install <pkg>` performed under this job's own npm 11 could
+      # silently drop an npm-10-required lockfile entry and reintroduce a
+      # defect that only ever surfaced at `docker build` time -- this step
+      # lives inside `static`, a required status check, specifically so
+      # that reintroduction blocks the merge instead of only being caught
+      # post-merge by the Images workflow's own build.
+      #
+      # Network note (WR-02, 14-REVIEW.md): with no --npm-command override
+      # (the path this step takes), the guard shells out to
+      # `npx --yes npm@10`, which needs to resolve/fetch the npm@10
+      # package from the registry (or an already-warm local npx cache)
+      # before it can run. If this required check goes red for a reason
+      # that looks unrelated to the lockfile itself, check npm registry /
+      # npx-cache health before suspecting package-lock.json.
+      - name: npm-10 lockfile guard
+        run: npm run check:lockfile-npm10
+
       - name: Working-root hygiene
         run: npm run check:root-hygiene
+
+      # Phase 14 plan 08 (OPS-01, OPS-02, DB-13, D-09, Pitfall 19, Pitfall 7):
+      # the machine half of every production compose invariant that has no
+      # local feedback loop -- memory limits, OOM protection, connection
+      # headroom, published ports, immutable tags, and the derived worker
+      # stop-grace-period. Runs the YAML-parsing fallback here (no Docker
+      # daemon on this runner's `static` job) -- see
+      # scripts/validate-prod-compose.mjs's own header for why that path is
+      # not a downgrade for this specific check.
+      - name: Production compose invariants
+        run: npm run verify:prod-compose
+
+      # Phase 14 plan 13 (DB-14 SPECIFICATION.md filing gate): the machine
+      # half of .claude/CLAUDE.md's "a new secret must be recorded in the
+      # same change" rule for the secrets section specifically -- every
+      # environment-variable NAME docker/prod.env.example documents must
+      # also appear in SPECIFICATION.md. Names only, never values; the gate
+      # itself never reads a real secret.
+      - name: SPECIFICATION env coverage
+        run: npm run check:spec-env-coverage
 
   # ---------------------------------------------------------------------------
   # The full corpus against live services, then the coverage threshold and the
@@ -230,6 +281,24 @@ jobs:
 
       - name: Segment sweep kill-resume
         run: npm run failure:segment-sweep-resume
+
+      # Phase 14 plan 07 (DB-05, ROADMAP-locked): kills a real migrate-runner.mjs
+      # process the instant it holds the advisory lock and confirms the next
+      # deploy proceeds.
+      - name: Migration runner killed mid-run
+        run: npm run failure:migrate-unclean-death
+
+      # Phase 14 plan 07 (R-05): a schemaVersion this worker does not
+      # recognize is deferred, not processed and not failed, in both
+      # directions of the deploy overlap.
+      - name: Two-version payload compatibility
+        run: npm run failure:two-version-compat
+
+      # Phase 14 plan 07 (Pitfall 7): a real SIGTERM sent mid-load-test --
+      # not just that shutdown starts, but that it finishes inside the
+      # derived stop-grace-period.
+      - name: Real SIGTERM mid-load
+        run: npm run failure:sigterm-mid-load
 
   # ---------------------------------------------------------------------------
   # Reports, never blocks. What CI needs from this job is not the browser

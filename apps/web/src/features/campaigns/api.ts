@@ -133,11 +133,22 @@ export interface CampaignProgress {
   clickedCount: number;
   bouncedCount: number;
   unsubscribedCount: number;
+  /**
+   * D-16 (Phase 13): a committed copy of apps/api's `CampaignProgress.ledger`
+   * shape (campaign.repository.ts) -- apps/web has no package dependency on
+   * apps/api, the same convention `send-log/api.ts` documents for its status
+   * vocabulary. `reconciling`/`unknown` are ledger states, not delivery
+   * facts: a send in either state has an outcome the platform has not
+   * observed, so it is its own count next to `sent`/`failed`, never folded
+   * into either.
+   */
   ledger: {
     sent: number;
     failed: number;
     excluded: number;
     dispatching: number;
+    reconciling: number;
+    unknown: number;
   };
   /** D-07: excluded sends grouped by exclusion_reason, for the «Пропущено» breakdown row. */
   excludedBreakdown: CampaignProgressExcludedBreakdownItem[];

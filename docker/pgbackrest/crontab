@@ -1,0 +1,71 @@
+# Phase 14 plan 10 (DB-09, D-05, D-06, D-08). Full/differential/incremental
+# backup schedule plus pgBackRest's own verification, installed into
+# /etc/cron.d/pgbackrest by docker/pgbackrest/backup-entrypoint.sh (Debian
+# cron refuses to load a bind-mounted file directly -- ownership/permission
+# rules -- so the entrypoint copies this file in with the right mode).
+#
+# `SHELL=/bin/bash` is required: every job line below sources
+# /etc/pgbackrest-env (written by backup-entrypoint.sh at container start,
+# using `printf '%s=%q\n'` shell-quoting) -- that quoting produces bash-
+# specific syntax cron's own default `/bin/sh` cannot always parse.
+#
+# Every job's user field is "postgres" (uid 999, the SAME fixed uid
+# docker/postgres/Dockerfile's base image defines), NOT "root": pgBackRest
+# needs to read the shared, postgres-owned PGDATA volume and authenticate
+# its own control connection the same way `db`'s local connections do (see
+# docker/pgbackrest/pgbackrest.conf's own comment) -- `cron` itself stays
+# root (PID 1) purely to manage that per-job user switch.
+#
+# Every job appends to /var/log/pgbackrest/cron.log, which
+# backup-entrypoint.sh's own `tail -F` mirrors to this container's stdout --
+# NOT `/proc/1/fd/1` directly, which a non-root job cannot open (see that
+# script's own comment for why).
+#
+# Cadence rationale -- chosen deliberately, not defaulted (Claude's
+# Discretion, 14-CONTEXT.md):
+#   FULL       every Sunday 02:00 UTC   -- the anchor a diff/incr chain
+#     restores from. Weekly keeps that chain from growing unboundedly long
+#     between fulls: a longer chain means a slower restore, since every
+#     diff/incr since the last full must replay on top of it.
+#   DIFFERENTIAL  Mon-Sat 02:00 UTC     -- captures everything since the
+#     LAST FULL. Costs more per-backup than an incremental, but a restore
+#     only ever needs the full plus the single latest differential (never a
+#     chain of increments) -- a deliberate size-for-restore-speed trade.
+#   INCREMENTAL   06:00/10:00/14:00/18:00/22:00 UTC (skipping the 02:00
+#     full/diff slot) -- tightens the point a differential-only schedule
+#     could restore to between the once-daily diffs. Continuous WAL
+#     archiving (docker/postgres/prod-tls-entrypoint.sh's archive_command)
+#     already gives PITR continuous coverage regardless of this schedule --
+#     these bulk backups exist to bound RESTORE TIME, not recovery POINT.
+#   CHECK      daily 03:30 UTC (after the heaviest nightly full/diff job)
+#     -- validates the archive configuration and repository reachability.
+#     Documented explicitly in docs/runbooks/backups.md and repeated here:
+#     a PASSING check means the configuration is coherent and the
+#     repository is reachable; it does NOT prove a restore works -- only
+#     plan 14-11's actually-performed restore drill proves that. DB-09 and
+#     DB-10 are separate requirements for exactly this reason.
+#
+# Retention (docker/pgbackrest/pgbackrest.conf: repo1-retention-full=2,
+# count-based) -- the resulting RPO/RTO this schedule buys, stated in plain
+# terms per this plan's own action text:
+#   RPO (recovery point): bounded by continuous WAL archiving, not by this
+#     schedule -- seconds, not hours, as long as archiving is keeping up
+#     (docs/runbooks/backups.md documents how to confirm that).
+#   RTO (recovery time): bounded by restoring the most recent full plus (at
+#     most) one day's differential plus a few hours of incrementals -- for
+#     this platform's current data volume, well under an hour; re-measure
+#     once plan 14-11's restore drill has a real timing, this is a
+#     first-principles estimate, not a measurement.
+#   Retention horizon: 2 full backups kept online (docker/pgbackrest/
+#     pgbackrest.conf) => roughly two weeks of restorable history (this
+#     week's full plus last week's, with every diff/incr chained off each)
+#     before the oldest full -- and everything chained off it -- expires.
+#     D-08 / plan 14-12: this is the ACTUAL recovery horizon for anything
+#     the partition-drop retention tick removes; a dropped partition is
+#     recoverable ONLY from a backup, and ONLY until that backup expires.
+SHELL=/bin/bash
+
+0 2 * * 0 postgres . /etc/pgbackrest-env && /usr/local/bin/backup-entrypoint.sh full >> /var/log/pgbackrest/cron.log 2>&1
+0 2 * * 1-6 postgres . /etc/pgbackrest-env && /usr/local/bin/backup-entrypoint.sh diff >> /var/log/pgbackrest/cron.log 2>&1
+0 6,10,14,18,22 * * * postgres . /etc/pgbackrest-env && /usr/local/bin/backup-entrypoint.sh incr >> /var/log/pgbackrest/cron.log 2>&1
+30 3 * * * postgres . /etc/pgbackrest-env && /usr/local/bin/backup-entrypoint.sh check >> /var/log/pgbackrest/cron.log 2>&1

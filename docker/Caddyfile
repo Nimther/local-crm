@@ -1,0 +1,68 @@
+# Phase 14 plan 06 (OPS-01, D-02, D-03). One self-contained web image ships
+# both the SPA bundle and this routing configuration, so a rollback to a
+# previous SHA tag rolls the frontend back too (OPS-03's "redeploy the
+# previous SHA, no rebuild" story only holds if both live in one artifact).
+#
+# {$SITE_ADDRESS} is Caddy's own environment-variable placeholder syntax
+# (never a template the image renders itself) -- the operator supplies the
+# real domain at `docker run`/compose time (plan 14-08/14-09), so this same
+# image serves any domain. Automatic HTTPS via Caddy's built-in ACME client
+# is the reason Caddy was chosen (D-02) -- do not add a certbot-style flow,
+# and do not add `auto_https off` to this file. The local verification note
+# at the bottom of this file's own runbook (docs/runbooks/container-images.md)
+# covers how to check routing without touching this setting.
+{$SITE_ADDRESS} {
+	encode gzip zstd
+
+	# Every server-side path is enumerated explicitly, one handle block per
+	# prefix, all proxying to the api container on its documented port
+	# (apps/api/src/env.ts's API_PORT default, 4000). A missing entry here is
+	# not a 404 -- `handle` blocks fall through to the catch-all `handle {}`
+	# below, which serves the SPA's index.html with a 200. For /webhooks/*
+	# specifically that means SendGrid's POST gets a 200 it interprets as
+	# accepted, and the event is silently lost -- this list must stay
+	# exhaustive, never a prefix guess (T-14-30).
+	#
+	# reverse_proxy never buffers or transforms the request body -- the raw
+	# bytes SendGrid's ECDSA signature was computed over reach apps/api
+	# unchanged, which is what /webhooks/sendgrid/:pathToken's own raw-buffer
+	# content-type parser depends on (T-14-31; CLAUDE.md "What NOT to Use").
+	handle /api/* {
+		reverse_proxy api:4000
+	}
+	handle /webhooks/* {
+		reverse_proxy api:4000
+	}
+	handle /unsubscribe/* {
+		reverse_proxy api:4000
+	}
+	handle /healthz {
+		reverse_proxy api:4000
+	}
+	handle /readyz {
+		reverse_proxy api:4000
+	}
+
+	# Vite's default build emits every hashed JS/CSS bundle under /assets/*
+	# (apps/web has no custom build.assetsDir) -- those filenames change on
+	# every content change, so they are safe to cache forever.
+	handle /assets/* {
+		root * /srv/web
+		file_server
+		header Cache-Control "public, max-age=31536000, immutable"
+	}
+
+	# Everything else: serve the SPA, falling back to index.html for any
+	# client-side route (react-router). index.html itself is NEVER
+	# long-cached -- it is the one file whose content changes on every deploy
+	# without a new filename, and it is served here for BOTH a direct
+	# request and the try_files fallback. A cached index.html surviving a
+	# rollback (OPS-03) would keep pointing at a newer SHA's now-missing
+	# hashed asset filenames (T-14-35).
+	handle {
+		root * /srv/web
+		header Cache-Control "no-cache"
+		try_files {path} /index.html
+		file_server
+	}
+}

@@ -35,7 +35,7 @@ Full phase details: [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md)
 - [x] **Phase 10: Tenant Isolation & Trust Boundaries** - Cross-tenant access prevented by DB identity and policy, proven by negative tests (completed 2026-08-08)
 - [x] **Phase 11: Delivery Correctness** - No mail lost, duplicated or misclassified at crash, timeout and ambiguous-outcome boundaries (completed 2026-08-09)
 - [x] **Phase 12: Worker Reliability & Tenant Fairness** - One tenant, one huge segment, or a restart cannot degrade the platform (completed 2026-08-10)
-- [ ] **Phase 13: Compliance & Analytics Integrity** - Consent and delivery numbers mean exactly what they claim
+- [x] **Phase 13: Compliance & Analytics Integrity** - Consent and delivery numbers mean exactly what they claim (completed 2026-08-12)
 - [ ] **Phase 14: Deployment & Database Durability** - Reproducible deploy, gated migrations, rehearsed restore, enforced constraints
 - [ ] **Phase 15: Observability, Alerting & Frontend Resilience** - The system reports its true state to operators and to users
 - [ ] **Phase 16: Live SendGrid Verification** - Every delivery guarantee confirmed against the real provider (release barrier)
@@ -429,7 +429,54 @@ Plans:
   4. A provider event carrying an out-of-range or manipulated timestamp cannot bypass deduplication or land outside its partition, and a redelivered event is counted once even when `sg_event_id` is not stable across retries.
   5. Metric drift is corrected by a scheduled reconciliation job rather than a one-off fix, events missed while the webhook endpoint was unreachable are recovered by backfill, and a tenant approaching the spam-complaint threshold raises an alert.
 
-**Plans**: TBD
+**Plans**: 16/16 plans executed
+
+Plans:
+**Wave 1**
+
+- [x] 13-01-PLAN.md — [tracer] Ingress journal end-to-end: verified batch journaled before enqueue, worker marks it ingested; quarantine table DDL (CMP-08)
+- [x] 13-02-PLAN.md — UTC day semantics: force `AT TIME ZONE 'UTC'` on every reconciliation cast, pin `sent_at` as the day authority, assert the recurring schedule (CMP-02, CMP-06)
+- [x] 13-03-PLAN.md — `unknown`/`reconciling` sends get their own visible count in campaign stats; ledger provably sums to total sends (CMP-02 / D-16)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [x] 13-04-PLAN.md — Bound provider `occurred_at` before partition routing and dedup; quarantine out-of-range events per event (CMP-05)
+- [x] 13-05-PLAN.md — Dirty-day marking and sweep so a late event is re-verified against a fresh scan (CMP-03)
+- [x] 13-06-PLAN.md — Journal replay sweep, operator range-replay CLI, and split retention: completed rows pruned, incomplete ones tombstoned (CMP-08)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [x] 13-07-PLAN.md — Dedup re-base to `(workspace_id, send_id, event_type, occurred_at)`; partitioned unique-index migration with duplicate pre-check (CMP-07)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [x] 13-08-PLAN.md — One shared atomic unsubscribe helper across route, webhook and dropped paths, with a crash test (CMP-01)
+- [x] 13-09-PLAN.md — Per-tenant complaint and hard-bounce rates, tiered, into a keyed alert-state table (CMP-09)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [x] 13-10-PLAN.md — Contact erasure: anonymize in place, keep evidence FKs, write an auditable erasure record, queue the scrub (CMP-04)
+- [x] 13-11-PLAN.md — Ingestion-health and reputation watchdogs, operator plus tenant alerts, boot wiring (CMP-08, CMP-09)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [x] 13-12-PLAN.md — Suppression list converted to a per-workspace HMAC; no plaintext address survives erasure (CMP-04)
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
+- [x] 13-13-PLAN.md — Bounded resumable JSONB scrub over linked event rows, rebuilt from an evidence allowlist, with completion tracking (CMP-04)
+
+**Wave 8** *(blocked on Wave 7 completion)*
+
+- [x] 13-15-PLAN.md — Erasure-record reclaim tick: a committed erasure whose scrub was never enqueued is recovered, proven by a crash-in-the-gap scenario (CMP-04)
+
+**Wave 9** *(blocked on Wave 8 completion)*
+
+- [x] 13-14-PLAN.md — SPECIFICATION/ARCHITECTURE/CONVENTIONS as-built update, coverage matrix, human phase verification (CMP-01…CMP-09)
+
+**Wave 10** *(gap closure — 13-VERIFICATION.md Gap #1, SC3/CMP-04)*
+
+- [x] 13-16-PLAN.md — Bounded retention for `send_event_quarantine`: age out the raw webhook bodies this phase started persisting, on the tick that already runs, with the erasure-scrub exclusion documented (CMP-04)
 
 **Sequencing and pitfall notes:**
 
@@ -454,7 +501,46 @@ Plans:
   4. A point-in-time restore from backup has actually been performed and written up, not merely configured.
   5. Postgres connections use TLS, every pool has an error handler, the missing constraints exist and are verifiably enforced, and retention deletes aged data on a defined schedule.
 
-**Plans**: TBD
+**Plans**: 11/14 plans executed
+
+Plans:
+**Wave 1**
+
+- [x] 14-01-PLAN.md — [tracer] Migration runner (dedicated-connection advisory lock) + `/healthz`/`/readyz` with applied-vs-shipped verification + fail-closed request guard (DB-05, DB-06, OPS-04, OPS-05)
+- [x] 14-02-PLAN.md — DB-12: live constraint introspection, `member` duplicate pre-check, migration 0062 with `indisvalid` assertion (DB-12)
+
+**Wave 2**
+
+- [x] 14-03-PLAN.md — `createPgPool` factory + every production pool migrated + CI guard; TLS driven by the connection string, proven via `pg_stat_ssl` (DB-13, DB-14)
+- [x] 14-04-PLAN.md — Worker `node:http` health server, draining-on-SIGTERM, and the stop-grace-period publish script (OPS-04, OPS-05)
+- [x] 14-05-PLAN.md — DB-07: two-tier migration classification, empty-diff smoke test, snapshot backfill, revert/roll-forward rehearsal in CI (DB-07)
+
+**Wave 3**
+
+- [x] 14-06-PLAN.md — Dockerfiles for api/worker/web (Node 22, non-root, direct `node` exec) + Caddyfile + GHCR build-and-push per SHA (OPS-01)
+- [x] 14-07-PLAN.md — Failure injection: migration unclean death, two-version compatibility (R-05), real SIGTERM mid-load (DB-05, OPS-02)
+
+**Wave 4**
+
+- [x] 14-08-PLAN.md — Production compose: Postgres TLS, memory limits + `oom_score_adj`, connection headroom, one-shot migrate, invariant gate (OPS-01, OPS-02, DB-13)
+- [x] 14-14-PLAN.md — [gap G-14-4] npm-10 lockfile repair (all three Docker builds fail at root `npm ci`), fail-loud npm-10 guard in the required `static` job, pull_request-time image build (OPS-01)
+
+**Wave 5**
+
+- [ ] 14-09-PLAN.md — `deploy.sh <sha>`: readiness-gated, fail-before-replace, stop-old-then-start-new worker; deploy/rollback runbook (OPS-02, OPS-03)
+- [ ] 14-10-PLAN.md — pgBackRest: WAL archiving, scheduled backups, off-host encrypted S3 repository (DB-09)
+
+**Wave 6**
+
+- [ ] 14-11-PLAN.md — DB-10: scripted PITR drill into a scratch container with a tested verification query set, actually performed (DB-10)
+
+**Wave 7**
+
+- [x] 14-12-PLAN.md — DB-11: partition-drop retention on the daily tick behind a default-off flag, evidence tables excluded (DB-11)
+
+**Wave 8**
+
+- [x] 14-13-PLAN.md — As-built docs: SPECIFICATION.md §2–§8, ARCHITECTURE.md topology/gating/backup/retention + connection budget, CONVENTIONS.md rules, env-coverage gate (DB-09, DB-11, DB-13, DB-14)
 
 **Sequencing and pitfall notes:**
 
@@ -554,7 +640,7 @@ Running two dispatch code versions against one queue during a rolling restart ca
 | **Better Auth trust boundary (SEC-05)** | Phase 10 | Dedicated least-privilege DB role (`mega_crm_auth` owning only the 7 auth tables, optionally in an `auth.*` schema; `mega_crm_app` revoked) **vs.** adding RLS to `organization`/`session`/`account`. Naive RLS breaks login platform-wide and silently — see Pitfall 12. |
 | ~~**Per-tenant concurrency-cap mechanism (WRK-02)**~~ — **RESOLVED 2026-08-10 (D-01)** | Phase 12 | Redis semaphore at the application layer, keyed per tenant **and** lane (D-02), TTL-leased, over-cap jobs deferring through the same tenant-scoped path as the RPS ceiling. BullMQ-native per-group concurrency and bounded per-tier worker pools both rejected. See `.planning/phases/12-worker-reliability-tenant-fairness/12-CONTEXT.md`. |
 | **Admin-scan connection shape (SEC-01)** | Phase 10 | Separate physical pool + separate credential (research's recommendation, strongest boundary) **vs.** `SET LOCAL ROLE` on the existing pool with role membership granted (smaller diff, weaker). Record as an ADR either way. |
-| **PgBouncer now or defer to SCALE-02 (DB-14)** | Phase 14 | Introduce transaction-mode pooling now (requires Phase 10's bare-`SET` audit and interacts with DB-05's advisory lock) **vs.** explicitly defer until `max_connections` pressure is real. |
+| ~~**PgBouncer now or defer to SCALE-02 (DB-14)**~~ — **RESOLVED 2026-08-12 (D-09)** | Phase 14 | Deferred to SCALE-02 as an explicit accepted decision: revisit trigger = real `max_connections` pressure; app-level pools get explicit sizes + error handlers via a shared `createPgPool` factory, documented connection budget proves headroom. Preconditions if ever introduced: transaction-mode + reset-on-return, bare-`SET` audit stays green, DB-05 advisory lock stays on a direct connection. See `.planning/phases/14-deployment-database-durability/14-CONTEXT.md`. |
 
 ## Coverage
 
@@ -582,8 +668,8 @@ Phase 9 has no dependents and may be scheduled in parallel at any point after Ph
 | 10. Tenant Isolation & Trust Boundaries | v1.1 | 15/15 | Complete    | 2026-08-09 |
 | 11. Delivery Correctness | v1.1 | 11/11 | Complete    | 2026-08-09 |
 | 12. Worker Reliability & Tenant Fairness | v1.1 | 14/14 | Complete    | 2026-08-11 |
-| 13. Compliance & Analytics Integrity | v1.1 | 0/TBD | Not started | - |
-| 14. Deployment & Database Durability | v1.1 | 0/TBD | Not started | - |
+| 13. Compliance & Analytics Integrity | v1.1 | 16/16 | Complete    | 2026-08-12 |
+| 14. Deployment & Database Durability | v1.1 | 11/14 | In Progress|  |
 | 15. Observability, Alerting & Frontend Resilience | v1.1 | 0/TBD | Not started | - |
 | 16. Live SendGrid Verification | v1.1 | 0/TBD | Not started | - |
 

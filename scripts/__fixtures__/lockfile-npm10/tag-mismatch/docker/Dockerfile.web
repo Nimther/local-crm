@@ -1,0 +1,6 @@
+# Fixture for scripts/__tests__/check-lockfile-npm10.test.mjs --
+# "tag-mismatch" case. Only the base-image pin matters to the guard; this
+# is not a real, buildable Dockerfile.
+FROM node:22-slim AS deps
+FROM deps AS build
+FROM caddy:2 AS runtime

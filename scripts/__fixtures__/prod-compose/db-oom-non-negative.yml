@@ -1,0 +1,7 @@
+# Fixture: `db` has a memory limit but a non-negative oom_score_adj (should
+# be negative to favor Postgres's survival under host memory pressure).
+services:
+  db:
+    image: postgres:17
+    mem_limit: 2048m
+    oom_score_adj: 0

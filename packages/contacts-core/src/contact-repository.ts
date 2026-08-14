@@ -2,6 +2,7 @@ import type { PoolClient } from "pg";
 import { logger } from "./logger.js";
 import { registerObservedProperties } from "./property-registry.js";
 import { recordSubscriptionStatusChange } from "./subscription-status-history.js";
+import { hashSuppressionEmail, loadWorkspaceSuppressionKey, normalizeSuppressionEmail } from "./suppression-hash.js";
 
 export type SubscriptionStatus = "subscribed" | "unsubscribed" | "suppressed";
 
@@ -43,14 +44,44 @@ export const CONTACT_COLUMNS = `
   updated_at as "updatedAt"
 `;
 
+/**
+ * CMP-04 (D-02, plan 13-12): compares by HMAC hash, never plaintext -- the
+ * three write sites (`deleteContact`, `applySuppression`, and this plan's
+ * backfill) now write only `email_hash`, so a plaintext comparison would
+ * silently miss every address suppressed after this conversion.
+ *
+ * `loadWorkspaceSuppressionKey` returning `null` means this workspace has no
+ * `workspace_suppression_keys` row, i.e. it has never suppressed anything --
+ * that absence IS the answer, so this short-circuits to `false` without
+ * performing any further query or any KMS work. This function NEVER calls
+ * `ensureWorkspaceSuppressionKey`: creating a key just to hash a candidate
+ * against zero rows would put key-management work on the pre-send/pre-create
+ * path of every tenant with a clean suppression list, which is exactly the
+ * hot-path cost the cache exists to avoid for the tenants that need it
+ * least (T-13-12-05).
+ */
 export async function isEmailSuppressed(client: PoolClient, workspaceId: string, email: string): Promise<boolean> {
+  const key = await loadWorkspaceSuppressionKey(client, workspaceId);
+  if (!key) return false;
+
+  const hash = hashSuppressionEmail(normalizeSuppressionEmail(email), key);
   const { rows } = await client.query(
-    `SELECT 1 FROM workspace_suppressions WHERE workspace_id = $1 AND email = $2`,
-    [workspaceId, email]
+    `SELECT 1 FROM workspace_suppressions WHERE workspace_id = $1 AND email_hash = $2`,
+    [workspaceId, hash]
   );
   return rows.length > 0;
 }
 
+/**
+ * CMP-04 (plan 13-10, Task 3): `anonymized_at IS NULL` is added here too,
+ * defensively -- an anonymized row already has `email = NULL`, and `NULL =
+ * $2` is never true in SQL, so this filter changes no observable behavior
+ * (an anonymized row could never match anyway). Added anyway because the
+ * plan calls this out explicitly among the identity-lookup reads, and a
+ * reader auditing "does every contacts read here exclude anonymized rows"
+ * should not have to re-derive the NULL-never-matches argument to confirm
+ * it.
+ */
 export async function isEmailTaken(
   client: PoolClient,
   workspaceId: string,
@@ -59,8 +90,8 @@ export async function isEmailTaken(
 ): Promise<boolean> {
   const { rows } = await client.query(
     excludeContactId
-      ? `SELECT 1 FROM contacts WHERE workspace_id = $1 AND email = $2 AND id != $3`
-      : `SELECT 1 FROM contacts WHERE workspace_id = $1 AND email = $2`,
+      ? `SELECT 1 FROM contacts WHERE workspace_id = $1 AND email = $2 AND anonymized_at IS NULL AND id != $3`
+      : `SELECT 1 FROM contacts WHERE workspace_id = $1 AND email = $2 AND anonymized_at IS NULL`,
     excludeContactId ? [workspaceId, email, excludeContactId] : [workspaceId, email]
   );
   return rows.length > 0;
@@ -103,6 +134,18 @@ function isUniqueViolation(err: unknown): boolean {
  * upsert at all) or create a new contact -- both apps/api's dry-run counter
  * and apps/worker's apply worker call this SAME function so neither process
  * can disagree about "does this identity already exist."
+ *
+ * CMP-04/T-13-10-08 (plan 13-10, Task 3, REVIEWS.md HIGH finding 3): BOTH
+ * branches gain `anonymized_at IS NULL`. `deleteContact` nulls `external_id`
+ * in the SAME anonymizing UPDATE that nulls `email`, which is what makes
+ * this filter cost nothing rather than turn a match into a unique
+ * violation: with both columns NULL on the erased row, the filtered lookup
+ * finds nothing and the constraint has nothing to collide with. A future
+ * reader removing either half (the UPDATE's nulling, or this filter)
+ * reintroduces the defect from the other side -- an anonymized row would
+ * either stay a match target (filter removed) or become an un-matchable
+ * row with a live identity column the constraint could still collide on
+ * (nulling removed).
  */
 export async function findContactIdByIdentity(
   client: PoolClient,
@@ -111,14 +154,14 @@ export async function findContactIdByIdentity(
 ): Promise<string | null> {
   if (input.externalId) {
     const { rows } = await client.query<{ id: string }>(
-      `SELECT id FROM contacts WHERE workspace_id = $1 AND external_id = $2`,
+      `SELECT id FROM contacts WHERE workspace_id = $1 AND external_id = $2 AND anonymized_at IS NULL`,
       [workspaceId, input.externalId]
     );
     if (rows[0]) return rows[0].id;
   }
   if (input.email) {
     const { rows } = await client.query<{ id: string }>(
-      `SELECT id FROM contacts WHERE workspace_id = $1 AND email = $2`,
+      `SELECT id FROM contacts WHERE workspace_id = $1 AND email = $2 AND anonymized_at IS NULL`,
       [workspaceId, input.email]
     );
     if (rows[0]) return rows[0].id;
@@ -193,6 +236,13 @@ export interface UpsertContactIdentityResult {
  * Reserved property keys (Pitfall 4) are stripped before ANY properties
  * merge, and every surviving custom key is recorded via the single shared
  * `registerObservedProperty` helper (D-10).
+ *
+ * CMP-04/T-13-10-08 (plan 13-10, Task 3, REVIEWS.md HIGH finding 3): BOTH
+ * FOR UPDATE branches below gain `anonymized_at IS NULL`, for the exact
+ * same reason `findContactIdByIdentity` does (see that function's own
+ * comment) -- an anonymized row is never an upsert match target, which is
+ * what makes a re-import create a NEW contact instead of writing PII back
+ * into the erased row.
  */
 export async function upsertContactByIdentity(
   client: PoolClient,
@@ -206,7 +256,7 @@ export async function upsertContactByIdentity(
 
   if (input.externalId) {
     const { rows } = await client.query<ContactRow>(
-      `SELECT ${CONTACT_COLUMNS} FROM contacts WHERE workspace_id = $1 AND external_id = $2 FOR UPDATE`,
+      `SELECT ${CONTACT_COLUMNS} FROM contacts WHERE workspace_id = $1 AND external_id = $2 AND anonymized_at IS NULL FOR UPDATE`,
       [workspaceId, input.externalId]
     );
     existing = rows[0];
@@ -217,7 +267,7 @@ export async function upsertContactByIdentity(
 
   if (!existing && input.email) {
     const { rows } = await client.query<ContactRow>(
-      `SELECT ${CONTACT_COLUMNS} FROM contacts WHERE workspace_id = $1 AND email = $2 FOR UPDATE`,
+      `SELECT ${CONTACT_COLUMNS} FROM contacts WHERE workspace_id = $1 AND email = $2 AND anonymized_at IS NULL FOR UPDATE`,
       [workspaceId, input.email]
     );
     existing = rows[0];

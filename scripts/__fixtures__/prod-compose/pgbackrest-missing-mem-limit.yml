@@ -1,0 +1,8 @@
+# Fixture for scripts/validate-prod-compose.mjs's test suite: `pgbackrest`
+# declares no `mem_limit` at all. Deliberately minimal -- only the one
+# service under test; the "missing-service" checks for the other six will
+# also fire, and the test only asserts the specific rule this fixture
+# targets is present.
+services:
+  pgbackrest:
+    image: megacrm-postgres:local

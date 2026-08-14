@@ -269,12 +269,54 @@ export type CampaignKickoffJob = z.infer<typeof campaignKickoffJobSchema>;
  * event rows (dedup-only slice, WBHK-03) -- normalized field extraction
  * happens inside the worker, not at the schema boundary, since SendGrid's
  * per-event-type shape varies (05-03 adds normalization/side effects).
+ *
+ * Phase 13 (CMP-08, D-05, R-05, plan 13-01) widens this shape with two
+ * OPTIONAL fields, both optional by design and not by omission:
+ * `schemaVersion` and `journalId`. A job enqueued by pre-Phase-13 code
+ * carries NEITHER field, and per ROADMAP R-05's backward-compatible-payload
+ * intent such a job must still be processed to completion -- an absent
+ * `schemaVersion` means the pre-versioned shape, and is processed WITHOUT
+ * the journal completion mark (there is no journal row to mark). An
+ * unrecognized NON-ABSENT version (e.g. `2` once this schema's literal only
+ * names `1`) is deferred the same way `sendReconcilerTickJobSchema`
+ * consumers defer: logged and returned, never thrown into BullMQ retries.
+ * `journalId` is the `ingress_journal` row id `enqueueWebhookBatch` was
+ * handed after `writeIngressJournal` committed -- the worker's sole handle
+ * to close the loop via `markIngestionComplete`.
  */
+export const WEBHOOK_EVENTS_SCHEMA_VERSION = 1;
+
 export const webhookEventsJobSchema = z.object({
   workspaceId: z.string().uuid(),
   events: z.array(z.unknown()),
+  schemaVersion: z.literal(WEBHOOK_EVENTS_SCHEMA_VERSION).optional(),
+  journalId: z.string().uuid().optional(),
 });
 export type WebhookEventsJob = z.infer<typeof webhookEventsJobSchema>;
+
+/**
+ * Pure payload constructor shared by BOTH producers of `WEBHOOK_EVENTS_QUEUE`
+ * -- `enqueueWebhookBatch` (apps/api, this plan) and plan 13-06's replay
+ * sweep (apps/worker) -- so the two cannot drift on job shape while neither
+ * app imports the other (the phase-wide `apps/api` <-> `apps/worker` import
+ * boundary decision, 13-01-PLAN.md's "Cross-app shared-module placement").
+ * `journalId` is optional here too: the replay sweep's own re-enqueue MAY
+ * omit it for a row it cannot resolve, and a caller that never journaled a
+ * batch (should not happen post-13-01, but this constructor makes no
+ * assumption about its caller) can still build a valid legacy-shaped payload.
+ */
+export function buildWebhookEventsJobPayload(
+  workspaceId: string,
+  events: unknown[],
+  journalId?: string
+): WebhookEventsJob {
+  return {
+    workspaceId,
+    events,
+    schemaVersion: WEBHOOK_EVENTS_SCHEMA_VERSION,
+    ...(journalId !== undefined ? { journalId } : {}),
+  };
+}
 
 /**
  * Phase 12 (WRK-05/WRK-06, D-09, R-05, plan 12-06): the segment-sweep
@@ -307,3 +349,139 @@ export const flowSegmentSweepFlowJobSchema = z.object({
   flowId: z.string().uuid(),
 });
 export type FlowSegmentSweepFlowJob = z.infer<typeof flowSegmentSweepFlowJobSchema>;
+
+/**
+ * Phase 13 (CMP-08, D-05, D-06, R-05, plan 13-06): the webhook-replay-sweep
+ * tick's own `schemaVersion` payload -- mirrors `sendReconcilerTickJobSchema`'s
+ * shape and doc comment exactly (Phase 11): a rolling deploy can have an
+ * old-code worker still draining jobs enqueued by new code (or vice versa),
+ * so this tick's payload carries an explicit version a worker validates
+ * before acting on it. `createWebhookReplaySweepWorker`'s processor DEFERS
+ * (logs via `scrubbedConsole`, returns without processing) a `schemaVersion`
+ * it does not recognize, rather than throwing it into BullMQ retries -- a
+ * deferred tick never consumes one of the job's `attempts`, and the next
+ * scheduled tick (or the next boot) simply tries again.
+ */
+export const WEBHOOK_REPLAY_SWEEP_TICK_SCHEMA_VERSION = 1;
+export const webhookReplaySweepTickJobSchema = z.object({
+  schemaVersion: z.literal(WEBHOOK_REPLAY_SWEEP_TICK_SCHEMA_VERSION),
+});
+export type WebhookReplaySweepTickJob = z.infer<typeof webhookReplaySweepTickJobSchema>;
+
+/**
+ * Phase 13 (CMP-09, D-09 through D-12, R-05, plan 13-09): the reputation
+ * tick's own `schemaVersion` payload -- mirrors `sendReconcilerTickJobSchema`'s
+ * shape and doc comment exactly (Phase 11): a rolling deploy can have an
+ * old-code worker still draining jobs enqueued by new code (or vice versa),
+ * so this tick's payload carries an explicit version a worker validates
+ * before acting on it. `createReputationTickWorker`'s processor DEFERS
+ * (logs via `scrubbedConsole`, returns without processing) a `schemaVersion`
+ * it does not recognize, rather than throwing it into BullMQ retries -- a
+ * deferred tick never consumes one of the job's `attempts`, and the next
+ * scheduled tick (or the next boot) simply tries again.
+ */
+export const REPUTATION_TICK_SCHEMA_VERSION = 1;
+export const reputationTickJobSchema = z.object({
+  schemaVersion: z.literal(REPUTATION_TICK_SCHEMA_VERSION),
+});
+export type ReputationTickJob = z.infer<typeof reputationTickJobSchema>;
+
+/**
+ * Phase 13 (CMP-04, D-01/D-04, plan 13-10): the erasure-scrub job's queue
+ * contract. Its own dedicated lane, not folded into any existing queue --
+ * this is a background PII-scrub walk over `sends`/`send_events`/`events`
+ * (plan 13-13), a structurally different concern from send dispatch,
+ * webhook ingestion, or flow advancement. Defined here rather than in
+ * plan 13-13 because THIS plan is the producer (`deleteContact`,
+ * `apps/api`) and this wave owns the schema file; 13-13 implements the
+ * consumer, and plan 13-15's reclaimer is the SECOND producer.
+ *
+ * `erasureRecordId` is the sole pointer this job needs -- the worker
+ * re-reads the `erasure_records` row for its current status/cursors
+ * (re-derive-everything-from-the-row, the same convention
+ * `campaignKickoffJobSchema`/`flowRunAdvanceJobSchema` use).
+ * `workspaceId`/`contactId` are carried too so the worker never has to
+ * open an admin-scan connection just to discover which tenant this job
+ * belongs to (Pattern 2: never trust ambient state).
+ */
+export const ERASURE_SCRUB_QUEUE = "erasure-scrub";
+export const ERASURE_SCRUB_SCHEMA_VERSION = 1;
+
+export const erasureScrubJobSchema = z.object({
+  schemaVersion: z.literal(ERASURE_SCRUB_SCHEMA_VERSION),
+  workspaceId: z.string().uuid(),
+  contactId: z.string().uuid(),
+  erasureRecordId: z.string().uuid(),
+});
+export type ErasureScrubJob = z.infer<typeof erasureScrubJobSchema>;
+
+/**
+ * Pure payload constructor -- mirrors `buildWebhookEventsJobPayload`'s own
+ * precedent (plan 13-01) for the identical two-producers-one-consumer
+ * shape: this plan's `deleteContact` and plan 13-15's reclaimer BOTH build
+ * this payload, so a single exported constructor is what keeps them from
+ * drifting on job shape while neither imports the other's app.
+ */
+export function buildErasureScrubJobPayload(
+  workspaceId: string,
+  contactId: string,
+  erasureRecordId: string
+): ErasureScrubJob {
+  return {
+    schemaVersion: ERASURE_SCRUB_SCHEMA_VERSION,
+    workspaceId,
+    contactId,
+    erasureRecordId,
+  };
+}
+
+/**
+ * Deterministic BullMQ `jobId`, derived from the erasure record's own id
+ * (mirrors `eventsIngestJobSchema`'s `eventId`-as-`jobId` convention: the
+ * work's own durable identifier, not a caller-invented string). There are
+ * TWO producers of this job -- this plan's `deleteContact` request path,
+ * and plan 13-15's reclaimer re-enqueueing a stranded `pending` record --
+ * and BOTH must derive the SAME id from the SAME erasure-record id, or a
+ * reclaim of an already-queued record would queue a second scrub. Exported
+ * from here (not computed inline at either call site) so that can never
+ * happen. NOTE for readers: BullMQ's own `jobId` deduplication is a
+ * best-effort layer, not the authoritative one -- once a completed job
+ * ages out of Redis (`STANDARD_JOB_RETENTION`), the same id can be
+ * enqueued again. The authoritative idempotency is plan 13-13's own
+ * already-complete check on the `erasure_records` row, which holds
+ * regardless of Redis state.
+ */
+export function buildErasureScrubJobId(erasureRecordId: string): string {
+  return erasureRecordId;
+}
+
+/**
+ * Phase 13 (CMP-04, D-04, R-05, plan 13-15): the reclaim tick's own
+ * `schemaVersion` payload -- mirrors `sendReconcilerTickJobSchema`'s shape
+ * and doc comment exactly (Phase 11): a rolling deploy can have an old-code
+ * worker still draining jobs enqueued by new code (or vice versa), so this
+ * tick's payload carries an explicit version a worker validates before
+ * acting on it. `createErasureScrubReclaimWorker`'s processor DEFERS (logs
+ * via `scrubbedConsole`, returns without processing) a `schemaVersion` it
+ * does not recognize, rather than throwing it into BullMQ retries -- a
+ * deferred tick never consumes one of the job's `attempts`, and the next
+ * scheduled tick (or the next boot) simply tries again.
+ */
+export const ERASURE_SCRUB_RECLAIM_TICK_SCHEMA_VERSION = 1;
+export const erasureScrubReclaimTickJobSchema = z.object({
+  schemaVersion: z.literal(ERASURE_SCRUB_RECLAIM_TICK_SCHEMA_VERSION),
+});
+export type ErasureScrubReclaimTickJob = z.infer<typeof erasureScrubReclaimTickJobSchema>;
+
+/**
+ * Phase 13 (CMP-04, D-04, plan 13-10): the `workspace_suppressions.reason`
+ * value written by an erasure. Exported as a shared constant, not an
+ * inline string literal, because THREE plans depend on this exact value --
+ * this one writes it, plan 13-12 rewrites the row it lives on when the
+ * suppression column becomes a hash, and the erasure re-import tests
+ * assert on it -- and a string literal repeated across three plans is how
+ * they silently drift. Distinct from the reasons a genuine unsubscribe or
+ * a provider suppression writes, which is what keeps "asked to leave" from
+ * being conflated with "asked to be forgotten" in consent history.
+ */
+export const SUPPRESSION_REASON_CONTACT_DELETED = "contact_deleted";

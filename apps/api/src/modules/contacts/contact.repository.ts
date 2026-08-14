@@ -1,9 +1,13 @@
+import { Queue } from "bullmq";
 import { getWorkspaceId, withTenantTransaction } from "../../middleware/tenant-context.js";
 import { isValidIanaTimezone } from "@mega-crm/delivery-core";
 import {
   CONTACT_COLUMNS,
+  ensureWorkspaceSuppressionKey,
+  hashSuppressionEmail,
   isEmailSuppressed,
   isEmailTaken,
+  normalizeSuppressionEmail,
   recordSubscriptionStatusChange,
   registerObservedProperties,
   upsertContactByIdentity,
@@ -12,6 +16,15 @@ import {
   type UpsertContactIdentityInput,
   type UpsertContactIdentityResult,
 } from "@mega-crm/contacts-core";
+import {
+  buildErasureScrubJobId,
+  buildErasureScrubJobPayload,
+  ERASURE_SCRUB_QUEUE,
+  SUPPRESSION_REASON_CONTACT_DELETED,
+  type ErasureScrubJob,
+} from "@mega-crm/shared-schemas";
+import { buildJobOptions, buildRedisConnectionOptions, STANDARD_JOB_RETENTION } from "@mega-crm/queue-core";
+import { env } from "../../env.js";
 
 // upsertContactByIdentity (CONT-04/EVNT-02) and its supporting helpers now
 // live in @mega-crm/contacts-core -- extracted in 02-06 so apps/worker's
@@ -108,7 +121,20 @@ export async function listContactEvents(
 export class ContactConflictError extends Error {
   constructor(
     message: string,
-    public readonly code: "email_taken" | "invalid_status_transition" | "cannot_set_suppressed"
+    public readonly code:
+      | "email_taken"
+      | "invalid_status_transition"
+      | "cannot_set_suppressed"
+      // CMP-04 (plan 13-10, Task 3): thrown by updateContact when the
+      // targeted row has already been anonymized. contacts.routes.ts
+      // deliberately maps THIS code to 404 (not the usual 409) -- an
+      // anonymized contact must never be presented to a tenant as a live
+      // contact (threat T-13-10-03's prohibition), so the wire-visible
+      // outcome is identical to "contact not found", the same as if the
+      // row had been hard-deleted. The typed error/code still exists so
+      // the refusal is explicit internally (logging, tests) rather than a
+      // silent zero-row UPDATE or an accidental PII repopulation.
+      | "contact_anonymized"
   ) {
     super(message);
     this.name = "ContactConflictError";
@@ -139,11 +165,17 @@ function assertValidTimezone(timezone: string | null | undefined): void {
   }
 }
 
-/** D-13: search (email/first_name/last_name/external_id) + status/tag filters, sort, offset/limit pagination. */
+/**
+ * D-13: search (email/first_name/last_name/external_id) + status/tag filters,
+ * sort, offset/limit pagination. `anonymized_at IS NULL` (CMP-04, plan
+ * 13-10, Task 3) is a tenant-visibility filter, not a soft-delete
+ * convention -- evidence queries over sends/send_events/
+ * subscription_status_history deliberately do NOT apply it.
+ */
 export async function listContacts(query: ListContactsQuery): Promise<ListContactsResult> {
   return withTenantTransaction(async (client) => {
     const workspaceId = getWorkspaceId();
-    const conditions: string[] = ["workspace_id = $1"];
+    const conditions: string[] = ["workspace_id = $1", "anonymized_at IS NULL"];
     const params: unknown[] = [workspaceId];
 
     if (query.search) {
@@ -204,11 +236,25 @@ export async function listContacts(query: ListContactsQuery): Promise<ListContac
   });
 }
 
+/**
+ * CMP-04/T-13-10-03 (plan 13-10, Task 2 deviation Rule 3): `anonymized_at IS
+ * NULL` is pulled forward into THIS task rather than left for Task 3's full
+ * enumeration, because Task 2's own `<verify>` runs `contact-crud.test.ts`,
+ * whose "delete removes the contact -- subsequent GET is 404" assertion
+ * would otherwise regress the moment `deleteContact` stops hard-deleting
+ * the row below: an anonymized row with no filter here would make this
+ * read return 200 with a nameless, emailless contact instead of 404. Task
+ * 3 still owns the FULL enumeration (list, count, isEmailTaken, the
+ * contacts-core identity lookups, segment/audience reads) and records it
+ * in the SUMMARY -- this is a tenant-visibility filter, not a soft-delete
+ * convention, and evidence queries over sends/send_events/
+ * subscription_status_history deliberately do NOT apply it.
+ */
 export async function getContact(id: string): Promise<ContactRow | null> {
   return withTenantTransaction(async (client) => {
     const workspaceId = getWorkspaceId();
     const { rows } = await client.query<ContactRow>(
-      `SELECT ${CONTACT_COLUMNS} FROM contacts WHERE workspace_id = $1 AND id = $2`,
+      `SELECT ${CONTACT_COLUMNS} FROM contacts WHERE workspace_id = $1 AND id = $2 AND anonymized_at IS NULL`,
       [workspaceId, id]
     );
     return rows[0] ?? null;
@@ -281,12 +327,22 @@ export async function updateContact(id: string, patch: UpdateContactInput): Prom
 
   return withTenantTransaction(async (client) => {
     const workspaceId = getWorkspaceId();
-    const { rows: existingRows } = await client.query<ContactRow>(
-      `SELECT ${CONTACT_COLUMNS} FROM contacts WHERE workspace_id = $1 AND id = $2 FOR UPDATE`,
+    // CMP-04 (plan 13-10, Task 3): reads `anonymized_at` too, in addition to
+    // CONTACT_COLUMNS -- deliberately NOT filtered by `anonymized_at IS
+    // NULL` here (unlike every OTHER read in this file), because this
+    // function needs to tell "no such contact" (existing is undefined)
+    // apart from "found, but anonymized" (existing.anonymizedAt is set) so
+    // it can refuse the second case explicitly rather than silently
+    // updating zero rows or repopulating a scrubbed column.
+    const { rows: existingRows } = await client.query<ContactRow & { anonymizedAt: Date | null }>(
+      `SELECT ${CONTACT_COLUMNS}, anonymized_at as "anonymizedAt" FROM contacts WHERE workspace_id = $1 AND id = $2 FOR UPDATE`,
       [workspaceId, id]
     );
     const existing = existingRows[0];
     if (!existing) return null;
+    if (existing.anonymizedAt !== null) {
+      throw new ContactConflictError(`Contact ${id} has been anonymized and cannot be modified`, "contact_anonymized");
+    }
 
     let nextEmail = existing.email;
     if (patch.email !== undefined && patch.email !== existing.email) {
@@ -378,30 +434,198 @@ export async function updateContact(id: string, patch: UpdateContactInput): Prom
   });
 }
 
-/** D-08: an unsubscribed/suppressed contact's email is preserved in the workspace suppression list on delete. */
-export async function deleteContact(id: string): Promise<boolean> {
-  return withTenantTransaction(async (client) => {
+/**
+ * Producer-side BullMQ Queue for ERASURE_SCRUB_QUEUE (CMP-04, plan 13-10) --
+ * the consumer is plan 13-13's future scrub worker. Module-singleton, built
+ * through the shared `@mega-crm/queue-core` factory (Phase 12, WRK-11,
+ * D-10) like every other producer in this codebase -- never a hand-rolled
+ * connection/job-options literal.
+ */
+const erasureScrubQueue = new Queue<ErasureScrubJob>(ERASURE_SCRUB_QUEUE, {
+  connection: buildRedisConnectionOptions(env.REDIS_URL),
+  defaultJobOptions: buildJobOptions(STANDARD_JOB_RETENTION),
+});
+
+async function defaultEnqueueErasureScrub(payload: ErasureScrubJob, jobId: string): Promise<void> {
+  await erasureScrubQueue.add("erasure-scrub", payload, { jobId });
+}
+
+export interface DeleteContactDeps {
+  /**
+   * Test-only failure-injection seam (T-13-10-02's atomicity criterion):
+   * called immediately BEFORE the `erasure_records` INSERT, inside the same
+   * transaction as the anonymizing UPDATE and the suppression INSERT.
+   * Throwing here proves all three writes roll back together. Defaults to
+   * a no-op so every existing caller is unaffected.
+   */
+  beforeErasureRecordWrite?: () => Promise<void> | void;
+  /**
+   * Enqueues the erasure-scrub job AFTER the transaction commits -- never
+   * inside it (REVIEWS.md (Codex) BLOCKER finding 3: a job enqueued inside
+   * a transaction that then rolls back would reference an `erasure_records`
+   * id that never existed, which nothing in the system can distinguish
+   * from a bug; a committed erasure whose enqueue fails is instead a
+   * durable `pending` `erasure_records` row plan 13-15's reclaimer can find
+   * and re-enqueue). Injectable so plan 13-15's failure-injection scenario
+   * -- and this plan's own enqueue-failure acceptance criterion -- can fail
+   * this exact seam without a live BullMQ Queue/Redis round trip or a
+   * module-singleton stub. Defaults to the real `erasureScrubQueue.add`.
+   */
+  enqueueErasureScrub?: (payload: ErasureScrubJob, jobId: string) => Promise<void>;
+}
+
+interface DeleteContactTxResult {
+  erased: boolean;
+  alreadyAnonymized: boolean;
+  workspaceId: string;
+  erasureRecordId?: string;
+}
+
+/**
+ * CMP-04 (D-01/D-04, plan 13-10): erasure, not row removal. The row and its
+ * foreign keys (`sends`, `subscription_status_history`, `events`) survive;
+ * mail stops in THIS request because the suppression entry and status are
+ * resolved here, synchronously; the JSONB PII in linked `send_events` and
+ * `events` rows is scrubbed asynchronously by the job this enqueues,
+ * tracked to completion by the `erasure_records` row it writes.
+ *
+ * Inside one transaction, in order:
+ *  1. `SELECT ... FOR UPDATE` captures the pre-erasure email/status/
+ *     anonymized_at under a row lock, BEFORE anything is written. `FOR
+ *     UPDATE` holds the row against a concurrent delete/update for the
+ *     rest of the transaction, so the address captured here is provably
+ *     the address the anonymizing UPDATE is about to scrub. A row with a
+ *     non-null `anonymizedAt` short-circuits here (already erased --
+ *     return true, write nothing further, so a retried request cannot
+ *     create a second erasure record or a second scrub job).
+ *  2. The anonymizing UPDATE nulls every PII/identity column named in the
+ *     schema (`email`, `first_name`, `last_name`, `phone`, `external_id`,
+ *     `city`, `country`, `timezone`) and empties `tags`/`properties`
+ *     ([Rule 2 - Missing critical functionality]: the plan's own text names
+ *     only email/first_name/last_name/phone/external_id/attributes, but
+ *     `contacts` has no `attributes` column -- the freeform JSONB bag is
+ *     named `properties` -- and Task 1's schema read additionally surfaced
+ *     four more personal-data columns the plan text never named: `city`,
+ *     `country`, `timezone`, `tags`. T-13-10-01's disposition is
+ *     `mitigate` against "incomplete PII scrub", which makes closing this
+ *     gap a correctness requirement, not a scope expansion). `external_id`
+ *     is scrubbed here (not merely filtered in Task 3's reads) because the
+ *     shared identity lookup in `packages/contacts-core/src/contact-repository.ts`
+ *     resolves external_id BEFORE email -- an anonymized row that kept it
+ *     would stay addressable by the one identifier erasure did not remove.
+ *     Steps 2 and later NEVER read a value back from THIS statement's own
+ *     `RETURNING` -- Postgres's `RETURNING` yields POST-update values, so
+ *     an `UPDATE ... SET email = NULL ... RETURNING email` would return
+ *     null. Every downstream write below uses the value captured in step 1.
+ *  3. The suppression INSERT runs UNCONDITIONALLY on every erasure -- not
+ *     gated on the pre-erasure subscription status (REVIEWS.md (Codex)
+ *     BLOCKER finding 1: the old gate left a currently-subscribed contact's
+ *     address freely re-importable and immediately mailable after erasure,
+ *     the exact outcome CMP-04 exists to prevent). The ONE surviving guard
+ *     is a null captured email -- a contact with no address has nothing to
+ *     hash and nothing to suppress (CMP-04, D-02, plan 13-12: this insert
+ *     writes only `email_hash`, computed from the captured address under
+ *     this workspace's own key; see step 3's own code comment).
+ *  4. The `beforeErasureRecordWrite` test seam, then the `erasure_records`
+ *     INSERT (`status = 'pending'`) -- in the SAME transaction as steps 2-3,
+ *     so a crash cannot leave an anonymized row with no auditable record of
+ *     why, and an injected failure here rolls back the anonymization and
+ *     the suppression insert too.
+ *
+ * AFTER the transaction commits (never inside it, see `DeleteContactDeps`'s
+ * own comment), exactly one erasure-scrub job is enqueued with a
+ * deterministic `jobId` derived from the erasure record's own id
+ * (`buildErasureScrubJobId`) -- calling delete twice for the same contact
+ * therefore enqueues at most one job, because the second call's row lock
+ * finds `anonymizedAt` already set and returns before reaching step 2.
+ */
+export async function deleteContact(id: string, deps: DeleteContactDeps = {}): Promise<boolean> {
+  const result = await withTenantTransaction(async (client): Promise<DeleteContactTxResult> => {
     const workspaceId = getWorkspaceId();
-    const { rows } = await client.query<{ email: string | null; subscriptionStatus: SubscriptionStatus }>(
-      `DELETE FROM contacts WHERE workspace_id = $1 AND id = $2
-       RETURNING email, subscription_status as "subscriptionStatus"`,
+
+    // Step 1: capture pre-erasure identity under a row lock, before
+    // anything is written.
+    const { rows } = await client.query<{
+      email: string | null;
+      subscriptionStatus: SubscriptionStatus;
+      anonymizedAt: Date | null;
+    }>(
+      `SELECT email, subscription_status as "subscriptionStatus", anonymized_at as "anonymizedAt"
+       FROM contacts WHERE workspace_id = $1 AND id = $2 FOR UPDATE`,
       [workspaceId, id]
     );
-    const deleted = rows[0];
-    if (!deleted) return false;
+    const existing = rows[0];
+    if (!existing) {
+      return { erased: false, alreadyAnonymized: false, workspaceId };
+    }
+    if (existing.anonymizedAt !== null) {
+      // Already erased -- idempotent no-op, no second record/job.
+      return { erased: true, alreadyAnonymized: true, workspaceId };
+    }
 
-    if (
-      deleted.email &&
-      (deleted.subscriptionStatus === "unsubscribed" || deleted.subscriptionStatus === "suppressed")
-    ) {
+    // Step 2: the anonymizing UPDATE. Computed once in JS (not two separate
+    // `now()` calls) so the same instant is written to both `contacts.anonymized_at`
+    // and `erasure_records.anonymized_at` below.
+    const anonymizedAt = new Date();
+    await client.query(
+      `UPDATE contacts SET
+         email = NULL,
+         first_name = NULL,
+         last_name = NULL,
+         phone = NULL,
+         external_id = NULL,
+         city = NULL,
+         country = NULL,
+         timezone = NULL,
+         tags = '{}',
+         properties = '{}'::jsonb,
+         anonymized_at = $3,
+         updated_at = now()
+       WHERE workspace_id = $1 AND id = $2 AND anonymized_at IS NULL`,
+      [workspaceId, id, anonymizedAt]
+    );
+
+    // Step 3: unconditional suppression write, from the value captured in
+    // step 1 -- the ONE surviving guard is a null captured email. CMP-04
+    // (D-02, plan 13-12): hashes the captured address under this workspace's
+    // own key and writes ONLY the hash -- never the plaintext `email`
+    // column, which this write site no longer populates at all.
+    // `ensureWorkspaceSuppressionKey` is safe to call unconditionally here
+    // (unlike the read-only `isEmailSuppressed`): this write site is the
+    // first-ever suppression for a workspace exactly once, and creating the
+    // key on that occasion is the intended, one-time cost.
+    if (existing.email) {
+      const key = await ensureWorkspaceSuppressionKey(client, workspaceId);
+      const hash = hashSuppressionEmail(normalizeSuppressionEmail(existing.email), key);
       await client.query(
-        `INSERT INTO workspace_suppressions (workspace_id, email, reason)
-         VALUES ($1, $2, 'contact_deleted')
-         ON CONFLICT (workspace_id, email) DO NOTHING`,
-        [workspaceId, deleted.email]
+        `INSERT INTO workspace_suppressions (workspace_id, email_hash, reason)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (workspace_id, email_hash) DO NOTHING`,
+        [workspaceId, hash, SUPPRESSION_REASON_CONTACT_DELETED]
       );
     }
 
-    return true;
+    // Step 4: the auditable proof, same transaction as steps 2-3.
+    await deps.beforeErasureRecordWrite?.();
+    const { rows: erasureRows } = await client.query<{ id: string }>(
+      `INSERT INTO erasure_records (workspace_id, contact_id, anonymized_at)
+       VALUES ($1, $2, $3)
+       RETURNING id`,
+      [workspaceId, id, anonymizedAt]
+    );
+
+    return { erased: true, alreadyAnonymized: false, workspaceId, erasureRecordId: erasureRows[0].id };
   });
+
+  // AFTER commit: enqueue exactly one scrub job for a fresh erasure. Never
+  // for the already-anonymized short-circuit (no new erasure record to
+  // scrub) and never for "no such contact".
+  if (result.erased && !result.alreadyAnonymized && result.erasureRecordId) {
+    const jobId = buildErasureScrubJobId(result.erasureRecordId);
+    const payload = buildErasureScrubJobPayload(result.workspaceId, id, result.erasureRecordId);
+    const enqueue = deps.enqueueErasureScrub ?? defaultEnqueueErasureScrub;
+    await enqueue(payload, jobId);
+  }
+
+  return result.erased;
 }

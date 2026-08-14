@@ -9,12 +9,16 @@ function def(groups: SegmentDefinition["groups"]): SegmentDefinition {
 }
 
 describe("compileSegmentDefinition -- attribute conditions", () => {
-  it("compiles a standard eq condition with the leading workspace_id clause", () => {
+  it("compiles a standard eq condition with the leading workspace_id + anonymized_at clauses", () => {
     const result = compileSegmentDefinition(
       def([{ conditions: [{ type: "attribute", source: "standard", field: "country", operator: "eq", value: "RU" }] }]),
       WSID
     );
-    expect(result.whereSql.startsWith("c.workspace_id = $1 AND (")).toBe(true);
+    // CMP-04 (plan 13-10): the base predicate gained `c.anonymized_at IS
+    // NULL` right after workspace_id -- a single source every count/list/
+    // point-check/audience caller compiles through, so an erased contact
+    // is never counted or matched anywhere this engine is used.
+    expect(result.whereSql.startsWith("c.workspace_id = $1 AND c.anonymized_at IS NULL AND (")).toBe(true);
     expect(result.whereSql).toContain("c.country = $2");
     expect(result.params).toEqual([WSID, "RU"]);
   });
@@ -273,7 +277,9 @@ describe("compileSegmentDefinition -- two-tier AND/OR parenthesization (Pitfall 
     );
 
     // Each group is its own parenthesized OR clause; groups joined by AND.
-    const groupPattern = /^c\.workspace_id = \$1 AND \(c\.country = \$2 OR c\.country = \$3\) AND \(EXISTS \(/;
+    // CMP-04 (plan 13-10): `c.anonymized_at IS NULL` sits between the
+    // workspace_id clause and the first group.
+    const groupPattern = /^c\.workspace_id = \$1 AND c\.anonymized_at IS NULL AND \(c\.country = \$2 OR c\.country = \$3\) AND \(EXISTS \(/;
     expect(result.whereSql).toMatch(groupPattern);
     expect(result.params).toEqual([WSID, "RU", "KZ", "order_placed", 30]);
   });

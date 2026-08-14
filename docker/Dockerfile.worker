@@ -1,0 +1,125 @@
+# syntax=docker/dockerfile:1
+#
+# Phase 14 plan 06 (OPS-01, D-03). Multi-stage build for @mega-crm/worker.
+#
+# Node 22 LTS is pinned as a LITERAL below and must stay that way -- this
+# repo's own .nvmrc pins Node 26 for dev/CI, and STATE.md records the
+# drizzle-kit CLI hanging under that version in this project's own sandbox.
+# `FROM node:$(cat .nvmrc)`-style derivation would silently reintroduce that
+# hang into production. If a future "unify the Node version" change ever
+# touches this file, re-read this comment and STATE.md's Phase 12 note first.
+
+########################################
+# Stage 1: deps -- install the full workspace, including devDependencies
+# (needed by Stage 2's tsc build). Manifests are copied before any source so
+# this layer is cache-stable across source-only changes; every workspace's
+# package.json must be present before `npm ci`, or the lockfile in a
+# workspaces monorepo will not resolve.
+########################################
+FROM node:22-slim AS deps
+WORKDIR /app
+COPY package.json package-lock.json ./
+COPY apps/api/package.json apps/api/package.json
+COPY apps/worker/package.json apps/worker/package.json
+COPY apps/web/package.json apps/web/package.json
+COPY packages/contacts-core/package.json packages/contacts-core/package.json
+COPY packages/db/package.json packages/db/package.json
+COPY packages/delivery-core/package.json packages/delivery-core/package.json
+COPY packages/flows-core/package.json packages/flows-core/package.json
+COPY packages/kms/package.json packages/kms/package.json
+COPY packages/queue-core/package.json packages/queue-core/package.json
+COPY packages/redaction/package.json packages/redaction/package.json
+COPY packages/segments-core/package.json packages/segments-core/package.json
+COPY packages/shared-schemas/package.json packages/shared-schemas/package.json
+COPY packages/tenant-context/package.json packages/tenant-context/package.json
+COPY packages/test-support/package.json packages/test-support/package.json
+RUN npm ci
+
+########################################
+# Stage 2: build -- compile apps/worker's own src, then compile every shared
+# `packages/*` workspace to real dist/ output and repoint its package.json at
+# that output. Every `packages/*` workspace ships with `"main":
+# "./src/index.ts"` and `noEmit: true` in its own tsconfig.json BY DESIGN (so
+# tsx/vitest read it as TypeScript source in dev and tests) -- plain `node`
+# cannot resolve that package's OWN internal relative "./foo.js" imports
+# against a sibling "foo.ts" file (confirmed empirically; see
+# docker/patch-workspace-mains.mjs's header and 14-06-SUMMARY.md). This is the
+# general fix plan 14-04's own SUMMARY flagged forward to this plan.
+########################################
+FROM deps AS build
+COPY . .
+RUN npm run build -w apps/worker
+RUN node docker/patch-workspace-mains.mjs
+
+# Cleanup: strip test output from every dist/ this stage produced. apps/worker's
+# own tsconfig has no test exclude (matching this repo's pre-existing
+# `npm run build` behavior elsewhere), so its dist/ picks up compiled
+# __tests__ files unless removed here; packages/*/dist already excludes them
+# at compile time (see patch-workspace-mains.mjs) but this is defensive.
+RUN find apps/worker/dist packages/*/dist -type d -name '__tests__' -prune -exec rm -rf {} + \
+ && find apps/worker/dist packages/*/dist -type f -name '*.test.*' -delete
+
+# Production-only dependency tree -- devDependencies (typescript, tsx,
+# vitest, fastify (dev-only here), ...) are needed to build, never to run.
+RUN npm prune --omit=dev
+
+########################################
+# Stage 3: runtime -- only what the worker process needs at boot. No
+# devtools, no test files, no other app's source.
+########################################
+FROM node:22-slim AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/package.json ./package.json
+
+COPY --from=build /app/apps/worker/package.json ./apps/worker/package.json
+COPY --from=build /app/apps/worker/dist ./apps/worker/dist
+
+COPY --from=build /app/packages/contacts-core/package.json ./packages/contacts-core/package.json
+COPY --from=build /app/packages/contacts-core/dist ./packages/contacts-core/dist
+COPY --from=build /app/packages/db/package.json ./packages/db/package.json
+COPY --from=build /app/packages/db/dist ./packages/db/dist
+COPY --from=build /app/packages/delivery-core/package.json ./packages/delivery-core/package.json
+COPY --from=build /app/packages/delivery-core/dist ./packages/delivery-core/dist
+COPY --from=build /app/packages/flows-core/package.json ./packages/flows-core/package.json
+COPY --from=build /app/packages/flows-core/dist ./packages/flows-core/dist
+COPY --from=build /app/packages/kms/package.json ./packages/kms/package.json
+COPY --from=build /app/packages/kms/dist ./packages/kms/dist
+COPY --from=build /app/packages/queue-core/package.json ./packages/queue-core/package.json
+COPY --from=build /app/packages/queue-core/dist ./packages/queue-core/dist
+COPY --from=build /app/packages/redaction/package.json ./packages/redaction/package.json
+COPY --from=build /app/packages/redaction/dist ./packages/redaction/dist
+COPY --from=build /app/packages/segments-core/package.json ./packages/segments-core/package.json
+COPY --from=build /app/packages/segments-core/dist ./packages/segments-core/dist
+COPY --from=build /app/packages/shared-schemas/package.json ./packages/shared-schemas/package.json
+COPY --from=build /app/packages/shared-schemas/dist ./packages/shared-schemas/dist
+COPY --from=build /app/packages/tenant-context/package.json ./packages/tenant-context/package.json
+COPY --from=build /app/packages/tenant-context/dist ./packages/tenant-context/dist
+
+# DRIZZLE_MIGRATIONS_FOLDER (packages/db/src/migration-journal.ts) resolves to
+# "../migrations" relative to wherever migration-journal.js is loaded from --
+# the worker's own health server calls assertMigrationsCurrent (D-13) exactly
+# like the api's /readyz does, so it needs the same sibling migrations dir.
+COPY --from=build /app/packages/db/migrations ./packages/db/migrations
+
+# apps/worker/src/load-env.ts imports scripts/env-path.mjs via a relative
+# "../../../scripts/env-path.mjs" specifier -- this exact repo-root-relative
+# path is why WORKDIR must stay /app and this tree must stay unflattened.
+COPY --from=build /app/scripts/env-path.mjs ./scripts/env-path.mjs
+
+# The node:22-slim image ships a non-root "node" user (uid 1000) already --
+# reuse it rather than create a new one.
+USER node
+
+# WORKER_HEALTH_HOST is 127.0.0.1-only (plan 14-04, D-14) -- never published
+# via `ports:` in compose; this EXPOSE is documentation for `docker inspect`,
+# not a host port mapping. No stdlib HTTP server anywhere else in this image.
+EXPOSE 4100
+
+# Exec form, "node" as the literal first element -- never an npm wrapper.
+# npm does not forward SIGTERM to its child process; wrapping this in
+# `npm start` would make apps/worker/src/shutdown-budget.ts's entire derived
+# drain budget inert while looking correctly configured (plan 14-04).
+CMD ["node", "apps/worker/dist/server.js"]

@@ -15,3 +15,15 @@ playwright/.cache/
 
 .planning/
 .claude/
+
+# Phase 14 plan 03 (DB-13, T-14-15): TLS certificate/key material for the
+# dev/CI Postgres container. Generated INSIDE the container by
+# docker/pg-tls-entrypoint.sh into the named `mega_crm_db_certs` volume, never
+# bind-mounted into this working tree by design -- ignored here defensively
+# anyway, so a private key can never be committed even if a future change (a
+# local debugging bind-mount, a different compose override) puts one on disk
+# under docker/.
+docker/certs/
+docker/*.key
+docker/*.pem
+docker/*.crt

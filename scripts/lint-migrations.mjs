@@ -10,6 +10,12 @@
 //      one client.query(sql) call — so the file is a guaranteed runtime failure.
 //      This is the rule that protects Phase 11's 'reconciling' addition.
 //   2. Destructive DDL with no visible, reason-bearing marker.
+//   3. A drizzle statement delimiter (`--> statement-breakpoint`) sitting
+//      somewhere other than a statement boundary — most often the literal
+//      quoted inside a comment that is *discussing* the convention. drizzle
+//      splits the raw file on that literal regardless of context, so the prose
+//      after it becomes a bogus statement. Added after migration 0057 shipped
+//      exactly that and failed at apply time with 42601.
 //
 // The written half — the binding rule text — lives in CONVENTIONS.md (08-17).
 //
@@ -216,8 +222,103 @@ export function checkDestructiveDdl(file, rawSql) {
   return violations;
 }
 
+/**
+ * The literal drizzle splits every migration file on.
+ *
+ * Load-bearing, and the reason rule 3 exists: `readMigrationFiles`
+ * (drizzle-orm/migrator.js) runs a plain
+ * `query.split("--> statement-breakpoint")` over the RAW file bytes — no
+ * comment awareness, no trimming, no empty-chunk filtering — and
+ * `PgDialect.migrate` then executes every resulting chunk verbatim via
+ * `tx.execute(sql.raw(chunk))`. Because the delimiter is ITSELF a `--`
+ * comment, it can hide inside another comment while remaining fully active as
+ * a delimiter, which is precisely how this defect reaches production.
+ */
+const STATEMENT_BREAKPOINT = "--> statement-breakpoint";
+
+/**
+ * Rule 3 — a statement delimiter that is not at a statement boundary.
+ *
+ * Two accepted placements, both of which drizzle-kit `generate` emits and both
+ * of which are proven against the 97 legitimate occurrences in this repo's
+ * generated migrations:
+ *
+ *   1. Alone on its own line (leading indentation tolerated).
+ *   2. Directly after a completed statement's `;` — e.g.
+ *      `ALTER TABLE ... ON UPDATE no action;--> statement-breakpoint`.
+ *
+ * Anything else is a violation, for one of two distinct reasons:
+ *
+ *   - Text FOLLOWS the delimiter on the same line. That text becomes the first
+ *     characters of the next statement drizzle executes. This is what migration
+ *     0057 shipped: the delimiter appeared inside a backticked code span in a
+ *     comment discussing the convention, so the chunk after the split began
+ *     with a bare backtick and Postgres rejected it with
+ *     `42601: syntax error at or near "\`"`.
+ *   - The delimiter does NOT follow a completed statement. Then the chunk
+ *     BEFORE it is cut mid-statement (e.g. a `CREATE TABLE (` with no closing
+ *     paren), which fails just as hard in the other direction.
+ *
+ * Scope limit, stated for the same reason `maskSqlComments` states its own: the
+ * check is lexical and does not track single-quoted string literals or
+ * dollar-quoted (`$$ ... $$`) bodies. A delimiter alone on its own line INSIDE
+ * a dollar-quoted body would pass this rule and still split the body — no
+ * migration here does that, and detecting it needs the dollar-quote tracking
+ * that is already a documented follow-up.
+ *
+ * Deliberately NOT implemented via `maskSqlComments`: masking blanks everything
+ * from a comment opener onward, and the delimiter opens a comment itself, so a
+ * masked prefix is all-spaces for BOTH the legitimate and the illegitimate
+ * case — it cannot discriminate them. The raw line is the only text that can.
+ */
+export function checkStatementBreakpointPlacement(file, rawSql) {
+  const violations = [];
+  const lines = rawSql.split("\n");
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    let col = line.indexOf(STATEMENT_BREAKPOINT);
+
+    while (col !== -1) {
+      const before = line.slice(0, col);
+      const after = line.slice(col + STATEMENT_BREAKPOINT.length);
+
+      // `after` never contains a newline (we are inside one line), so `\s*`
+      // here means "trailing spaces, tabs, or a stray CR" — all harmless,
+      // since the resulting chunk merely starts with whitespace.
+      const endsLine = /^\s*$/.test(after);
+      const atBoundary = /^\s*$/.test(before) || /;\s*$/.test(before);
+
+      if (!endsLine || !atBoundary) {
+        const detail = !endsLine
+          ? `line ${i + 1} has text after the drizzle delimiter "${STATEMENT_BREAKPOINT}" (${JSON.stringify(
+              after.length > 40 ? `${after.slice(0, 40)}…` : after,
+            )}); drizzle splits the raw file on that literal even inside a comment, so this text becomes the start of the next statement. Reword the prose so it does not contain the literal (dropping the "-->" is enough).`
+          : `line ${i + 1} places the drizzle delimiter "${STATEMENT_BREAKPOINT}" after text that is not a completed statement (${JSON.stringify(
+              before.length > 40 ? `…${before.slice(-40)}` : before,
+            )}); the chunk before the split would be cut mid-statement.`;
+
+        violations.push({
+          file,
+          rule: "statement-breakpoint-misplaced",
+          line: i + 1,
+          detail,
+        });
+      }
+
+      col = line.indexOf(STATEMENT_BREAKPOINT, col + STATEMENT_BREAKPOINT.length);
+    }
+  }
+
+  return violations;
+}
+
 export function lintMigrationFile(file, rawSql) {
-  return [...checkEnumAddValueSameFile(file, rawSql), ...checkDestructiveDdl(file, rawSql)];
+  return [
+    ...checkEnumAddValueSameFile(file, rawSql),
+    ...checkDestructiveDdl(file, rawSql),
+    ...checkStatementBreakpointPlacement(file, rawSql),
+  ];
 }
 
 export function lintMigrationDirectory(dir) {
