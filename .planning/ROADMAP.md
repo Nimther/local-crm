@@ -569,7 +569,66 @@ Plans:
   4. The app loads with route-level code splitting — canvas and heavy dashboard chunks arrive only when those routes are opened.
   5. A failed API call, an empty list, a paginated list, stale analytics and unsaved canvas changes each show the user what is actually true rather than a blank or silently-wrong screen.
 
-**Plans**: TBD
+**Plans**: 18 plans (13 waves, tracer-first). Backend plans are largely sequential by necessity — `SPECIFICATION.md`, root `package.json` and `package-lock.json` are hub files touched by most of them, and this repository's convention allows one migration slot per phase. Frontend plans run in parallel against them (no shared file) in waves 2–5 and wave 10. All dependency installs are consolidated into wave 1 so the lockfile is mutated exactly once.
+
+Plans:
+**Wave 1**
+
+- [ ] 15-01-PLAN.md — Dependency gate: blocking package-legitimacy checkpoint, all installs, `fastify` promoted to a runtime dep, out-of-scope scope notes
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 15-02-PLAN.md — TRACER: one correlation id from HTTP request through queue job to Postgres `application_name` (merge-safe ALS, worker Pino logger, one wired send path)
+- [ ] 15-03-PLAN.md — Data-router migration + `React.lazy` routes + pinned vendor chunks + CI chunk-boundary check (OPS-16)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 15-04-PLAN.md — Deepened pino redaction + behavioural API/worker uniformity test (OPS-07)
+- [ ] 15-05-PLAN.md — Shared inline error/empty components + contacts, segments, send-log conversion (OPS-17)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 15-06-PLAN.md — `sentryBeforeSend` + leak-fixture test wired as a blocking CI gate (OPS-09, Pitfall 18)
+- [ ] 15-07-PLAN.md — Campaigns, flows, dashboard, team and settings error/empty conversion (OPS-17)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 15-08-PLAN.md — Shared BullMQ processor wrapper across every factory + control-flow allowlist + `console.*` retirement (OPS-06)
+- [ ] 15-09-PLAN.md — Unsaved canvas guard: router blocker, `beforeunload`, persistent save-error banner (OPS-19)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 15-10-PLAN.md — Sentry init for API + worker behind a one-way-door decision checkpoint (OPS-08)
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
+- [ ] 15-11-PLAN.md — Web Sentry (errors only) + route error boundary + build-time DSN pipeline (OPS-08/OPS-17)
+
+**Wave 8** *(blocked on Wave 7 completion)*
+
+- [ ] 15-12-PLAN.md — Migration 0064: keyed `ops_alert_state` + rollup watermark, claim primitive, analytics freshness API (OPS-13/OPS-18)
+
+**Wave 9** *(blocked on Wave 8 completion)*
+
+- [ ] 15-13-PLAN.md — Queue-depth and oldest-job-age watchdogs (OPS-13)
+
+**Wave 10** *(blocked on Wave 9 completion)*
+
+- [ ] 15-14-PLAN.md — Webhook-lag and failed-send-share watchdogs + boot wiring for all four (OPS-13)
+- [ ] 15-15-PLAN.md — Data-as-of label + conditional stale-analytics banner (OPS-18)
+
+**Wave 11** *(blocked on Wave 10 completion)*
+
+- [ ] 15-16-PLAN.md — Bull Board on the loopback-only worker health server, contract pinned first (OPS-14)
+
+**Wave 12** *(blocked on Wave 11 completion)*
+
+- [ ] 15-17-PLAN.md — Grafana Alloy sidecar, bounded log rotation, cloud backstop alert rules (OPS-10)
+
+**Wave 13** *(blocked on Wave 12 completion)*
+
+- [ ] 15-18-PLAN.md — Runbook per alert + Bull Board access runbook + runbook-coverage gate + ARCHITECTURE.md (OPS-15)
+
 **UI hint**: yes
 
 **Sequencing and pitfall notes:**
