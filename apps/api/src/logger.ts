@@ -1,5 +1,6 @@
 import pino from "pino";
 import { PINO_REDACT_OPTIONS } from "@mega-crm/redaction";
+import { getCorrelationContext } from "@mega-crm/tenant-context";
 import { env } from "./env.js";
 
 /**
@@ -17,8 +18,21 @@ import { env } from "./env.js";
  * properties, webhook bodies) go through `@mega-crm/redaction`'s `scrub()`
  * instead, which has no depth ceiling and also matches by value pattern
  * (provider key shape, email, phone) -- see that package's doc comments.
+ *
+ * Phase 15 plan 02 (OPS-11, RESEARCH.md Pattern 1): `mixin()` runs on EVERY
+ * log call and merges its return value into that line's fields -- the
+ * zero-parameter-threading mechanism that stamps `requestId`/`workspaceId`/
+ * `jobId`/`sendId` onto every log line without any call site passing them
+ * explicitly. `getCorrelationContext()` returns `{}` when no ALS scope is
+ * active (e.g. a boot-time log line before any request has started), so this
+ * never throws. Only ever returns the four correlation ids themselves --
+ * never contact data or payloads (T-15-05) -- pino's own `redact` above still
+ * applies to the rest of the line regardless.
  */
 export const logger = pino({
   level: env.NODE_ENV === "test" ? "silent" : "info",
   redact: PINO_REDACT_OPTIONS,
+  mixin() {
+    return getCorrelationContext();
+  },
 });

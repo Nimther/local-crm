@@ -145,6 +145,45 @@ export function getWorkspaceId(): string {
 }
 
 /**
+ * Phase 15 plan 02 (OPS-12, RESEARCH.md Pattern 4): Postgres truncates
+ * `application_name` at 63 bytes -- silently, at whatever byte happens to
+ * land on the boundary. This budget is the SAME 63 the server enforces, held
+ * here as a named constant (not a magic number at the call site below) so a
+ * future author who wants to append a third field to the composed value
+ * re-checks this budget instead of discovering the silent Postgres cut in
+ * production. Do not raise this without also widening the column Postgres
+ * itself uses -- it cannot be raised on our side alone.
+ */
+export const APPLICATION_NAME_BYTE_BUDGET = 63;
+
+/**
+ * Composes the `application_name` value from the current correlation store:
+ * a compact `req=<requestId or -> job=<jobId or ->` pair. Deterministically
+ * truncated to `APPLICATION_NAME_BYTE_BUDGET` bytes -- not left to Postgres's
+ * own silent truncation -- and truncated on a whole-character boundary (never
+ * mid multi-byte UTF-8 sequence), since `requestId` ultimately derives from
+ * an attacker-controlled `x-request-id` header (T-15-04) upstream of this
+ * function, even though the request-id gate itself (plan 15-02 task 3)
+ * constrains that header to a bounded-length safe character set before it
+ * ever reaches here.
+ */
+export function composeApplicationName(ctx: CorrelationStore): string {
+  const raw = `req=${ctx.requestId ?? "-"} job=${ctx.jobId ?? "-"}`;
+  if (Buffer.byteLength(raw, "utf8") <= APPLICATION_NAME_BYTE_BUDGET) {
+    return raw;
+  }
+  let truncated = "";
+  let bytes = 0;
+  for (const char of raw) {
+    const charBytes = Buffer.byteLength(char, "utf8");
+    if (bytes + charBytes > APPLICATION_NAME_BYTE_BUDGET) break;
+    truncated += char;
+    bytes += charBytes;
+  }
+  return truncated;
+}
+
+/**
  * Runs `fn` inside a transaction that first sets the tenant GUC via
  * `SET LOCAL` (via `set_config(..., true)`) — NEVER a plain `SET`, which
  * would persist for the life of the pooled connection and leak into the
@@ -152,6 +191,13 @@ export function getWorkspaceId(): string {
  * scopes to the transaction only and auto-resets on COMMIT/ROLLBACK, which
  * is what makes this safe under connection-pool reuse — proven by
  * apps/api/src/db/__tests__/rls-pooling-chaos.test.ts.
+ *
+ * Phase 15 plan 02 (OPS-12, RESEARCH.md Pattern 4): the SAME statement also
+ * sets `application_name` to a compact `req=.../job=...` correlation label —
+ * one extra `set_config` argument in the existing `SELECT`, no second round
+ * trip, no schema change. With no requestId/jobId bound at all, this still
+ * sets a well-formed `req=- job=-` placeholder rather than leaving
+ * `application_name` at the pool's default.
  *
  * Always releases the client in `finally` so a broken/aborted connection is
  * never silently kept alive in the pool.
@@ -175,9 +221,10 @@ export async function withTenantTransaction<T>(
   let releaseWithError: Error | undefined;
   try {
     await client.query("BEGIN");
-    await client.query("SELECT set_config('app.current_workspace_id', $1, true)", [
-      ctx.workspaceId,
-    ]);
+    await client.query(
+      "SELECT set_config('app.current_workspace_id', $1, true), set_config('application_name', $2, true)",
+      [ctx.workspaceId, composeApplicationName(ctx)],
+    );
     const result = await fn(client);
     await client.query("COMMIT");
     return result;
