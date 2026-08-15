@@ -21,6 +21,14 @@ const dashboardQuerySchema = z.object({
  * T-07-07-01 (IDOR/info-disclosure): `resolveWorkspaceMember` + `withTenant`
  * scope every read (rollup + contacts + campaigns/flows mini-lists) to the
  * caller's own workspace under RLS.
+ *
+ * Phase 15 (OPS-18, D-12, plan 15-12): the response now also carries
+ * `dataAsOf`/`lagMinutes` (`@mega-crm/shared-schemas`'s
+ * `WorkspaceDashboardFreshness`, computed in `dashboard.repository.ts`) --
+ * the honest "data as of" timestamp and staleness signal plan 15-15's
+ * frontend renders. No new route/schema wiring needed here: the response is
+ * still a single unvalidated JSON body (this route has never had an output
+ * schema), so the two fields simply flow through `reply.send(result)`.
  */
 // eslint-disable-next-line @typescript-eslint/require-await -- Fastify plugin contract: app.register() resolves the returned promise, and the declared Promise<void> is part of that signature -- dropping async would change it, not simplify it
 export async function registerDashboardRoutes(fastify: FastifyInstance): Promise<void> {

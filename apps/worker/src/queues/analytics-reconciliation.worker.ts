@@ -103,12 +103,20 @@ interface WorkspaceRow {
  * timezone. This same pitfall applies to ANY future query in this codebase
  * that buckets a `timestamptz` column by calendar day -- bucket in UTC
  * explicitly, never rely on the bare cast.
+ *
+ * `updated_at` (Phase 15, OPS-18, D-12, migration 0064): set to `now()` on
+ * every overwrite, same as the incremental path
+ * (`incrementWorkspaceDailyRollup`, packages/db/src/analytics/daily-rollup.ts).
+ * Missing this here specifically would make the dashboard's "data as of"
+ * watermark lie in exactly the case that matters most -- a day this
+ * reconciler just re-verified would still show an OLD watermark, understating
+ * how fresh the number actually is.
  */
 export async function reconcileWorkspaceDay(client: PoolClient, workspaceId: string, day: string): Promise<void> {
   await client.query(
     `INSERT INTO workspace_daily_rollup (
        workspace_id, day, sent_count, delivered_count, opened_count,
-       clicked_count, bounced_count, unsubscribed_count
+       clicked_count, bounced_count, unsubscribed_count, updated_at
      )
      SELECT
        $1, $2::date,
@@ -121,7 +129,8 @@ export async function reconcileWorkspaceDay(client: PoolClient, workspaceId: str
             OR (dropped_at IS NOT NULL AND (dropped_at AT TIME ZONE 'UTC')::date = $2::date)
             OR (spam_reported_at IS NOT NULL AND (spam_reported_at AT TIME ZONE 'UTC')::date = $2::date)
        ),
-       count(*) FILTER (WHERE unsubscribed_at IS NOT NULL AND (unsubscribed_at AT TIME ZONE 'UTC')::date = $2::date)
+       count(*) FILTER (WHERE unsubscribed_at IS NOT NULL AND (unsubscribed_at AT TIME ZONE 'UTC')::date = $2::date),
+       now()
      FROM sends
      WHERE workspace_id = $1
      ON CONFLICT (workspace_id, day) DO UPDATE SET
@@ -130,7 +139,8 @@ export async function reconcileWorkspaceDay(client: PoolClient, workspaceId: str
        opened_count = EXCLUDED.opened_count,
        clicked_count = EXCLUDED.clicked_count,
        bounced_count = EXCLUDED.bounced_count,
-       unsubscribed_count = EXCLUDED.unsubscribed_count`,
+       unsubscribed_count = EXCLUDED.unsubscribed_count,
+       updated_at = EXCLUDED.updated_at`,
     [workspaceId, day]
   );
 }

@@ -137,8 +137,8 @@ describe("workspace_daily_rollup watermark and dashboard freshness signal (OPS-1
 
     const row = await readRollupRow(workspace.id, day);
     expect(row).not.toBeNull();
-    expect(row!.updated_at.getTime()).toBeGreaterThanOrEqual(before.getTime());
-    expect(row!.updated_at.getTime()).toBeLessThanOrEqual(Date.now() + 5_000);
+    expect(row.updated_at.getTime()).toBeGreaterThanOrEqual(before.getTime());
+    expect(row.updated_at.getTime()).toBeLessThanOrEqual(Date.now() + 5_000);
   });
 
   it("the dashboard response's data-as-of value equals the newest watermark among the workspace's rows in the requested window", async () => {

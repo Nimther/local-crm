@@ -1,3 +1,4 @@
+import type { WorkspaceDashboardFreshness } from "@mega-crm/shared-schemas";
 import { getWorkspaceId, withTenantTransaction } from "../../middleware/tenant-context.js";
 
 const RECENT_CAMPAIGNS_LIMIT = 5;
@@ -44,7 +45,14 @@ export interface DashboardActiveFlow {
   emailsSent: number;
 }
 
-export interface WorkspaceDashboard {
+/**
+ * OPS-18 (D-12, plan 15-12): `dataAsOf`/`lagMinutes` come from
+ * `@mega-crm/shared-schemas`'s `WorkspaceDashboardFreshness` -- the ONE
+ * shared definition of the freshness signal, so this repository's response
+ * shape and the frontend's consumed type (plan 15-15) can never drift
+ * against each other.
+ */
+export interface WorkspaceDashboard extends WorkspaceDashboardFreshness {
   trend: DashboardTrendPoint[];
   growth: DashboardGrowthPoint[];
   kpis: DashboardKpis;
@@ -101,24 +109,55 @@ export async function getWorkspaceDashboard(period: DashboardPeriod): Promise<Wo
     const startDay = denseDays[0];
 
     // Trend: workspace_daily_rollup only (D-08b) -- never send_events/sends.
+    // `updatedAt` (migration 0064's watermark column) rides along on this
+    // SAME query -- no separate round trip needed to compute the OPS-18
+    // "data as of" signal below, since it needs exactly the rows this query
+    // already fetches (the workspace's rows in the requested window).
     const { rows: rollupRows } = await client.query<{
       day: string;
       sentCount: string;
       deliveredCount: string;
       openedCount: string;
       unsubscribedCount: string;
+      updatedAt: Date;
     }>(
       `SELECT day::text as day,
               sent_count::text as "sentCount",
               delivered_count::text as "deliveredCount",
               opened_count::text as "openedCount",
-              unsubscribed_count::text as "unsubscribedCount"
+              unsubscribed_count::text as "unsubscribedCount",
+              updated_at as "updatedAt"
        FROM workspace_daily_rollup
        WHERE workspace_id = $1 AND day >= $2::date
        ORDER BY day`,
       [workspaceId, startDay]
     );
     const rollupByDay = new Map(rollupRows.map((row) => [row.day, row]));
+
+    // OPS-18 (D-12): the newest watermark among the workspace's rows in the
+    // requested window -- `null` when the workspace has no rollup rows at
+    // all in that window (a brand-new workspace, not an error). Derived from
+    // the SAME rows already fetched above, never a live scan.
+    const dataAsOf = rollupRows.reduce<Date | null>((latest, row) => {
+      return !latest || row.updatedAt > latest ? row.updatedAt : latest;
+    }, null);
+
+    // OPS-18 (D-12, T-15-40): the lag signal comes from the oldest
+    // OUTSTANDING dirty mark, deliberately unbounded by the requested
+    // window -- a stuck reconciliation backlog older than the visible
+    // window must still surface. Deliberately NEVER derived from
+    // `dataAsOf`'s own age: a workspace with no recent sending activity has
+    // an old watermark and zero dirty marks, and reporting that as lag
+    // would be a false "stale" alarm on every quiet tenant.
+    const { rows: dirtyRows } = await client.query<{ oldestDirty: Date | null; now: Date }>(
+      `SELECT min(dirtied_at) as "oldestDirty", now() as "now"
+       FROM workspace_daily_rollup
+       WHERE workspace_id = $1 AND dirtied_at IS NOT NULL`,
+      [workspaceId]
+    );
+    const oldestDirtiedAt = dirtyRows[0]?.oldestDirty ?? null;
+    const dbNow = dirtyRows[0]?.now ?? new Date();
+    const lagMinutes = oldestDirtiedAt ? (dbNow.getTime() - oldestDirtiedAt.getTime()) / (60 * 1000) : null;
 
     const trend: DashboardTrendPoint[] = denseDays.map((day) => {
       const row = rollupByDay.get(day);
@@ -235,6 +274,14 @@ export async function getWorkspaceDashboard(period: DashboardPeriod): Promise<Wo
       emailsSent: Number(row.emailsSent),
     }));
 
-    return { trend, growth, kpis, recentCampaigns, activeFlows };
+    return {
+      trend,
+      growth,
+      kpis,
+      recentCampaigns,
+      activeFlows,
+      dataAsOf: dataAsOf ? dataAsOf.toISOString() : null,
+      lagMinutes,
+    };
   });
 }
