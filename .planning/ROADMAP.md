@@ -569,7 +569,7 @@ Plans:
   4. The app loads with route-level code splitting — canvas and heavy dashboard chunks arrive only when those routes are opened.
   5. A failed API call, an empty list, a paginated list, stale analytics and unsaved canvas changes each show the user what is actually true rather than a blank or silently-wrong screen.
 
-**Plans**: 1/18 plans executed
+**Plans**: 3/18 plans executed
 
 Plans:
 **Wave 1**
@@ -578,8 +578,8 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 15-02-PLAN.md — TRACER: one correlation id from HTTP request through queue job to Postgres `application_name` (merge-safe ALS, worker Pino logger, one wired send path)
-- [ ] 15-03-PLAN.md — Data-router migration + `React.lazy` routes + pinned vendor chunks + CI chunk-boundary check (OPS-16)
+- [x] 15-02-PLAN.md — TRACER: one correlation id from HTTP request through queue job to Postgres `application_name` (merge-safe ALS, worker Pino logger, one wired send path)
+- [x] 15-03-PLAN.md — Data-router migration + `React.lazy` routes + pinned vendor chunks + CI chunk-boundary check (OPS-16)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -729,7 +729,7 @@ Phase 9 has no dependents and may be scheduled in parallel at any point after Ph
 | 12. Worker Reliability & Tenant Fairness | v1.1 | 14/14 | Complete    | 2026-08-11 |
 | 13. Compliance & Analytics Integrity | v1.1 | 16/16 | Complete    | 2026-08-12 |
 | 14. Deployment & Database Durability | v1.1 | 14/14 | Complete    | 2026-08-14 |
-| 15. Observability, Alerting & Frontend Resilience | v1.1 | 1/18 | In Progress|  |
+| 15. Observability, Alerting & Frontend Resilience | v1.1 | 3/18 | In Progress|  |
 | 16. Live SendGrid Verification | v1.1 | 0/TBD | Not started | - |
 
 ---
