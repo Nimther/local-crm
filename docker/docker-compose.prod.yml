@@ -241,6 +241,16 @@ services:
         required: false
     environment:
       NODE_ENV: production
+      # Plan 15-10 (OPS-08): passed through EXPLICITLY (not implicit
+      # env_file passthrough) -- docker/prod.env.example documents why.
+      # IMAGE_TAG is the SAME full deployed image SHA already used above to
+      # select this service's own image; this is the first place in this
+      # file that ALSO forwards it into the container's own process
+      # environment, where apps/api/src/sentry.ts reads it as Sentry's
+      # release identifier (previously IMAGE_TAG was compose-scope only).
+      SENTRY_DSN_API: ${SENTRY_DSN_API}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT}
+      IMAGE_TAG: ${IMAGE_TAG}
     mem_limit: ${API_MEM_LIMIT:-512m}
     # Probes /readyz, not just /healthz -- the API's own port is never
     # published (T-14-43), so this container's OWN health status is the
@@ -268,6 +278,13 @@ services:
         required: false
     environment:
       NODE_ENV: production
+      # Plan 15-10 (OPS-08): mirrors the `api` service's own three new
+      # entries above -- its own DSN (D-06: a separate Sentry project per
+      # process), the same shared SENTRY_ENVIRONMENT override, and the same
+      # IMAGE_TAG passthrough for apps/worker/src/sentry.ts's release field.
+      SENTRY_DSN_WORKER: ${SENTRY_DSN_WORKER}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT}
+      IMAGE_TAG: ${IMAGE_TAG}
     mem_limit: ${WORKER_MEM_LIMIT:-1024m}
     # ARCHITECTURE.md §10 / Pitfall 7: MUST come from the published constant,
     # NEVER a hand-typed literal -- the deploy script (plan 14-09) exports

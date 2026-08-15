@@ -24,16 +24,16 @@ function makeCapturingTransport() {
   return {
     events,
     factory: () => ({
-      send: async (envelope: unknown) => {
+      send: (envelope: unknown) => {
         const [, items] = envelope as FakeEnvelope;
         for (const [header, payload] of items) {
           if (header.type === "event") {
             events.push(payload as Event);
           }
         }
-        return {};
+        return Promise.resolve({});
       },
-      flush: async () => true,
+      flush: () => Promise.resolve(true),
     }),
   };
 }
