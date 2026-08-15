@@ -55,6 +55,17 @@ import { organization } from "./auth.js";
  *    clearer, and the clear is CONDITIONAL on the mark predating the
  *    sweep's own start time -- an unconditional clear would drop a mark
  *    that arrived mid-sweep, losing that late event's verification forever.
+ * 6. `updated_at` (Phase 15, OPS-18, D-12, migration 0064) -- the freshness
+ *    watermark BOTH write paths must set to `now()` on every write: the
+ *    incremental upsert (`incrementWorkspaceDailyRollup`) and the
+ *    reconciliation overwrite (`reconcileWorkspaceDay`). Additive column,
+ *    `NOT NULL DEFAULT now()` -- no backfill of existing rows. This is what
+ *    makes the dashboard's "data as of" timestamp
+ *    (`apps/api/src/modules/analytics/dashboard.repository.ts`) honest: the
+ *    newest `updated_at` among a workspace's rows in the requested window.
+ *    Missing either write path would understate freshness for exactly the
+ *    rows the reconciler just re-verified -- see migration 0064's own
+ *    comment.
  */
 export const workspaceDailyRollup = pgTable(
   "workspace_daily_rollup",
@@ -71,6 +82,7 @@ export const workspaceDailyRollup = pgTable(
     bouncedCount: integer("bounced_count").notNull().default(0),
     unsubscribedCount: integer("unsubscribed_count").notNull().default(0),
     dirtiedAt: timestamp("dirtied_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [unique("workspace_daily_rollup_workspace_day_unique").on(t.workspaceId, t.day)]
 );
