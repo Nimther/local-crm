@@ -9,6 +9,7 @@ import type { WorkspaceListItem } from "@mega-crm/shared-schemas";
 import { Toaster } from "@/components/ui/sonner";
 import { AppShell } from "@/features/app-shell/AppShell";
 import { RouteSuspenseFallback } from "@/components/RouteSuspenseFallback";
+import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
 
 // D-14 (OPS-16): every feature/route page is lazily loaded, uniformly, with
 // no per-route eager/lazy judgement calls. RootRedirect, AppShell and the
@@ -40,9 +41,24 @@ const FlowsListPage = lazy(() => import("@/features/flows/list/FlowsListPage"));
 const FlowDetailPage = lazy(() => import("@/features/flows/detail/FlowDetailPage"));
 const SendLogPage = lazy(() => import("@/features/send-log/SendLogPage"));
 
-/** Wraps a lazily-loaded route element in the shared route-level Suspense fallback. */
+/**
+ * Wraps a lazily-loaded route element in the shared route-level Suspense
+ * fallback, itself wrapped by the route-level error boundary (OPS-17/D-11).
+ * Ordering is load-bearing: `RouteErrorBoundary` MUST enclose `Suspense`,
+ * not the reverse -- a failed lazy chunk import throws in a way only a
+ * `componentDidCatch`-based boundary outside the Suspense can actually catch
+ * (see `RouteErrorBoundary.tsx`'s own header comment). This wraps every
+ * lazy route below UNIFORMLY (standalone auth/onboarding routes and every
+ * route nested inside `/w/:slug`) -- `AppShell` and `RootRedirect` are
+ * deliberately NOT passed through this helper, so the shell itself is never
+ * wrapped by the same boundary as its children.
+ */
 function withSuspense(element: ReactNode) {
-  return <Suspense fallback={<RouteSuspenseFallback />}>{element}</Suspense>;
+  return (
+    <RouteErrorBoundary>
+      <Suspense fallback={<RouteSuspenseFallback />}>{element}</Suspense>
+    </RouteErrorBoundary>
+  );
 }
 
 /**

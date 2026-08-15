@@ -120,6 +120,18 @@ jobs:
           # `master` tag for quick local pulls), read this comment first and
           # weigh that cost against this workflow's whole reason for existing.
           tags: ${{ steps.image-base.outputs.base }}/${{ matrix.app }}:${{ github.sha }}
+          # Phase 15 plan 11 (OPS-08/D-06): the frontend Sentry DSN, web
+          # matrix entry ONLY -- Dockerfile.web's own `ARG VITE_SENTRY_DSN`
+          # is the only Dockerfile of the three that declares it, so this is
+          # a harmless no-op string for api/worker regardless. Read from
+          # `vars` (a GitHub Actions repository VARIABLE), not `secrets` --
+          # a Sentry DSN authorizes sending events to a project, not reading
+          # from it, so it is deliberately not a secret (SPECIFICATION.md
+          # §3); routing it through `secrets` would suggest to a future
+          # contributor that it needs the same handling as GHCR's own
+          # `secrets.GITHUB_TOKEN` above, which it does not.
+          build-args: |
+            ${{ matrix.app == 'web' && format('VITE_SENTRY_DSN={0}', vars.VITE_SENTRY_DSN) || '' }}
 
   # Phase 14 plan 14 (G-14-4 gap closure). Builds all three images on every
   # pull_request targeting master -- BUILD ONLY, never push. See the header
@@ -157,3 +169,9 @@ jobs:
           # the Dockerfiles.
           cache-from: type=gha,scope=${{ matrix.app }}
           cache-to: type=gha,mode=max,scope=${{ matrix.app }}
+          # Same web-only build-arg as build-and-push above (this job never
+          # pushes, so a fork PR without access to a configured
+          # `vars.VITE_SENTRY_DSN` still builds successfully -- an
+          # empty/absent value is the documented no-op default, T-15-33).
+          build-args: |
+            ${{ matrix.app == 'web' && format('VITE_SENTRY_DSN={0}', vars.VITE_SENTRY_DSN) || '' }}
