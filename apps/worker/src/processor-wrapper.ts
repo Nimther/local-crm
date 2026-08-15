@@ -46,10 +46,30 @@ import { logger } from "./logger.js";
  * throw site this codebase has today.
  */
 
-/** Context passed to the injected error reporter alongside the thrown value. */
+/**
+ * Context passed to the injected error reporter alongside the thrown value.
+ *
+ * Phase 15 plan 10 (OPS-08, Rule 2 deviation -- see that plan's SUMMARY.md):
+ * `requestId`/`workspaceId` were added here, explicit rather than left for
+ * the reporter to read off `@mega-crm/tenant-context`'s ALS correlation
+ * store itself. That would look like the more "central" choice, but it does
+ * NOT work: `wrappedProcessor`'s catch block below runs as a continuation of
+ * `wrappedProcessor` ITSELF awaiting `withCorrelation(...)`'s returned
+ * promise from OUTSIDE that call -- Node's AsyncLocalStorage does not
+ * propagate a `run()` call's bound store to a continuation registered by an
+ * external awaiter once that call's own promise has settled (verified
+ * empirically: a minimal `als.run(store, asyncFn)` whose caller does
+ * `promise.catch(() => als.getStore())` sees `undefined`, not `store`, on
+ * every tested Node 26 build). `queue`/`jobId` were already explicit for the
+ * unrelated reason of being the two values `wrappedProcessor` already holds
+ * as plain locals; `requestId`/`workspaceId` follow the same explicit-field
+ * discipline for the same underlying reason, not two different reasons.
+ */
 export interface ProcessorErrorContext {
   queue: string;
   jobId: string | undefined;
+  requestId: string | undefined;
+  workspaceId: string | undefined;
 }
 
 /** The error-reporter seam's shape -- synchronous, side-effecting only (never awaited, never affects control flow). */
@@ -109,6 +129,26 @@ function extractRequestId(data: unknown): string | undefined {
 }
 
 /**
+ * Reads an optional `workspaceId` off a job's payload -- the same defensive,
+ * never-throwing shape as `extractRequestId` above. Phase 15 plan 10
+ * (OPS-08): unlike `requestId`, `workspaceId` is declared on nearly every
+ * job schema in `packages/shared-schemas/src/queues.ts` (it is the "SOLE
+ * context the worker trusts" per that file's own comment), but a handful of
+ * platform-wide/cross-tenant jobs (partition maintenance, the send
+ * reconciler's own tick, ...) genuinely have none -- `undefined` for those
+ * is correct, not a bug.
+ */
+function extractWorkspaceId(data: unknown): string | undefined {
+  if (data !== null && typeof data === "object" && "workspaceId" in data) {
+    const value = (data as { workspaceId?: unknown }).workspaceId;
+    if (typeof value === "string") {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+/**
  * Wraps a BullMQ processor function with instrumentation, returning a
  * processor with the IDENTICAL signature BullMQ expects -- a factory's call
  * site changes only by wrapping its existing handler in this function, no
@@ -122,7 +162,10 @@ function extractRequestId(data: unknown): string | undefined {
  *     line explicitly marked `controlFlow: true` rather than as a failure.
  *   - Throws anything else (an `Error`, a string, an object, ...): re-throws
  *     the SAME value unchanged, calls the error reporter exactly once with
- *     that value plus `{ queue, jobId }`, logs a failure line.
+ *     that value plus `{ queue, jobId, requestId, workspaceId }` (the latter
+ *     two read directly off the job, per `ProcessorErrorContext`'s own
+ *     header comment -- NOT off the ALS correlation store, which the
+ *     reporter cannot see from here), logs a failure line.
  *   - Every path re-throws the original thrown value unchanged -- this
  *     wrapper never swallows an error, or BullMQ's own retry/delay/stall
  *     handling breaks (T-15-23).
@@ -139,6 +182,7 @@ export function wrapProcessor<DataType, ResultType = void>(
 ): (job: Job<DataType>, token?: string) => Promise<ResultType> {
   return async function wrappedProcessor(job: Job<DataType>, token?: string): Promise<ResultType> {
     const requestId = extractRequestId(job.data) ?? job.id;
+    const workspaceId = extractWorkspaceId(job.data);
     const child = logger.child({ queue: queueName, jobId: job.id, requestId });
     const start = Date.now();
 
@@ -163,7 +207,7 @@ export function wrapProcessor<DataType, ResultType = void>(
         // wrapper's "same value re-thrown on every path" guarantee (T-15-23)
         // has to hold even when the injected reporter is misbehaving.
         try {
-          errorReporter(err, { queue: queueName, jobId: job.id });
+          errorReporter(err, { queue: queueName, jobId: job.id, requestId, workspaceId });
         } catch (reporterErr) {
           child.error({ err: reporterErr, durationMs }, "error reporter itself threw -- ignored, original error still re-thrown");
         }

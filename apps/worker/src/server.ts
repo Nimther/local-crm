@@ -8,6 +8,8 @@ import { assertMigrationsCurrent } from "@mega-crm/db";
 import { markWorkerDraining, startWorkerHealthServer, type WorkerHealthServer } from "./health-server.js";
 import { closeTrackedQueues } from "./queues/queue-registry.js";
 import { isTerminalJobFailure, writeDeadLetterOnTerminalFailure } from "./queues/dead-letter/dead-letter-writer.js";
+import { setProcessorErrorReporter } from "./processor-wrapper.js";
+import { initSentry, reportProcessorError, flushSentry, SENTRY_FLUSH_TIMEOUT_MS } from "./sentry.js";
 import { createEventsIngestWorker } from "./queues/events-ingest.worker.js";
 import { createImportsCsvWorker } from "./queues/imports-csv.worker.js";
 import { createEmailBroadcastWorker } from "./queues/email-broadcast.worker.js";
@@ -89,6 +91,14 @@ export async function closeWorkerRuntime(
 ): Promise<void> {
   await Promise.all(workers.map((worker) => worker.close()));
   await closeTrackedQueues();
+  // Phase 15 plan 10 (OPS-08, T-15-32): flushes any Sentry event still
+  // in-flight AFTER every worker/queue has fully drained, so a real
+  // in-flight capture is not racing a job that is still being processed --
+  // but BEFORE the shared connection disconnects and the health server
+  // closes, so a hanging flush is still bounded by its own explicit timeout
+  // rather than by anything downstream. A no-op (resolves immediately) when
+  // Sentry was never initialized (no DSN configured).
+  await flushSentry(SENTRY_FLUSH_TIMEOUT_MS);
   connection.disconnect();
   if (healthServer) {
     await healthServer.close();
@@ -139,6 +149,16 @@ export function attachSharedListeners(workers: Worker[]): void {
 // so the require-await disable this function needed before that change is
 // stale -- removed rather than left as a now-inert directive.
 export async function buildWorker(): Promise<WorkerRuntime> {
+  // Phase 15 plan 10 (OPS-08): initialized once at boot, before anything
+  // else -- a missing SENTRY_DSN_WORKER is a no-op (initSentry logs once and
+  // returns false), so this never blocks/slows boot. The reporter is
+  // injected into processor-wrapper.ts's seam UNCONDITIONALLY, DSN or not --
+  // `reportProcessorError`'s own Sentry.captureException call already
+  // no-ops when no client is initialized, exactly like
+  // apps/api/src/server.ts's Sentry.setupFastifyErrorHandler wiring.
+  initSentry();
+  setProcessorErrorReporter(reportProcessorError);
+
   const redisUrl = process.env.REDIS_URL;
   if (!redisUrl) {
     throw new Error("REDIS_URL is required for apps/worker to start");

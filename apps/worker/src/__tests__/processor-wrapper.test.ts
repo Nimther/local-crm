@@ -121,7 +121,7 @@ describe("wrapProcessor", () => {
     expect(reporter).not.toHaveBeenCalled();
   });
 
-  it("re-throws a plain Error unchanged and calls the reporter exactly once with the error, queue name and job id", async () => {
+  it("re-throws a plain Error unchanged and calls the reporter exactly once with the error, queue name, job id, requestId and workspaceId", async () => {
     const job = fakeJob({ workspaceId: "ws-1" }, "job-4");
     const plainError = new Error("boom");
     const handler = vi.fn((): Promise<never> => Promise.reject(plainError));
@@ -138,7 +138,18 @@ describe("wrapProcessor", () => {
 
     expect(caught).toBe(plainError);
     expect(reporter).toHaveBeenCalledTimes(1);
-    expect(reporter).toHaveBeenCalledWith(plainError, { queue: "test-queue", jobId: "job-4" });
+    // Phase 15 plan 10 (OPS-08, Rule 2 deviation): requestId/workspaceId are
+    // read directly off the job (job.data has no requestId, so it falls back
+    // to job.id, same as the wrapper's own correlation-scope binding above)
+    // -- NOT off the ALS correlation store, which the reporter cannot see
+    // from inside this catch block (see ProcessorErrorContext's own header
+    // comment for the verified reason why).
+    expect(reporter).toHaveBeenCalledWith(plainError, {
+      queue: "test-queue",
+      jobId: "job-4",
+      requestId: "job-4",
+      workspaceId: "ws-1",
+    });
     const failureLine = capturedLogLines().find((line) => line.msg === "job failed");
     expect(failureLine).toBeDefined();
     expect(failureLine?.controlFlow).toBe(false);
@@ -188,7 +199,12 @@ describe("wrapProcessor", () => {
 
     expect(caught).toBe("a thrown string");
     expect(reporter).toHaveBeenCalledTimes(1);
-    expect(reporter).toHaveBeenCalledWith("a thrown string", { queue: "test-queue", jobId: "job-5" });
+    expect(reporter).toHaveBeenCalledWith("a thrown string", {
+      queue: "test-queue",
+      jobId: "job-5",
+      requestId: "job-5",
+      workspaceId: "ws-1",
+    });
   });
 
   it("wraps the handler in a correlation scope: a log line emitted from inside the handler carries the job id", async () => {
