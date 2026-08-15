@@ -119,8 +119,19 @@ export function withTenant<T>(workspaceId: string, fn: () => Promise<T>): Promis
  * this helper works in EITHER nesting order (correlation-then-tenant, the
  * API's shape; tenant-then-correlation, a shape a future caller could
  * introduce), since neither call spreads a fresh literal.
+ *
+ * Deliberately typed as `fn: () => T` (matching `AsyncLocalStorage.run`'s own
+ * generic signature) rather than `() => Promise<T>` -- every existing async
+ * caller is unaffected (`T` is simply inferred as the `Promise<X>` an async
+ * arrow function already returns), but this also admits a plain synchronous
+ * callback. `apps/api/src/server.ts`'s `onRequest` hook needs exactly that:
+ * it binds `requestId` and synchronously calls Fastify's `done()` (a `void`
+ * return) from inside this scope so the ALS context propagates to the
+ * continuation `done()` triggers -- forcing an `async () => { done(); }`
+ * wrapper there just to satisfy a `Promise<T>`-only signature would add a
+ * microtask tick with no benefit.
  */
-export function withCorrelation<T>(fields: CorrelationStore, fn: () => Promise<T>): Promise<T> {
+export function withCorrelation<T>(fields: CorrelationStore, fn: () => T): T {
   return tenantContext.run({ ...tenantContext.getStore(), ...definedCorrelationFields(fields) }, fn);
 }
 

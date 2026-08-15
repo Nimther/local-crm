@@ -1,4 +1,5 @@
 import "./load-env.js";
+import { randomUUID } from "node:crypto";
 import Fastify from "fastify";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
@@ -9,6 +10,7 @@ import {
   validatorCompiler,
   type ZodTypeProvider,
 } from "@fastify/type-provider-zod";
+import { withCorrelation } from "@mega-crm/tenant-context";
 import { logger } from "./logger.js";
 import { env } from "./env.js";
 import { pool } from "./db.js";
@@ -80,6 +82,32 @@ export interface BuildServerOptions {
   rateLimitRedisUrl?: string;
 }
 
+/**
+ * Phase 15 plan 02 (OPS-11, RESEARCH.md Pitfall 6): Fastify's default
+ * `genReqId` is a per-process monotonic counter (`req-1`, `req-2`, ...) that
+ * restarts at 1 on every deploy -- two different deploys, or two API
+ * replicas, can log the identical `request_id` for two unrelated requests,
+ * defeating a Loki correlation query entirely. An inbound `x-request-id`
+ * header is echoed back so a caller/reverse-proxy can supply its own
+ * correlation id, but that header is attacker-controlled input (T-15-04) --
+ * it is used ONLY as an opaque correlation label (never for auth/dedup) and
+ * constrained to a bounded-length safe character set before being echoed, so
+ * a crafted header cannot inject a `set_config`-breaking separator into the
+ * `application_name` value it eventually reaches (packages/tenant-context's
+ * `composeApplicationName`). Any value outside that pattern falls back to
+ * `crypto.randomUUID()` (Node 22 built-in, no new dependency), same as no
+ * header at all.
+ */
+const REQUEST_ID_SAFE_PATTERN = /^[A-Za-z0-9._-]{1,100}$/;
+
+function resolveRequestId(header: string | string[] | undefined): string {
+  const value = Array.isArray(header) ? header[0] : header;
+  if (value !== undefined && REQUEST_ID_SAFE_PATTERN.test(value)) {
+    return value;
+  }
+  return randomUUID();
+}
+
 /** Assembles the Fastify app: zod type provider, better-auth handler, workspace/profile/invite/member routes. */
 export async function buildServer(options: BuildServerOptions = {}) {
   const app = Fastify({
@@ -90,10 +118,26 @@ export async function buildServer(options: BuildServerOptions = {}) {
     // chars. Without this, find-my-way returns a 414 for every genuine
     // token, defeating the endpoint entirely.
     routerOptions: { maxParamLength: 1024 },
+    genReqId: (req) => resolveRequestId(req.headers["x-request-id"]),
   }).withTypeProvider<ZodTypeProvider>();
 
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
+
+  // OPS-11 (RESEARCH.md Pattern 1/Pitfall 7): the FIRST onRequest hook
+  // registered, so every later hook (including the migration-currency guard
+  // below) and the route handler itself run inside this correlation scope --
+  // Fastify hooks execute in registration order. Deliberately never reads or
+  // consumes `request.body` -- the SendGrid webhook route's raw-body ECDSA
+  // signature verification depends on those exact bytes reaching its own
+  // content-type parser untouched. `done()` is called SYNCHRONOUSLY from
+  // inside `withCorrelation`'s callback (not `async (request) => { await
+  // withCorrelation(...) }`) so the ALS context is established for the
+  // continuation Fastify runs when `done()` fires, not just for the
+  // synchronous body of this hook.
+  app.addHook("onRequest", (request, _reply, done) => {
+    withCorrelation({ requestId: request.id }, () => done());
+  });
 
   // SEC-11 (T-10-12-01): a per-process (in-memory) rate-limit store silently
   // multiplies every configured limit by however many API replicas are

@@ -152,6 +152,19 @@ export type ImportsCsvJob = z.infer<typeof importsCsvJobSchema>;
  * separate path) so the send pipeline has exactly one code path; `contactId`
  * is required for `kind: "campaign"` and absent for `kind: "test"`, which
  * instead carries `testTo`/`testData`.
+ *
+ * Phase 15 plan 02 (OPS-11, ROADMAP R-05 backward-compatible-payload
+ * contract): `requestId` is OPTIONAL and PURELY ADDITIVE -- no
+ * `schemaVersion` is introduced or bumped on this payload. A rolling deploy
+ * can have an old-code worker still draining jobs enqueued by new API code
+ * (or vice versa); a version bump here would make an old worker DEFER every
+ * new job during that window (the same failure mode the Phase 11
+ * `schemaVersion` convention exists to avoid), whereas an optional field an
+ * old worker simply never reads is invisible to it. A job enqueued by
+ * pre-Phase-15 code has no `requestId` at all and must still validate and
+ * process -- see `apps/worker/src/queues/email-broadcast.worker.ts`, which
+ * treats an absent `requestId` the same as the placeholder `composeApplicationName`
+ * already produces for "no requestId bound" (`req=-`).
  */
 export const emailBroadcastJobSchema = z.object({
   workspaceId: z.string().uuid(),
@@ -160,6 +173,7 @@ export const emailBroadcastJobSchema = z.object({
   contactId: z.string().uuid().optional(),
   testTo: z.string().email().optional(),
   testData: z.record(z.string(), z.unknown()).optional(),
+  requestId: z.string().optional(),
 });
 export type EmailBroadcastJob = z.infer<typeof emailBroadcastJobSchema>;
 
