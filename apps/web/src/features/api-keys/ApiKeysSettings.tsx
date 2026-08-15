@@ -16,7 +16,9 @@ import {
 import { ApiError, apiGet, apiPost } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { EmptyState } from "@/components/EmptyState";
+import { QueryErrorState } from "@/components/QueryErrorState";
 import {
   Dialog,
   DialogContent,
@@ -276,6 +278,9 @@ export function ApiKeysSettings() {
   const viewerRole = workspaceQuery.data?.role ?? "member";
   const canManage = viewerRole === "owner" || viewerRole === "admin";
   const keys = keysQuery.data ?? [];
+  // OPS-17/D-11: same full-vs-stale error split as the other list surfaces.
+  const isFullyErrored = keysQuery.isError && !keysQuery.data;
+  const isStaleErrored = keysQuery.isError && Boolean(keysQuery.data);
 
   return (
     <div className="space-y-6 p-8">
@@ -289,48 +294,62 @@ export function ApiKeysSettings() {
         <CreateApiKeyDialog slug={slug} canManage={canManage} />
       </div>
 
-      {keys.length === 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>API-ключей пока нет</CardTitle>
-            <CardDescription>
-              Создайте ключ, чтобы ваш бэкенд мог отправлять контакты и события через API.
-            </CardDescription>
-          </CardHeader>
-        </Card>
+      {isFullyErrored ? (
+        <QueryErrorState
+          title="Не удалось загрузить API-ключи"
+          isFetching={keysQuery.isFetching}
+          onRetry={() => void keysQuery.refetch()}
+        />
       ) : (
-        <Card>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Название</TableHead>
-                  <TableHead>Ключ</TableHead>
-                  <TableHead>Статус</TableHead>
-                  <TableHead className="text-right" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {keys.map((key) => (
-                  <TableRow key={key.id}>
-                    <TableCell>{key.name}</TableCell>
-                    <TableCell className="font-mono text-sm">{key.keyMask}</TableCell>
-                    <TableCell>
-                      <ApiKeyStatusBadge revoked={Boolean(key.revokedAt)} />
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {canManage && !key.revokedAt ? (
-                        <Button type="button" variant="ghost" size="sm" onClick={() => setRevokeTarget(key)}>
-                          Отозвать
-                        </Button>
-                      ) : null}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+        <div className="space-y-6">
+          {isStaleErrored ? (
+            <QueryErrorState
+              title="Не удалось обновить список API-ключей"
+              detail="Показаны последние загруженные данные."
+              isFetching={keysQuery.isFetching}
+              onRetry={() => void keysQuery.refetch()}
+            />
+          ) : null}
+          {keys.length === 0 ? (
+            <EmptyState
+              title="API-ключей пока нет"
+              description="Создайте ключ, чтобы ваш бэкенд мог отправлять контакты и события через API."
+            />
+          ) : (
+            <Card>
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Название</TableHead>
+                      <TableHead>Ключ</TableHead>
+                      <TableHead>Статус</TableHead>
+                      <TableHead className="text-right" />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {keys.map((key) => (
+                      <TableRow key={key.id}>
+                        <TableCell>{key.name}</TableCell>
+                        <TableCell className="font-mono text-sm">{key.keyMask}</TableCell>
+                        <TableCell>
+                          <ApiKeyStatusBadge revoked={Boolean(key.revokedAt)} />
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {canManage && !key.revokedAt ? (
+                            <Button type="button" variant="ghost" size="sm" onClick={() => setRevokeTarget(key)}>
+                              Отозвать
+                            </Button>
+                          ) : null}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
+        </div>
       )}
 
       {revokeTarget ? (

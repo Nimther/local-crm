@@ -16,6 +16,7 @@ import {
 import { ApiError, apiGet, apiPost } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { QueryErrorState } from "@/components/QueryErrorState";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -239,6 +240,16 @@ export function SendGridKeySettings() {
   const canManage = viewerRole === "owner" || viewerRole === "admin";
   const status = statusQuery.data;
 
+  // T-15-19/OPS-17: a failed status fetch must NEVER fall into the
+  // `!status?.connected` branch below -- that branch renders the connect
+  // form, which reads as "no key configured" and invites pasting a key
+  // that may already be stored (a real repudiation risk on a page whose
+  // whole purpose is showing whether a key is connected). The empty/connect
+  // state is reachable only from a successful response that says
+  // `connected: false`, never from a fetch failure.
+  const isFullyErrored = statusQuery.isError && !statusQuery.data;
+  const isStaleErrored = statusQuery.isError && Boolean(statusQuery.data);
+
   return (
     <div className="space-y-6 p-8">
       <div>
@@ -246,7 +257,24 @@ export function SendGridKeySettings() {
         <p className="text-sm text-muted-foreground">Подключение и статус вашего SendGrid-аккаунта.</p>
       </div>
 
-      {!status?.connected ? (
+      {isFullyErrored ? (
+        <QueryErrorState
+          title="Не удалось загрузить статус SendGrid"
+          detail="Ключ может быть уже подключён — не вводите его заново, пока проверка не пройдёт успешно."
+          isFetching={statusQuery.isFetching}
+          onRetry={() => void statusQuery.refetch()}
+        />
+      ) : (
+        <>
+          {isStaleErrored ? (
+            <QueryErrorState
+              title="Не удалось обновить статус SendGrid"
+              detail="Показан последний известный статус."
+              isFetching={statusQuery.isFetching}
+              onRetry={() => void statusQuery.refetch()}
+            />
+          ) : null}
+          {!status?.connected ? (
         <Card>
           <CardHeader>
             <CardTitle>SendGrid не подключён</CardTitle>
@@ -340,6 +368,8 @@ export function SendGridKeySettings() {
             )}
           </CardContent>
         </Card>
+          )}
+        </>
       )}
 
       {status?.connected ? <WebhookHealthCard slug={slug} canManage={canManage} /> : null}
