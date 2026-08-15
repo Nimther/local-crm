@@ -11,7 +11,9 @@ import {
   type SegmentResponse,
 } from "@mega-crm/shared-schemas";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { EmptyState } from "@/components/EmptyState";
+import { QueryErrorState } from "@/components/QueryErrorState";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -83,19 +85,40 @@ function SegmentMembersTable({ slug, segmentId, refreshToken }: { slug: string; 
     return <Skeleton className="h-64 w-full" />;
   }
 
-  if (total === 0) {
+  // OPS-17/D-11: a failed fetch with no prior data gets the full-region
+  // error; a failed background refetch that still has stale rows keeps
+  // showing them with a banner instead (T-15-14).
+  if (membersQuery.isError && !membersQuery.data) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Пока никто не подходит под условия</CardTitle>
-          <CardDescription>Измените условия сегмента — список обновится автоматически.</CardDescription>
-        </CardHeader>
-      </Card>
+      <QueryErrorState
+        title="Не удалось загрузить участников"
+        isFetching={membersQuery.isFetching}
+        onRetry={() => void membersQuery.refetch()}
+      />
     );
   }
 
+  if (total === 0) {
+    return (
+      <EmptyState
+        title="Пока никто не подходит под условия"
+        description="Измените условия сегмента — список обновится автоматически."
+      />
+    );
+  }
+
+  const isStaleErrored = membersQuery.isError && Boolean(membersQuery.data);
+
   return (
     <div className={cn("space-y-4 transition-opacity duration-200", isRefetching && "opacity-50")}>
+      {isStaleErrored ? (
+        <QueryErrorState
+          title="Не удалось обновить список участников"
+          detail="Показаны последние загруженные данные."
+          isFetching={membersQuery.isFetching}
+          onRetry={() => void membersQuery.refetch()}
+        />
+      ) : null}
       <Card>
         <CardContent className="p-0">
           <Table>
@@ -273,16 +296,27 @@ export function SegmentDetailPage() {
   }
 
   // WR-06: check isError BEFORE the loading/skeleton branch -- a deleted/bad
-  // segment id must surface the not-found card instead of hanging on an
-  // infinite skeleton (isLoading stays false but `definition` never gets set).
-  if (segmentQuery.isError || (!segmentQuery.isLoading && !segmentQuery.data)) {
+  // segment id must surface a terminal state instead of hanging on an
+  // infinite skeleton (isLoading stays false but `definition` never gets
+  // set). OPS-17/D-11 split what used to be one conflated branch: a fetch
+  // failure (Retry-able) is not the same fact as a successful fetch that
+  // legitimately found nothing (not-found, no Retry control).
+  if (segmentQuery.isError) {
     return (
       <div className="p-8">
-        <Card>
-          <CardHeader>
-            <CardTitle>Сегмент не найден</CardTitle>
-          </CardHeader>
-        </Card>
+        <QueryErrorState
+          title="Не удалось загрузить сегмент"
+          isFetching={segmentQuery.isFetching}
+          onRetry={() => void segmentQuery.refetch()}
+        />
+      </div>
+    );
+  }
+
+  if (!segmentQuery.isLoading && !segmentQuery.data) {
+    return (
+      <div className="p-8">
+        <EmptyState title="Сегмент не найден" />
       </div>
     );
   }
