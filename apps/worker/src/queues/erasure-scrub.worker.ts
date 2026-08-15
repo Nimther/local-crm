@@ -5,6 +5,7 @@ import { buildJobOptions, buildRedisConnectionOptions, STANDARD_JOB_RETENTION } 
 import type { BuiltJobOptions } from "@mega-crm/queue-core";
 import { ERASURE_SCRUB_QUEUE, erasureScrubJobSchema, type ErasureScrubJob } from "@mega-crm/shared-schemas";
 import { wrapProcessor } from "../processor-wrapper.js";
+import { logger } from "../logger.js";
 import type { ErasureRecordStatus } from "@mega-crm/db";
 import {
   advanceErasureScrubCheckpoint,
@@ -442,7 +443,12 @@ export async function runErasureScrub(params: RunErasureScrubParams): Promise<vo
     // Defensive: erasure_records cascades from contacts/organization deletes
     // (migration 0059), so this should not happen for a job produced by
     // deleteContact's own committed transaction. Nothing to scrub if it did.
-    console.error("erasure-scrub: erasure_records row not found, skipping", { erasureRecordId });
+    // Phase 15 plan 08 (OPS-06): merging object FIRST, message SECOND --
+    // Pino's argument order is the inverse of console's. `erasureRecordId`
+    // is an internally-generated UUID, not tenant-authored freeform text,
+    // so no `scrub()` pass is needed here (see this file's `markErr` site
+    // below for the one call that DOES need it).
+    logger.error({ erasureRecordId }, "erasure-scrub: erasure_records row not found, skipping");
     return;
   }
 
@@ -467,7 +473,19 @@ export async function runErasureScrub(params: RunErasureScrubParams): Promise<vo
     await withTenant(workspaceId, () =>
       withTenantTransaction((client) => markScrubFailed(client, workspaceId, erasureRecordId, err))
     ).catch((markErr) => {
-      console.error("erasure-scrub: failed to record scrub failure on the erasure record", markErr);
+      // Phase 15 plan 08 (OPS-06): logged via the plain Pino logger, NOT
+      // `scrubbedConsole`/`scrub()` -- this file's own tested invariant
+      // (`erasure-scrub.test.ts`'s module-source-check) forbids importing
+      // ANYTHING from `@mega-crm/redaction` at all (see this file's header
+      // comment: an allowlist-reconstruction module must never gain a
+      // denylist/pattern-matching dependency, or a future edit could
+      // silently reintroduce the exact denylist gap Phase 13's REVIEWS.md
+      // BLOCKER finding 4 closed). `markErr` here is a Postgres
+      // driver/client-level write failure (from `markScrubFailed`'s own
+      // UPDATE), not tenant-authored freeform content from the erasure
+      // evidence pipeline itself -- Pino's default `err` serializer
+      // (type/message/stack) is the appropriate level of structure for it.
+      logger.error({ err: markErr }, "erasure-scrub: failed to record scrub failure on the erasure record");
     });
     throw err;
   }
@@ -511,7 +529,7 @@ export function createErasureScrubWorker(connection: ConnectionOptions, options:
     wrapProcessor(ERASURE_SCRUB_QUEUE, async (job: Job) => {
       const parsed = erasureScrubJobSchema.safeParse(job.data);
       if (!parsed.success) {
-        console.error("erasure-scrub: deferring job with an unrecognized payload shape", { jobId: job.id });
+        logger.error({ jobId: job.id }, "erasure-scrub: deferring job with an unrecognized payload shape");
         return;
       }
       const data: ErasureScrubJob = parsed.data;

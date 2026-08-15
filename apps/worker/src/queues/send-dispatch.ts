@@ -120,6 +120,13 @@ export function getDefaultRedisClient(): Redis {
     // the process the way an unhandled `pg.Pool` error would), which is both
     // an unredacted-log risk and invisible to every other error/log path in
     // this codebase.
+    // Phase 15 plan 08 (OPS-06): stays on `scrubbedConsole` rather than
+    // moving to the plain Pino logger -- `err` here is an ioredis connection
+    // error whose message can echo back connection-string-shaped content,
+    // so it keeps `scrub()`'s value-pattern matching, which the Pino
+    // path-list (`PINO_REDACT_OPTIONS`) cannot do. OPS-06's "no raw
+    // console.*" truth targets bare `console.*` (this file has none), not
+    // every `scrubbedConsole` site.
     defaultRedisClient.on("error", (err) => {
       scrubbedConsole.error("send-dispatch: default rate-limiter/semaphore Redis client error", err);
     });
@@ -642,6 +649,10 @@ export async function processSendJob(
         // the outcome only, NEVER the recipient address (`testTo`) supplied
         // by the caller (T-11-10-05). Return, do not throw: throwing here is
         // what would make BullMQ retry a test send, which D-11 forbids.
+        // Phase 15 plan 08 (OPS-06): stays on `scrubbedConsole` (same rule
+        // as this file's Redis-client-error site above) -- OPS-06's "no raw
+        // console.*" truth targets bare `console.*`, not every
+        // `scrubbedConsole` site.
         scrubbedConsole.warn("test-send outcome unknown (ambiguous provider error)", { campaignId, outcome: "unknown" });
         return { outcome: "unknown", sendId };
       }
