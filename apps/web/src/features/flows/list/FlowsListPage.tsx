@@ -18,7 +18,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -33,6 +33,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { EmptyState } from "@/components/EmptyState";
+import { QueryErrorState } from "@/components/QueryErrorState";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -204,6 +206,9 @@ export function FlowsListPage() {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const isInitialLoad = flowsQuery.isLoading;
   const isRefetching = flowsQuery.isPlaceholderData || flowsQuery.isFetching;
+  // OPS-17/D-11: same full-vs-stale error split as CampaignsListPage.
+  const isFullyErrored = flowsQuery.isError && !flowsQuery.data;
+  const isStaleErrored = flowsQuery.isError && Boolean(flowsQuery.data);
 
   return (
     <div className="space-y-6 p-8">
@@ -219,20 +224,29 @@ export function FlowsListPage() {
 
       {isInitialLoad ? (
         <Skeleton className="h-96 w-full" />
-      ) : items.length === 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Цепочек пока нет</CardTitle>
-            <CardDescription>
-              Постройте автоматическую цепочку — от события или входа в сегмент до серии писем с задержками и
-              условиями.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button onClick={() => setCreateOpen(true)}>Создать цепочку</Button>
-          </CardContent>
-        </Card>
+      ) : isFullyErrored ? (
+        <QueryErrorState
+          title="Не удалось загрузить цепочки"
+          isFetching={flowsQuery.isFetching}
+          onRetry={() => void flowsQuery.refetch()}
+        />
       ) : (
+        <div className="space-y-6">
+          {isStaleErrored ? (
+            <QueryErrorState
+              title="Не удалось обновить список цепочек"
+              detail="Показаны последние загруженные данные."
+              isFetching={flowsQuery.isFetching}
+              onRetry={() => void flowsQuery.refetch()}
+            />
+          ) : null}
+          {items.length === 0 ? (
+            <EmptyState
+              title="Цепочек пока нет"
+              description="Постройте автоматическую цепочку — от события или входа в сегмент до серии писем с задержками и условиями."
+              action={<Button onClick={() => setCreateOpen(true)}>Создать цепочку</Button>}
+            />
+          ) : (
         <Card className={cn("transition-opacity duration-200", isRefetching && "opacity-50")}>
           <CardContent className="p-0">
             <Table>
@@ -292,6 +306,8 @@ export function FlowsListPage() {
             </Table>
           </CardContent>
         </Card>
+          )}
+        </div>
       )}
 
       {!isInitialLoad && items.length > 0 ? (
