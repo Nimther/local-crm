@@ -16,6 +16,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/EmptyState";
+import { QueryErrorState } from "@/components/QueryErrorState";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -136,19 +138,36 @@ export function FlowDetailPage() {
     });
   }
 
-  if (flowQuery.isError || (!flowQuery.isLoading && !flow)) {
-    return (
-      <div className="p-8">
-        <p className="text-sm text-muted-foreground">Цепочка не найдена.</p>
-      </div>
-    );
-  }
-
-  if (flowQuery.isLoading || !flow) {
+  // OPS-17/D-11: the canvas below renders the flow definition this query
+  // loads -- a failed fetch must show the error state in place of the
+  // canvas with Retry, never let the canvas mount over missing/partial
+  // data. Split the previously-conflated isError/not-found branch, same
+  // pattern as ContactDetailPage/CampaignDetailPage.
+  if (flowQuery.isLoading) {
     return (
       <div className="space-y-4 p-8">
         <Skeleton className="h-8 w-64" />
         <Skeleton className="h-96 w-full" />
+      </div>
+    );
+  }
+
+  if (flowQuery.isError) {
+    return (
+      <div className="p-8">
+        <QueryErrorState
+          title="Не удалось загрузить цепочку"
+          isFetching={flowQuery.isFetching}
+          onRetry={() => void flowQuery.refetch()}
+        />
+      </div>
+    );
+  }
+
+  if (!flow) {
+    return (
+      <div className="p-8">
+        <EmptyState title="Цепочка не найдена" />
       </div>
     );
   }

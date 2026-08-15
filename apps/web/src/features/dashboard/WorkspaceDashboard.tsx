@@ -3,7 +3,9 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { EmptyState } from "@/components/EmptyState";
+import { QueryErrorState } from "@/components/QueryErrorState";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
@@ -17,8 +19,6 @@ const PERIOD_PRESETS: { value: DashboardPeriod; label: string }[] = [
   { value: 30, label: "30 дней" },
   { value: 90, label: "90 дней" },
 ];
-
-const GENERIC_ERROR = "Не удалось загрузить дашборд. Обновите страницу — если ошибка повторится, попробуйте позже.";
 
 /** D-06: «—» for a zero-denominator rate, never NaN%/Infinity% (mirrors CampaignProgress.tsx's rateLabel). */
 function rateLabel(rate: number | null): string {
@@ -63,6 +63,18 @@ export function WorkspaceDashboard() {
     data && data.kpis.sent === 0 && data.recentCampaigns.length === 0 && data.activeFlows.length === 0
   );
 
+  // OPS-17/D-11/T-15-21: this endpoint returns one combined payload for
+  // every widget on this page (KPIs, both charts, both mini-lists) -- there
+  // is no per-widget query to split without changing the API contract,
+  // which this plan does not do. Within that constraint, a failure still
+  // renders as two distinct, region-scoped QueryErrorState cards (the
+  // KPI/chart region and the lists region) rather than one page-wide
+  // message, and the header/period selector/OnboardingChecklist above
+  // never disappear regardless of this query's state -- no early return
+  // ever replaces the whole page.
+  const isFullyErrored = dashboardQuery.isError && !dashboardQuery.data;
+  const isStaleErrored = dashboardQuery.isError && Boolean(dashboardQuery.data);
+
   return (
     <div className="space-y-6 p-8">
       <div className="flex items-center justify-between gap-4">
@@ -96,24 +108,40 @@ export function WorkspaceDashboard() {
           <Skeleton className="h-72 w-full" />
           <Skeleton className="h-72 w-full" />
         </div>
-      ) : dashboardQuery.isError ? (
-        <p className="text-sm font-medium text-destructive">{GENERIC_ERROR}</p>
+      ) : isFullyErrored ? (
+        <div className="space-y-6">
+          <QueryErrorState
+            title="Не удалось загрузить KPI и графики"
+            isFetching={dashboardQuery.isFetching}
+            onRetry={() => void dashboardQuery.refetch()}
+          />
+          <QueryErrorState
+            title="Не удалось загрузить последние кампании и цепочки"
+            isFetching={dashboardQuery.isFetching}
+            onRetry={() => void dashboardQuery.refetch()}
+          />
+        </div>
       ) : !data ? null : isEmpty ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Пока нет отправок</CardTitle>
-            <CardDescription>
-              Как только вы запустите первую кампанию или цепочку, здесь появится динамика доставок и открытий.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
+        <EmptyState
+          title="Пока нет отправок"
+          description="Как только вы запустите первую кампанию или цепочку, здесь появится динамика доставок и открытий."
+          action={
             <Button variant="secondary" onClick={() => void navigate(`/w/${slug}/campaigns`)}>
               Создать кампанию
             </Button>
-          </CardContent>
-        </Card>
+          }
+        />
       ) : (
         <div className="space-y-6">
+          {isStaleErrored ? (
+            <QueryErrorState
+              title="Не удалось обновить дашборд"
+              detail="Показаны последние загруженные данные."
+              isFetching={dashboardQuery.isFetching}
+              onRetry={() => void dashboardQuery.refetch()}
+            />
+          ) : null}
+
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
             <KpiCard label="Отправлено" value={String(data.kpis.sent)} />
             <KpiCard label="Доставлено" value={rateLabel(data.kpis.deliveredRate)} />

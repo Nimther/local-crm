@@ -6,6 +6,8 @@ import type { WorkspaceResponse } from "@mega-crm/shared-schemas";
 import { apiDelete, apiGet, apiPost } from "@/lib/api";
 import { useSession } from "@/lib/authClient";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { EmptyState } from "@/components/EmptyState";
+import { QueryErrorState } from "@/components/QueryErrorState";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { InviteModal } from "@/features/team/InviteModal";
@@ -122,6 +124,17 @@ export function TeamPage() {
   const canManage = viewerRole === "owner" || viewerRole === "admin";
   const isEmpty = members.length <= 1 && invites.length === 0;
 
+  // OPS-17/D-11: the roster table below merges membersQuery and
+  // invitesQuery into one `rows` array -- a failure on either with no
+  // prior data means the roster cannot be honestly assembled, so both
+  // queries gate the same region-level QueryErrorState rather than
+  // rendering a partial/misleading table.
+  const isFullyErrored =
+    (membersQuery.isError && !membersQuery.data) || (invitesQuery.isError && !invitesQuery.data);
+  const isStaleErrored =
+    !isFullyErrored &&
+    ((membersQuery.isError && Boolean(membersQuery.data)) || (invitesQuery.isError && Boolean(invitesQuery.data)));
+
   const rows: MemberRowData[] = [
     ...members.map<MemberRowData>((m) => ({
       kind: "member" as const,
@@ -150,47 +163,65 @@ export function TeamPage() {
         {canManage ? <InviteModal slug={slug} canInviteAdmin={viewerRole === "owner"} /> : null}
       </div>
 
-      {isEmpty ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>В воркспейсе пока только вы</CardTitle>
-            <CardDescription>Пригласите коллег — они получат письмо со ссылкой для входа.</CardDescription>
-          </CardHeader>
-          {canManage ? (
-            <CardContent>
-              <InviteModal slug={slug} canInviteAdmin={viewerRole === "owner"} />
-            </CardContent>
-          ) : null}
-        </Card>
+      {isFullyErrored ? (
+        <QueryErrorState
+          title="Не удалось загрузить команду"
+          isFetching={membersQuery.isFetching || invitesQuery.isFetching}
+          onRetry={() => {
+            void membersQuery.refetch();
+            void invitesQuery.refetch();
+          }}
+        />
       ) : (
-        <Card>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Имя</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Роль</TableHead>
-                  <TableHead className="text-right" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {rows.map((row) => (
-                  <MemberRow
-                    key={`${row.kind}-${row.id}`}
-                    row={row}
-                    viewerRole={viewerRole}
-                    onRoleChange={(memberId, role) => roleMutation.mutate({ memberId, role })}
-                    onRemove={(memberId) => removeMutation.mutate(memberId)}
-                    onRevoke={(invitationId) => revokeMutation.mutate(invitationId)}
-                    onResend={(invitationId) => resendMutation.mutate(invitationId)}
-                    resendingId={resendMutation.isPending ? (resendMutation.variables ?? null) : null}
-                  />
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+        <div className="space-y-6">
+          {isStaleErrored ? (
+            <QueryErrorState
+              title="Не удалось обновить команду"
+              detail="Показаны последние загруженные данные."
+              isFetching={membersQuery.isFetching || invitesQuery.isFetching}
+              onRetry={() => {
+                void membersQuery.refetch();
+                void invitesQuery.refetch();
+              }}
+            />
+          ) : null}
+          {isEmpty ? (
+            <EmptyState
+              title="В воркспейсе пока только вы"
+              description="Пригласите коллег — они получат письмо со ссылкой для входа."
+              action={canManage ? <InviteModal slug={slug} canInviteAdmin={viewerRole === "owner"} /> : undefined}
+            />
+          ) : (
+            <Card>
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Имя</TableHead>
+                      <TableHead>Email</TableHead>
+                      <TableHead>Роль</TableHead>
+                      <TableHead className="text-right" />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {rows.map((row) => (
+                      <MemberRow
+                        key={`${row.kind}-${row.id}`}
+                        row={row}
+                        viewerRole={viewerRole}
+                        onRoleChange={(memberId, role) => roleMutation.mutate({ memberId, role })}
+                        onRemove={(memberId) => removeMutation.mutate(memberId)}
+                        onRevoke={(invitationId) => revokeMutation.mutate(invitationId)}
+                        onResend={(invitationId) => resendMutation.mutate(invitationId)}
+                        resendingId={resendMutation.isPending ? (resendMutation.variables ?? null) : null}
+                      />
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
+        </div>
       )}
 
       {viewerRole === "owner" && workspaceQuery.data ? (
