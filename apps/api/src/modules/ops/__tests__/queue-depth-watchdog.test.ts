@@ -1,5 +1,5 @@
 import { pool } from "@mega-crm/tenant-context";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { ensureTestDbMigrated, getTestDatabaseUrl } from "../../../test/db-fixture.js";
 import type { QueueMetricsResult } from "../queue-monitor.js";
@@ -140,6 +140,15 @@ describe("checkQueueDepthHealthAndAlert dedup (T-15-42/43/44)", () => {
 
   afterAll(async () => {
     await pool.end();
+  });
+
+  // Each test starts with a clean claim state for this alert name -- without
+  // this, a prior test's own claim (potentially dated far in the future, as
+  // test 8's dedup-window-elapsed step deliberately is) would leak into the
+  // next test and make its own claim attempt evaluate against stale state
+  // instead of a fresh one.
+  beforeEach(async () => {
+    await pool.query(`DELETE FROM ops_alert_state WHERE alert_name = $1`, [QUEUE_DEPTH_ALERT_NAME]);
   });
 
   const [unhealthyQueueName, unhealthyThreshold] = Object.entries(QUEUE_DEPTH_THRESHOLDS)[0];
