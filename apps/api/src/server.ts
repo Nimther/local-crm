@@ -50,6 +50,7 @@ import {
   REPUTATION_ALERT_DEDUP_HOURS,
   type ReputationAlertMessage,
 } from "./modules/ops/reputation-watchdog.js";
+import { closeQueueMonitorQueues } from "./modules/ops/queue-monitor.js";
 import { authPlugin } from "./modules/auth/plugin.js";
 import { registerWorkspaceRoutes } from "./modules/tenancy/workspaces.js";
 import { registerProfileRoutes } from "./modules/tenancy/profile.js";
@@ -329,6 +330,17 @@ export async function buildServer(options: BuildServerOptions = {}) {
   // command over.
   app.addHook("onClose", () => {
     rateLimitRedis.disconnect();
+  });
+
+  // Phase 15 plan 13 (OPS-13, Task 1): closes queue-monitor.ts's own new
+  // read-only `emailTriggeredQueue` handle -- the one BullMQ `Queue` that
+  // module constructs itself (every other queue it reads is a REUSED handle
+  // already owned, and already closed where relevant, by its own producer
+  // module). Same rationale as the `rateLimitRedis.disconnect()` hook just
+  // above: without this, `npx vitest run --root apps/api` would hang on an
+  // open ioredis handle after the suite finishes.
+  app.addHook("onClose", async () => {
+    await closeQueueMonitorQueues();
   });
 
   return app;

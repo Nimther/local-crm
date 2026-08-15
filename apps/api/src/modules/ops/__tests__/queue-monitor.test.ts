@@ -18,9 +18,9 @@ import {
 
 function fakeQueue(overrides: Partial<QueueMonitorQueueLike> = {}): QueueMonitorQueueLike {
   return {
-    getJobCounts: async () => ({ waiting: 0, delayed: 0, active: 0, failed: 0 }),
-    getWaiting: async () => [],
-    getDelayed: async () => [],
+    getJobCounts: () => Promise.resolve({ waiting: 0, delayed: 0, active: 0, failed: 0 }),
+    getWaiting: () => Promise.resolve([]),
+    getDelayed: () => Promise.resolve([]),
     ...overrides,
   };
 }
@@ -41,7 +41,7 @@ describe("readQueueMetrics", () => {
   it("test 2: counts pass through from getJobCounts verbatim", async () => {
     const result = await readQueueMetrics(
       fakeQueue({
-        getJobCounts: async () => ({ waiting: 12, delayed: 3, active: 1, failed: 2 }),
+        getJobCounts: () => Promise.resolve({ waiting: 12, delayed: 3, active: 1, failed: 2 }),
       }),
     );
     expect(result).toMatchObject({ readable: true, waiting: 12, delayed: 3, active: 1, failed: 2 });
@@ -52,8 +52,8 @@ describe("readQueueMetrics", () => {
     const newer = 5_000;
     const result = await readQueueMetrics(
       fakeQueue({
-        getWaiting: async () => [{ timestamp: newer }],
-        getDelayed: async () => [{ timestamp: older }],
+        getWaiting: () => Promise.resolve([{ timestamp: newer }]),
+        getDelayed: () => Promise.resolve([{ timestamp: older }]),
       }),
     );
     expect(result.readable).toBe(true);
@@ -89,7 +89,7 @@ describe("readAllQueueMetrics", () => {
     const queues: Record<string, QueueMonitorQueueLike> = {
       "queue-a": fakeQueue(),
       "queue-b": fakeQueue({ getJobCounts: () => Promise.reject(new Error("down")) }),
-      "queue-c": fakeQueue({ getJobCounts: async () => ({ waiting: 5, delayed: 0, active: 0, failed: 0 }) }),
+      "queue-c": fakeQueue({ getJobCounts: () => Promise.resolve({ waiting: 5, delayed: 0, active: 0, failed: 0 }) }),
     };
 
     const results = await readAllQueueMetrics(queues);
