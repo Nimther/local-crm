@@ -32,6 +32,14 @@ const columnHelper = createColumnHelper<FlowNodeAnalyticsResponse>();
  * node, listing send-node delivery/open/click/bounce counts + rates.
  * Nodes removed from the live definition are still listed (D-05) -- this
  * table has no concept of "the current graph", only the analytics response.
+ *
+ * OPS-18/D-12 (plan 15-15): deliberately NO `DataAsOfLabel`/`StaleDataBanner`
+ * here. `useFlowAnalytics`'s `GET /flows/:id/analytics` response is built
+ * live from `flow_run_steps`/`sends` (flow-analytics.repository.ts) --
+ * `workspace_daily_rollup` plays no part in it. Mounting the rollup
+ * watermark over these figures would mislabel live data as rollup-derived
+ * (T-15-52); the plan 15-12 freshness signal only exists on the workspace
+ * dashboard response and does not apply to this table.
  */
 export function FlowAnalyticsTable({ slug, flowId }: { slug: string; flowId: string }) {
   const [sorting, setSorting] = useState<SortingState>([]);

@@ -4,8 +4,10 @@ import { useNavigate, useParams } from "react-router";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DataAsOfLabel } from "@/components/DataAsOfLabel";
 import { EmptyState } from "@/components/EmptyState";
 import { QueryErrorState } from "@/components/QueryErrorState";
+import { StaleDataBanner } from "@/components/StaleDataBanner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
@@ -142,10 +144,22 @@ export function WorkspaceDashboard() {
             />
           ) : null}
 
+          {/*
+            OPS-18/D-12 (plan 15-15): one banner for the whole rollup-derived
+            region below, not one per widget -- a delayed pipeline is one
+            message. `newContacts` (below) and the growth chart/mini-lists
+            further down are read LIVE from contacts/campaigns/flows, never
+            from the rollup, so this signal deliberately does not cover them
+            (T-15-52 -- labelling a live number with a rollup watermark would
+            be a new lie in place of the old one).
+          */}
+          <StaleDataBanner lagMinutes={data.lagMinutes} />
+
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
             <KpiCard label="Отправлено" value={String(data.kpis.sent)} />
             <KpiCard label="Доставлено" value={rateLabel(data.kpis.deliveredRate)} />
             <KpiCard label="Открыто" value={rateLabel(data.kpis.openedRate)} />
+            {/* `newContacts` is grouped from `contacts.created_at` (RESEARCH A2), not workspace_daily_rollup -- live, always current, deliberately outside the freshness label's scope below. */}
             <KpiCard label="Новые контакты" value={String(data.kpis.newContacts)} />
             <KpiCard label="Отписки" value={String(data.kpis.unsubscribes)} />
           </div>
@@ -153,6 +167,15 @@ export function WorkspaceDashboard() {
           <Card>
             <CardHeader>
               <CardTitle>Динамика отправок</CardTitle>
+              {/*
+                Scoped to this card: `sent`/`deliveredRate`/`openedRate`
+                (grid above) and `trend` (below) all come from the SAME
+                `workspace_daily_rollup` query for the SAME period window
+                (dashboard.repository.ts), so one watermark honestly
+                describes all of them. `unsubscribes` (grid above) is also
+                rollup-derived (summed from the same rows).
+              */}
+              <DataAsOfLabel dataAsOf={data.dataAsOf} />
             </CardHeader>
             <CardContent>
               <TrendChart data={data.trend} />
