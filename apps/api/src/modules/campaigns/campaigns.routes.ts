@@ -10,7 +10,7 @@ import { buildContactTemplateData, audienceExclusionBreakdown } from "@mega-crm/
 import { decryptTenantSecret } from "@mega-crm/kms";
 import { auth } from "../auth/auth.js";
 import { requirePermission, toFetchHeaders } from "../../middleware/role-guard.js";
-import { withTenant, withTenantTransaction } from "../../middleware/tenant-context.js";
+import { getCorrelationContext, withTenant, withTenantTransaction } from "../../middleware/tenant-context.js";
 import { findActiveWorkspaceBySlug } from "../tenancy/workspace-lookup.js";
 import { resolveWorkspaceMember, NOT_FOUND_BODY } from "../tenancy/resolve-workspace-member.js";
 import { getKey } from "../tenancy/sendgrid-key.repository.js";
@@ -469,6 +469,12 @@ export async function registerCampaignsRoutes(fastify: FastifyInstance): Promise
 
     const testTo = parsed.data.to ?? session.user.email;
     const jobId = `${workspace.id}-test-${id}-${Date.now()}`;
+    // Phase 15 plan 02 (OPS-11/OPS-12): carries the request's correlation id
+    // across the HTTP->queue boundary -- server.ts's onRequest hook already
+    // bound it for this request via withCorrelation, so it is read back
+    // here, never re-derived or invented. Optional on the schema (no
+    // schemaVersion bump) -- see queues.ts's own doc comment.
+    const { requestId } = getCorrelationContext();
     await emailBroadcastQueue.add(
       "test",
       {
@@ -477,6 +483,7 @@ export async function registerCampaignsRoutes(fastify: FastifyInstance): Promise
         kind: "test",
         testTo,
         testData: parsed.data.dynamicTemplateData,
+        ...(requestId !== undefined ? { requestId } : {}),
       },
       { jobId }
     );

@@ -1,8 +1,10 @@
 import { Worker, type Job, type ConnectionOptions } from "bullmq";
 import { EMAIL_BROADCAST_QUEUE, type EmailBroadcastJob } from "@mega-crm/shared-schemas";
+import { withCorrelation } from "@mega-crm/tenant-context";
 import { processSendJob, type ProcessSendJobDeps } from "./send-dispatch.js";
 import { SEND_LOCK_DURATION_MS } from "@mega-crm/queue-core";
 import { deferForTenantBucket } from "./tenant-deferral.js";
+import { logger } from "../logger.js";
 
 /**
  * The broadcast Worker's per-job handler, factored out of the `Worker`
@@ -13,6 +15,16 @@ import { deferForTenantBucket } from "./tenant-deferral.js";
  * round trip. `deps` defaults to `{}` so every existing call site
  * (`createEmailBroadcastWorker(connection)`, unchanged) behaves identically
  * to before this export existed.
+ *
+ * Phase 15 plan 02 (OPS-11/OPS-12): the ENTIRE body runs inside a
+ * `withCorrelation` scope bound to this job's `jobId` and the payload's
+ * (optional -- pre-Phase-15 jobs carry none) `requestId`, so every log line
+ * emitted by `processSendJob`/`withTenantTransaction` beneath this call --
+ * and the transaction's own `application_name` -- carries the same
+ * correlation identity the enqueuing HTTP request bound. This is a targeted
+ * fix for THIS ONE queue's processor (the phase's tracer path) -- plan 15-05
+ * owns building the general-purpose wrapper every other `create*Worker`
+ * factory will route through; do not generalize this call site here.
  */
 export async function handleEmailBroadcastJob(
   job: Job<EmailBroadcastJob>,
@@ -20,33 +32,39 @@ export async function handleEmailBroadcastJob(
   deps: ProcessSendJobDeps = {},
   token?: string
 ): Promise<void> {
-  const result = await processSendJob(job.data, deps);
-  // Phase 11 (D-11, plan 11-10): a test-send's `{ outcome: "unknown" }`
-  // (and every other non-`rate_limited` outcome) falls through this `if`
-  // untouched -- the processor resolves and the job completes. This is
-  // load-bearing for D-11's no-automatic-retry guarantee: DO NOT add a
-  // catch-all `else { throw ... }` below without checking whether it would
-  // reintroduce test-send retries.
-  if (result.outcome === "rate_limited") {
-    if (result.cause === "tenant_bucket") {
-      // Phase 12 (WRK-01): a tenant's own RPS ceiling is not a failure --
-      // does NOT consume one of the job's `attempts`. Deferred through the
-      // shared `deferForTenantBucket` helper (job.moveToDelayed), NOT
-      // `worker.rateLimit()` -- that mechanism is global-per-worker and
-      // would pause draining for every OTHER tenant's jobs too, not just
-      // this one's. Both send lanes reach this through the same helper so
-      // they cannot drift.
-      await deferForTenantBucket(job, result.rateLimitMs, token);
+  return withCorrelation({ jobId: job.id, requestId: job.data.requestId }, async () => {
+    logger.info(
+      { queue: EMAIL_BROADCAST_QUEUE, kind: job.data.kind, campaignId: job.data.campaignId },
+      "email-broadcast job processing",
+    );
+    const result = await processSendJob(job.data, deps);
+    // Phase 11 (D-11, plan 11-10): a test-send's `{ outcome: "unknown" }`
+    // (and every other non-`rate_limited` outcome) falls through this `if`
+    // untouched -- the processor resolves and the job completes. This is
+    // load-bearing for D-11's no-automatic-retry guarantee: DO NOT add a
+    // catch-all `else { throw ... }` below without checking whether it would
+    // reintroduce test-send retries.
+    if (result.outcome === "rate_limited") {
+      if (result.cause === "tenant_bucket") {
+        // Phase 12 (WRK-01): a tenant's own RPS ceiling is not a failure --
+        // does NOT consume one of the job's `attempts`. Deferred through the
+        // shared `deferForTenantBucket` helper (job.moveToDelayed), NOT
+        // `worker.rateLimit()` -- that mechanism is global-per-worker and
+        // would pause draining for every OTHER tenant's jobs too, not just
+        // this one's. Both send lanes reach this through the same helper so
+        // they cannot drift.
+        await deferForTenantBucket(job, result.rateLimitMs, token);
+      }
+      // Phase 11 (D-10, plan 11-05): `cause === "provider_backoff"` --
+      // SendGrid itself returned 429/5xx. This now consumes ONE of the
+      // job's BOUNDED `attempts`, with BullMQ's exponential backoff
+      // applying between redeliveries -- the previous unbounded
+      // Retry-After-driven `worker.rateLimit()` loop for this case is
+      // deliberately gone. A provider that keeps failing lands the job in
+      // the failed set, where it is visible, instead of retrying forever.
+      throw new Error(`SendGrid provider backoff (suggested retry in ~${result.rateLimitMs}ms)`);
     }
-    // Phase 11 (D-10, plan 11-05): `cause === "provider_backoff"` --
-    // SendGrid itself returned 429/5xx. This now consumes ONE of the
-    // job's BOUNDED `attempts`, with BullMQ's exponential backoff
-    // applying between redeliveries -- the previous unbounded
-    // Retry-After-driven `worker.rateLimit()` loop for this case is
-    // deliberately gone. A provider that keeps failing lands the job in
-    // the failed set, where it is visible, instead of retrying forever.
-    throw new Error(`SendGrid provider backoff (suggested retry in ~${result.rateLimitMs}ms)`);
-  }
+  });
 }
 
 /**
