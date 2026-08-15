@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { Mail, MousePointerClick, Send, ShieldAlert } from "lucide-react";
 
+import { QueryErrorState } from "@/components/QueryErrorState";
 import { Separator } from "@/components/ui/separator";
 import {
   Sheet,
@@ -117,24 +118,43 @@ export function SendLogRowDrawer({ slug, sendId, row, onOpenChange }: SendLogRow
             <Skeleton className="h-10 w-full" />
             <Skeleton className="h-10 w-full" />
           </div>
-        ) : (eventsQuery.data ?? []).length === 0 ? (
-          <p className="text-sm text-muted-foreground">Событий по этому письму пока нет.</p>
+        ) : eventsQuery.isError && !eventsQuery.data ? (
+          // Contained to the drawer -- the table behind it keeps rendering
+          // regardless of this drawer's own fetch state (T-15-14).
+          <QueryErrorState
+            title="Не удалось загрузить хронологию письма"
+            isFetching={eventsQuery.isFetching}
+            onRetry={() => void eventsQuery.refetch()}
+          />
         ) : (
-          <div className="space-y-2">
-            {(eventsQuery.data ?? []).map((event) => (
-              <div key={event.id} className="flex items-start gap-3 rounded-md border p-3">
-                {eventIcon(event.eventType)}
-                <div className="flex-1 space-y-1">
-                  <p className="text-sm font-medium">{EVENT_TYPE_LABELS[event.eventType] ?? event.eventType}</p>
-                  {event.clickUrl && (
-                    <p className="break-all text-sm text-muted-foreground">{event.clickUrl}</p>
-                  )}
-                  {event.reason && <p className="text-sm text-muted-foreground">{event.reason}</p>}
-                </div>
-                <span className="shrink-0 text-sm text-muted-foreground">{relativeTime(event.occurredAt)}</span>
+          <>
+            {eventsQuery.isError && eventsQuery.data ? (
+              <QueryErrorState
+                title="Не удалось обновить хронологию письма"
+                isFetching={eventsQuery.isFetching}
+                onRetry={() => void eventsQuery.refetch()}
+              />
+            ) : null}
+            {(eventsQuery.data ?? []).length === 0 ? (
+              <p className="text-sm text-muted-foreground">Событий по этому письму пока нет.</p>
+            ) : (
+              <div className="space-y-2">
+                {(eventsQuery.data ?? []).map((event) => (
+                  <div key={event.id} className="flex items-start gap-3 rounded-md border p-3">
+                    {eventIcon(event.eventType)}
+                    <div className="flex-1 space-y-1">
+                      <p className="text-sm font-medium">{EVENT_TYPE_LABELS[event.eventType] ?? event.eventType}</p>
+                      {event.clickUrl && (
+                        <p className="break-all text-sm text-muted-foreground">{event.clickUrl}</p>
+                      )}
+                      {event.reason && <p className="text-sm text-muted-foreground">{event.reason}</p>}
+                    </div>
+                    <span className="shrink-0 text-sm text-muted-foreground">{relativeTime(event.occurredAt)}</span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            )}
+          </>
         )}
       </SheetContent>
     </Sheet>
