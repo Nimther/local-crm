@@ -11,6 +11,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@bull-board/api": "8.6.1",
+    "@bull-board/fastify": "8.6.1",
     "@mega-crm/contacts-core": "0.1.0",
     "@mega-crm/db": "0.1.0",
     "@mega-crm/delivery-core": "0.1.0",
@@ -21,9 +23,12 @@
     "@mega-crm/segments-core": "0.1.0",
     "@mega-crm/shared-schemas": "0.1.0",
     "@mega-crm/tenant-context": "0.1.0",
+    "@sentry/node": "10.70.0",
     "bullmq": "5.79.1",
+    "fastify": "5.9.0",
     "ioredis": "5.11.0",
     "pg": "8.22.0",
+    "pino": "10.3.1",
     "rate-limiter-flexible": "11.2.0"
   },
   "devDependencies": {
@@ -32,7 +37,6 @@
     "@types/node": "^22.10.5",
     "@types/pg": "^8.15.6",
     "@vitest/coverage-v8": "^4.1.9",
-    "fastify": "5.9.0",
     "tsx": "^4.19.2",
     "typescript": "^5.9.3",
     "vitest": "4.1.9"

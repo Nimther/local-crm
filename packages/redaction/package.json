@@ -10,6 +10,7 @@
     "test": "vitest run"
   },
   "devDependencies": {
+    "@sentry/node": "10.70.0",
     "pino": "10.3.1",
     "typescript": "^5.9.3",
     "vitest": "4.1.9"
