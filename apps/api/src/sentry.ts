@@ -43,6 +43,20 @@ let initialized = false;
  * NOT cleared by a later `Sentry.init()` call) -- `initSentry` guards
  * against re-registering this on a second call in the same process (e.g. a
  * test file that calls `initSentry()` more than once).
+ *
+ * KNOWN RESIDUAL (verified, see `__tests__/sentry.test.ts`'s "REAL PATH"
+ * test): `request_id` is bound once at `server.ts`'s outermost onRequest
+ * hook and reliably reaches every exception `setupFastifyErrorHandler`
+ * captures for that request. `workspace_id`, however, is bound per-route by
+ * a NESTED `withTenant(workspace.id, () => ...)` call inside each route
+ * handler, awaited from OUTSIDE that call -- Node's AsyncLocalStorage does
+ * not propagate that nested binding to Fastify's onError capture once the
+ * route handler's own promise has settled (same underlying mechanism as
+ * `apps/worker/src/processor-wrapper.ts`'s `ProcessorErrorContext` header
+ * comment). An exception thrown from inside a route handler's `withTenant`
+ * scope therefore reaches Sentry WITHOUT `workspace_id`. See this plan's
+ * SUMMARY.md "Known limitations" for why this is documented rather than
+ * fixed here (fixing it touches ~10 route modules, out of this plan's scope).
  */
 export function attachCorrelationTags(event: Event): Event {
   const ctx = getCorrelationContext();
