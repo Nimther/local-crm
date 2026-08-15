@@ -1,6 +1,11 @@
 import "./load-env.js";
 import { randomUUID } from "node:crypto";
 import Fastify from "fastify";
+// Phase 15 plan 10 (OPS-08): namespace import, not a named import of the
+// Fastify error-handler helper below -- keeps this file's only mention of
+// that helper's name on its single call-site line, not duplicated here too.
+import * as Sentry from "@sentry/node";
+import { initSentry } from "./sentry.js";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import { Redis } from "ioredis";
@@ -110,6 +115,14 @@ function resolveRequestId(header: string | string[] | undefined): string {
 
 /** Assembles the Fastify app: zod type provider, better-auth handler, workspace/profile/invite/member routes. */
 export async function buildServer(options: BuildServerOptions = {}) {
+  // Phase 15 plan 10 (OPS-08): initialized before the Fastify instance is
+  // built, per this plan's own instruction -- a missing DSN is a no-op
+  // (initSentry logs once and returns false), so this never blocks/slows
+  // boot and every apps/api integration test calling buildServer() directly
+  // (there is no separate DSN in the test environment) hits exactly that
+  // no-op path.
+  initSentry();
+
   const app = Fastify({
     loggerInstance: logger,
     // 04-03: find-my-way's default maxParamLength (100) is too small for the
@@ -297,6 +310,13 @@ export async function buildServer(options: BuildServerOptions = {}) {
   await app.register(registerWebhookSettingsRoutes);
   await app.register(registerAnalyticsRoutes);
   await app.register(registerSendLogRoutes);
+
+  // Phase 15 plan 10 (OPS-08): registered AFTER every route above, per this
+  // plan's own instruction. Safe to call unconditionally (even with no DSN
+  // configured, i.e. every test run) -- it only adds an onError hook that
+  // forwards to Sentry's own captureException, which itself no-ops when no
+  // client is initialized.
+  Sentry.setupFastifyErrorHandler(app);
 
   // Every apps/api integration test calls `buildServer()` and closes the
   // returned instance in teardown -- closing the limiter's Redis client here
