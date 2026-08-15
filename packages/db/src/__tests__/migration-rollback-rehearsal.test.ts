@@ -61,6 +61,12 @@ interface InverseStep {
  *   `partition_retention_drops`, with its own index. Reverting means
  *   dropping exactly those four objects -- nothing this migration's inverse
  *   touches existed before this migration ran.
+ * - 0064_ops_alert_state_and_rollup_watermark (Phase 15 plan 12, OPS-13/
+ *   OPS-18): creates a brand-new table, `ops_alert_state` (no FK, no other
+ *   object depends on it), and adds one defaulted column,
+ *   `workspace_daily_rollup.updated_at`. Reverting means dropping exactly
+ *   those two objects -- nothing this migration's inverse touches existed
+ *   before this migration ran.
  */
 const MIGRATION_INVERSES: Record<string, InverseStep[]> = {
   "0062_member_unique_org_user": [
@@ -82,6 +88,16 @@ const MIGRATION_INVERSES: Record<string, InverseStep[]> = {
               DROP COLUMN retention_status,
               DROP COLUMN retention_error,
               DROP COLUMN partitions_dropped;`,
+    },
+  ],
+  "0064_ops_alert_state_and_rollup_watermark": [
+    {
+      description: "drop ops_alert_state (no FK, no other object depends on it)",
+      sql: `DROP TABLE ops_alert_state;`,
+    },
+    {
+      description: "drop the watermark column this migration added to workspace_daily_rollup (updated_at)",
+      sql: `ALTER TABLE workspace_daily_rollup DROP COLUMN updated_at;`,
     },
   ],
 };

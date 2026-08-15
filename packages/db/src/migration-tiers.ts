@@ -134,6 +134,7 @@ export const MIGRATION_TIERS: Readonly<Record<string, MigrationTier>> = Object.f
   "0061_suppression_hash_contract": "forward-only", // DROP COLUMN + DROP CONSTRAINT
   "0062_member_unique_org_user": "auto-reversible", // CREATE UNIQUE INDEX + ADD CONSTRAINT ... UNIQUE USING INDEX
   "0063_partition_retention_drops": "auto-reversible", // ADD COLUMN x3 on partition_maintenance_runs + CREATE TABLE partition_retention_drops -- pure additive shape, destroys nothing that existed before
+  "0064_ops_alert_state_and_rollup_watermark": "auto-reversible", // CREATE TABLE ops_alert_state + ADD COLUMN workspace_daily_rollup.updated_at -- pure additive shape, no backfill, destroys nothing that existed before
 });
 
 /**

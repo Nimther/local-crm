@@ -205,6 +205,52 @@ describe("analytics reconciliation worker (07-06, ANLT-04)", () => {
     expect(thirdRun).toEqual(firstRun);
   });
 
+  /**
+   * Phase 15 (OPS-18, D-12, plan 15-12 Task 3, Rule 2 deviation -- not in
+   * this plan's own `files_modified` list for this test file, but the
+   * plan's own acceptance criteria requires "a test asserts each [write
+   * path] independently", and `reconcileWorkspaceDay` lives here, not in
+   * `apps/api` (which cannot import it -- see
+   * `apps/api/src/modules/analytics/__tests__/rollup-watermark.test.ts`'s
+   * own header comment for the cross-app dependency direction). Seeds a
+   * STALE `updated_at` first, forcing the reconciliation overwrite down its
+   * `ON CONFLICT DO UPDATE` branch -- a fresh `INSERT`'s own column DEFAULT
+   * would otherwise trivially satisfy "sets the watermark" without proving
+   * the overwrite path's own `updated_at = EXCLUDED.updated_at` is present.
+   */
+  it("reconciliation overwrite sets the row's watermark to the write time -- including on the ON CONFLICT (already-existing-row) branch", async () => {
+    const workspaceId = await freshWorkspaceId("reconcile-watermark");
+    const campaignId = await createFixtureCampaign(workspaceId);
+    const contact1 = await createFixtureContact(workspaceId);
+    await createFixtureSend(workspaceId, campaignId, contact1, { sentAt: DAY_TS, deliveredAt: DAY_TS });
+
+    const staleWatermark = new Date(Date.now() - 24 * 60 * 60 * 1000); // 1 day ago
+    await withTenant(workspaceId, () =>
+      withTenantTransaction((client) =>
+        client.query(
+          `INSERT INTO workspace_daily_rollup (workspace_id, day, sent_count, updated_at)
+           VALUES ($1, $2, 0, $3)`,
+          [workspaceId, DAY, staleWatermark]
+        )
+      )
+    );
+
+    const before = new Date();
+    await runReconcile(workspaceId, DAY);
+
+    const { updatedAt } = await withTenant(workspaceId, () =>
+      withTenantTransaction(async (client) => {
+        const { rows } = await client.query<{ updatedAt: Date }>(
+          `SELECT updated_at as "updatedAt" FROM workspace_daily_rollup WHERE workspace_id = $1 AND day = $2`,
+          [workspaceId, DAY]
+        );
+        return rows[0];
+      })
+    );
+    expect(updatedAt.getTime()).toBeGreaterThanOrEqual(before.getTime());
+    expect(updatedAt.getTime()).toBeLessThanOrEqual(Date.now() + 5_000);
+  });
+
   it("reconciles only the requested workspace's own sends (per-workspace scoping)", async () => {
     const workspaceA = await freshWorkspaceId("reconcile-tenant-a");
     const workspaceB = await freshWorkspaceId("reconcile-tenant-b");

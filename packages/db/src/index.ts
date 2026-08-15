@@ -34,6 +34,7 @@ import * as ingestionAlertStateSchema from "./schema/ingestion-alert-state.js";
 import * as erasureRecordsSchema from "./schema/erasure-records.js";
 import * as workspaceSuppressionKeysSchema from "./schema/workspace-suppression-keys.js";
 import * as partitionRetentionDropsSchema from "./schema/partition-retention-drops.js";
+import * as opsAlertStateSchema from "./schema/ops-alert-state.js";
 
 const schema = {
   ...authSchema,
@@ -69,6 +70,7 @@ const schema = {
   ...erasureRecordsSchema,
   ...workspaceSuppressionKeysSchema,
   ...partitionRetentionDropsSchema,
+  ...opsAlertStateSchema,
 };
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -171,6 +173,10 @@ export * from "./schema/erasure-records.js";
 // partition_maintenance_runs.retention_status/retention_error rather than
 // instead of it.
 export * from "./schema/partition-retention-drops.js";
+// Phase 15 plan 12 (OPS-13): the shared alert-dedup table's own
+// type-inference shape -- see that file's header for the keyed-not-singleton
+// rationale.
+export * from "./schema/ops-alert-state.js";
 export { TENANT_GUC_KEY } from "./rls.js";
 // Phase 14 plan 01 (D-13, DB-05/DB-06, OPS-04/OPS-05): the one shared
 // definition of "a migration is applied", consumed by scripts/migrate-runner.mjs

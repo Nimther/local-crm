@@ -60,9 +60,9 @@ describe("checkEmptyDiff against the real repository (the CI-enforced copy of db
     expect(result.empty).toBe(true);
     expect(result.sqlStatements).toEqual([]);
     // Diagnosable on failure: which snapshot, how many shipped migrations.
-    expect(result.comparedAgainstSnapshot).toBe("0063_snapshot.json");
-    expect(result.shippedMigrationCount).toBe(64);
-    expect(result.snapshotFileCount).toBe(13);
+    expect(result.comparedAgainstSnapshot).toBe("0064_snapshot.json");
+    expect(result.shippedMigrationCount).toBe(65);
+    expect(result.snapshotFileCount).toBe(14);
 
     // Never touches the repository -- proven, not assumed: the directory
     // listing (every file under packages/db/migrations, recursively) is
@@ -77,12 +77,12 @@ describe("checkEmptyDiff against the real repository (the CI-enforced copy of db
     // The backfilled snapshot's own prevId must chain from the snapshot that
     // preceded it (0034), and its filename must match the newest shipped
     // migration's tag prefix -- a mismatch here would mean db:check-empty-diff
-    // is silently comparing against the wrong point in history. 0063
-    // (Phase 14 plan 12, DB-11) is now the newest, with its own snapshot
-    // generated the same way (drizzle-kit's own generateDrizzleJson,
-    // chained from 0062_snapshot.json's id) rather than hand-typed.
+    // is silently comparing against the wrong point in history. 0064
+    // (Phase 15 plan 12, OPS-13/OPS-18) is now the newest, with its own
+    // snapshot generated the same way (drizzle-kit's own generateDrizzleJson,
+    // chained from 0063_snapshot.json's id) rather than hand-typed.
     const newestTag = journal.entries[journal.entries.length - 1]?.tag;
-    expect(newestTag).toBe("0063_partition_retention_drops");
+    expect(newestTag).toBe("0064_ops_alert_state_and_rollup_watermark");
   });
 });
 
@@ -145,6 +145,6 @@ describe("listSnapshotFiles", () => {
     const files = listSnapshotFiles(path.join(REAL_MIGRATIONS_DIR, "meta"));
     expect(files).not.toContain("_journal.json");
     expect(files).toEqual([...files].sort());
-    expect(files[files.length - 1]).toBe("0063_snapshot.json");
+    expect(files[files.length - 1]).toBe("0064_snapshot.json");
   });
 });
