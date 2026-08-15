@@ -28,7 +28,10 @@ import { cn } from "@/lib/utils";
 import { useFlow, type FlowNodeAnalyticsResponse, type FlowResponse } from "../api";
 import { INCOMPLETE_NODE_MESSAGES, NodeConfigPanel, computePublishBlockers } from "./NodeConfigPanel";
 import { NodePalette, PALETTE_DND_MIME } from "./NodePalette";
+import { SaveErrorBanner } from "./SaveErrorBanner";
+import { UnsavedChangesDialog } from "./UnsavedChangesDialog";
 import { useAutosaveDraft } from "./useAutosaveDraft";
+import { useUnsavedChangesGuard } from "./useUnsavedChangesGuard";
 import {
   NODE_TYPE_META,
   NodeActionsContext,
@@ -169,7 +172,11 @@ function FlowCanvasInner({
   }, [focusNodeId]);
 
   // Debounced (1s) draft autosave against PATCH /flows/:id (06-04).
-  const { saveState, serialized } = useAutosaveDraft({ slug, flowId: flow.id, nodes, edges });
+  const { saveState, serialized, unsaved, retry } = useAutosaveDraft({ slug, flowId: flow.id, nodes, edges });
+
+  // OPS-19/D-13: in-app navigation guard (React Router `useBlocker`) + native
+  // `beforeunload` prompt, both driven by the same `unsaved` signal above.
+  const unsavedChangesBlocker = useUnsavedChangesGuard(unsaved);
 
   // Instant D-17 feedback via the SAME validateFlowDefinition the server
   // re-runs at publish time — client validity is never a trusted flag.
@@ -309,59 +316,63 @@ function FlowCanvasInner({
 
   return (
     <NodeActionsContext.Provider value={{ deleteNode, duplicateNode }}>
-      <div className="h-full min-h-0 flex-1">
-        <ReactFlow
-          nodes={displayNodes}
-          edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={onConnect}
-          isValidConnection={isValidConnection}
-          nodeTypes={nodeTypes}
-          edgeTypes={edgeTypes}
-          defaultEdgeOptions={{ type: "flow" }}
-          onDragOver={onDragOver}
-          onDrop={onDrop}
-          snapToGrid
-          snapGrid={[16, 16]}
-          fitView
-          fitViewOptions={{ maxZoom: 1 }}
-          className="bg-neutral-50"
-        >
-          {/* Dot-grid neutral-200 on the standard neutral-50 page background. */}
-          <Background variant={BackgroundVariant.Dots} gap={16} size={1.5} color="#E5E5E5" />
-          <Controls position="bottom-left" />
-          <MiniMap position="bottom-right" />
-          <NodePalette />
-          <Panel position="top-right">
-            <div className="flex flex-col items-end gap-2">
-              {/* Autosave status — Label/meta text, never a toast (06-UI-SPEC). WR-05: an
-                  errored-with-unsaved-changes state must read honestly, never «Сохранено». */}
-              <span
-                className={cn(
-                  "rounded bg-white/90 px-2 py-1 text-sm",
-                  saveState === "error" ? "text-destructive" : "text-muted-foreground"
-                )}
-              >
-                {saveState === "saving" ? "Сохранение…" : saveState === "error" ? "Не сохранено — повтор…" : "Сохранено"}
-              </span>
-              {uniqueBlockerMessages.length > 0 ? (
-                <div className="w-72 rounded-lg border border-neutral-200 bg-white p-3 shadow-sm">
-                  <p className="text-sm font-semibold">Блокирует публикацию</p>
-                  <ul className="mt-1 space-y-1">
-                    {uniqueBlockerMessages.map((message) => (
-                      <li key={message} className="text-sm text-destructive">
-                        {message}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
-            </div>
-          </Panel>
-        </ReactFlow>
+      <div className="flex h-full min-h-0 flex-1 flex-col">
+        {saveState === "error" ? <SaveErrorBanner onRetry={retry} /> : null}
+        <div className="min-h-0 flex-1">
+          <ReactFlow
+            nodes={displayNodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            isValidConnection={isValidConnection}
+            nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
+            defaultEdgeOptions={{ type: "flow" }}
+            onDragOver={onDragOver}
+            onDrop={onDrop}
+            snapToGrid
+            snapGrid={[16, 16]}
+            fitView
+            fitViewOptions={{ maxZoom: 1 }}
+            className="bg-neutral-50"
+          >
+            {/* Dot-grid neutral-200 on the standard neutral-50 page background. */}
+            <Background variant={BackgroundVariant.Dots} gap={16} size={1.5} color="#E5E5E5" />
+            <Controls position="bottom-left" />
+            <MiniMap position="bottom-right" />
+            <NodePalette />
+            <Panel position="top-right">
+              <div className="flex flex-col items-end gap-2">
+                {/* Autosave status — Label/meta text, never a toast (06-UI-SPEC). WR-05: an
+                    errored-with-unsaved-changes state must read honestly, never «Сохранено». */}
+                <span
+                  className={cn(
+                    "rounded bg-white/90 px-2 py-1 text-sm",
+                    saveState === "error" ? "text-destructive" : "text-muted-foreground"
+                  )}
+                >
+                  {saveState === "saving" ? "Сохранение…" : saveState === "error" ? "Не сохранено — повтор…" : "Сохранено"}
+                </span>
+                {uniqueBlockerMessages.length > 0 ? (
+                  <div className="w-72 rounded-lg border border-neutral-200 bg-white p-3 shadow-sm">
+                    <p className="text-sm font-semibold">Блокирует публикацию</p>
+                    <ul className="mt-1 space-y-1">
+                      {uniqueBlockerMessages.map((message) => (
+                        <li key={message} className="text-sm text-destructive">
+                          {message}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+              </div>
+            </Panel>
+          </ReactFlow>
+        </div>
       </div>
       <NodeConfigPanel slug={slug} node={selectedNode} onConfigChange={onConfigChange} onClose={deselectAll} />
+      <UnsavedChangesDialog blocker={unsavedChangesBlocker} />
     </NodeActionsContext.Provider>
   );
 }
