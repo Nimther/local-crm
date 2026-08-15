@@ -68,6 +68,20 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # Phase 15 plan 06 (OPS-09, Pitfall 18): Sentry has no retroactive
+      # redaction -- the only remedy for a field that reaches a live DSN is
+      # deleting the project's entire event history. This step is the
+      # blocking proof that `sentryBeforeSend` (packages/redaction) removes
+      # every planted secret/PII needle from a full serialization of the
+      # event body BEFORE any Sentry SDK is initialized against a live DSN
+      # anywhere in this codebase (see packages/redaction/src/sentry-scrub.ts
+      # and its fixture test's own header comment). Lives in `static` --
+      # already a required check under branch protection -- rather than a
+      # new job, so this becomes blocking immediately with no
+      # repository-admin action.
+      - name: Sentry redaction fixture gate (OPS-09)
+        run: npm run check:sentry-redaction
+
       # Without this, an ignores-glob typo makes `eslint .` check nothing and
       # exit 0 — a green gate that examined no files.
       - name: Lint file-count floor

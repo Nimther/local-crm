@@ -3,3 +3,4 @@ export type { KeyRule, ValueRule } from "./rules.js";
 export { PINO_REDACT_OPTIONS } from "./pino-redact.js";
 export { scrub } from "./scrub.js";
 export { scrubbedConsole } from "./scrubbed-console.js";
+export { sentryBeforeSend } from "./sentry-scrub.js";
