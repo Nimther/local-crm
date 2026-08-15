@@ -6,9 +6,9 @@ current_phase: 15
 current_phase_name: Observability, Alerting & Frontend Resilience
 status: executing
 stopped_at: Phase 15 context gathered
-last_updated: "2026-08-14T15:03:12.175Z"
-last_activity: 2026-08-14
-last_activity_desc: Phase 14 complete, transitioned to Phase 15
+last_updated: "2026-08-15T09:56:46.091Z"
+last_activity: 2026-08-15
+last_activity_desc: Phase 15 execution started
 progress:
   total_phases: 9
   completed_phases: 7
@@ -24,15 +24,15 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-12)
 
 **Core value:** Маркетолог настраивает триггерную цепочку или кампанию — и письма надёжно и вовремя доходят до нужных контактов, со сквозным отслеживанием статусов (delivered/opened/clicked/bounced).
-**Current focus:** Phase 14 — deployment-database-durability
+**Current focus:** Phase 15 — Observability, Alerting & Frontend Resilience
 
 ## Current Position
 
 Milestone: v1.1 Production Hardening (Phases 8-16, 95 requirements)
-Phase: 15 — Observability, Alerting & Frontend Resilience
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-08-14 — Phase 14 complete, transitioned to Phase 15
+Phase: 15 (Observability, Alerting & Frontend Resilience) — EXECUTING
+Plan: 1 of 18
+Status: Executing Phase 15
+Last activity: 2026-08-15 — Phase 15 execution started
 Progress: [████████████████████] 79/79 plans ([██████████] 100%) — 6/9 v1.1 phases complete (8–13), 54/95 requirements
 
 ✓ **Deadline closed (2026-08-07):** Phase 9 (DB-01/DB-02 partition automation) completed ahead of the hard **2026-09-01** deadline — 20 attached monthly partitions (2026-09…2027-06) confirmed by catalog query against a migrated database.

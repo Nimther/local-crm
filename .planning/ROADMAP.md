@@ -569,12 +569,12 @@ Plans:
   4. The app loads with route-level code splitting — canvas and heavy dashboard chunks arrive only when those routes are opened.
   5. A failed API call, an empty list, a paginated list, stale analytics and unsaved canvas changes each show the user what is actually true rather than a blank or silently-wrong screen.
 
-**Plans**: 18 plans (13 waves, tracer-first). Backend plans are largely sequential by necessity — `SPECIFICATION.md`, root `package.json` and `package-lock.json` are hub files touched by most of them, and this repository's convention allows one migration slot per phase. Frontend plans run in parallel against them (no shared file) in waves 2–5 and wave 10. All dependency installs are consolidated into wave 1 so the lockfile is mutated exactly once.
+**Plans**: 1/18 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 15-01-PLAN.md — Dependency gate: blocking package-legitimacy checkpoint, all installs, `fastify` promoted to a runtime dep, out-of-scope scope notes
+- [x] 15-01-PLAN.md — Dependency gate: blocking package-legitimacy checkpoint, all installs, `fastify` promoted to a runtime dep, out-of-scope scope notes
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -729,7 +729,7 @@ Phase 9 has no dependents and may be scheduled in parallel at any point after Ph
 | 12. Worker Reliability & Tenant Fairness | v1.1 | 14/14 | Complete    | 2026-08-11 |
 | 13. Compliance & Analytics Integrity | v1.1 | 16/16 | Complete    | 2026-08-12 |
 | 14. Deployment & Database Durability | v1.1 | 14/14 | Complete    | 2026-08-14 |
-| 15. Observability, Alerting & Frontend Resilience | v1.1 | 0/TBD | Not started | - |
+| 15. Observability, Alerting & Frontend Resilience | v1.1 | 1/18 | In Progress|  |
 | 16. Live SendGrid Verification | v1.1 | 0/TBD | Not started | - |
 
 ---
