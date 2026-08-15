@@ -175,6 +175,10 @@ None - no external service configuration required.
 - If a future phase adds rollup-backed data to `CampaignDetailPage` or `FlowAnalyticsTable` (or any new analytics surface), re-run this plan's sweep methodology before assuming the existing "no label" comments still apply — they are conditioned on the CURRENT data source, not a permanent exemption.
 - No blockers for downstream phases.
 
+## Self-Check: PASSED
+
+All 4 created/modified deliverable files verified present on disk; all 4 plan commits (`7ade69f`, `b65b115`, `ba6c5b5`, `45d36b3`) verified present in `git log`.
+
 ---
 *Phase: 15-observability-alerting-frontend-resilience*
 *Completed: 2026-08-15*
