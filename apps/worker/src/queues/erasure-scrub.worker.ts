@@ -4,6 +4,7 @@ import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { buildJobOptions, buildRedisConnectionOptions, STANDARD_JOB_RETENTION } from "@mega-crm/queue-core";
 import type { BuiltJobOptions } from "@mega-crm/queue-core";
 import { ERASURE_SCRUB_QUEUE, erasureScrubJobSchema, type ErasureScrubJob } from "@mega-crm/shared-schemas";
+import { wrapProcessor } from "../processor-wrapper.js";
 import type { ErasureRecordStatus } from "@mega-crm/db";
 import {
   advanceErasureScrubCheckpoint,
@@ -507,7 +508,7 @@ export const ERASURE_SCRUB_JOB_OPTIONS: BuiltJobOptions = buildJobOptions(STANDA
 export function createErasureScrubWorker(connection: ConnectionOptions, options: { autorun?: boolean } = {}): Worker {
   return new Worker(
     ERASURE_SCRUB_QUEUE,
-    async (job: Job) => {
+    wrapProcessor(ERASURE_SCRUB_QUEUE, async (job: Job) => {
       const parsed = erasureScrubJobSchema.safeParse(job.data);
       if (!parsed.success) {
         console.error("erasure-scrub: deferring job with an unrecognized payload shape", { jobId: job.id });
@@ -519,7 +520,7 @@ export function createErasureScrubWorker(connection: ConnectionOptions, options:
         contactId: data.contactId,
         erasureRecordId: data.erasureRecordId,
       });
-    },
+    }),
     { connection, ...(options.autorun !== undefined ? { autorun: options.autorun } : {}) }
   );
 }

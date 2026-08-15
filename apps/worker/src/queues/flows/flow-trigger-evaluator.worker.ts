@@ -11,6 +11,7 @@ import {
 import { canEnterFlow } from "./flow-reentry.js";
 import { enqueueFlowRunAdvance } from "./flow-queues.js";
 import { resolveNextNodeId } from "./handlers/send-node.js";
+import { wrapProcessor } from "../../processor-wrapper.js";
 
 interface LiveEventFlowRow {
   id: string;
@@ -311,9 +312,9 @@ export async function processFlowTriggerCheck(data: FlowTriggerCheckJob): Promis
 export function createFlowTriggerEvaluatorWorker(connection: ConnectionOptions): Worker<FlowTriggerCheckJob> {
   return new Worker<FlowTriggerCheckJob>(
     FLOW_TRIGGER_EVALUATOR_QUEUE,
-    async (job: Job<FlowTriggerCheckJob>) => {
+    wrapProcessor(FLOW_TRIGGER_EVALUATOR_QUEUE, async (job: Job<FlowTriggerCheckJob>) => {
       await processFlowTriggerCheck(job.data);
-    },
+    }),
     { connection }
   );
 }

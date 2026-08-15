@@ -157,7 +157,16 @@ export function wrapProcessor<DataType, ResultType = void>(
         // denominator (T-15-22).
         child.info({ durationMs, controlFlow: true }, "job control flow (not reported)");
       } else {
-        errorReporter(err, { queue: queueName, jobId: job.id });
+        // The reporter runs inside its OWN try/catch: a future reporter
+        // (plan 15-10's Sentry-backed one) that itself throws must never
+        // replace `err` as the value this function re-throws -- the
+        // wrapper's "same value re-thrown on every path" guarantee (T-15-23)
+        // has to hold even when the injected reporter is misbehaving.
+        try {
+          errorReporter(err, { queue: queueName, jobId: job.id });
+        } catch (reporterErr) {
+          child.error({ err: reporterErr, durationMs }, "error reporter itself threw -- ignored, original error still re-thrown");
+        }
         child.error({ err, durationMs, controlFlow: false }, "job failed");
       }
       // ALWAYS re-throw the original value, unchanged, on every path --

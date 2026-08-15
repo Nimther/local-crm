@@ -3,6 +3,7 @@ import type { PoolClient } from "pg";
 import { withCrossWorkspaceScan, withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { scrubbedConsole } from "@mega-crm/redaction";
 import { buildJobOptions, STANDARD_JOB_RETENTION } from "@mega-crm/queue-core";
+import { wrapProcessor } from "../processor-wrapper.js";
 
 /** The reconciliation job's own repeatable-tick queue -- self-produced and self-consumed within this file/process only. */
 const ANALYTICS_RECONCILE_QUEUE = "analytics-reconcile";
@@ -339,7 +340,7 @@ export function createAnalyticsReconciliationWorker(
 
   const worker = new Worker(
     ANALYTICS_RECONCILE_QUEUE,
-    async () => {
+    wrapProcessor(ANALYTICS_RECONCILE_QUEUE, async () => {
       const rows = await withCrossWorkspaceScan(async (client) => {
         const { rows: workspaceRows } = await client.query<WorkspaceRow>(`SELECT id FROM organization`);
         return workspaceRows;
@@ -347,7 +348,7 @@ export function createAnalyticsReconciliationWorker(
       for (const row of rows) {
         await reconcileWorkspace(row.id, RECONCILE_WINDOW_DAYS);
       }
-    },
+    }),
     // G-12-1: the `autorun` key is included ONLY when a caller actually
     // supplied a value (mirrors `flow-segment-sweep.worker.ts`, which never
     // mentions the key at all) -- never nullish-coalesced to a restated

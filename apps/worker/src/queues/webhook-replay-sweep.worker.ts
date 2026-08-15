@@ -16,6 +16,7 @@ import {
   INGRESS_JOURNAL_RETENTION_DAYS,
   INGRESS_JOURNAL_STUCK_THRESHOLD_MINUTES,
 } from "@mega-crm/db/src/webhooks/ingress-journal.js";
+import { wrapProcessor } from "../processor-wrapper.js";
 import { pruneSendEventQuarantine, SEND_EVENT_QUARANTINE_RETENTION_DAYS } from "@mega-crm/db/src/webhooks/quarantine.js";
 import { registerTrackedQueue } from "./queue-registry.js";
 
@@ -447,7 +448,7 @@ export function createWebhookReplaySweepWorker(
 
   const worker = new Worker(
     WEBHOOK_REPLAY_SWEEP_QUEUE,
-    async (job) => {
+    wrapProcessor(WEBHOOK_REPLAY_SWEEP_QUEUE, async (job) => {
       const parsed = webhookReplaySweepTickJobSchema.safeParse(job.data);
       if (!parsed.success) {
         scrubbedConsole.error("webhook-replay-sweep: deferring job with an unrecognized payload shape", {
@@ -456,7 +457,7 @@ export function createWebhookReplaySweepWorker(
         return;
       }
       await runWebhookReplaySweep();
-    },
+    }),
     // G-12-1: the `autorun` key is included ONLY when a caller actually
     // supplied a value -- never nullish-coalesced to a restated `true`,
     // which would be a second source of truth for a value BullMQ already

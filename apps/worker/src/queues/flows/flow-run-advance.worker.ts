@@ -10,6 +10,7 @@ import { handleSendNode } from "./handlers/send-node.js";
 import { handleExitNode } from "./handlers/exit-node.js";
 import { handleDelayNode } from "./handlers/delay-node.js";
 import { handleBranchNode } from "./handlers/branch-node.js";
+import { wrapProcessor } from "../../processor-wrapper.js";
 
 /**
  * 06-17/CR-01: defense-in-depth backstop against a cyclic definition that
@@ -371,9 +372,9 @@ export async function processFlowRunAdvance(data: FlowRunAdvanceJob): Promise<vo
 export function createFlowRunAdvanceWorker(connection: ConnectionOptions): Worker<FlowRunAdvanceJob> {
   return new Worker<FlowRunAdvanceJob>(
     FLOW_RUN_ADVANCE_QUEUE,
-    async (job: Job<FlowRunAdvanceJob>) => {
+    wrapProcessor(FLOW_RUN_ADVANCE_QUEUE, async (job: Job<FlowRunAdvanceJob>) => {
       await processFlowRunAdvance(job.data);
-    },
+    }),
     { connection }
   );
 }

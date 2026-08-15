@@ -12,6 +12,7 @@ import {
   runPartitionMaintenance,
   type MaintenanceRunSnapshot,
 } from "@mega-crm/db/src/partitions/maintenance-run.js";
+import { wrapProcessor } from "../processor-wrapper.js";
 
 /**
  * 09-02 (DB-01/DB-02, D-07/D-13): the daily cron-scheduled tick that keeps
@@ -232,9 +233,9 @@ export function createPartitionMaintenanceWorker(
 
   const worker = new Worker(
     PARTITION_MAINTENANCE_QUEUE,
-    async () => {
+    wrapProcessor(PARTITION_MAINTENANCE_QUEUE, async () => {
       await processPartitionMaintenance();
-    },
+    }),
     // G-12-1: the `autorun` key is included ONLY when a caller actually
     // supplied a value (mirrors `flow-segment-sweep.worker.ts`, which never
     // mentions the key at all) -- never nullish-coalesced to a restated

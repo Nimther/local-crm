@@ -10,6 +10,7 @@ import {
   type ReputationMetric,
   type ReputationObservation,
 } from "@mega-crm/delivery-core";
+import { wrapProcessor } from "../processor-wrapper.js";
 
 /**
  * Phase 13 (CMP-09, D-09 through D-12, plan 13-09): the measurement half of
@@ -310,7 +311,7 @@ export function createReputationTickWorker(
 
   const worker = new Worker(
     REPUTATION_TICK_QUEUE,
-    async (job) => {
+    wrapProcessor(REPUTATION_TICK_QUEUE, async (job) => {
       const parsed = reputationTickJobSchema.safeParse(job.data);
       if (!parsed.success) {
         scrubbedConsole.error("reputation-tick: deferring job with an unrecognized payload shape", {
@@ -319,7 +320,7 @@ export function createReputationTickWorker(
         return;
       }
       await runReputationTick();
-    },
+    }),
     // G-12-1: the `autorun` key is included ONLY when a caller actually
     // supplied a value -- never nullish-coalesced to a restated `true`,
     // which would be a second source of truth for a value BullMQ already

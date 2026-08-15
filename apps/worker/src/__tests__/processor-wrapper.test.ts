@@ -143,6 +143,32 @@ describe("wrapProcessor", () => {
     expect(failureLine).toBeDefined();
     expect(failureLine?.controlFlow).toBe(false);
     expect(typeof failureLine?.durationMs).toBe("number");
+    // Pino auto-serializes an `err`-keyed Error (type/message/stack) by
+    // default -- confirms the failure line actually carries the error's
+    // content, not an empty `{}` from JSON.stringify-ing a bare Error.
+    const errField = failureLine?.err as { message?: string } | undefined;
+    expect(errField?.message).toBe("boom");
+  });
+
+  it("still re-throws the original error unchanged even when the injected error reporter itself throws", async () => {
+    const job = fakeJob({ workspaceId: "ws-1" }, "job-4b");
+    const plainError = new Error("boom-original");
+    const handler = vi.fn((): Promise<never> => Promise.reject(plainError));
+    const reporterError = new Error("reporter blew up");
+    setProcessorErrorReporter(() => {
+      throw reporterError;
+    });
+
+    const wrapped = wrapProcessor("test-queue", handler);
+    let caught: unknown;
+    try {
+      await wrapped(job);
+    } catch (err) {
+      caught = err;
+    }
+
+    // T-15-23: the reporter throwing must never replace the original error.
+    expect(caught).toBe(plainError);
   });
 
   it("re-throws a thrown non-Error value (a string) unchanged and still calls the reporter exactly once", async () => {

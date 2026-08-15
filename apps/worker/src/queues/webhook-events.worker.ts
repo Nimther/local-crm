@@ -22,6 +22,7 @@ import {
 import { WEBHOOK_EVENTS_QUEUE, webhookEventsJobSchema, type WebhookEventsJob } from "@mega-crm/shared-schemas";
 import { markIngestionComplete } from "@mega-crm/db/src/webhooks/ingress-journal.js";
 import { writeQuarantinedEvent } from "@mega-crm/db/src/webhooks/quarantine.js";
+import { wrapProcessor } from "../processor-wrapper.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -835,9 +836,9 @@ export async function processWebhookEventBatch(data: unknown): Promise<{ inserte
 export function createWebhookEventsWorker(connection: ConnectionOptions): Worker<WebhookEventsJob> {
   return new Worker<WebhookEventsJob>(
     WEBHOOK_EVENTS_QUEUE,
-    async (job: Job<WebhookEventsJob>) => {
+    wrapProcessor(WEBHOOK_EVENTS_QUEUE, async (job: Job<WebhookEventsJob>) => {
       await processWebhookEventBatch(job.data);
-    },
+    }),
     { connection }
   );
 }

@@ -8,6 +8,7 @@ import {
   SEND_RECONCILER_TICK_SCHEMA_VERSION,
   sendReconcilerTickJobSchema,
 } from "@mega-crm/shared-schemas";
+import { wrapProcessor } from "../processor-wrapper.js";
 import {
   classifyReconcilableSend,
   resolveReconcilingSend,
@@ -403,7 +404,7 @@ export function createSendReconcilerWorker(
 
   const worker = new Worker(
     SEND_RECONCILER_QUEUE,
-    async (job) => {
+    wrapProcessor(SEND_RECONCILER_QUEUE, async (job) => {
       const parsed = sendReconcilerTickJobSchema.safeParse(job.data);
       if (!parsed.success) {
         scrubbedConsole.error("send-reconciler: deferring job with an unrecognized payload shape", {
@@ -412,7 +413,7 @@ export function createSendReconcilerWorker(
         return;
       }
       await runReconcilerTick();
-    },
+    }),
     // G-12-1: the `autorun` key is included ONLY when a caller actually
     // supplied a value (mirrors `flow-segment-sweep.worker.ts`, which never
     // mentions the key at all) -- never nullish-coalesced to a restated
