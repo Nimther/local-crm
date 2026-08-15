@@ -4,6 +4,7 @@ import { scrubbedConsole } from "@mega-crm/redaction";
 import { FLOW_RECONCILIATION_QUEUE } from "@mega-crm/shared-schemas";
 import { buildJobOptions, STANDARD_JOB_RETENTION } from "@mega-crm/queue-core";
 import { enqueueFlowRunAdvance } from "./flow-queues.js";
+import { wrapProcessor } from "../../processor-wrapper.js";
 
 /** The reconciliation worker's own repeatable-tick queue -- self-produced and self-consumed within this file/process only. */
 const RECONCILIATION_INTERVAL_MS = 60_000;
@@ -167,14 +168,14 @@ export function createFlowReconciliationWorker(
 
   const worker = new Worker(
     FLOW_RECONCILIATION_QUEUE,
-    async () => {
+    wrapProcessor(FLOW_RECONCILIATION_QUEUE, async () => {
       const dueRuns = await findDueFlowRunCandidates();
       for (const row of dueRuns) {
         const stillDue = await transitionAndNudge(row);
         if (!stillDue) continue; // already handled by a prior tick, or its flow is paused -- skip
         await enqueueFlowRunAdvance({ workspaceId: row.workspaceId, flowRunId: row.id });
       }
-    },
+    }),
     // G-12-1: the `autorun` key is included ONLY when a caller actually
     // supplied a value (mirrors `flow-segment-sweep.worker.ts`, which never
     // mentions the key at all) -- never nullish-coalesced to a restated

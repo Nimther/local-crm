@@ -5,7 +5,7 @@ import type { Pool } from "pg";
 import { Redis } from "ioredis";
 import { withTenantTransaction } from "@mega-crm/tenant-context";
 import type { EmailBroadcastJob } from "@mega-crm/shared-schemas";
-import { emailBroadcastJobSchema } from "@mega-crm/shared-schemas";
+import { emailBroadcastJobSchema, EMAIL_BROADCAST_QUEUE } from "@mega-crm/shared-schemas";
 import { createTestPool, ensureTestDbMigrated, getTestDatabaseUrl } from "../test/db-fixture.js";
 import {
   connectFixtureSendgridKey,
@@ -14,14 +14,21 @@ import {
 } from "../test/failure-fixtures.js";
 
 /**
- * Phase 15 plan 02 (Task 3) -- TRACER PROOF: one correlation id, bound by
- * `handleEmailBroadcastJob`'s `withCorrelation` wrapping, is visible in BOTH
- * a real worker log line (captured pino output) AND `pg_stat_activity
+ * Phase 15 plan 02 (Task 3) -- TRACER PROOF: one correlation id is visible in
+ * BOTH a real worker log line (captured pino output) AND `pg_stat_activity
  * .application_name` for a transaction opened while that job is processing
  * -- the full HTTP->queue->Postgres path this plan's objective names, minus
  * the HTTP hop itself (proven separately by `apps/api`'s own suite: the
  * `genReqId` override and the test-send route reading the correlation id
  * back via `getCorrelationContext()`).
+ *
+ * Phase 15 plan 08 (OPS-06): the correlation scope this test exercises now
+ * opens inside the shared `wrapProcessor` helper, not inline in
+ * `handleEmailBroadcastJob` (plan 02's targeted tracer-only fix was replaced
+ * by the general-purpose wrapper every `create*Worker` factory routes
+ * through) -- this suite invokes the handler THROUGH `wrapProcessor`, the
+ * same shape `createEmailBroadcastWorker`'s factory now does, rather than
+ * calling `handleEmailBroadcastJob` bare.
  *
  * The logger singleton (`apps/worker/src/logger.ts`) is only ever imported
  * via a DYNAMIC `import()` inside `beforeAll`, AFTER `process.stdout.write`
@@ -40,6 +47,7 @@ describe("correlation tracer: one requestId across worker log + application_name
   let redisClient: Redis;
   let stdoutChunks: string[];
   let handleEmailBroadcastJob: typeof import("../queues/email-broadcast.worker.js")["handleEmailBroadcastJob"];
+  let wrapProcessor: typeof import("../processor-wrapper.js")["wrapProcessor"];
   let workerLogger: typeof import("../logger.js")["logger"];
 
   beforeAll(async () => {
@@ -65,6 +73,7 @@ describe("correlation tracer: one requestId across worker log + application_name
     workerLogger.level = "info";
 
     ({ handleEmailBroadcastJob } = await import("../queues/email-broadcast.worker.js"));
+    ({ wrapProcessor } = await import("../processor-wrapper.js"));
   });
 
   afterAll(async () => {
@@ -105,8 +114,8 @@ describe("correlation tracer: one requestId across worker log + application_name
 
     let observedApplicationName = "";
     // Stands in for the real SendGrid call -- invoked deep inside
-    // processSendJob's test-send branch, still nested within
-    // handleEmailBroadcastJob's withCorrelation({ jobId, requestId }) scope.
+    // processSendJob's test-send branch, still nested within the
+    // withCorrelation({ jobId, requestId }) scope wrapProcessor opens.
     // Opening a FRESH withTenantTransaction here observes the SAME
     // correlation-derived application_name a transaction opened anywhere
     // else during this job's processing would (composeApplicationName reads
@@ -121,7 +130,10 @@ describe("correlation tracer: one requestId across worker log + application_name
       return { status: 202, headers: new Headers(), messageId: "sg-message-id-fixture" };
     };
 
-    await handleEmailBroadcastJob(fakeJob(jobData, jobId), fakeWorker(), { sendMail, redisClient });
+    const wrapped = wrapProcessor(EMAIL_BROADCAST_QUEUE, (job: Job<EmailBroadcastJob>, token) =>
+      handleEmailBroadcastJob(job, fakeWorker(), { sendMail, redisClient }, token),
+    );
+    await wrapped(fakeJob(jobData, jobId));
 
     // --- Postgres half ---
     expect(observedApplicationName).toContain(requestId);
@@ -181,13 +193,18 @@ describe("correlation tracer: one requestId across worker log + application_name
       return { status: 202, headers: new Headers(), messageId: "sg-message-id-fixture" };
     };
 
-    await expect(
-      handleEmailBroadcastJob(fakeJob(parsed, jobId), fakeWorker(), { sendMail, redisClient }),
-    ).resolves.toBeUndefined();
+    const wrapped = wrapProcessor(EMAIL_BROADCAST_QUEUE, (job: Job<EmailBroadcastJob>, token) =>
+      handleEmailBroadcastJob(job, fakeWorker(), { sendMail, redisClient }, token),
+    );
+    await expect(wrapped(fakeJob(parsed, jobId))).resolves.toBeUndefined();
 
-    // No requestId bound -- composeApplicationName's "req=-" placeholder --
-    // but jobId (from job.id, always present) still appears.
-    expect(observedApplicationName).toContain("req=-");
+    // Phase 15 plan 08 (OPS-06): wrapProcessor falls back requestId to the
+    // job id when the payload carries none (repeatable ticks and
+    // webhook-originated jobs have no originating request) -- so a legacy
+    // payload's application_name now reads `req=<jobId>`, not the plan 02
+    // `req=-` placeholder that inline scope produced when requestId was
+    // truly left unbound.
+    expect(observedApplicationName).toContain(`req=${jobId}`);
     expect(observedApplicationName).toContain(jobId);
   });
 });

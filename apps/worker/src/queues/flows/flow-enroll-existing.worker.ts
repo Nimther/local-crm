@@ -10,6 +10,7 @@ import {
 import { canEnterFlow } from "./flow-reentry.js";
 import { enqueueFlowRunAdvance } from "./flow-queues.js";
 import { loadEntryNodeId } from "./flow-trigger-evaluator.worker.js";
+import { wrapProcessor } from "../../processor-wrapper.js";
 
 /**
  * D-04: batch size for the resumable enroll-existing cursor pattern -- small
@@ -232,9 +233,9 @@ export async function processFlowEnrollExisting(data: FlowEnrollExistingJob): Pr
 export function createFlowEnrollExistingWorker(connection: ConnectionOptions): Worker<FlowEnrollExistingJob> {
   return new Worker<FlowEnrollExistingJob>(
     FLOW_ENROLL_EXISTING_QUEUE,
-    async (job: Job<FlowEnrollExistingJob>) => {
+    wrapProcessor(FLOW_ENROLL_EXISTING_QUEUE, async (job: Job<FlowEnrollExistingJob>) => {
       await processFlowEnrollExisting(job.data);
-    },
+    }),
     { connection }
   );
 }

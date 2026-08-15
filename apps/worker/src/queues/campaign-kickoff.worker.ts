@@ -5,6 +5,7 @@ import { evaluatePreSendGate, recordExcluded, tryCompleteCampaign } from "@mega-
 import { CAMPAIGN_KICKOFF_QUEUE, campaignKickoffJobSchema, type CampaignKickoffJob } from "@mega-crm/shared-schemas";
 import { materializeCampaignSnapshot } from "./recipient-snapshot.js";
 import { emailBroadcastQueue } from "./campaign-broadcast-producer.js";
+import { wrapProcessor } from "../processor-wrapper.js";
 
 /** Cursor page size for walking the frozen `campaign_recipients` snapshot (mirrors imports-csv.worker.ts's PAGE_SIZE convention). */
 const BREAKDOWN_PAGE_SIZE = 5_000;
@@ -205,9 +206,9 @@ export async function processCampaignKickoffJob(data: CampaignKickoffJob): Promi
 export function createCampaignKickoffWorker(connection: ConnectionOptions): Worker<CampaignKickoffJob> {
   return new Worker<CampaignKickoffJob>(
     CAMPAIGN_KICKOFF_QUEUE,
-    async (job: Job<CampaignKickoffJob>) => {
+    wrapProcessor(CAMPAIGN_KICKOFF_QUEUE, async (job: Job<CampaignKickoffJob>) => {
       await processCampaignKickoffJob(job.data);
-    },
+    }),
     { connection }
   );
 }

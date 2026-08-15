@@ -4,6 +4,7 @@ import { scrubbedConsole } from "@mega-crm/redaction";
 import { CAMPAIGN_KICKOFF_QUEUE, type CampaignKickoffJob } from "@mega-crm/shared-schemas";
 import { buildJobOptions, STANDARD_JOB_RETENTION } from "@mega-crm/queue-core";
 import { registerTrackedQueue } from "./queue-registry.js";
+import { wrapProcessor } from "../processor-wrapper.js";
 
 /** The scheduler's own repeatable-tick queue -- self-produced and self-consumed within this file/process only. */
 const CAMPAIGN_SCHEDULER_QUEUE = "campaign-scheduler";
@@ -195,14 +196,14 @@ export function createCampaignSchedulerWorker(
 
   const worker = new Worker(
     CAMPAIGN_SCHEDULER_QUEUE,
-    async () => {
+    wrapProcessor(CAMPAIGN_SCHEDULER_QUEUE, async () => {
       const dueCampaigns = await findDueCampaignCandidates();
       for (const row of dueCampaigns) {
         const transitioned = await transitionToSending(row);
         if (!transitioned) continue; // already handled by a prior tick -- skip re-kickoff
         await kickoffQueue.add("kickoff", { workspaceId: row.workspaceId, campaignId: row.id }, { jobId: row.id });
       }
-    },
+    }),
     // G-12-1: the `autorun` key is included ONLY when a caller actually
     // supplied a value (mirrors `flow-segment-sweep.worker.ts`, which never
     // mentions the key at all) -- never nullish-coalesced to a restated

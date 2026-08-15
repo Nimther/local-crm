@@ -9,6 +9,7 @@ import {
   flowSegmentSweepTickJobSchema,
 } from "@mega-crm/shared-schemas";
 import { flowSegmentSweepFlowQueue } from "./flow-queues.js";
+import { wrapProcessor } from "../../processor-wrapper.js";
 
 /**
  * Phase 12 (WRK-05/WRK-06, D-09): discovery-only half of the segment sweep,
@@ -151,7 +152,7 @@ export function createFlowSegmentSweepWorker(connection: ConnectionOptions): Wor
 
   const worker = new Worker(
     FLOW_SEGMENT_SWEEP_QUEUE,
-    async (job) => {
+    wrapProcessor(FLOW_SEGMENT_SWEEP_QUEUE, async (job) => {
       const parsed = flowSegmentSweepTickJobSchema.safeParse(job.data);
       if (!parsed.success) {
         scrubbedConsole.error("flow-segment-sweep: deferring job with an unrecognized payload shape", {
@@ -160,7 +161,7 @@ export function createFlowSegmentSweepWorker(connection: ConnectionOptions): Wor
         return;
       }
       await runFlowSegmentSweepTick();
-    },
+    }),
     { connection }
   );
 

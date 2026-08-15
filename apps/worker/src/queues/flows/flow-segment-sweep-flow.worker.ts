@@ -6,6 +6,7 @@ import { scrubbedConsole } from "@mega-crm/redaction";
 import { FLOW_SEGMENT_SWEEP_FLOW_QUEUE, flowSegmentSweepFlowJobSchema } from "@mega-crm/shared-schemas";
 import { enterSegmentTriggeredFlow, type LiveSegmentFlowRow } from "./flow-trigger-evaluator.worker.js";
 import { advanceSweepCheckpoint, loadSweepCheckpoint, resetSweepCheckpoint } from "./flow-segment-sweep-checkpoint.js";
+import { wrapProcessor } from "../../processor-wrapper.js";
 
 /**
  * Phase 12 (WRK-05/WRK-06, D-09): the bounded, checkpointed, resumable
@@ -297,9 +298,9 @@ export async function runFlowSegmentSweepFlowJob(data: unknown): Promise<void> {
 export function createFlowSegmentSweepFlowWorker(connection: ConnectionOptions): Worker {
   return new Worker(
     FLOW_SEGMENT_SWEEP_FLOW_QUEUE,
-    async (job: Job) => {
+    wrapProcessor(FLOW_SEGMENT_SWEEP_FLOW_QUEUE, async (job: Job) => {
       await runFlowSegmentSweepFlowJob(job.data);
-    },
+    }),
     { connection }
   );
 }

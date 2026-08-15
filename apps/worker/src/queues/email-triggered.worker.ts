@@ -3,6 +3,7 @@ import { EMAIL_TRIGGERED_QUEUE, type EmailTriggeredJob } from "@mega-crm/shared-
 import { processSendJob, type ProcessSendJobDeps } from "./send-dispatch.js";
 import { SEND_LOCK_DURATION_MS } from "@mega-crm/queue-core";
 import { deferForTenantBucket } from "./tenant-deferral.js";
+import { wrapProcessor } from "../processor-wrapper.js";
 
 /**
  * The triggered Worker's per-job handler, factored out of the `Worker`
@@ -57,7 +58,9 @@ export async function handleEmailTriggeredJob(
 export function createEmailTriggeredWorker(connection: ConnectionOptions): Worker<EmailTriggeredJob> {
   const worker: Worker<EmailTriggeredJob> = new Worker<EmailTriggeredJob>(
     EMAIL_TRIGGERED_QUEUE,
-    (job: Job<EmailTriggeredJob>, token) => handleEmailTriggeredJob(job, worker, {}, token),
+    wrapProcessor(EMAIL_TRIGGERED_QUEUE, (job: Job<EmailTriggeredJob>, token) =>
+      handleEmailTriggeredJob(job, worker, {}, token)
+    ),
     // Higher, always-on concurrency (SEND-03) -- this lane must keep
     // draining even while a large broadcast is in flight on the other queue.
     { connection, concurrency: 20, lockDuration: SEND_LOCK_DURATION_MS }

@@ -12,6 +12,7 @@ import {
   type ErasureScrubJob,
 } from "@mega-crm/shared-schemas";
 import { registerTrackedQueue } from "./queue-registry.js";
+import { wrapProcessor } from "../processor-wrapper.js";
 
 /**
  * Phase 13 (CMP-04, D-04, R-05, plan 13-15): closes the last gap in CMP-04's
@@ -335,7 +336,7 @@ export function createErasureScrubReclaimWorker(
 
   const worker = new Worker(
     ERASURE_SCRUB_RECLAIM_QUEUE,
-    async (job: Job) => {
+    wrapProcessor(ERASURE_SCRUB_RECLAIM_QUEUE, async (job: Job) => {
       const parsed = erasureScrubReclaimTickJobSchema.safeParse(job.data);
       if (!parsed.success) {
         scrubbedConsole.error("erasure-scrub-reclaim: deferring job with an unrecognized payload shape", {
@@ -344,7 +345,7 @@ export function createErasureScrubReclaimWorker(
         return;
       }
       await runErasureScrubReclaim();
-    },
+    }),
     // G-12-1: the `autorun` key is included ONLY when a caller actually
     // supplied a value -- never nullish-coalesced to a restated `true`,
     // which would be a second source of truth for a value BullMQ already

@@ -2,6 +2,7 @@ import { Worker, type Job, type ConnectionOptions } from "bullmq";
 import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { applyCsvRowMapping, findContactIdByIdentity, upsertContactByIdentity } from "@mega-crm/contacts-core";
 import { IMPORTS_CSV_QUEUE, importsCsvJobSchema, type ImportsCsvJob } from "@mega-crm/shared-schemas";
+import { wrapProcessor } from "../processor-wrapper.js";
 
 const PAGE_SIZE = 500;
 
@@ -186,9 +187,9 @@ export async function processImportsCsvJob(data: ImportsCsvJob): Promise<void> {
 export function createImportsCsvWorker(connection: ConnectionOptions): Worker<ImportsCsvJob> {
   return new Worker<ImportsCsvJob>(
     IMPORTS_CSV_QUEUE,
-    async (job: Job<ImportsCsvJob>) => {
+    wrapProcessor(IMPORTS_CSV_QUEUE, async (job: Job<ImportsCsvJob>) => {
       await processImportsCsvJob(job.data);
-    },
+    }),
     { connection }
   );
 }

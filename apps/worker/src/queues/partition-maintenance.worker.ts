@@ -12,6 +12,7 @@ import {
   runPartitionMaintenance,
   type MaintenanceRunSnapshot,
 } from "@mega-crm/db/src/partitions/maintenance-run.js";
+import { wrapProcessor } from "../processor-wrapper.js";
 
 /**
  * 09-02 (DB-01/DB-02, D-07/D-13): the daily cron-scheduled tick that keeps
@@ -131,8 +132,13 @@ export async function processPartitionMaintenance(
     bufferAlertThresholdMonths: BUFFER_ALERT_THRESHOLD_MONTHS,
   });
 
-  // Pino arrives in Phase 15 / OPS-06 -- console.log carries the same
-  // numbers the operator alert email would, so a human reading worker
+  // Phase 15 plan 08 (OPS-06): every worker job's execution now logs
+  // through the shared `wrapProcessor` (this queue's factory below routes
+  // through it too), but this specific line stays on `scrubbedConsole`
+  // rather than moving to the plain Pino logger -- OPS-06's "no raw
+  // console.*" truth targets bare `console.*` call sites (this file had
+  // none), not every `scrubbedConsole` site. `scrubbedConsole` carries the
+  // same numbers the operator alert email would, so a human reading worker
   // output sees what the watchdog sees.
   scrubbedConsole.log("partition-maintenance: run complete", {
     lastRunAt: snapshot.lastRunAt.toISOString(),
@@ -232,9 +238,9 @@ export function createPartitionMaintenanceWorker(
 
   const worker = new Worker(
     PARTITION_MAINTENANCE_QUEUE,
-    async () => {
+    wrapProcessor(PARTITION_MAINTENANCE_QUEUE, async () => {
       await processPartitionMaintenance();
-    },
+    }),
     // G-12-1: the `autorun` key is included ONLY when a caller actually
     // supplied a value (mirrors `flow-segment-sweep.worker.ts`, which never
     // mentions the key at all) -- never nullish-coalesced to a restated
