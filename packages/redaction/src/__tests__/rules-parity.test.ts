@@ -93,11 +93,10 @@ describe("rules parity", () => {
     };
 
     const logged = logViaPino(payload);
-    expect(
-      (
-        ((logged.a as Record<string, unknown>).b as Record<string, unknown>).c as Record<string, unknown>
-      ).sendgridKey,
-    ).toBe(CENSOR);
+    const a = logged.a as Record<string, unknown>;
+    const b = a.b as Record<string, unknown>;
+    const c = b.c as Record<string, unknown>;
+    expect(c.sendgridKey).toBe(CENSOR);
   });
 
   test("Test 11: an email nested five levels deep (four intermediate objects) is censored", () => {
@@ -114,15 +113,11 @@ describe("rules parity", () => {
     };
 
     const logged = logViaPino(payload);
-    expect(
-      (
-        (
-          (
-            ((logged.a as Record<string, unknown>).b as Record<string, unknown>).c as Record<string, unknown>
-          ).d as Record<string, unknown>
-        ) as Record<string, unknown>
-      ).email,
-    ).toBe(CENSOR);
+    const a = logged.a as Record<string, unknown>;
+    const b = a.b as Record<string, unknown>;
+    const c = b.c as Record<string, unknown>;
+    const d = c.d as Record<string, unknown>;
+    expect(d.email).toBe(CENSOR);
   });
 
   test("Test 12: the compiled path list has no duplicate entries and enumerates exactly five depths per key rule", () => {
