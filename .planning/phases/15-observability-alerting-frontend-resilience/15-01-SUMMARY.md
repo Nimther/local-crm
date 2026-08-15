@@ -149,3 +149,7 @@ None — no external service configuration required by this plan. (Sentry DSNs a
 ---
 *Phase: 15-observability-alerting-frontend-resilience*
 *Completed: 2026-08-15*
+
+## Self-Check: PASSED
+
+All 8 claimed files confirmed present on disk; all 3 claimed commit hashes (`38fb3e9`, `2a845d3`, `e3c8ae0`) confirmed present in `git log --oneline --all`.
