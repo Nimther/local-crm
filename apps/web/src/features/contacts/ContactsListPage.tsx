@@ -14,7 +14,9 @@ import type { ContactListResponse, ContactResponse, SubscriptionStatus } from "@
 import { apiGet } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { EmptyState } from "@/components/EmptyState";
+import { QueryErrorState } from "@/components/QueryErrorState";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -188,6 +190,19 @@ export function ContactsListPage() {
   // placeholder data) -- shown as a dim cue on the results region only,
   // never a remount.
   const isRefetching = contactsQuery.isPlaceholderData || contactsQuery.isFetching;
+  // OPS-17/D-11: a failed fetch with NO prior data (genuine first-load
+  // failure, or a placeholderData carry-over that never resolved) gets the
+  // full-region QueryErrorState. A failed BACKGROUND refetch that still has
+  // stale data (TanStack Query preserves `data` across a failed refetch --
+  // `status` flips to 'error' but the last successful `data` is untouched)
+  // must NOT clobber the previously-rendered table -- it surfaces as a
+  // contained banner above the stale rows instead (T-15-14).
+  const isFullyErrored = contactsQuery.isError && !contactsQuery.data;
+  const isStaleErrored = contactsQuery.isError && Boolean(contactsQuery.data);
+  // A page beyond the real total (e.g. the last item on the last page was
+  // deleted server-side while this page number was still selected) must
+  // render as an explicit out-of-range state, not an empty-looking table.
+  const isOutOfRange = total > 0 && page > totalPages;
 
   return (
     <div className="space-y-6 p-8">
@@ -260,27 +275,40 @@ export function ContactsListPage() {
         <div className="space-y-4">
           <Skeleton className="h-96 w-full" />
         </div>
+      ) : isFullyErrored ? (
+        <QueryErrorState
+          title="Не удалось загрузить контакты"
+          isFetching={contactsQuery.isFetching}
+          onRetry={() => void contactsQuery.refetch()}
+        />
       ) : (
         <div className={cn("space-y-6 transition-opacity duration-200", isRefetching && "opacity-50")}>
+          {isStaleErrored ? (
+            <QueryErrorState
+              title="Не удалось обновить список контактов"
+              detail="Показаны последние загруженные данные."
+              isFetching={contactsQuery.isFetching}
+              onRetry={() => void contactsQuery.refetch()}
+            />
+          ) : null}
           {total === 0 && !hasActiveFilters ? (
-            <Card>
-              <CardHeader>
-                <CardTitle>Пока нет ни одного контакта</CardTitle>
-                <CardDescription>
-                  Добавьте контакты вручную, импортируйте CSV или начните отправлять события через API — контакты
-                  появятся автоматически.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <CreateContactDialog slug={slug} />
-              </CardContent>
-            </Card>
+            <EmptyState
+              title="Пока нет ни одного контакта"
+              description="Добавьте контакты вручную, импортируйте CSV или начните отправлять события через API — контакты появятся автоматически."
+              action={<CreateContactDialog slug={slug} />}
+            />
           ) : total === 0 && hasActiveFilters ? (
-            <Card>
-              <CardHeader>
-                <CardTitle>Нет контактов по заданным фильтрам</CardTitle>
-              </CardHeader>
-            </Card>
+            <EmptyState title="Нет контактов по заданным фильтрам" />
+          ) : isOutOfRange ? (
+            <EmptyState
+              title="Страница не найдена"
+              description={`Всего страниц: ${totalPages}.`}
+              action={
+                <Button variant="outline" size="sm" onClick={() => setPage(1)}>
+                  Вернуться на первую страницу
+                </Button>
+              }
+            />
           ) : (
             <>
               <Card>

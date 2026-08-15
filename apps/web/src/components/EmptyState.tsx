@@ -5,7 +5,8 @@ import { cn } from "@/lib/utils";
 
 export interface EmptyStateProps {
   title: string;
-  description?: string;
+  /** ReactNode (not just string) so a call site can embed a link, e.g. "See the API docs". */
+  description?: ReactNode;
   /** Optional call-to-action node (e.g. a "create contact" button). */
   action?: ReactNode;
   className?: string;

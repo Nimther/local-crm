@@ -7,7 +7,9 @@ import type { CsvImportStatus } from "@mega-crm/shared-schemas";
 import { apiGet } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { EmptyState } from "@/components/EmptyState";
+import { QueryErrorState } from "@/components/QueryErrorState";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
@@ -89,6 +91,11 @@ export function CsvImportHistory() {
     );
   }
 
+  // OPS-17/D-11: a failed fetch with no prior data gets the full-region
+  // error; a failed background refetch that still has stale rows keeps
+  // showing them with a banner instead (T-15-14).
+  const isFullyErrored = historyQuery.isError && !historyQuery.data;
+  const isStaleErrored = historyQuery.isError && Boolean(historyQuery.data);
   const items = historyQuery.data ?? [];
 
   return (
@@ -103,60 +110,76 @@ export function CsvImportHistory() {
         </Button>
       </div>
 
-      {items.length === 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Импортов ещё не было</CardTitle>
-            <CardDescription>Загрузите CSV-файл, чтобы добавить контакты пакетом.</CardDescription>
-          </CardHeader>
-        </Card>
+      {isFullyErrored ? (
+        <QueryErrorState
+          title="Не удалось загрузить историю импортов"
+          isFetching={historyQuery.isFetching}
+          onRetry={() => void historyQuery.refetch()}
+        />
       ) : (
-        <Card>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Файл</TableHead>
-                  <TableHead>Дата</TableHead>
-                  <TableHead>Автор</TableHead>
-                  <TableHead>Статус</TableHead>
-                  <TableHead>Итог</TableHead>
-                  <TableHead className="text-right" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {items.map((item) => (
-                  <TableRow key={item.id}>
-                    <TableCell>{item.fileName}</TableCell>
-                    <TableCell>{new Date(item.createdAt).toLocaleString("ru-RU")}</TableCell>
-                    <TableCell>{memberNameById.get(item.createdByUserId) ?? "—"}</TableCell>
-                    <TableCell>
-                      <StatusBadge status={item.status} />
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{summaryText(item)}</TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        {item.status === "applying" || item.status === "done" || item.status === "failed" ? (
-                          <Button asChild variant="ghost" size="sm">
-                            <Link to={`/w/${slug}/contacts/import/${item.id}`}>Открыть</Link>
-                          </Button>
-                        ) : null}
-                        {(item.summary?.errorCount ?? 0) > 0 ? (
-                          <Button asChild variant="ghost" size="sm">
-                            <a href={`/api/workspaces/${slug}/imports/${item.id}/errors`} download>
-                              <Download className="mr-1 h-4 w-4" />
-                              Ошибки
-                            </a>
-                          </Button>
-                        ) : null}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+        <>
+          {isStaleErrored ? (
+            <QueryErrorState
+              title="Не удалось обновить историю импортов"
+              detail="Показаны последние загруженные данные."
+              isFetching={historyQuery.isFetching}
+              onRetry={() => void historyQuery.refetch()}
+            />
+          ) : null}
+          {items.length === 0 ? (
+            <EmptyState
+              title="Импортов ещё не было"
+              description="Загрузите CSV-файл, чтобы добавить контакты пакетом."
+            />
+          ) : (
+            <Card>
+              <CardContent className="p-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Файл</TableHead>
+                      <TableHead>Дата</TableHead>
+                      <TableHead>Автор</TableHead>
+                      <TableHead>Статус</TableHead>
+                      <TableHead>Итог</TableHead>
+                      <TableHead className="text-right" />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {items.map((item) => (
+                      <TableRow key={item.id}>
+                        <TableCell>{item.fileName}</TableCell>
+                        <TableCell>{new Date(item.createdAt).toLocaleString("ru-RU")}</TableCell>
+                        <TableCell>{memberNameById.get(item.createdByUserId) ?? "—"}</TableCell>
+                        <TableCell>
+                          <StatusBadge status={item.status} />
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">{summaryText(item)}</TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            {item.status === "applying" || item.status === "done" || item.status === "failed" ? (
+                              <Button asChild variant="ghost" size="sm">
+                                <Link to={`/w/${slug}/contacts/import/${item.id}`}>Открыть</Link>
+                              </Button>
+                            ) : null}
+                            {(item.summary?.errorCount ?? 0) > 0 ? (
+                              <Button asChild variant="ghost" size="sm">
+                                <a href={`/api/workspaces/${slug}/imports/${item.id}/errors`} download>
+                                  <Download className="mr-1 h-4 w-4" />
+                                  Ошибки
+                                </a>
+                              </Button>
+                            ) : null}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
+        </>
       )}
     </div>
   );
