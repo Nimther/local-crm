@@ -59,7 +59,8 @@
     "loadtest:tenant-rps": "vitest run --root apps/worker src/queues/__tests__/loadtest/tenant-rps-sustained.test.ts",
     "coverage:gate": "node scripts/coverage-gate.mjs",
     "coverage:ratchet": "node scripts/coverage-ratchet.mjs",
-    "check:root-hygiene": "node scripts/check-root-hygiene.mjs"
+    "check:root-hygiene": "node scripts/check-root-hygiene.mjs",
+    "check:web-chunks": "node scripts/check-web-chunks.mjs"
   },
   "devDependencies": {
     "@mega-crm/db": "0.1.0",
