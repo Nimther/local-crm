@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { Progress } from "@/components/ui/progress";
+import { QueryErrorState } from "@/components/QueryErrorState";
 import { CampaignMetricsSummary } from "@/features/campaigns/CampaignMetricsSummary";
 import { getCampaignProgress, type CampaignStatus } from "@/features/campaigns/api";
 
@@ -42,6 +43,25 @@ export function CampaignProgress({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [progress?.status]);
 
+  // OPS-17/D-11: a transient poll failure must never wipe the last known
+  // progress. A failure with no prior successful poll (isFullyErrored) gets
+  // the full-region QueryErrorState in place of the progress bar; a failed
+  // poll that still has stale progress data (isStaleErrored) keeps
+  // rendering the last known values, with the failure surfaced as a
+  // contained banner above them instead of replacing anything.
+  const isFullyErrored = progressQuery.isError && !progressQuery.data;
+  const isStaleErrored = progressQuery.isError && Boolean(progressQuery.data);
+
+  if (isFullyErrored) {
+    return (
+      <QueryErrorState
+        title="Не удалось загрузить прогресс отправки"
+        isFetching={progressQuery.isFetching}
+        onRetry={() => void progressQuery.refetch()}
+      />
+    );
+  }
+
   const sent = progress?.sentCount ?? 0;
   const total = progress?.sendableTotal ?? 0;
   const failed = progress?.failedCount ?? 0;
@@ -68,6 +88,14 @@ export function CampaignProgress({
 
   return (
     <div className="space-y-4">
+      {isStaleErrored ? (
+        <QueryErrorState
+          title="Не удалось обновить прогресс отправки"
+          detail="Показаны последние известные значения."
+          isFetching={progressQuery.isFetching}
+          onRetry={() => void progressQuery.refetch()}
+        />
+      ) : null}
       <div className="space-y-2">
         <Progress value={percent} />
         <p className="text-sm text-muted-foreground tabular-nums">
