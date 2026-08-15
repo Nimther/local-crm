@@ -36,14 +36,34 @@ RUN npm ci
 # build`. Vite/esbuild resolve every `@mega-crm/*` TypeScript import directly
 # at bundle time (a bundler, unlike plain `node`, does not need the
 # dist-and-patch step Dockerfile.api/Dockerfile.worker require) and the
-# output is a static bundle with no server-side runtime at all -- confirmed
-# no `import.meta.env` usage anywhere in apps/web/src, so no build-time API
-# URL/build ARG is needed; the SPA calls `/api` relatively and reaches the
-# api container through THIS image's own Caddy same-origin proxy in
-# production.
+# output is a static bundle with no server-side runtime at all -- the SPA
+# calls `/api` relatively and reaches the api container through THIS image's
+# own Caddy same-origin proxy in production, so no build-time API URL/build
+# ARG is needed for that path.
+#
+# Phase 15 plan 11 (OPS-08/D-06): `VITE_SENTRY_DSN` is the ONE exception --
+# `apps/web/src/lib/sentry.ts` reads `import.meta.env.VITE_SENTRY_DSN`,
+# which Vite's `envPrefix`-gated static replacement resolves from
+# `process.env` at build time (Vite exposes any `VITE_`-prefixed name
+# already present in `process.env` to `import.meta.env`, no `.env` file
+# needed -- verified against the installed `vite@8.1.3`'s own env-loading
+# behavior). `caddy`'s runtime stage below serves a static bundle with NO
+# environment-variable injection point, so build time is the only place
+# this value can be supplied at all. A Sentry DSN authorizes SENDING events
+# to a project, not reading from it, so it is deliberately NOT a secret
+# (SPECIFICATION.md §3) -- a missing `ARG` value here is a no-op default
+# (empty string), and `initSentry()` treats an empty/absent DSN as "error
+# tracking disabled", never a build failure (T-15-33's same contract,
+# frontend side) -- this is what keeps a fork or a local build with no DSN
+# supplied succeeding. `ARG` is declared INSIDE this stage (after its own
+# `FROM`), not before it -- a pre-`FROM` `ARG` is Dockerfile global scope,
+# visible only to `FROM` lines' own variable expansion, not to `RUN`/`ENV`
+# inside a stage body without being redeclared there.
 ########################################
 FROM deps AS build
+ARG VITE_SENTRY_DSN=""
 COPY . .
+ENV VITE_SENTRY_DSN=${VITE_SENTRY_DSN}
 RUN npm run build -w apps/web
 
 ########################################
