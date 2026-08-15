@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 // a live application query site -- mirrors oldest-job-age-watchdog.test.ts's
 // own `authDb`/`organization` seeding convention.
 import { authDb as sharedDb, organization } from "@mega-crm/db";
-import { closeScanPool, pool, withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
+import { closeScanPool, pool, withCrossWorkspaceScan, withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { getScanTestDatabaseUrl } from "@mega-crm/test-support";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
@@ -17,6 +17,7 @@ import {
   FAILED_SEND_SHARE_ROLLING_WINDOW_HOURS,
   checkFailedSendShareHealthAndAlert,
   evaluateFailedSendShareHealth,
+  readSendStatusCountsSince,
   renderFailedSendShareAlertText,
   type SendStatusCounts,
 } from "../failed-send-share-watchdog.js";
@@ -255,13 +256,13 @@ describe("checkFailedSendShareHealthAndAlert dedup", () => {
     expect(sent).toHaveLength(1);
   });
 
-  it("test 11: a real seeded mix of statuses, read through withCrossWorkspaceScan's default readCounts, alerts only on the sent/failed share -- reconciling/excluded/unknown/dispatching rows never dilute or inflate it", async () => {
+  it("test 11: readSendStatusCountsSince (via withCrossWorkspaceScan), measured as a before/after DELTA so concurrent test-suite fixtures elsewhere in the same ephemeral DB can never contaminate the assertion, counts exactly the seeded sent/failed rows and exactly zero of the seeded reconciling/unknown/excluded/dispatching rows", async () => {
+    const windowStart = new Date(Date.now() - 5 * 60_000);
+    const before = await withCrossWorkspaceScan((client) => readSendStatusCountsSince(client, windowStart));
+
     const workspaceId = await freshWorkspaceId("failed-send-share-fixture");
     createdWorkspaceIds.push(workspaceId);
 
-    // 1 sent, 4 failed -> denominator 5, share 80% (well above threshold),
-    // easily distinguishable from noise, plus a pile of non-attempted /
-    // non-terminal rows that must never enter the computation.
     await seedSend(workspaceId, "sent");
     await seedSend(workspaceId, "failed");
     await seedSend(workspaceId, "failed");
@@ -272,22 +273,26 @@ describe("checkFailedSendShareHealthAndAlert dedup", () => {
     await seedSend(workspaceId, "excluded");
     await seedSend(workspaceId, "dispatching");
 
-    const sentMessages: Array<{ to: string; text: string }> = [];
-    // eslint-disable-next-line @typescript-eslint/require-await -- test spy: intentionally synchronous
-    const sendMail = async (message: { to: string; text: string }) => {
-      sentMessages.push(message);
+    const after = await withCrossWorkspaceScan((client) => readSendStatusCountsSince(client, windowStart));
+
+    expect((after.sent ?? 0) - (before.sent ?? 0)).toBe(1);
+    expect((after.failed ?? 0) - (before.failed ?? 0)).toBe(4);
+    expect((after.reconciling ?? 0) - (before.reconciling ?? 0)).toBe(1);
+    expect((after.unknown ?? 0) - (before.unknown ?? 0)).toBe(1);
+    expect((after.excluded ?? 0) - (before.excluded ?? 0)).toBe(1);
+    expect((after.dispatching ?? 0) - (before.dispatching ?? 0)).toBe(1);
+
+    // Feeding exactly this delta into the pure evaluator reproduces the
+    // 4/5 share this module's own header describes -- proving the read and
+    // the pure evaluation compose correctly end to end, without asserting
+    // on the platform-wide (contamination-prone) absolute body text.
+    const delta: SendStatusCounts = {
+      sent: (after.sent ?? 0) - (before.sent ?? 0),
+      failed: (after.failed ?? 0) - (before.failed ?? 0),
     };
-
-    await checkFailedSendShareHealthAndAlert({
-      client: pool,
-      now: new Date(),
-      operatorEmail: "ops@example.com",
-      sendMail,
-      thresholds: { minSampleSize: 2, shareThreshold: FAILED_SEND_SHARE_ALERT_THRESHOLD },
-    });
-
-    expect(sentMessages).toHaveLength(1);
-    expect(sentMessages[0].text).toContain("4/5");
+    const result = evaluateFailedSendShareHealth(delta, { minSampleSize: 2, shareThreshold: FAILED_SEND_SHARE_ALERT_THRESHOLD });
+    expect(result.healthy).toBe(false);
+    expect(result.reasons.some((r) => r.includes("4/5"))).toBe(true);
   });
 });
 
