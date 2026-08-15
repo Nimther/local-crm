@@ -569,7 +569,7 @@ Plans:
   4. The app loads with route-level code splitting — canvas and heavy dashboard chunks arrive only when those routes are opened.
   5. A failed API call, an empty list, a paginated list, stale analytics and unsaved canvas changes each show the user what is actually true rather than a blank or silently-wrong screen.
 
-**Plans**: 7/18 plans executed
+**Plans**: 9/18 plans executed
 
 Plans:
 **Wave 1**
@@ -593,8 +593,8 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 15-08-PLAN.md — Shared BullMQ processor wrapper across every factory + control-flow allowlist + `console.*` retirement (OPS-06)
-- [ ] 15-09-PLAN.md — Unsaved canvas guard: router blocker, `beforeunload`, persistent save-error banner (OPS-19)
+- [x] 15-08-PLAN.md — Shared BullMQ processor wrapper across every factory + control-flow allowlist + `console.*` retirement (OPS-06)
+- [x] 15-09-PLAN.md — Unsaved canvas guard: router blocker, `beforeunload`, persistent save-error banner (OPS-19)
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
@@ -729,7 +729,7 @@ Phase 9 has no dependents and may be scheduled in parallel at any point after Ph
 | 12. Worker Reliability & Tenant Fairness | v1.1 | 14/14 | Complete    | 2026-08-11 |
 | 13. Compliance & Analytics Integrity | v1.1 | 16/16 | Complete    | 2026-08-12 |
 | 14. Deployment & Database Durability | v1.1 | 14/14 | Complete    | 2026-08-14 |
-| 15. Observability, Alerting & Frontend Resilience | v1.1 | 7/18 | In Progress|  |
+| 15. Observability, Alerting & Frontend Resilience | v1.1 | 9/18 | In Progress|  |
 | 16. Live SendGrid Verification | v1.1 | 0/TBD | Not started | - |
 
 ---
