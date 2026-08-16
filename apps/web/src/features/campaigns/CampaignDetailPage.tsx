@@ -173,6 +173,15 @@ function SummaryView({ slug, campaign }: { slug: string; campaign: CampaignRespo
  * scheduled/sending/sent/canceled each get their own dedicated view. Replaces
  * the 04-07 placeholder that routed every /campaigns/:id request straight to
  * the builder.
+ *
+ * OPS-18/D-12 (plan 15-15): deliberately NO `DataAsOfLabel`/`StaleDataBanner`
+ * on this page. Every number here -- the `campaigns` row's own counters,
+ * `getCampaignProgress`'s live re-aggregation of the `sends` ledger
+ * (campaign.repository.ts's `CampaignProgress`), and the audience-breakdown
+ * snapshot -- is read live, never from `workspace_daily_rollup`. Mounting a
+ * rollup watermark over these figures would be a new lie in place of the old
+ * one (T-15-52): the freshness signal plan 15-12 added exists only on the
+ * workspace dashboard response and does not apply here.
  */
 export function CampaignDetailPage() {
   const { slug = "", id = "" } = useParams<{ slug: string; id: string }>();
