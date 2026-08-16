@@ -21,6 +21,7 @@
     "lint:pg-pool-factory": "node scripts/lint-pg-pool-factory.mjs",
     "check:lockfile-npm10": "node scripts/check-lockfile-npm10.mjs",
     "check:spec-env-coverage": "node scripts/check-spec-env-coverage.mjs",
+    "check:runbook-coverage": "node scripts/check-runbook-coverage.mjs",
     "check:sentry-redaction": "vitest run --root packages/redaction src/__tests__/sentry-scrub-fixtures.test.ts",
     "verify:redis-config": "node scripts/verify-redis-config.mjs",
     "verify:prod-compose": "node scripts/validate-prod-compose.mjs",
