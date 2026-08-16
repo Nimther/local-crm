@@ -206,6 +206,15 @@ None - no external service configuration required.
 - Gaps G-15-2 and G-15-3 are closed. ARCHITECTURE.md §18 and SPECIFICATION.md §7/§3 now describe the post-gap-closure system (post plans 15-19/15-20, post commits eaaafe0/32d2b22), with no surviving stale claim in either document.
 - Phase 15 plan sequence (gap-closure wave: 15-19, 15-20, 15-21) is now complete at the code and documentation level. No blockers for phase-level re-verification.
 
+## Self-Check: PASSED
+
+- FOUND: ARCHITECTURE.md
+- FOUND: SPECIFICATION.md
+- FOUND: .planning/phases/15-observability-alerting-frontend-resilience/15-21-SUMMARY.md
+- FOUND commit bb5914c (Task 1)
+- FOUND commit a2a3fe6 (Task 2)
+- FOUND commit 7107d04 (SUMMARY.md)
+
 ---
 *Phase: 15-observability-alerting-frontend-resilience*
 *Completed: 2026-08-16*
