@@ -66,13 +66,21 @@ function requireRedisUrl(): string {
   return redisUrl;
 }
 
-/** Queue names board-queues.ts must NOT construct a fresh handle for -- an existing tracked producer already covers them. */
-const REUSED_PRODUCER_QUEUES: ReadonlyMap<string, Queue> = new Map([
-  [EMAIL_BROADCAST_QUEUE, emailBroadcastQueue],
-  [EMAIL_TRIGGERED_QUEUE, emailTriggeredQueue],
-  [FLOW_RUN_ADVANCE_QUEUE, flowRunAdvanceQueue],
-  [FLOW_TRIGGER_EVALUATOR_QUEUE, flowTriggerEvaluatorQueue],
-  [FLOW_SEGMENT_SWEEP_FLOW_QUEUE, flowSegmentSweepFlowQueue],
+/**
+ * Queue names board-queues.ts must NOT construct a fresh handle for -- an
+ * existing tracked producer already covers them. Each producer is a
+ * `Queue<SpecificJobType>` -- widened to the untyped `Queue` here (a Bull
+ * Board handle has no use for the job-payload generic), since a single
+ * `Map`/array holding several mutually-incompatible `Queue<T>` generics
+ * cannot otherwise be typed without TypeScript trying to unify their `add()`
+ * signatures into one impossible type.
+ */
+const REUSED_PRODUCER_QUEUES: ReadonlyMap<string, Queue> = new Map<string, Queue>([
+  [EMAIL_BROADCAST_QUEUE, emailBroadcastQueue as Queue],
+  [EMAIL_TRIGGERED_QUEUE, emailTriggeredQueue as Queue],
+  [FLOW_RUN_ADVANCE_QUEUE, flowRunAdvanceQueue as Queue],
+  [FLOW_TRIGGER_EVALUATOR_QUEUE, flowTriggerEvaluatorQueue as Queue],
+  [FLOW_SEGMENT_SWEEP_FLOW_QUEUE, flowSegmentSweepFlowQueue as Queue],
 ]);
 
 /**
