@@ -152,6 +152,14 @@ jobs:
       - name: SPECIFICATION env coverage
         run: npm run check:spec-env-coverage
 
+      # Phase 15 plan 18 (OPS-15, T-15-66): the machine half of "every alert
+      # this phase introduces has its own runbook" -- enumerates every
+      # `*_ALERT_NAME` constant apps/api/src/modules/ops declares and fails
+      # if a matching docs/runbooks/<name>-alert.md file does not exist, so a
+      # future alert cannot ship undocumented.
+      - name: Runbook coverage
+        run: npm run check:runbook-coverage
+
   # ---------------------------------------------------------------------------
   # The full corpus against live services, then the coverage threshold and the
   # ratchet that stops the threshold being lowered to meet a regression.
