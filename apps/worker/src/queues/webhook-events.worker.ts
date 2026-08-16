@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Worker, type Job, type ConnectionOptions } from "bullmq";
 import type { PoolClient } from "pg";
 import { scrubbedConsole } from "@mega-crm/redaction";
-import { withCrossWorkspaceScan, withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
+import { withCorrelation, withCrossWorkspaceScan, withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import {
   recordSubscriptionStatusChange,
   applyUnsubscribeWithSendFact,
@@ -23,6 +23,7 @@ import { WEBHOOK_EVENTS_QUEUE, webhookEventsJobSchema, type WebhookEventsJob } f
 import { markIngestionComplete } from "@mega-crm/db/src/webhooks/ingress-journal.js";
 import { writeQuarantinedEvent } from "@mega-crm/db/src/webhooks/quarantine.js";
 import { wrapProcessor } from "../processor-wrapper.js";
+import { logger } from "../logger.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -793,13 +794,26 @@ export async function processWebhookEventBatch(data: unknown): Promise<{ inserte
           );
           const send = sendRows[0];
           // Defensive re-check (row.sendId already validated live above;
-          // this guards a same-transaction delete race).
+          // this guards a same-transaction delete race). This is also the
+          // first point at which `send.id` is a proven-live send in THIS
+          // workspace (Phase 15 plan 20, G-15-1 webhook half) -- the
+          // per-event correlation scope below opens immediately after this
+          // guard, per event, never around the batch or the transaction, so
+          // one event's identifier never stamps another event's lines in
+          // the same batch.
           if (!send) continue;
+          // Hoisted into a const so the guard's narrowing (row.normalizedType
+          // !== null, checked above) survives across the closure boundary
+          // below -- property narrowing does not cross function boundaries.
+          const normalizedType = row.normalizedType;
 
-          await applyEventSideEffects(client, workspaceId, send, {
-            normalizedType: row.normalizedType,
-            reason: row.reason,
-            occurredAt: row.occurredAt,
+          await withCorrelation({ sendId: send.id }, async () => {
+            logger.info({ eventType: normalizedType, isTest: row.isTest }, "webhook event applied to send");
+            await applyEventSideEffects(client, workspaceId, send, {
+              normalizedType,
+              reason: row.reason,
+              occurredAt: row.occurredAt,
+            });
           });
         }
       }
