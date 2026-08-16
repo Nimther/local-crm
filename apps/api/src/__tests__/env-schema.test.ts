@@ -233,15 +233,31 @@ describe("P3 -- apps/api holds no scan-role credential or entry point", () => {
    * table, through the SAME `mega_crm_scan` role's existing unrestricted
    * `sends_scan` policy (migration 0042 -- the same grant
    * `send-reconciler.worker.ts`'s own discovery query already uses, see
-   * SPECIFICATION.md §5.10). Any OTHER file importing
-   * `withCrossWorkspaceScan` still fails this test -- P3's original intent
-   * (apps/api holds no BROAD scan-role membership) is preserved by keeping
-   * the allowlist to these two narrowly-scoped consumers.
+   * SPECIFICATION.md §5.10).
+   *
+   * Phase 15 (OPS-13, plan 15-14, Task 2): `failed-send-share-watchdog.ts`
+   * is the THIRD permitted consumer, for the same structural reason again --
+   * its own `readSendStatusCountsSince` needs a platform-wide per-status
+   * `COUNT(*) ... GROUP BY status` over `sends`, through the SAME
+   * unrestricted `sends_scan` policy.
+   *
+   * Phase 15 (OPS-13, plan 15-14, Task 1): `webhook-lag-watchdog.ts` is the
+   * FOURTH permitted consumer -- its own `readNewestWebhookEventAt` needs a
+   * platform-wide `MAX(last_event_at)` over `workspace_webhook_endpoints`
+   * (migration 0065's column-level scan grant), and it also reuses
+   * `oldest-job-age-watchdog.ts`'s own `readOldestReconcilingSince` for the
+   * "outstanding sends" half, both under the same `withCrossWorkspaceScan`
+   * call. Any OTHER file importing `withCrossWorkspaceScan` still fails this
+   * test -- P3's original intent (apps/api holds no BROAD scan-role
+   * membership) is preserved by keeping the allowlist to these four
+   * narrowly-scoped consumers.
    */
-  it("only modules/ops/ingestion-health-watchdog.ts and modules/ops/oldest-job-age-watchdog.ts under apps/api/src (outside __tests__) import withCrossWorkspaceScan", () => {
+  it("only modules/ops/ingestion-health-watchdog.ts, modules/ops/oldest-job-age-watchdog.ts, modules/ops/failed-send-share-watchdog.ts and modules/ops/webhook-lag-watchdog.ts under apps/api/src (outside __tests__) import withCrossWorkspaceScan", () => {
     const ALLOWED = [
       path.join(API_SRC_DIR, "modules", "ops", "ingestion-health-watchdog.ts"),
       path.join(API_SRC_DIR, "modules", "ops", "oldest-job-age-watchdog.ts"),
+      path.join(API_SRC_DIR, "modules", "ops", "failed-send-share-watchdog.ts"),
+      path.join(API_SRC_DIR, "modules", "ops", "webhook-lag-watchdog.ts"),
     ];
     const offenders = collectTsFiles(API_SRC_DIR).filter(
       (file) => readFileSync(file, "utf8").includes("withCrossWorkspaceScan") && !ALLOWED.includes(file),

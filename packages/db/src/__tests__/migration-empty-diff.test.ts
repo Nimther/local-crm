@@ -60,8 +60,15 @@ describe("checkEmptyDiff against the real repository (the CI-enforced copy of db
     expect(result.empty).toBe(true);
     expect(result.sqlStatements).toEqual([]);
     // Diagnosable on failure: which snapshot, how many shipped migrations.
+    // 0065 (Phase 15 plan 14, Task 1) is a grants-only migration -- a
+    // column-level GRANT + CREATE POLICY, no packages/db/src/schema/*.ts
+    // change at all -- so it ships no new snapshot (0064_snapshot.json
+    // remains the newest, matching 0055's/0059's/0060's own grants/policy
+    // -only precedent of shipping no snapshot). shippedMigrationCount grows
+    // to 66 (one more shipped tag in the journal); snapshotFileCount stays
+    // 14 (no new snapshot file).
     expect(result.comparedAgainstSnapshot).toBe("0064_snapshot.json");
-    expect(result.shippedMigrationCount).toBe(65);
+    expect(result.shippedMigrationCount).toBe(66);
     expect(result.snapshotFileCount).toBe(14);
 
     // Never touches the repository -- proven, not assumed: the directory
@@ -75,14 +82,18 @@ describe("checkEmptyDiff against the real repository (the CI-enforced copy of db
       fs.readFileSync(path.join(REAL_MIGRATIONS_DIR, "meta/_journal.json"), "utf8"),
     ) as { entries: { tag: string }[] };
     // The backfilled snapshot's own prevId must chain from the snapshot that
-    // preceded it (0034), and its filename must match the newest shipped
-    // migration's tag prefix -- a mismatch here would mean db:check-empty-diff
-    // is silently comparing against the wrong point in history. 0064
-    // (Phase 15 plan 12, OPS-13/OPS-18) is now the newest, with its own
-    // snapshot generated the same way (drizzle-kit's own generateDrizzleJson,
-    // chained from 0063_snapshot.json's id) rather than hand-typed.
+    // preceded it (0034), and its filename must match the newest SCHEMA-
+    // CHANGING migration's tag prefix -- a mismatch here would mean
+    // db:check-empty-diff is silently comparing against the wrong point in
+    // history. 0065 (Phase 15 plan 14, Task 1) is now the newest SHIPPED
+    // migration overall, but it is grants-only (no packages/db/src/schema/
+    // *.ts change) and therefore ships no snapshot of its own -- 0064's
+    // snapshot (Phase 15 plan 12, OPS-13/OPS-18) remains the one
+    // checkEmptyDiff compares against (asserted separately above via
+    // `comparedAgainstSnapshot`). This assertion tracks the JOURNAL's newest
+    // tag, which is now 0065.
     const newestTag = journal.entries[journal.entries.length - 1]?.tag;
-    expect(newestTag).toBe("0064_ops_alert_state_and_rollup_watermark");
+    expect(newestTag).toBe("0065_webhook_endpoints_scan_grant");
   });
 });
 
