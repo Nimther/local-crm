@@ -127,10 +127,14 @@ of the following, in order of preference:
    securely-shared copy of the key):
 
    ```bash
-   curl -s -H "Authorization: Bearer <tenant's SendGrid API key>" \
+   curl -s -H "Authorization: ${SENDGRID_AUTH_HEADER}" \
      https://api.sendgrid.com/v3/user/webhooks/event/settings/<sendgridWebhookId> \
      | jq '.processed, .deferred'
    ```
+   Set `SENDGRID_AUTH_HEADER` in your own shell to the tenant's SendGrid API
+   key, formatted per SendGrid's own Authorization header convention (see
+   SendGrid's API reference) — never paste the key literally into this
+   command or into any copy of it.
 
    Expect `true` then `null`/absent (`processed` enabled, `deferred` never
    sent). `sendgridWebhookId` is stored on `workspace_webhook_endpoints` for
