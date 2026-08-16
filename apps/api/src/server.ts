@@ -50,6 +50,30 @@ import {
   REPUTATION_ALERT_DEDUP_HOURS,
   type ReputationAlertMessage,
 } from "./modules/ops/reputation-watchdog.js";
+import {
+  startQueueDepthWatchdog,
+  QUEUE_DEPTH_WATCHDOG_INTERVAL_MS,
+  QUEUE_DEPTH_ALERT_DEDUP_HOURS,
+  type QueueDepthAlertMessage,
+} from "./modules/ops/queue-depth-watchdog.js";
+import {
+  startOldestJobAgeWatchdog,
+  OLDEST_JOB_AGE_WATCHDOG_INTERVAL_MS,
+  OLDEST_JOB_AGE_ALERT_DEDUP_HOURS,
+  type OldestJobAgeAlertMessage,
+} from "./modules/ops/oldest-job-age-watchdog.js";
+import {
+  startWebhookLagWatchdog,
+  WEBHOOK_LAG_WATCHDOG_INTERVAL_MS,
+  WEBHOOK_LAG_ALERT_DEDUP_HOURS,
+  type WebhookLagAlertMessage,
+} from "./modules/ops/webhook-lag-watchdog.js";
+import {
+  startFailedSendShareWatchdog,
+  FAILED_SEND_SHARE_WATCHDOG_INTERVAL_MS,
+  FAILED_SEND_SHARE_ALERT_DEDUP_HOURS,
+  type FailedSendShareAlertMessage,
+} from "./modules/ops/failed-send-share-watchdog.js";
 import { closeQueueMonitorQueues } from "./modules/ops/queue-monitor.js";
 import { authPlugin } from "./modules/auth/plugin.js";
 import { registerWorkspaceRoutes } from "./modules/tenancy/workspaces.js";
@@ -423,6 +447,64 @@ async function sendReputationAlert(message: ReputationAlertMessage): Promise<voi
   });
 }
 
+/**
+ * Phase 15 (OPS-13, plan 15-13): the queue-depth watchdog's own real
+ * dispatch -- same platform-key-only, plain-text discipline as every
+ * sibling above, a sixth distinct subject line so all six alert channels
+ * stay distinguishable in an operator's inbox.
+ */
+async function sendQueueDepthAlert(message: QueueDepthAlertMessage): Promise<void> {
+  await sgMail.send({
+    to: message.to,
+    from: env.PLATFORM_MAIL_FROM,
+    subject: "Mega CRM queue depth alert",
+    text: message.text,
+  });
+}
+
+/**
+ * Phase 15 (OPS-13, plan 15-13): the oldest-job-age watchdog's own real
+ * dispatch -- same platform-key-only, plain-text discipline as every
+ * sibling above, a seventh distinct subject line.
+ */
+async function sendOldestJobAgeAlert(message: OldestJobAgeAlertMessage): Promise<void> {
+  await sgMail.send({
+    to: message.to,
+    from: env.PLATFORM_MAIL_FROM,
+    subject: "Mega CRM oldest-job-age alert",
+    text: message.text,
+  });
+}
+
+/**
+ * Phase 15 (OPS-13, plan 15-14): the webhook-lag watchdog's own real
+ * dispatch -- same platform-key-only, plain-text discipline as every
+ * sibling above, an eighth distinct subject line.
+ */
+async function sendWebhookLagAlert(message: WebhookLagAlertMessage): Promise<void> {
+  await sgMail.send({
+    to: message.to,
+    from: env.PLATFORM_MAIL_FROM,
+    subject: "Mega CRM webhook-lag alert",
+    text: message.text,
+  });
+}
+
+/**
+ * Phase 15 (OPS-13, plan 15-14): the failed-send-share watchdog's own real
+ * dispatch -- same platform-key-only, plain-text discipline as every
+ * sibling above, a ninth distinct subject line so all nine alert channels
+ * stay distinguishable in an operator's inbox.
+ */
+async function sendFailedSendShareAlert(message: FailedSendShareAlertMessage): Promise<void> {
+  await sgMail.send({
+    to: message.to,
+    from: env.PLATFORM_MAIL_FROM,
+    subject: "Mega CRM failed-send-share alert",
+    text: message.text,
+  });
+}
+
 async function main(): Promise<void> {
   const app = await buildServer();
   await app.listen({ port: env.API_PORT, host: "0.0.0.0" });
@@ -490,6 +572,57 @@ async function main(): Promise<void> {
     operatorEmail: env.OPERATOR_ALERT_EMAIL,
     sendMail: sendReputationAlert,
   });
+  // Phase 15 (OPS-13, plan 15-13): a SIXTH independent dead-man's switch,
+  // over BullMQ queue depth across all 8 monitored send-pipeline lanes. It
+  // claims through the SHARED ops_alert_state table (plan 15-12) under its
+  // own alert name ("queue-depth") and its own dedup window
+  // (QUEUE_DEPTH_ALERT_DEDUP_HOURS), independent of every watchdog above and
+  // below -- a claim under one alert name can never satisfy or block
+  // another's WHERE predicate, so none of these nine watchdogs can mask or
+  // be masked by any other.
+  startQueueDepthWatchdog({
+    client: pool,
+    operatorEmail: env.OPERATOR_ALERT_EMAIL,
+    sendMail: sendQueueDepthAlert,
+  });
+  // Phase 15 (OPS-13, plan 15-13): a SEVENTH independent dead-man's switch,
+  // over the oldest pending BullMQ job's age AND the oldest outstanding
+  // sends.reconciling_since, evaluated together into one alert
+  // ("oldest-job-age") so a send stuck at either stage produces exactly one
+  // email, never two. Deliberately set BELOW send-reconciler-watchdog.ts's
+  // own RECONCILING_AGE_ALERT_HOURS (see that module's own constant
+  // comments) -- an earlier warning on the same underlying signal, never a
+  // simultaneous duplicate.
+  startOldestJobAgeWatchdog({
+    client: pool,
+    operatorEmail: env.OPERATOR_ALERT_EMAIL,
+    sendMail: sendOldestJobAgeAlert,
+  });
+  // Phase 15 (OPS-13, plan 15-14): an EIGHTH independent dead-man's switch,
+  // answering "is delivery evidence still arriving" -- a deliberately
+  // DIFFERENT question from ingestion-health-watchdog.ts's "is an
+  // already-arrived batch stuck" (see webhook-lag-watchdog.ts's own header
+  // for the full distinction). Claims under its own alert name
+  // ("webhook-lag") and its own dedup window, so it cannot mask or be
+  // masked by ingestion-health-watchdog above or any other watchdog here.
+  startWebhookLagWatchdog({
+    client: pool,
+    operatorEmail: env.OPERATOR_ALERT_EMAIL,
+    sendMail: sendWebhookLagAlert,
+  });
+  // Phase 15 (OPS-13, plan 15-14): a NINTH independent dead-man's switch,
+  // over the share of terminal (sent/failed) sends that failed, over a
+  // rolling window -- rate-limited deferrals and other non-terminal
+  // control-flow outcomes are structurally excluded from both sides of the
+  // ratio (see failed-send-share-watchdog.ts's own header), so routine
+  // per-tenant backpressure can never read as a false outage. Claims under
+  // its own alert name ("failed-send-share") and its own dedup window,
+  // independent of every watchdog above.
+  startFailedSendShareWatchdog({
+    client: pool,
+    operatorEmail: env.OPERATOR_ALERT_EMAIL,
+    sendMail: sendFailedSendShareAlert,
+  });
 
   // Names only the interval/threshold numbers -- never the operator
   // address or anything derived from the SendGrid key (T-09-11).
@@ -516,6 +649,22 @@ async function main(): Promise<void> {
   logger.info(
     { pollIntervalMs: REPUTATION_WATCHDOG_INTERVAL_MS, alertDedupHours: REPUTATION_ALERT_DEDUP_HOURS },
     "reputation watchdog armed -- watching reputation_alert_state for warn/critical tier crossings"
+  );
+  logger.info(
+    { pollIntervalMs: QUEUE_DEPTH_WATCHDOG_INTERVAL_MS, alertDedupHours: QUEUE_DEPTH_ALERT_DEDUP_HOURS },
+    "queue-depth watchdog armed -- watching all 8 monitored BullMQ send-pipeline lanes for a backing-up queue"
+  );
+  logger.info(
+    { pollIntervalMs: OLDEST_JOB_AGE_WATCHDOG_INTERVAL_MS, alertDedupHours: OLDEST_JOB_AGE_ALERT_DEDUP_HOURS },
+    "oldest-job-age watchdog armed -- watching the oldest pending BullMQ job and the oldest outstanding sends.reconciling_since"
+  );
+  logger.info(
+    { pollIntervalMs: WEBHOOK_LAG_WATCHDOG_INTERVAL_MS, alertDedupHours: WEBHOOK_LAG_ALERT_DEDUP_HOURS },
+    "webhook-lag watchdog armed -- watching workspace_webhook_endpoints.last_event_at against outstanding reconciling sends"
+  );
+  logger.info(
+    { pollIntervalMs: FAILED_SEND_SHARE_WATCHDOG_INTERVAL_MS, alertDedupHours: FAILED_SEND_SHARE_ALERT_DEDUP_HOURS },
+    "failed-send-share watchdog armed -- watching the rolling share of terminal sends that failed"
   );
 }
 
