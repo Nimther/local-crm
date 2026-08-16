@@ -569,7 +569,7 @@ Plans:
   4. The app loads with route-level code splitting — canvas and heavy dashboard chunks arrive only when those routes are opened.
   5. A failed API call, an empty list, a paginated list, stale analytics and unsaved canvas changes each show the user what is actually true rather than a blank or silently-wrong screen.
 
-**Plans**: 13/18 plans executed
+**Plans**: 15/18 plans executed
 
 Plans:
 **Wave 1**
@@ -614,8 +614,8 @@ Plans:
 
 **Wave 10** *(blocked on Wave 9 completion)*
 
-- [ ] 15-14-PLAN.md — Webhook-lag and failed-send-share watchdogs + boot wiring for all four (OPS-13)
-- [ ] 15-15-PLAN.md — Data-as-of label + conditional stale-analytics banner (OPS-18)
+- [x] 15-14-PLAN.md — Webhook-lag and failed-send-share watchdogs + boot wiring for all four (OPS-13)
+- [x] 15-15-PLAN.md — Data-as-of label + conditional stale-analytics banner (OPS-18)
 
 **Wave 11** *(blocked on Wave 10 completion)*
 
@@ -729,7 +729,7 @@ Phase 9 has no dependents and may be scheduled in parallel at any point after Ph
 | 12. Worker Reliability & Tenant Fairness | v1.1 | 14/14 | Complete    | 2026-08-11 |
 | 13. Compliance & Analytics Integrity | v1.1 | 16/16 | Complete    | 2026-08-12 |
 | 14. Deployment & Database Durability | v1.1 | 14/14 | Complete    | 2026-08-14 |
-| 15. Observability, Alerting & Frontend Resilience | v1.1 | 13/18 | In Progress|  |
+| 15. Observability, Alerting & Frontend Resilience | v1.1 | 15/18 | In Progress|  |
 | 16. Live SendGrid Verification | v1.1 | 0/TBD | Not started | - |
 
 ---
