@@ -150,6 +150,21 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    # Phase 15 plan 17 (OPS-10, Pitfall 5): Docker's json-file driver has NO
+    # size cap unless configured per service -- this plan is the first time
+    # log volume materially increases (plan 15-08 turned the worker's
+    # silent `console` output into structured per-job logging), so an
+    # unbounded log file is a disk-exhaustion outage waiting for a busy
+    # day. 10MB x 5 files = 50MB ceiling per service, sized to comfortably
+    # outlive a network blip during which the `alloy` sidecar below cannot
+    # push to Grafana Cloud Loki -- IDENTICAL across every service in this
+    # file (see each subsequent service's own `logging:` block) unless one
+    # is given a documented reason to differ; none is.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     # No `ports:` -- reachable only on the compose network (T-14-43).
 
   # Phase 14 plan 10 (DB-09, D-05, D-06). The scheduled-backup sidecar --
@@ -200,6 +215,13 @@ services:
       - ./pgbackrest/crontab:/etc/pgbackrest-crontab.d/crontab:ro
       - mega_crm_db_data_prod:/var/lib/postgresql/data:ro
       - mega_crm_pg_socket_prod:/var/run/postgresql
+    # Phase 15 plan 17 (OPS-10, Pitfall 5): same bounded logging as every
+    # other service (see `db`'s own comment above).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     # No `ports:`, no `healthcheck:` -- a scheduled batch process, not a
     # request-serving service (T-14-43).
 
@@ -221,6 +243,13 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    # Phase 15 plan 17 (OPS-10, Pitfall 5): same bounded logging as every
+    # other service (see `db`'s own comment above).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     # No `ports:` -- reachable only on the compose network (T-14-43).
 
   api:
@@ -262,6 +291,13 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+    # Phase 15 plan 17 (OPS-10, Pitfall 5): same bounded logging as every
+    # other service (see `db`'s own comment above).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     # No `ports:` -- `web` (Caddy) is the ONLY published surface (T-14-43);
     # Caddy reaches this container by compose service name (docker/Caddyfile).
 
@@ -302,6 +338,13 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+    # Phase 15 plan 17 (OPS-10, Pitfall 5): same bounded logging as every
+    # other service (see `db`'s own comment above).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     # No `ports:` -- publishing WORKER_HEALTH_PORT would expose an
     # unauthenticated probe endpoint to the internet (T-14-43).
 
@@ -347,6 +390,13 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    # Phase 15 plan 17 (OPS-10, Pitfall 5): same bounded logging as every
+    # other service (see `db`'s own comment above).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
 
   # One-shot migrate step (plan 14-01's `npm run migrate:prod` ==
   # `node scripts/migrate-runner.mjs`), built from the SAME api image --
@@ -375,6 +425,13 @@ services:
     environment:
       NODE_ENV: production
     mem_limit: ${MIGRATE_MEM_LIMIT:-512m}
+    # Phase 15 plan 17 (OPS-10, Pitfall 5): same bounded logging as every
+    # other service (see `db`'s own comment above).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     # No `ports:`, no `healthcheck:` -- a one-shot process the deploy script
     # awaits by exit code, never a long-lived container.
 
