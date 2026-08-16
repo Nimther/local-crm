@@ -6,6 +6,7 @@ import { attachSharedErrorListeners, buildRedisConnectionOptions, createRedisCon
 import { pool } from "@mega-crm/tenant-context";
 import { assertMigrationsCurrent } from "@mega-crm/db";
 import { markWorkerDraining, startWorkerHealthServer, type WorkerHealthServer } from "./health-server.js";
+import { mountBullBoard } from "./bull-board.js";
 import { closeTrackedQueues } from "./queues/queue-registry.js";
 import { isTerminalJobFailure, writeDeadLetterOnTerminalFailure } from "./queues/dead-letter/dead-letter-writer.js";
 import { setProcessorErrorReporter } from "./processor-wrapper.js";
@@ -299,10 +300,19 @@ export async function buildWorker(): Promise<WorkerRuntime> {
   // is `assertMigrationsCurrent` (D-13, packages/db/src/migration-journal.ts)
   // bound to that pool -- the identical applied-vs-shipped definition
   // apps/api's /readyz uses, never a second comparison.
+  //
+  // Phase 15 plan 16 (OPS-14, D-09/D-10): `beforeListen` mounts the
+  // read-only Bull Board onto this SAME Fastify instance -- `board-queues.ts`'s
+  // handles are already constructed by the time this module graph finished
+  // loading (its module-level `boardQueues` array is built at import time,
+  // before `main()` ever runs), so "after the queue handles exist" holds by
+  // construction; this hook itself runs before `app.listen(...)` starts
+  // accepting connections (`health-server.ts`'s own contract for the hook).
   const healthServer = await startWorkerHealthServer({
     queryPostgres: () => pool.query("SELECT 1"),
     redisConnection: connection,
     checkMigrationsCurrent: () => assertMigrationsCurrent(pool),
+    beforeListen: mountBullBoard,
   });
 
   const close = (): Promise<void> => closeWorkerRuntime(workers, connection, healthServer);

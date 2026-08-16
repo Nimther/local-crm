@@ -1,7 +1,7 @@
 import { readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { Queue } from "bullmq";
 import {
   CAMPAIGN_KICKOFF_QUEUE,
@@ -34,6 +34,13 @@ import { REPUTATION_TICK_QUEUE } from "../queues/reputation-tick.worker.js";
 import { ERASURE_SCRUB_RECLAIM_QUEUE } from "../queues/erasure-scrub-reclaim.worker.js";
 import { boardQueues } from "../queues/board-queues.js";
 import { closeTrackedQueues, trackedQueueCount } from "../queues/queue-registry.js";
+import {
+  resetWorkerDrainingForTests,
+  startWorkerHealthServer,
+  WORKER_HEALTH_HOST,
+  type WorkerHealthServer,
+} from "../health-server.js";
+import { BULL_BOARD_BASE_PATH, mountBullBoard } from "../bull-board.js";
 
 /**
  * Phase 15 plan 16 (OPS-14), Task 2: read-only queue handles for Bull Board
@@ -117,6 +124,74 @@ describe("board-queues.ts: read-only queue handles for Bull Board (OPS-14 Task 2
     expect(byName.get(FLOW_SEGMENT_SWEEP_FLOW_QUEUE)).toBe(flowSegmentSweepFlowQueue);
   });
 
+});
+
+/**
+ * Phase 15 plan 16 (OPS-14), Task 3: the board mounted on the worker's own
+ * loopback-only health listener. Placed in its OWN describe block, run
+ * BEFORE the shutdown-registry test below (which closes every `boardQueues`
+ * handle) -- the board's `/api/queues` route performs a real round trip
+ * against each queue's Redis connection, so it must run against still-open
+ * handles.
+ */
+describe("bull-board.ts: the board mounted on the health listener (OPS-14 Task 3)", () => {
+  const PORT = 4192;
+  let server: WorkerHealthServer | undefined;
+
+  afterEach(async () => {
+    resetWorkerDrainingForTests();
+    if (server) {
+      await server.close();
+      server = undefined;
+    }
+  });
+
+  async function start(): Promise<void> {
+    server = await startWorkerHealthServer({
+      queryPostgres: () => Promise.resolve({ rows: [{ ok: 1 }] }),
+      redisConnection: { info: () => Promise.resolve("redis_version:7.0.0") },
+      checkMigrationsCurrent: () => Promise.resolve(),
+      port: PORT,
+      beforeListen: mountBullBoard,
+    });
+  }
+
+  it("/healthz and /readyz still answer their original contract with the board mounted", async () => {
+    await start();
+
+    const healthzResponse = await fetch(`http://${WORKER_HEALTH_HOST}:${String(PORT)}/healthz`);
+    expect(healthzResponse.status).toBe(200);
+    expect(await healthzResponse.json()).toEqual({ status: "ok" });
+
+    const readyzResponse = await fetch(`http://${WORKER_HEALTH_HOST}:${String(PORT)}/readyz`);
+    expect(readyzResponse.status).toBe(200);
+    const readyzBody = (await readyzResponse.json()) as { ready: boolean; checks: unknown[] };
+    expect(readyzBody.ready).toBe(true);
+  });
+
+  it("the board's base path responds on the loopback listener", async () => {
+    await start();
+
+    const response = await fetch(`http://${WORKER_HEALTH_HOST}:${String(PORT)}${BULL_BOARD_BASE_PATH}/api/queues`);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { queues: { name: string }[] };
+    expect(body.queues.map((q) => q.name).sort()).toEqual([...EXPECTED_QUEUE_NAMES].sort());
+  });
+
+  it("the board is read-only: a mutating route (pause) is refused with 405, never performing the mutation", async () => {
+    await start();
+
+    const response = await fetch(
+      `http://${WORKER_HEALTH_HOST}:${String(PORT)}${BULL_BOARD_BASE_PATH}/api/queues/${EVENTS_INGEST_QUEUE}/pause`,
+      { method: "PUT" }
+    );
+    expect(response.status).toBe(405);
+    const body = (await response.json()) as { error?: string };
+    expect(JSON.stringify(body)).toMatch(/READ_ONLY/i);
+  });
+});
+
+describe("board-queues.ts shutdown (OPS-14 Task 2, run last -- closes every boardQueues handle)", () => {
   it("every handle -- reused or newly constructed -- is registered with the shutdown registry, and closing empties it", async () => {
     expect(trackedQueueCount()).toBe(boardQueues.length);
 
