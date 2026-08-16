@@ -13,6 +13,7 @@ import { Link } from "react-router";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
+import { QueryErrorState } from "@/components/QueryErrorState";
 import { NODE_TYPE_META, type FlowCanvasNodeType } from "@/features/flows/canvas/nodeTypes";
 import { useFlowAnalytics, type FlowNodeAnalyticsResponse } from "@/features/flows/api";
 import { computeRate } from "@/lib/rates";
@@ -127,27 +128,62 @@ export function FlowAnalyticsTable({ slug, flowId }: { slug: string; flowId: str
     getSortedRowModel: getSortedRowModel(),
   });
 
+  // WR-02/OPS-17/D-11: same isFullyErrored/isStaleErrored split every
+  // sibling list/detail page in this phase applies -- this query shares its
+  // exact key with FlowDetailPage's own analyticsQuery, so a background
+  // refetch (e.g. after a pause/resume/publish mutation elsewhere on the
+  // same detail page) can fail while this tab already shows previously
+  // loaded rows. A plain `isError` check with no stale-data carve-out would
+  // discard the whole table in favor of a generic error paragraph with no
+  // Retry control.
+  const isFullyErrored = analyticsQuery.isError && !analyticsQuery.data;
+  const isStaleErrored = analyticsQuery.isError && Boolean(analyticsQuery.data);
+
   if (analyticsQuery.isLoading) {
     return <Skeleton className="h-64 w-full" />;
   }
 
-  if (analyticsQuery.isError) {
-    return <p className="text-sm text-destructive">Не удалось загрузить аналитику цепочки. Обновите страницу.</p>;
+  if (isFullyErrored) {
+    return (
+      <QueryErrorState
+        title="Не удалось загрузить аналитику цепочки"
+        isFetching={analyticsQuery.isFetching}
+        onRetry={() => void analyticsQuery.refetch()}
+      />
+    );
   }
 
   if (items.length === 0) {
     return (
-      <div className="space-y-1">
-        <p className="text-sm font-medium">Данных пока нет</p>
-        <p className="text-sm text-muted-foreground">
-          Опубликуйте цепочку и дождитесь первых контактов — здесь появится статистика по каждому узлу.
-        </p>
+      <div className="space-y-4">
+        {isStaleErrored ? (
+          <QueryErrorState
+            title="Не удалось обновить аналитику цепочки"
+            detail="Показаны последние загруженные данные."
+            isFetching={analyticsQuery.isFetching}
+            onRetry={() => void analyticsQuery.refetch()}
+          />
+        ) : null}
+        <div className="space-y-1">
+          <p className="text-sm font-medium">Данных пока нет</p>
+          <p className="text-sm text-muted-foreground">
+            Опубликуйте цепочку и дождитесь первых контактов — здесь появится статистика по каждому узлу.
+          </p>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="space-y-4">
+      {isStaleErrored ? (
+        <QueryErrorState
+          title="Не удалось обновить аналитику цепочки"
+          detail="Показаны последние загруженные данные."
+          isFetching={analyticsQuery.isFetching}
+          onRetry={() => void analyticsQuery.refetch()}
+        />
+      ) : null}
       <Table>
         <TableHeader>
           {table.getHeaderGroups().map((headerGroup) => (
