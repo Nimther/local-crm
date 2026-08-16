@@ -569,7 +569,7 @@ Plans:
   4. The app loads with route-level code splitting — canvas and heavy dashboard chunks arrive only when those routes are opened.
   5. A failed API call, an empty list, a paginated list, stale analytics and unsaved canvas changes each show the user what is actually true rather than a blank or silently-wrong screen.
 
-**Plans**: 18/18 plans executed
+**Plans**: 18/18 scoped plans executed + 3 gap-closure plans (15-19…15-21) planned from 15-VERIFICATION.md's `gaps_found`
 
 Plans:
 **Wave 1**
@@ -628,6 +628,18 @@ Plans:
 **Wave 13** *(blocked on Wave 12 completion)*
 
 - [x] 15-18-PLAN.md — Runbook per alert + Bull Board access runbook + runbook-coverage gate + ARCHITECTURE.md (OPS-15)
+
+**Wave 14** *(gap closure — G-15-1, dispatch half)*
+
+- [ ] 15-19-PLAN.md — Bind sendId into the correlation store on all three dispatch paths + emit Pino lines inside those scopes (OPS-11)
+
+**Wave 15** *(gap closure — G-15-1, webhook half; blocked on Wave 14)*
+
+- [ ] 15-20-PLAN.md — Bind sendId per resolved webhook event + first Pino line in webhook-events.worker.ts (OPS-11)
+
+**Wave 16** *(gap closure — G-15-2/G-15-3; blocked on Wave 15)*
+
+- [ ] 15-21-PLAN.md — ARCHITECTURE.md §18 correlation model + SPECIFICATION.md §7/§3 corrected to shipped behaviour (OPS-15, OPS-08)
 
 **UI hint**: yes
 
