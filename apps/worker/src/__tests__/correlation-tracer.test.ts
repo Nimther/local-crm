@@ -210,4 +210,67 @@ describe("correlation tracer: one requestId across worker log + application_name
     expect(observedApplicationName).toContain("req=-");
     expect(observedApplicationName).toContain(`job=${jobId}`);
   });
+
+  it("carries sendId into a captured worker log line alongside requestId and jobId, matching the custom_args.send_id SendGrid receives (G-15-1 dispatch half)", async () => {
+    const workspaceId = await freshWorkspaceId(pool, "correlation-tracer-sendid");
+    await connectFixtureSendgridKey(workspaceId);
+    const campaignId = await createFixtureCampaign(workspaceId);
+
+    const requestId = `trace-req-sendid-${Date.now().toString(36)}`;
+    const jobId = randomUUID();
+
+    const jobData = emailBroadcastJobSchema.parse({
+      workspaceId,
+      campaignId,
+      kind: "test",
+      testTo: "marketer@fixture.test",
+      requestId,
+    });
+
+    let capturedSendId = "";
+    const sendMail = async (_apiKey: string, payload: { personalizations: Array<{ custom_args: { send_id: string } }> }) => {
+      capturedSendId = payload.personalizations[0].custom_args.send_id;
+      return { status: 202, headers: new Headers(), messageId: "sg-message-id-fixture-sendid" };
+    };
+
+    const wrapped = wrapProcessor(EMAIL_BROADCAST_QUEUE, (job: Job<EmailBroadcastJob>, token) =>
+      handleEmailBroadcastJob(job, fakeWorker(), { sendMail, redisClient }, token),
+    );
+    await wrapped(fakeJob(jobData, jobId));
+
+    const logLines = stdoutChunks
+      .join("")
+      .split("\n")
+      .filter((line) => line.trim().length > 0)
+      .map((line) => {
+        try {
+          return JSON.parse(line) as Record<string, unknown>;
+        } catch {
+          return undefined;
+        }
+      })
+      .filter((parsed): parsed is Record<string, unknown> => parsed !== undefined);
+
+    const matchingLine = logLines.find(
+      (line) => line.sendId === capturedSendId && line.requestId === requestId,
+    );
+
+    // Assertion 1: at least one captured JSON line has sendId strictly equal
+    // to the captured custom_args.send_id -- proves the field is not merely
+    // declared, the value on the line is the same value SendGrid was handed.
+    expect(
+      matchingLine,
+      `expected a captured worker log line with sendId=${capturedSendId} and requestId=${requestId}; captured lines: ${JSON.stringify(logLines)}`,
+    ).toBeDefined();
+
+    // Assertion 2: that SAME line also carries requestId and jobId -- a line
+    // with sendId but no requestId would not close OPS-11's correlation claim.
+    expect(matchingLine?.requestId).toBe(requestId);
+    expect(matchingLine?.jobId).toBe(jobId);
+
+    // Assertion 3: the fixture recipient address never occurs anywhere on
+    // that line -- the standing no-PII guarantee for the new call sites.
+    const serializedLine = JSON.stringify(matchingLine);
+    expect(serializedLine).not.toContain("marketer@fixture.test");
+  });
 });
