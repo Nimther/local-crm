@@ -1,5 +1,5 @@
 ---
-status: complete
+status: diagnosed
 phase: 15-observability-alerting-frontend-resilience
 source: [15-VERIFICATION.md]
 started: 2026-08-16T10:45:00Z
@@ -47,5 +47,13 @@ blocked: 0
   reason: "User reported: docker/alloy/config.alloy uses # comments; grafana/alloy:v1.18.1 rejects them (illegal character U+0023), so the production Alloy container restart-loops. With a temporary //-corrected config, Loki shipping/correlation works and Grafana rules/contact are provisioned."
   severity: blocker
   test: 4
-  artifacts: []  # Filled by diagnosis
-  missing: []    # Filled by diagnosis
+  root_cause: "docker/alloy/config.alloy uses shell/YAML-style # comments on 88 lines; Grafana Alloy config syntax supports only // and /* */ comments, so grafana/alloy:v1.18.1's lexer rejects the first # byte (illegal character U+0023 at 1:1), the process exits at config load, and restart: unless-stopped restart-loops the container. Contributing process gap: no automated check parses config.alloy with a real Alloy binary (pre-flagged in 15-17-SUMMARY.md)."
+  artifacts:
+    - path: "docker/alloy/config.alloy"
+      issue: "88 comment lines use # instead of //; functional blocks are valid (verified: //-corrected copy passes alloy fmt exit 0 on the pinned image)"
+    - path: "docker/docker-compose.prod.yml"
+      issue: "No change needed — alloy service (lines 464-506) mounts the broken file; restart: unless-stopped produces the observed loop (context only)"
+  missing:
+    - "Convert # comments to // on all comment lines of docker/alloy/config.alloy"
+    - "Add a validation gate that parses config.alloy with the real binary (e.g. docker run --rm -v ...:/etc/alloy/config.alloy:ro grafana/alloy:v1.18.1 fmt /etc/alloy/config.alloy in CI or scripts/validate-prod-compose.mjs)"
+  debug_session: ".planning/debug/alloy-config-hash-comments.md"
