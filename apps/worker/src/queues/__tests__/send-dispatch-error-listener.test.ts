@@ -23,7 +23,13 @@ const { scrubbedConsole } = vi.hoisted(() => ({
   scrubbedConsole: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), log: vi.fn() },
 }));
 
-vi.mock("@mega-crm/redaction", () => ({ scrubbedConsole }));
+vi.mock("@mega-crm/redaction", async (importOriginal) => ({
+  // send-dispatch.ts now imports ../logger.js (plan 15-19), which reads
+  // PINO_REDACT_OPTIONS from this package at module load — keep every real
+  // export and override only the scrubbedConsole spy this suite asserts on.
+  ...(await importOriginal<typeof import("@mega-crm/redaction")>()),
+  scrubbedConsole,
+}));
 
 const { getDefaultRedisClient, __resetDefaultRedisClientForTests } = await import("../send-dispatch.js");
 
