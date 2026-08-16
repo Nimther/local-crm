@@ -181,7 +181,19 @@ export function wrapProcessor<DataType, ResultType = void>(
   handler: (job: Job<DataType>, token?: string) => Promise<ResultType>
 ): (job: Job<DataType>, token?: string) => Promise<ResultType> {
   return async function wrappedProcessor(job: Job<DataType>, token?: string): Promise<ResultType> {
-    const requestId = extractRequestId(job.data) ?? job.id;
+    // WR-03: no `?? job.id` fallback here -- extractRequestId's own
+    // documented contract is "undefined when the payload carries none",
+    // and folding job.id into the same variable before it is bound as
+    // `requestId` made every log line's/Sentry tag's `requestId` field
+    // indistinguishable from the separately-logged/tagged `jobId` for
+    // every queue except email-broadcast/email-triggered. `jobId` alone
+    // still carries job-level correlation (logged via `logger.child`
+    // below and tagged separately by `ProcessorErrorContext`/
+    // `reportProcessorError`); `@mega-crm/tenant-context`'s own
+    // `req=<requestId or -> job=<jobId or ->` composition already handles
+    // an absent requestId, so a genuinely-undefined value here loses no
+    // correlation capability.
+    const requestId = extractRequestId(job.data);
     const workspaceId = extractWorkspaceId(job.data);
     const child = logger.child({ queue: queueName, jobId: job.id, requestId });
     const start = Date.now();

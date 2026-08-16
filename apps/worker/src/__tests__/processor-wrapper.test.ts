@@ -138,16 +138,17 @@ describe("wrapProcessor", () => {
 
     expect(caught).toBe(plainError);
     expect(reporter).toHaveBeenCalledTimes(1);
-    // Phase 15 plan 10 (OPS-08, Rule 2 deviation): requestId/workspaceId are
-    // read directly off the job (job.data has no requestId, so it falls back
-    // to job.id, same as the wrapper's own correlation-scope binding above)
-    // -- NOT off the ALS correlation store, which the reporter cannot see
-    // from inside this catch block (see ProcessorErrorContext's own header
-    // comment for the verified reason why).
+    // Phase 15 plan 10 (OPS-08, Rule 2 deviation): workspaceId is read
+    // directly off the job -- NOT off the ALS correlation store, which the
+    // reporter cannot see from inside this catch block (see
+    // ProcessorErrorContext's own header comment for the verified reason
+    // why). WR-03: requestId stays genuinely undefined here (job.data has
+    // no requestId field, and the wrapper no longer folds job.id into it --
+    // jobId is already reported separately, under its own key).
     expect(reporter).toHaveBeenCalledWith(plainError, {
       queue: "test-queue",
       jobId: "job-4",
-      requestId: "job-4",
+      requestId: undefined,
       workspaceId: "ws-1",
     });
     const failureLine = capturedLogLines().find((line) => line.msg === "job failed");
@@ -199,10 +200,11 @@ describe("wrapProcessor", () => {
 
     expect(caught).toBe("a thrown string");
     expect(reporter).toHaveBeenCalledTimes(1);
+    // WR-03: requestId stays undefined -- see the plain-Error test above.
     expect(reporter).toHaveBeenCalledWith("a thrown string", {
       queue: "test-queue",
       jobId: "job-5",
-      requestId: "job-5",
+      requestId: undefined,
       workspaceId: "ws-1",
     });
   });
@@ -241,7 +243,7 @@ describe("wrapProcessor", () => {
     expect(completionLine?.requestId).toBe("req-abc");
   });
 
-  it("falls back to the job id for requestId when the payload has none", async () => {
+  it("WR-03: leaves requestId undefined (not job.id) when the payload has none", async () => {
     const job = fakeJob({ workspaceId: "ws-1" }, "job-8");
     const handler = vi.fn((): Promise<undefined> => {
       workerLogger.info("inner log without payload requestId");
@@ -254,6 +256,11 @@ describe("wrapProcessor", () => {
     const innerLine = capturedLogLines().find(
       (line) => line.msg === "inner log without payload requestId",
     );
-    expect(innerLine?.requestId).toBe("job-8");
+    // extractRequestId's own documented contract: undefined when the
+    // payload carries none -- no longer folded into job.id, which would
+    // make requestId indistinguishable from jobId (already logged
+    // separately as `jobId`, asserted below).
+    expect(innerLine?.requestId).toBeUndefined();
+    expect(innerLine?.jobId).toBe("job-8");
   });
 });

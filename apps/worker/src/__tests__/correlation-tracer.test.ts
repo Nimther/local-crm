@@ -198,13 +198,16 @@ describe("correlation tracer: one requestId across worker log + application_name
     );
     await expect(wrapped(fakeJob(parsed, jobId))).resolves.toBeUndefined();
 
-    // Phase 15 plan 08 (OPS-06): wrapProcessor falls back requestId to the
-    // job id when the payload carries none (repeatable ticks and
-    // webhook-originated jobs have no originating request) -- so a legacy
-    // payload's application_name now reads `req=<jobId>`, not the plan 02
-    // `req=-` placeholder that inline scope produced when requestId was
-    // truly left unbound.
-    expect(observedApplicationName).toContain(`req=${jobId}`);
-    expect(observedApplicationName).toContain(jobId);
+    // WR-03 (Phase 15 plan 10 fix): wrapProcessor no longer falls back
+    // requestId to the job id when the payload carries none -- that fallback
+    // made requestId indistinguishable from jobId in every log line/Sentry
+    // tag for any queue whose payload has no genuine requestId (repeatable
+    // ticks, webhook-originated jobs, ...). A legacy payload's
+    // application_name now reads the plan 02 `req=-` placeholder (requestId
+    // truly unbound) with `job=<jobId>` still carrying job-level
+    // correlation -- @mega-crm/tenant-context's own composition already
+    // handles this absent-requestId case.
+    expect(observedApplicationName).toContain("req=-");
+    expect(observedApplicationName).toContain(`job=${jobId}`);
   });
 });

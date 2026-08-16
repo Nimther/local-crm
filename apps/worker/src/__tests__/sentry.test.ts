@@ -97,9 +97,11 @@ describe("apps/worker Sentry initialization + processor-wrapper reporter (OPS-08
     const event = events[0];
     expect(event.tags?.queue).toBe("test-queue");
     expect(event.tags?.job_id).toBe("job-sentry-1");
-    // No requestId field on this payload, so it falls back to job.id --
-    // same fallback processor-wrapper.ts's own correlation binding uses.
-    expect(event.tags?.request_id).toBe("job-sentry-1");
+    // WR-03: no requestId field on this payload, and processor-wrapper.ts no
+    // longer folds job.id into requestId (that made request_id and job_id
+    // indistinguishable) -- reportProcessorError omits the tag entirely
+    // when requestId is undefined.
+    expect(event.tags?.request_id).toBeUndefined();
     expect(event.tags?.workspace_id).toBe("ws-worker-sentry-test");
   });
 
