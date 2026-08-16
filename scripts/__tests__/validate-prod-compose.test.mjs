@@ -140,6 +140,10 @@ describe("each fixture trips exactly the invariant it targets", () => {
       rule: "pgbackrest-missing-shared-data-volume",
       service: "pgbackrest",
     },
+    // Phase 15 plan 17 (OPS-10): `alloy`, the Grafana Alloy log-shipping
+    // sidecar.
+    { fixture: "missing-alloy-service.yml", rule: "missing-service", service: "alloy" },
+    { fixture: "alloy-mutable-image-tag.yml", rule: "mutable-image-tag", service: "alloy" },
   ];
 
   for (const { fixture, rule, service } of cases) {
