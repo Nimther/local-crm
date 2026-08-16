@@ -3,17 +3,17 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Production Hardening
 current_phase: 15
-current_phase_name: Observability, Alerting & Frontend Resilience
+current_phase_name: observability-alerting-frontend-resilience
 status: executing
 stopped_at: Phase 15 context gathered
-last_updated: "2026-08-16T08:57:30.727Z"
-last_activity: 2026-08-15
+last_updated: "2026-08-16T09:03:12.726Z"
+last_activity: 2026-08-16
 last_activity_desc: Phase 15 execution started
 progress:
   total_phases: 9
   completed_phases: 7
   total_plans: 114
-  completed_plans: 93
+  completed_plans: 111
   percent: 78
 ---
 
@@ -24,15 +24,15 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-12)
 
 **Core value:** Маркетолог настраивает триггерную цепочку или кампанию — и письма надёжно и вовремя доходят до нужных контактов, со сквозным отслеживанием статусов (delivered/opened/clicked/bounced).
-**Current focus:** Phase 15 — Observability, Alerting & Frontend Resilience
+**Current focus:** Phase 15 — observability-alerting-frontend-resilience
 
 ## Current Position
 
 Milestone: v1.1 Production Hardening (Phases 8-16, 95 requirements)
-Phase: 15 (Observability, Alerting & Frontend Resilience) — EXECUTING
-Plan: 1 of 18
-Status: Ready to execute
-Last activity: 2026-08-15 — Phase 15 execution started
+Phase: 15 (observability-alerting-frontend-resilience) — EXECUTING
+Plan: 1 of 21
+Status: Executing Phase 15
+Last activity: 2026-08-16 — Phase 15 execution started
 Progress: [████████████████████] 79/79 plans ([██████████] 100%) — 6/9 v1.1 phases complete (8–13), 54/95 requirements
 
 ✓ **Deadline closed (2026-08-07):** Phase 9 (DB-01/DB-02 partition automation) completed ahead of the hard **2026-09-01** deadline — 20 attached monthly partitions (2026-09…2027-06) confirmed by catalog query against a migrated database.
