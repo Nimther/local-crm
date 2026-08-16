@@ -437,6 +437,97 @@ is closed (`!open && ...`), or drop one of the two render sites.
 
 ---
 
+## Fix Results
+
+**Fixed at:** 2026-08-16
+**Scope:** 1 Critical + 3 Warnings (CR-01, WR-01, WR-02, WR-03). Info findings
+(IN-01, IN-02, IN-03) explicitly out of scope per fix instructions.
+
+| Finding | Status | Commit | Files |
+|---|---|---|---|
+| CR-01 | fixed | `32d2b22` | `docker/docker-compose.prod.yml`, `docker/prod.env.example`, `apps/api/src/sentry.ts`, `apps/worker/src/sentry.ts` |
+| WR-01 | fixed | `ca76108` | `apps/web/src/App.tsx` |
+| WR-02 | fixed | `e85b9cc` | `apps/web/src/features/flows/detail/FlowAnalyticsTable.tsx` |
+| WR-03 | fixed | `eaaafe0` | `apps/worker/src/processor-wrapper.ts`, `apps/worker/src/__tests__/processor-wrapper.test.ts`, `apps/worker/src/__tests__/sentry.test.ts`, `apps/worker/src/__tests__/correlation-tracer.test.ts` |
+
+### CR-01: Production compose file silently disables Sentry for api/worker
+
+Removed `SENTRY_DSN_API`/`SENTRY_ENVIRONMENT` (api service) and
+`SENTRY_DSN_WORKER`/`SENTRY_ENVIRONMENT` (worker service) from
+`docker-compose.prod.yml`'s `environment:` blocks entirely, letting
+`env_file: ${MEGA_CRM_ENV_FILE}` supply them unmolested -- Option 1 from
+the review's Fix section, chosen because it removes the shell-vs-container
+env confusion class entirely and requires no `scripts/deploy.sh` change
+(`IMAGE_TAG` is untouched: `deploy.sh` does export it, so its compose-level
+interpolation was never broken). Updated `docker/prod.env.example`'s
+comment for the same two secrets to describe the corrected delivery
+mechanism. Also fixed the corollary the review flagged: both
+`apps/api/src/sentry.ts` and `apps/worker/src/sentry.ts` resolved
+`environment` via `??`, which does not fall through on an empty string --
+switched to `||` so an exported-but-empty `SENTRY_ENVIRONMENT` still falls
+back to `NODE_ENV` instead of pinning every event to a blank environment
+tag.
+
+Verification: `npm run verify:prod-compose` (43 invariants OK, resolved via
+real `docker compose config`), `docker compose -f
+docker/docker-compose.prod.yml --env-file docker/prod.env.example config
+--quiet` (exit 0), `tsc --noEmit` clean on both `sentry.ts` files, scoped
+eslint clean.
+
+### WR-01: `RootRedirect` treats a failed `/api/workspaces` fetch as "no workspace yet"
+
+Added an `isError` branch (reading `workspacesQuery.isError` alongside the
+existing `data`/`isPending` destructure) that renders the shared
+`QueryErrorState` component with a Retry control, before the
+`!workspaces || workspaces.length === 0` redirect check -- matching the
+OPS-17/D-11 pattern already applied on every sibling page in this phase.
+
+Verification: `npx vitest run --root apps/web` (84 tests passed), `npm run
+build -w apps/web` (clean, pre-existing chunk-size warning unrelated),
+scoped eslint clean.
+
+### WR-02: `FlowAnalyticsTable` clobbers previously-loaded rows on a background refetch failure
+
+Applied the same `isFullyErrored`/`isStaleErrored` split used by every
+sibling list/detail page in this phase (e.g. `FlowsListPage`): a full
+failure (`isError && !data`) replaces the region with `QueryErrorState` +
+Retry; a stale failure (`isError && data`) renders a `QueryErrorState`
+banner above the still-visible table or empty-state instead of discarding
+it.
+
+Verification: `npx vitest run --root apps/web` (84 tests passed), `npm run
+build -w apps/web` (clean), scoped eslint clean.
+
+### WR-03: `wrapProcessor`'s `requestId` fallback blurs the requestId/jobId correlation distinction
+
+Chose the review's first fix option: dropped the `?? job.id` fallback so
+`requestId` stays genuinely `undefined` when the job payload carries none,
+matching `extractRequestId`'s own documented contract. `jobId` alone still
+carries job-level correlation (already logged/tagged separately
+everywhere), and `@mega-crm/tenant-context`'s own `req=<requestId or ->
+job=<jobId or ->` `application_name` composition already handles an absent
+`requestId` -- no correlation capability is lost.
+
+This behavior change required updating three tests whose assertions/
+comments explicitly encoded the old fallback-to-`job.id` behavior as
+intentional: two reporter-call assertions and one renamed test in
+`processor-wrapper.test.ts`, the `request_id` tag assertion in
+`sentry.test.ts`, and the `application_name` string assertion in
+`correlation-tracer.test.ts` (now asserts `req=-` + `job=<jobId>` instead
+of `req=<jobId>` twice-over).
+
+Verification: `npx vitest run --root apps/worker
+src/__tests__/processor-wrapper.test.ts
+src/__tests__/processor-wrapper-coverage.test.ts src/__tests__/sentry.test.ts
+src/__tests__/correlation-tracer.test.ts` (all pass); additionally ran the
+full `apps/worker` suite as a sanity check given the behavior change's
+breadth (87 test files, 638 tests, all pass); `tsc --noEmit` clean; scoped
+eslint clean.
+
+---
+
 _Reviewed: 2026-08-16_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
+_Fixed: 2026-08-16_
+_Fixer: Claude (gsd-code-fixer)_
