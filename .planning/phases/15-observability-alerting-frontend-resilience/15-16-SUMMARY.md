@@ -233,3 +233,7 @@ None — no external service configuration required by this plan. The Bull Board
 ---
 *Phase: 15-observability-alerting-frontend-resilience*
 *Completed: 2026-08-16*
+
+## Self-Check: PASSED
+
+All 7 claimed files confirmed present on disk (`apps/worker/src/bull-board.ts`, `apps/worker/src/queues/board-queues.ts`, `apps/worker/src/health-server.ts`, `apps/worker/src/server.ts`, `apps/worker/src/__tests__/health-server-contract.test.ts`, `apps/worker/src/__tests__/bull-board.test.ts`, this SUMMARY.md). All 7 task/fix commit hashes (`d86f139`, `f9e0f2d`, `ded75ae`, `b4fd2a0`, `f3aa909`, `c04da43`, `419fbf0`) confirmed present in `git log --oneline --all`.
