@@ -364,16 +364,51 @@ silently at 63 bytes; this codebase truncates deterministically first, on a
 whole-character boundary, so a long id is cut predictably rather than
 possibly mid-character by whichever truncation happens to run first.
 
-**Every log line in both processes carries the same four fields, without
-any call site passing them explicitly.** Both Pino instances
-(`apps/api/src/logger.ts`, `apps/worker/src/logger.ts`) install a `mixin()`
-that reads `getCorrelationContext()` on every log call — the correlation
-fields ride along automatically, and neither logger file declares its own
-list of what to attach. `apps/worker`'s own job-processing wrapper
-(`processor-wrapper.ts`) is what makes a BullMQ job carry a `requestId` at
-all: it opens a correlation scope keyed by `job.data.requestId` when the job
-schema carries one, falling back to the job's own id for jobs with no
-originating HTTP request. The field name is deliberately camelCase
+**The mechanism is uniform; which fields land on a given line is not.** Both
+Pino instances (`apps/api/src/logger.ts`, `apps/worker/src/logger.ts`)
+install a `mixin()` that reads `getCorrelationContext()` on every log call —
+no call site passes a correlation field explicitly, and neither logger file
+declares its own list of what to attach. What varies is not the mechanism
+but which scopes happen to be open at the point a given line is emitted:
+
+- `workspaceId` — bound by `withTenant`/`withTenantTransaction`, so present
+  once a tenant scope is open; absent on boot-time lines and on API lines
+  emitted before a workspace is resolved.
+- `requestId` — bound once per HTTP request by `apps/api/src/server.ts`'s
+  `onRequest` hook, carried onto the `email-broadcast` job payload by the
+  campaign test-send route, and rebound by `wrapProcessor`; absent on jobs
+  whose schema declares no such field (repeatable ticks, webhook-originated
+  jobs).
+- `jobId` — bound by `wrapProcessor` for every job in every queue; never
+  present on an `apps/api` line.
+- `sendId` — bound by the three post-claim dispatch scopes in
+  `apps/worker/src/queues/send-dispatch.ts` (campaign, test-send, flow) and
+  by the per-event scope in `apps/worker/src/queues/webhook-events.worker.ts`,
+  so a dispatch line and a provider-event line for the same send join on one
+  value. NOT present on `wrapProcessor`'s own job-completed/job-failed
+  lines, because those run as the external awaiter of an already-settled
+  `withCorrelation` promise and Node's AsyncLocalStorage does not propagate
+  a settled `run()` call's store into such a continuation — the same
+  empirically-verified behaviour `ProcessorErrorContext`'s header already
+  documents for the Sentry reporter. Not present on any `apps/api` line
+  either: the API process never dispatches a send.
+
+A Loki query filtering on one of these fields returns the lines where that
+scope happened to be open — a real and useful subset, not every line the
+process emitted.
+
+`apps/worker`'s own job-processing wrapper (`processor-wrapper.ts`) is what
+makes a BullMQ job carry a `requestId` at all: `wrapProcessor` opens a
+correlation scope keyed by `job.data.requestId` when the job's schema
+declares one; when the payload carries none, the field stays genuinely
+unbound — no substitute value is put in its place
+(`processor-wrapper.ts:196`, the WR-03 fix). The substitution it replaced
+made `requestId` indistinguishable from `jobId` in every log line and
+Sentry tag for every queue except the two send lanes, collapsing what
+should be two independent correlation axes into one; `jobId` alone still
+carries job-level correlation on those jobs, and `composeApplicationName`
+already renders the unbound case as a `req=-` placeholder rather than an
+empty or malformed `application_name`. The field name is deliberately camelCase
 (`requestId`, not `request_id`) everywhere it appears — in the ALS store, in
 every log line, and in the Grafana Cloud correlation query
 (`docs/observability/grafana-cloud-alerts.md`) — because a query written
