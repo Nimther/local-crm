@@ -1,4 +1,4 @@
-import http, { type IncomingMessage, type ServerResponse } from "node:http";
+import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import type { Redis } from "ioredis";
 import { MigrationsPendingError, MigrationsTableMissingError } from "@mega-crm/db";
 import { scrubbedConsole } from "@mega-crm/redaction";
@@ -13,17 +13,23 @@ import { scrubbedConsole } from "@mega-crm/redaction";
  * would mean the deploy script and the container healthchecks need two
  * parsers for what is conceptually one question asked of two processes.
  *
- * Built on `node:http` directly, not Fastify: `apps/worker/package.json`
- * declares `fastify` as a devDependency ONLY (D-14) -- the worker has no
- * production HTTP framework, and this is the one listener it needs.
+ * Phase 15 plan 16 (OPS-14, D-10, T-15-56): re-hosted on Fastify -- required
+ * because `@bull-board/fastify`'s adapter needs a Fastify instance to mount
+ * onto, and Phase 14's own comment (see `WORKER_HEALTH_PORT_DEFAULT` below)
+ * explicitly reserved THIS listener for that future use rather than allowing
+ * a second HTTP surface on the worker process. The externally-observed
+ * contract (status codes, body shape, headers) is unchanged -- proven by
+ * `__tests__/health-server-contract.test.ts`, captured against the
+ * pre-migration `node:http` implementation and required to pass unchanged
+ * against this one.
  *
- * D-14 / T-14-17: this listener is bound to `WORKER_HEALTH_HOST`
- * (`127.0.0.1`) and is NEVER published to the host network (plan 14-08 must
- * not add a port mapping for it). Container healthchecks probe it from
- * inside the container; the deploy script observes worker health through
- * the container's own health status, never an HTTP connection from the
- * host. `apps/api`'s `/readyz` -- already reachable through Caddy -- remains
- * the deploy script's HTTP-level gate.
+ * D-14 / T-14-17 / T-15-54: this listener is bound to `WORKER_HEALTH_HOST`
+ * (`127.0.0.1`) and is NEVER published to the host network (plan 14-08, and
+ * this plan's own SPECIFICATION.md update, confirm no port mapping for it).
+ * Container healthchecks probe it from inside the container; the deploy
+ * script observes worker health through the container's own health status,
+ * never an HTTP connection from the host. `apps/api`'s `/readyz` -- already
+ * reachable through Caddy -- remains the deploy script's HTTP-level gate.
  */
 
 export type WorkerReadinessCheckName = "postgres" | "redis" | "migrations";
@@ -53,10 +59,10 @@ export const WORKER_HEALTH_HOST = "127.0.0.1";
  * Fallback port, read from the `WORKER_HEALTH_PORT` environment variable
  * with this constant as the documented default. Distinct from `apps/api`'s
  * `API_PORT` default (4000, `apps/api/src/env.ts`) so both processes can
- * run health listeners on the same host without a collision. Phase 15's
- * observability work is expected to reuse THIS SAME listener (e.g. a
- * metrics route) rather than add a second HTTP surface to the worker
- * process.
+ * run health listeners on the same host without a collision. Phase 15 plan
+ * 16 (OPS-14) reuses THIS SAME listener for the Bull Board mount, exactly as
+ * this comment originally anticipated, rather than adding a second HTTP
+ * surface to the worker process.
  */
 export const WORKER_HEALTH_PORT_DEFAULT = 4100;
 
@@ -187,147 +193,163 @@ export interface WorkerHealthServer {
 export interface StartWorkerHealthServerDeps extends WorkerReadinessDeps {
   /** Test-only override. Production always resolves from `WORKER_HEALTH_PORT` / `WORKER_HEALTH_PORT_DEFAULT` above. */
   port?: number;
-}
-
-function sendJson(res: ServerResponse, status: number, body: unknown): void {
-  const payload = JSON.stringify(body);
-  res.writeHead(status, {
-    "Content-Type": "application/json; charset=utf-8",
-    "Content-Length": Buffer.byteLength(payload),
-  });
-  res.end(payload);
+  /**
+   * Phase 15 plan 16 (OPS-14): the Bull Board mount point. Invoked with the
+   * built Fastify instance AFTER `/healthz`/`/readyz` are registered but
+   * BEFORE `app.listen(...)` is called -- so a plugin registered here (the
+   * Bull Board adapter, `bull-board.ts`) is live from the very first
+   * accepted connection, and `server.ts` never needs to import this
+   * module's internal Fastify instance directly. Optional so every existing
+   * test call site (which never mounts anything extra) keeps working
+   * unchanged.
+   */
+  beforeListen?: (app: FastifyInstance) => Promise<void> | void;
 }
 
 /**
- * Routes exactly two paths, GET/HEAD only.
- *
+ * Every response -- 200, 404, 405, 500, whatever -- carries `Connection:
+ * close` (T-14-?? empirically discovered during the original plan 14-04:
+ * undici's connection-pool otherwise tries to reuse a stale keep-alive
+ * socket against a closed-and-restarted listener on the same port, giving
+ * `ECONNRESET` instead of a clean new connection). Health/readiness probes
+ * are infrequent and short-lived (a container healthcheck or the deploy
+ * script polling every few seconds) -- there is no benefit to keep-alive
+ * here. Applied via a global `onSend` hook rather than per-route so it
+ * covers the 404/405 paths too, matching the pre-Fastify implementation's
+ * behavior of setting this header before any routing decision is made.
+ */
+function registerConnectionCloseHook(app: FastifyInstance): void {
+  app.addHook("onSend", (_request, reply, payload, done) => {
+    reply.header("Connection", "close");
+    done(null, payload);
+  });
+}
+
+const ALL_METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"] as const;
+
+/**
+ * Routes exactly two paths, GET/HEAD only -- registered against every HTTP
+ * method so this handler (not Fastify's own 404 fallback) decides the
+ * response for a wrong-method request on one of these two exact paths (405,
+ * matching the pre-Fastify implementation), while any OTHER path still
+ * falls through to `setNotFoundHandler` below (404).
+ */
+function isReadMethod(method: string): boolean {
+  return method === "GET" || method === "HEAD";
+}
+
+/**
  * `/healthz`: OPS-04, T-14-19. Zero I/O -- the handler never even reads
  * `deps` -- because the container healthcheck drives restarts, and a
  * liveness probe that fails during a backing-service outage converts a
  * dependency incident into a restart loop of otherwise-healthy worker
  * processes.
- *
+ */
+function handleHealthz(request: FastifyRequest, reply: FastifyReply): void {
+  if (!isReadMethod(request.method)) {
+    reply.code(405).send({ error: "method_not_allowed" });
+    return;
+  }
+  reply.code(200).send({ status: "ok" });
+}
+
+/**
  * `/readyz`: OPS-05. The draining flag short-circuits FIRST (see its own
  * comment above); otherwise runs `checkWorkerReadiness` and reports 200
  * only when every check passes, 503 naming the failing check(s) otherwise.
- *
- * Anything other than GET/HEAD on these two exact paths is rejected (405
- * wrong-method, 404 unknown-path) -- T-14-17: this listener answers exactly
- * two infrastructure questions and discloses nothing else.
  */
-async function handleRequest(
-  req: IncomingMessage,
-  res: ServerResponse,
-  deps: WorkerReadinessDeps
-): Promise<void> {
-  const url = req.url ?? "";
-  const method = req.method ?? "GET";
-  const isHead = method === "HEAD";
-
-  // Health/readiness probes are infrequent and short-lived (a container
-  // healthcheck or the deploy script polling every few seconds) -- there is
-  // no benefit to keep-alive here, and closing the connection after every
-  // response avoids a class of client-side connection-pool-reuse bugs
-  // (observed directly in this plan's own test suite: a client that keeps a
-  // connection alive to this exact host:port across a `close()` + rebind of
-  // the listener will otherwise try to reuse the now-dead socket for its
-  // next request and see an ECONNRESET instead of a clean new connection).
-  res.setHeader("Connection", "close");
-
-  if (url !== "/healthz" && url !== "/readyz") {
-    if (isHead) {
-      res.writeHead(404);
-      res.end();
-      return;
-    }
-    sendJson(res, 404, { error: "not_found" });
+async function handleReadyz(request: FastifyRequest, reply: FastifyReply, deps: WorkerReadinessDeps): Promise<void> {
+  if (!isReadMethod(request.method)) {
+    reply.code(405).send({ error: "method_not_allowed" });
     return;
   }
 
-  if (method !== "GET" && !isHead) {
-    sendJson(res, 405, { error: "method_not_allowed" });
-    return;
-  }
-
-  if (url === "/healthz") {
-    if (isHead) {
-      res.writeHead(200);
-      res.end();
-      return;
-    }
-    sendJson(res, 200, { status: "ok" });
-    return;
-  }
-
-  // /readyz
   if (draining) {
     const body: WorkerReadinessResult = { ready: false, checks: [] };
-    if (isHead) {
-      res.writeHead(503);
-      res.end();
-      return;
-    }
-    sendJson(res, 503, body);
+    reply.code(503).send(body);
     return;
   }
 
   const result = await checkWorkerReadiness(deps);
-  if (isHead) {
-    res.writeHead(result.ready ? 200 : 503);
-    res.end();
-    return;
-  }
-  sendJson(res, result.ready ? 200 : 503, result);
+  reply.code(result.ready ? 200 : 503).send(result);
+}
+
+/**
+ * Builds (but does not start) the Fastify instance backing this listener --
+ * split out from `startWorkerHealthServer` so `beforeListen` runs against a
+ * fully-routed, not-yet-listening instance (Phase 15 plan 16's Bull Board
+ * mount point). `logger: false` -- this is an internal infrastructure
+ * listener probed every few seconds by container healthchecks; per-request
+ * access logs here would be pure noise, and errors are still surfaced via
+ * `scrubbedConsole` in the error handler below, matching the pre-Fastify
+ * implementation's own unhandled-error logging.
+ */
+function buildWorkerHealthApp(deps: WorkerReadinessDeps): FastifyInstance {
+  const app = Fastify({ logger: false });
+
+  registerConnectionCloseHook(app);
+
+  app.route({
+    method: [...ALL_METHODS],
+    url: "/healthz",
+    handler: (request, reply) => {
+      handleHealthz(request, reply);
+    },
+  });
+
+  app.route({
+    method: [...ALL_METHODS],
+    url: "/readyz",
+    handler: async (request, reply) => {
+      await handleReadyz(request, reply, deps);
+    },
+  });
+
+  app.setNotFoundHandler((_request, reply) => {
+    reply.code(404).send({ error: "not_found" });
+  });
+
+  app.setErrorHandler((err, _request, reply) => {
+    scrubbedConsole.error("apps/worker health server: unhandled request error", err);
+    if (!reply.sent) {
+      reply.code(500).send({ error: "internal_error" });
+    }
+  });
+
+  return app;
 }
 
 /**
  * Starts the worker's health listener on `WORKER_HEALTH_HOST` (never
  * overridable -- D-14) and the resolved port. Returns once the socket is
- * bound and accepting connections. `close()` is idempotent: closing an
- * already-closed `node:http` server rejects, so this module guards that
- * with its own internal flag rather than pushing the guard onto every
- * caller (`server.ts`'s `closeWorkerRuntime` relies on this).
+ * bound and accepting connections. `close()` is idempotent -- calling
+ * Fastify's own `close()` twice is harmless in practice, but this module
+ * guards it explicitly anyway so the contract (`close()` is safe to call
+ * more than once) does not depend on that Fastify internal (`server.ts`'s
+ * `closeWorkerRuntime` relies on this).
  */
-export function startWorkerHealthServer(deps: StartWorkerHealthServerDeps): Promise<WorkerHealthServer> {
+export async function startWorkerHealthServer(deps: StartWorkerHealthServerDeps): Promise<WorkerHealthServer> {
   const port = deps.port ?? Number(process.env.WORKER_HEALTH_PORT ?? WORKER_HEALTH_PORT_DEFAULT);
 
-  const server = http.createServer((req, res) => {
-    handleRequest(req, res, deps).catch((err: unknown) => {
-      scrubbedConsole.error("apps/worker health server: unhandled request error", err);
-      if (!res.headersSent) {
-        sendJson(res, 500, { error: "internal_error" });
-      } else {
-        res.end();
-      }
-    });
-  });
+  const app = buildWorkerHealthApp(deps);
+
+  if (deps.beforeListen) {
+    await deps.beforeListen(app);
+  }
 
   let closed = false;
-  const close = (): Promise<void> => {
-    if (closed) return Promise.resolve();
+  const close = async (): Promise<void> => {
+    if (closed) return;
     closed = true;
-    return new Promise((resolve, reject) => {
-      server.close((err) => {
-        if (err) {
-          reject(err);
-          return;
-        }
-        resolve();
-      });
-    });
+    await app.close();
   };
 
-  return new Promise((resolve, reject) => {
-    const onListenError = (err: Error): void => {
-      reject(err);
-    };
-    server.once("error", onListenError);
-    server.listen(port, WORKER_HEALTH_HOST, () => {
-      server.removeListener("error", onListenError);
-      server.on("error", (err) => {
-        scrubbedConsole.error("apps/worker health server error", err);
-      });
-      resolve({ close });
-    });
-  });
+  try {
+    await app.listen({ port, host: WORKER_HEALTH_HOST });
+  } catch (err) {
+    await app.close().catch(() => undefined);
+    throw err;
+  }
+
+  return { close };
 }

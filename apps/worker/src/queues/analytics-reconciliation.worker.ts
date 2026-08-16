@@ -5,8 +5,13 @@ import { scrubbedConsole } from "@mega-crm/redaction";
 import { buildJobOptions, STANDARD_JOB_RETENTION } from "@mega-crm/queue-core";
 import { wrapProcessor } from "../processor-wrapper.js";
 
-/** The reconciliation job's own repeatable-tick queue -- self-produced and self-consumed within this file/process only. */
-const ANALYTICS_RECONCILE_QUEUE = "analytics-reconcile";
+/**
+ * The reconciliation job's own repeatable-tick queue -- self-produced and
+ * self-consumed within this file/process only. Exported (Phase 15 plan 16,
+ * OPS-14) so `board-queues.ts` can derive its Bull Board queue list from
+ * this constant rather than a hand-typed duplicate string.
+ */
+export const ANALYTICS_RECONCILE_QUEUE = "analytics-reconcile";
 /**
  * A few minutes, per D-08b's stated freshness bound for the "correctness
  * backstop" path. Exported (test-only consumer: `scheduler-registration.test.ts`)

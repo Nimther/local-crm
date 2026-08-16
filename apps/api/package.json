@@ -31,7 +31,7 @@
     "@sendgrid/mail": "8.1.6",
     "@sentry/node": "10.70.0",
     "better-auth": "1.6.23",
-    "bullmq": "5.79.1",
+    "bullmq": "5.79.4",
     "csv-parse": "7.0.1",
     "drizzle-orm": "0.45.2",
     "fastify": "5.9.0",

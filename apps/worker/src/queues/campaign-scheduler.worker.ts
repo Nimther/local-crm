@@ -6,8 +6,13 @@ import { buildJobOptions, STANDARD_JOB_RETENTION } from "@mega-crm/queue-core";
 import { registerTrackedQueue } from "./queue-registry.js";
 import { wrapProcessor } from "../processor-wrapper.js";
 
-/** The scheduler's own repeatable-tick queue -- self-produced and self-consumed within this file/process only. */
-const CAMPAIGN_SCHEDULER_QUEUE = "campaign-scheduler";
+/**
+ * The scheduler's own repeatable-tick queue -- self-produced and
+ * self-consumed within this file/process only. Exported (Phase 15 plan 16,
+ * OPS-14) so `board-queues.ts` can derive its Bull Board queue list from
+ * this constant rather than a hand-typed duplicate string.
+ */
+export const CAMPAIGN_SCHEDULER_QUEUE = "campaign-scheduler";
 const SCAN_INTERVAL_MS = 60_000;
 
 /**
