@@ -322,6 +322,196 @@ Exact horizon value, the excluded-table list, the flag name, and the backup-wind
 
 ---
 
+## 18. The correlation model
+
+One request produces work across three boundaries — an HTTP request, a
+BullMQ job it enqueues, a Postgres transaction that job opens — and an
+operator following one send through an incident needs all three to answer
+to the same question: which lines, in which log file, belong to this one
+thing. The correlation model is what makes that question answerable without
+reconstructing the answer by hand from timestamps and guesswork.
+
+**A single AsyncLocalStorage store, not four separate mechanisms.**
+`packages/tenant-context`'s ALS store holds one object —
+`{ workspaceId?, requestId?, jobId?, sendId? }` — and every field is
+optional independently, because a repeatable-tick job (partition
+maintenance, a scheduled campaign tick) has a `jobId` but no `requestId`
+that originated it, and a webhook-triggered job has both. **The store must
+merge, never replace, across nested scopes.** `withTenant` and
+`withCorrelation` are the only two writers, and both spread the *current*
+store forward before adding their own fields, regardless of which nests
+inside the other. This is not a stylistic preference: `AsyncLocalStorage.run()`
+replaces the entire store for its callback by default, and a naive nested
+call would silently drop whatever the outer scope had already set —
+`requestId` disappearing the moment a handler opens a tenant-scoped
+transaction, discovered as a real pitfall, not a hypothetical one. The
+single reader, `getCorrelationContext()`, returns `{}` outside any scope and
+never throws — a logging call site should never crash because correlation
+context happens to be absent, even though `getWorkspaceId()` and
+`withTenantTransaction` still throw when a real workspace binding is
+required and missing, which is a distinct guarantee from the logging path's
+own leniency.
+
+**The same fields cross into Postgres itself**, not just into log lines.
+`withTenantTransaction`'s existing `set_config` call composes
+`req=<requestId or -> job=<jobId or ->` into the same connection's
+`application_name`, in the same round trip that already sets the tenant's
+RLS session variable — no new query, no schema change. An operator staring
+at `pg_stat_activity` during an incident sees which request or job opened
+each live connection, without a second correlation mechanism for the
+database layer specifically. Postgres itself truncates `application_name`
+silently at 63 bytes; this codebase truncates deterministically first, on a
+whole-character boundary, so a long id is cut predictably rather than
+possibly mid-character by whichever truncation happens to run first.
+
+**Every log line in both processes carries the same four fields, without
+any call site passing them explicitly.** Both Pino instances
+(`apps/api/src/logger.ts`, `apps/worker/src/logger.ts`) install a `mixin()`
+that reads `getCorrelationContext()` on every log call — the correlation
+fields ride along automatically, and neither logger file declares its own
+list of what to attach. `apps/worker`'s own job-processing wrapper
+(`processor-wrapper.ts`) is what makes a BullMQ job carry a `requestId` at
+all: it opens a correlation scope keyed by `job.data.requestId` when the job
+schema carries one, falling back to the job's own id for jobs with no
+originating HTTP request. The field name is deliberately camelCase
+(`requestId`, not `request_id`) everywhere it appears — in the ALS store, in
+every log line, and in the Grafana Cloud correlation query
+(`docs/observability/grafana-cloud-alerts.md`) — because a query written
+against the wrong casing does not error, it silently matches nothing.
+
+Exact field list, the `application_name` byte budget, and the mixin
+implementation: [`SPECIFICATION.md` §7](./SPECIFICATION.md).
+
+## 19. Error-tracking topology
+
+**Three Sentry projects, one shared scrub hook, applied before any of
+them.** `apps/web`, `apps/api` and `apps/worker` each report to their own
+Sentry project — not because they need different scrubbing rules, but
+because a frontend error and a backend error are different audiences for
+the same incident, and mixing them into one project makes triage slower for
+both. All three share exactly one redaction function
+(`sentryBeforeSend`, `packages/redaction`), never three separately
+maintained scrub implementations that could drift apart from each other or
+from `scrubbedConsole`'s own rules.
+
+**The ordering rule is the load-bearing one: the redaction gate must be
+proven correct before any `Sentry.init()` call exists anywhere in the
+codebase, and stays a blocking CI check forever after.** Sentry has no
+retroactive redaction — the only remedy for a secret or a contact's PII
+reaching a live Sentry project is deleting that project's entire event
+history, which is not a remedy anyone wants to reach for. The fixture test
+proving `sentryBeforeSend` strips a planted needle from a full event
+serialization runs as a named, blocking step inside the `static` CI job —
+already a required check under branch protection — specifically so this
+gate became blocking immediately, with no separate repository-admin action
+needed to make it so.
+
+**Tracing and profiling are structurally absent, not merely configured
+off.** `tracesSampleRate: 0` on every SDK is one layer of that guarantee;
+the frontend SDK additionally never imports `replayIntegration()` or
+`browserTracingIntegration()` at all — a second, independent layer of the
+same guarantee, because a sample rate pinned to zero is a runtime
+configuration a future edit could silently change, while an integration
+that was never imported cannot activate no matter what configuration value
+gets set.
+
+**Correlation reaches every captured event, through one seam, not through
+each call site remembering to tag its own capture.** Both backend SDKs
+attach `workspace_id`/`request_id`/`send_id` (`worker` also `job_id`) via a
+single `Sentry.addEventProcessor` reading `getCorrelationContext()` — the
+same correlation store §18 describes. The frontend has no per-request ALS
+context (there is no server-side request in a browser), so it tags `route`
+and `workspace_slug` instead, parsed from the URL at the moment of capture.
+
+**A verified, honestly-documented residual gap:** a workspace id is only
+present on a captured event when it was known *explicitly* at the point of
+capture (from job payload data on the worker side, from an
+explicitly-passed value on the API side) — not from `getCorrelationContext()`
+alone, in either process. This was traced to a real, empirically-confirmed
+property of `AsyncLocalStorage`: it does not propagate a nested scope's
+store into a continuation registered by an outer `await`er after that
+scope's own promise has already settled, which is exactly the position a
+processor's catch block or a route's error handler executes in. `request_id`
+does not share this gap (it is bound once, at the outermost hook, before any
+nested scope exists) — only `workspace_id`, bound inside a nested scope
+deeper in the call stack, does. Closing it fully would mean threading an
+explicit workspace value through roughly ten route modules on the API side —
+judged out of this phase's scope, and recorded here rather than silently
+left to be rediscovered.
+
+Exact DSN/environment variable names, the fixture test's five scenarios,
+and the `RouteErrorBoundary` frontend integration:
+[`SPECIFICATION.md` §7](./SPECIFICATION.md).
+
+## 20. Alerting topology: nine in-app watchdogs, two cloud backstop rules
+
+Every alert this platform sends answers one of two fundamentally different
+questions, and the split between them is deliberate, not incidental: **is a
+specific business condition inside this platform unhealthy**, or **is the
+platform itself still running at all.** The first question can only be
+answered from inside a running process; the second question cannot be
+answered from inside a running process, because the one thing that could
+answer it — the process itself — is exactly what may have stopped.
+
+**Nine independent dead-man's-switches live inside `apps/api`,** each
+watching a distinct condition: partition-maintenance health, the send
+reconciler's own progress, the dead-letter table, webhook-ingestion
+stalls, sender reputation, and (added this phase, OPS-13) queue depth per
+lane, the oldest pending job's age, webhook delivery lag, and the share of
+sends failing outright. Every one of these shares three properties on
+purpose: it runs in a process **separate from** whatever it observes (the
+watcher and the watched must not share a failure mode), it claims an
+alert-dedup slot under its **own** name so no watchdog can mask or be
+masked by another, and it emails the same `OPERATOR_ALERT_EMAIL` through
+the same platform-only SendGrid key — never a tenant's own BYO key,
+because the tenant whose reputation is failing is exactly the tenant whose
+own key is least likely to still be working. `ops_alert_state` (this
+phase's own migration) is the shared dedup primitive the four newest
+watchdogs claim against, generalizing the same atomic
+claim-then-send-then-release-on-failure pattern the five earlier,
+independently-tabled watchdogs already used.
+
+**Every one of those nine watchdogs shares the exact same structural blind
+spot, and it is the reason a tenth mechanism exists outside `apps/api`
+entirely.** A watchdog that lives inside `apps/api` cannot report that
+`apps/api` itself has stopped — the code that would report it is exactly
+what stopped. If the VPS goes dark, Docker itself stops, or the container
+OOM-kills without a restart, all nine in-app watchdogs fall silent at the
+same instant their own alerting ability does.
+
+**The answer is two Grafana Cloud alert rules, evaluated entirely outside
+this platform's VPS, reading only the log stream a sidecar ships there
+independent of any application process staying alive.** A no-logs-received
+rule fires when the log volume this pipeline normally emits falls to
+(near) zero — meaning something upstream of even the shipping sidecar has
+stopped, not merely that the platform happened to be quiet, since a
+healthy stack emits infrastructure-level log lines continuously even at
+zero user traffic. An error-rate-spike rule fires on the coarse ratio of
+`error`/`fatal`-level log lines across `apps/api`/`apps/worker`, entirely
+independent of whether any specific in-app watchdog's own condition
+happens to be tuned to catch the underlying cause. Both point at the same
+operator inbox every in-app watchdog uses — one contact point, not a
+second parallel paging surface to maintain and eventually forget about.
+
+**This is why the split is two locations, not one:** an alert that can only
+run inside the process it protects is structurally blind to that process's
+own death, and an alert that can only run outside the process has no view
+of business-level conditions (a specific queue's depth, a specific
+tenant's failure rate) that only the process itself can compute cheaply
+and continuously. Neither location can replace the other; both are
+required, and this phase's own closing state is both existing at once.
+
+Exact thresholds, dedup windows, alert-name identifiers, and the LogQL
+queries: [`SPECIFICATION.md` §7](./SPECIFICATION.md). Per-alert recovery
+procedures: `docs/runbooks/queue-depth-alert.md`,
+`docs/runbooks/oldest-job-age-alert.md`,
+`docs/runbooks/webhook-lag-alert.md`,
+`docs/runbooks/failed-send-share-alert.md`,
+`docs/runbooks/log-shipping-and-backstop-alerts.md`; the Bull Board
+observability UI's own access path: `docs/runbooks/bull-board-access.md`.
+
+---
+
 ## Forward-looking — not yet true
 
 Everything above describes code in this repository today. The items below do not exist yet and are named with the phase that introduces them, so nothing here can be mistaken for a description of the current system.
@@ -329,4 +519,5 @@ Everything above describes code in this repository today. The items below do not
 - **Phase 10 — RLS unification.** Two policy variants exist, and one of them errors rather than returning zero rows when no tenant is in scope on a recycled connection. Unifying them must go in the fail-closed direction. The current behaviour of both is pinned by tests in `packages/tenant-context` labelled as a pre-change baseline.
 - **Phase 11 — the delivery state machine.** Dispatch has no timeout mechanism, so a timeout and a connection reset are indistinguishable to it today, and both resolve to a terminal failure. A reconciling state is planned. Three assertions encode the current terminal outcome and are listed by name in [`docs/failure-injection-scenarios.md`](./docs/failure-injection-scenarios.md).
 - **Phase 12 — worker reliability.** Per-tenant concurrency caps now exist (§10 above). Queue retention is no longer open either — plan 12-09 bounded `removeOnFail` to a 7-day age now that the durable dead-letter path (plans 12-07/12-10) records every terminal failure in Postgres before the Redis record ages out; the shipped policy and its rationale are documented in [`SPECIFICATION.md` §5.3](./SPECIFICATION.md). What genuinely remains open is the queue's behaviour when its backing store reaches its memory ceiling.
-- **Phase 14 — deployment and database durability.** Largely no longer forward-looking: container images, a deployment manifest, application health endpoints, migration gating, backup/PITR and retention all now exist and are described in §14-§17 above. What genuinely remains open, all gated on a real host this repository's own development environment cannot provide: the first real deploy against a live VPS (plan 14-09), the first real off-host backup and WAL shipment (plan 14-10), and the first real point-in-time restore drill (plan 14-11) — all three stopped at a blocking human-verify checkpoint as of this writing ([`SPECIFICATION.md` §8.4](./SPECIFICATION.md)). Real alerting on top of the observability surfaces §14-§17 describe, and Postgres `verify-full` TLS in place of the current self-signed interim posture (D-10), remain **Phase 15's** job.
+- **Phase 14 — deployment and database durability.** Largely no longer forward-looking: container images, a deployment manifest, application health endpoints, migration gating, backup/PITR and retention all now exist and are described in §14-§17 above. What genuinely remains open, all gated on a real host this repository's own development environment cannot provide: the first real deploy against a live VPS (plan 14-09), the first real off-host backup and WAL shipment (plan 14-10), and the first real point-in-time restore drill (plan 14-11) — all three stopped at a blocking human-verify checkpoint as of this writing ([`SPECIFICATION.md` §8.4](./SPECIFICATION.md)). **Real alerting is no longer forward-looking** — §20 above describes the nine in-app watchdogs plus the two Grafana Cloud backstop rules Phase 15 built on top of the observability surfaces §14-§17 describe. Postgres `verify-full` TLS in place of the current self-signed interim posture (D-10) remains open, gated on the same real-VPS precondition as the three Phase 14 items above.
+- **Phase 15 — observability, alerting and frontend resilience.** The correlation model (§18), error-tracking topology (§19), and alerting topology (§20) all now exist as described above. What remains a flagged assumption rather than a proven fact: every OPS-13 threshold value (`QUEUE_DEPTH_THRESHOLDS`, `OLDEST_PENDING_JOB_AGE_ALERT_HOURS`, `RECONCILING_SEND_AGE_ALERT_HOURS`, `WEBHOOK_LAG_ALERT_MINUTES`, `FAILED_SEND_SHARE_ALERT_THRESHOLD`/`_MIN_SAMPLE_SIZE`) is a first estimate, not yet validated against real production load — each alert's own runbook (`docs/runbooks/*-alert.md`) names its governing constant and how to tune it from real operation. Whether logs actually reach Grafana Cloud Loki and whether both cloud backstop rules actually fire is an operator-provisioning dependency this repository cannot prove automatically — `docs/runbooks/log-shipping-and-backstop-alerts.md` is the operator's own verification procedure for that gap.
