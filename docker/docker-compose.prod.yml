@@ -270,15 +270,32 @@ services:
         required: false
     environment:
       NODE_ENV: production
-      # Plan 15-10 (OPS-08): passed through EXPLICITLY (not implicit
-      # env_file passthrough) -- docker/prod.env.example documents why.
+      # Plan 15-10 (OPS-08). CR-01 fix: SENTRY_DSN_API/SENTRY_ENVIRONMENT
+      # used to be listed HERE as `${VAR}` compose-level interpolation --
+      # that reads from the INVOKING SHELL's environment (or a docker/.env
+      # file, which does not exist), a completely different mechanism from
+      # `env_file: ${MEGA_CRM_ENV_FILE}` above, which loads key/value pairs
+      # into the CONTAINER's process environment at start. Compose's
+      # documented merge order has `environment:` override `env_file:` for
+      # the same key, so the old shape unconditionally overwrote whatever
+      # real SENTRY_DSN_API/SENTRY_ENVIRONMENT value `env_file:` had just
+      # loaded from MEGA_CRM_ENV_FILE with an empty string on every real
+      # deploy (scripts/deploy.sh never exports either name) -- silently
+      # disabling Sentry error tracking with no error or visible symptom.
+      # Both names are now supplied EXCLUSIVELY via `env_file:` above, like
+      # every other application secret in this file -- see
+      # docker/prod.env.example's own updated comment for the same two
+      # names.
+      #
       # IMAGE_TAG is the SAME full deployed image SHA already used above to
       # select this service's own image; this is the first place in this
       # file that ALSO forwards it into the container's own process
       # environment, where apps/api/src/sentry.ts reads it as Sentry's
       # release identifier (previously IMAGE_TAG was compose-scope only).
-      SENTRY_DSN_API: ${SENTRY_DSN_API}
-      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT}
+      # IMAGE_TAG stays compose-level `${VAR}` interpolation deliberately --
+      # unlike the two names above, `deploy.sh` DOES `export IMAGE_TAG`
+      # before every `docker compose` invocation, so this one resolves
+      # correctly today; it is not part of this fix.
       IMAGE_TAG: ${IMAGE_TAG}
     mem_limit: ${API_MEM_LIMIT:-512m}
     # Probes /readyz, not just /healthz -- the API's own port is never
@@ -314,12 +331,16 @@ services:
         required: false
     environment:
       NODE_ENV: production
-      # Plan 15-10 (OPS-08): mirrors the `api` service's own three new
-      # entries above -- its own DSN (D-06: a separate Sentry project per
-      # process), the same shared SENTRY_ENVIRONMENT override, and the same
-      # IMAGE_TAG passthrough for apps/worker/src/sentry.ts's release field.
-      SENTRY_DSN_WORKER: ${SENTRY_DSN_WORKER}
-      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT}
+      # Plan 15-10 (OPS-08). CR-01 fix: mirrors the `api` service's own
+      # comment above -- SENTRY_DSN_WORKER/SENTRY_ENVIRONMENT are supplied
+      # EXCLUSIVELY via `env_file:` above (never compose-level `${VAR}`
+      # interpolation in this block), because that interpolation resolves
+      # from the invoking shell's environment, not MEGA_CRM_ENV_FILE, and
+      # was silently overwriting the operator's real DSN with an empty
+      # string on every deploy (see `api` service's own comment for the
+      # full mechanism). IMAGE_TAG stays compose-level `${VAR}`
+      # interpolation -- `deploy.sh` DOES export it, so it is unaffected by
+      # this fix, same as `api`'s own IMAGE_TAG passthrough.
       IMAGE_TAG: ${IMAGE_TAG}
     mem_limit: ${WORKER_MEM_LIMIT:-1024m}
     # ARCHITECTURE.md §10 / Pitfall 7: MUST come from the published constant,

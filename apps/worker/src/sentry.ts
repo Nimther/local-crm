@@ -79,7 +79,12 @@ export function initSentry(options: InitSentryOptions = {}): boolean {
 
   Sentry.init({
     dsn,
-    environment: options.environment ?? process.env.SENTRY_ENVIRONMENT ?? process.env.NODE_ENV,
+    // CR-01 corollary: `||`, not `??` -- an exported-but-empty
+    // SENTRY_ENVIRONMENT ("") must still fall back to NODE_ENV. `??` only
+    // falls through on null/undefined, so `SENTRY_ENVIRONMENT=""` would
+    // otherwise pin every event's environment tag to the empty string
+    // instead of falling back.
+    environment: options.environment || process.env.SENTRY_ENVIRONMENT || process.env.NODE_ENV,
     release: options.release ?? process.env.IMAGE_TAG,
     tracesSampleRate: 0,
     beforeSend: sentryBeforeSend,
