@@ -10,6 +10,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { AppShell } from "@/features/app-shell/AppShell";
 import { RouteSuspenseFallback } from "@/components/RouteSuspenseFallback";
 import { RouteErrorBoundary } from "@/components/RouteErrorBoundary";
+import { QueryErrorState } from "@/components/QueryErrorState";
 
 // D-14 (OPS-16): every feature/route page is lazily loaded, uniformly, with
 // no per-route eager/lazy judgement calls. RootRedirect, AppShell and the
@@ -69,13 +70,14 @@ function withSuspense(element: ReactNode) {
 function RootRedirect() {
   const { data: session, isPending: sessionPending } = useSession();
 
-  const { data: workspaces, isPending: workspacesPending } = useQuery({
+  const workspacesQuery = useQuery({
     queryKey: ["workspaces"],
     // D-20: /api/workspaces (not better-auth's own organization.list) so a
     // soft-deleted workspace never gets redirected into.
     queryFn: () => apiGet<WorkspaceListItem[]>("/api/workspaces"),
     enabled: Boolean(session),
   });
+  const { data: workspaces, isPending: workspacesPending, isError: workspacesIsError } = workspacesQuery;
 
   if (sessionPending || (session && workspacesPending)) {
     return null;
@@ -83,6 +85,25 @@ function RootRedirect() {
 
   if (!session) {
     return <Navigate to="/login" replace />;
+  }
+
+  // WR-01/OPS-17/D-11: a rejected fetch must not be treated as "no
+  // workspace yet" -- that conflated shape would redirect an
+  // already-signed-in user with real workspaces to /create-workspace on a
+  // transient failure. Every sibling page in this phase's file set splits
+  // isError from the empty-response case; this is the one root-level
+  // router component that previously did not.
+  if (workspacesIsError) {
+    return (
+      <div className="flex min-h-screen items-center justify-center p-8">
+        <QueryErrorState
+          title="Не удалось загрузить рабочие пространства"
+          className="max-w-md"
+          isFetching={workspacesQuery.isFetching}
+          onRetry={() => void workspacesQuery.refetch()}
+        />
+      </div>
+    );
   }
 
   if (!workspaces || workspaces.length === 0) {
