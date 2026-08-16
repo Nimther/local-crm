@@ -569,7 +569,7 @@ Plans:
   4. The app loads with route-level code splitting — canvas and heavy dashboard chunks arrive only when those routes are opened.
   5. A failed API call, an empty list, a paginated list, stale analytics and unsaved canvas changes each show the user what is actually true rather than a blank or silently-wrong screen.
 
-**Plans**: 21/21 plans executed
+**Plans**: 22 plans (21 executed; 15-22 is gap closure for UAT gap G-15-4)
 
 Plans:
 **Wave 1**
@@ -640,6 +640,10 @@ Plans:
 **Wave 16** *(gap closure — G-15-2/G-15-3; blocked on Wave 15)*
 
 - [x] 15-21-PLAN.md — ARCHITECTURE.md §18 correlation model + SPECIFICATION.md §7/§3 corrected to shipped behaviour (OPS-15, OPS-08)
+
+**Wave 17** *(gap closure — G-15-4; blocked on Wave 16)*
+
+- [ ] 15-22-PLAN.md — Alloy config comment-token fix + `verify:alloy-config` gate parsing it with the real pinned binary, blocking in CI (OPS-10)
 
 **UI hint**: yes
 
