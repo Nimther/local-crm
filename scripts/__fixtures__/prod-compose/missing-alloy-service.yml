@@ -1,0 +1,7 @@
+# Fixture for scripts/validate-prod-compose.mjs's test suite: no `alloy`
+# service declared at all. Deliberately minimal -- only `db`; the
+# "missing-service" checks for the other services will also fire, and the
+# test only asserts the specific rule this fixture targets is present.
+services:
+  db:
+    image: postgres:17

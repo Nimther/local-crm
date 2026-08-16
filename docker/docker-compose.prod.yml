@@ -150,6 +150,21 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    # Phase 15 plan 17 (OPS-10, Pitfall 5): Docker's json-file driver has NO
+    # size cap unless configured per service -- this plan is the first time
+    # log volume materially increases (plan 15-08 turned the worker's
+    # silent `console` output into structured per-job logging), so an
+    # unbounded log file is a disk-exhaustion outage waiting for a busy
+    # day. 10MB x 5 files = 50MB ceiling per service, sized to comfortably
+    # outlive a network blip during which the `alloy` sidecar below cannot
+    # push to Grafana Cloud Loki -- IDENTICAL across every service in this
+    # file (see each subsequent service's own `logging:` block) unless one
+    # is given a documented reason to differ; none is.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     # No `ports:` -- reachable only on the compose network (T-14-43).
 
   # Phase 14 plan 10 (DB-09, D-05, D-06). The scheduled-backup sidecar --
@@ -200,6 +215,13 @@ services:
       - ./pgbackrest/crontab:/etc/pgbackrest-crontab.d/crontab:ro
       - mega_crm_db_data_prod:/var/lib/postgresql/data:ro
       - mega_crm_pg_socket_prod:/var/run/postgresql
+    # Phase 15 plan 17 (OPS-10, Pitfall 5): same bounded logging as every
+    # other service (see `db`'s own comment above).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     # No `ports:`, no `healthcheck:` -- a scheduled batch process, not a
     # request-serving service (T-14-43).
 
@@ -221,6 +243,13 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    # Phase 15 plan 17 (OPS-10, Pitfall 5): same bounded logging as every
+    # other service (see `db`'s own comment above).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     # No `ports:` -- reachable only on the compose network (T-14-43).
 
   api:
@@ -262,6 +291,13 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+    # Phase 15 plan 17 (OPS-10, Pitfall 5): same bounded logging as every
+    # other service (see `db`'s own comment above).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     # No `ports:` -- `web` (Caddy) is the ONLY published surface (T-14-43);
     # Caddy reaches this container by compose service name (docker/Caddyfile).
 
@@ -302,6 +338,13 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+    # Phase 15 plan 17 (OPS-10, Pitfall 5): same bounded logging as every
+    # other service (see `db`'s own comment above).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     # No `ports:` -- publishing WORKER_HEALTH_PORT would expose an
     # unauthenticated probe endpoint to the internet (T-14-43).
 
@@ -347,6 +390,13 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    # Phase 15 plan 17 (OPS-10, Pitfall 5): same bounded logging as every
+    # other service (see `db`'s own comment above).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
 
   # One-shot migrate step (plan 14-01's `npm run migrate:prod` ==
   # `node scripts/migrate-runner.mjs`), built from the SAME api image --
@@ -375,8 +425,73 @@ services:
     environment:
       NODE_ENV: production
     mem_limit: ${MIGRATE_MEM_LIMIT:-512m}
+    # Phase 15 plan 17 (OPS-10, Pitfall 5): same bounded logging as every
+    # other service (see `db`'s own comment above).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     # No `ports:`, no `healthcheck:` -- a one-shot process the deploy script
     # awaits by exit code, never a long-lived container.
+
+  # Phase 15 plan 17 (OPS-10, D-01, D-02, D-03): Grafana Alloy sidecar --
+  # tails every OTHER service's own json-file log capture (Docker API, not
+  # a bind-mounted log directory) and pushes to Grafana Cloud Loki. See
+  # docker/alloy/config.alloy's own header for the full label-strategy and
+  # credential-provenance reasoning -- not repeated here.
+  alloy:
+    # Pinned to an explicit released version (never `:latest` or another
+    # mutable tag) -- this repo's own immutable-tag discipline (T-14-49),
+    # applied here to a third-party vendor image the same way `redis:7`'s
+    # own comment documents a DIFFERENT (floating-minor) precedent: unlike
+    # `redis`/`db`, this service's tag is added to
+    # scripts/validate-prod-compose.mjs's FIRST_PARTY_IMAGE_SERVICES set
+    # below specifically so the CI gate enforces "never mutable" on this
+    # tag going forward, matching this plan's own must_haves truth.
+    image: grafana/alloy:v1.18.1
+    restart: unless-stopped
+    # No `depends_on:` -- discovery.docker's whole job is discovering
+    # containers as they come and go via the Docker socket; it has no
+    # functional dependency on any other service being healthy first
+    # (unlike `pgbackrest`, whose backup/check commands need a live
+    # connection to `db` specifically).
+    # Passed through explicitly (never implicit env_file passthrough) --
+    # config.alloy's own `env()` calls read exactly these three names, no
+    # others. `required: false` matches every other `env_file:` entry in
+    # this file -- this example env file cannot point at a real operator
+    # secrets file, so this resolves cleanly for local/CI validation.
+    env_file:
+      - path: ${MEGA_CRM_ENV_FILE}
+        required: false
+    mem_limit: ${ALLOY_MEM_LIMIT:-256m}
+    volumes:
+      # Read-only: config.alloy's own header explains why this mount is
+      # required (discovery.docker's container-discovery mechanism) and
+      # records it as an accepted, deliberately-scoped risk (T-15-59), not
+      # a silent grant.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+    command:
+      [
+        "run",
+        "--server.http.listen-addr=127.0.0.1:12345",
+        "/etc/alloy/config.alloy",
+      ]
+    # Phase 15 plan 17 (OPS-10, Pitfall 5): same bounded logging as every
+    # other service (see `db`'s own comment above) -- this sidecar's own
+    # stdout is subject to the same unbounded-json-file risk as anything
+    # else in this file.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    # No `ports:` -- Alloy's own HTTP server (used for its UI/debug
+    # endpoints, not log ingestion) is bound to loopback only via the
+    # `--server.http.listen-addr` flag above and never published (T-14-43)
+    # -- this sidecar has no reason to be reachable from outside its own
+    # container network namespace at all.
 
 volumes:
   mega_crm_db_data_prod:

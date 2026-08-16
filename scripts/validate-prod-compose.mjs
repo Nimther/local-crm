@@ -52,8 +52,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const POOL_SUM_FLOOR = 84;
 
 /** Every service this compose file must declare, in the order the plan
- * introduces them. */
-export const EXPECTED_SERVICES = ["db", "redis", "api", "worker", "web", "migrate", "pgbackrest"];
+ * introduces them. Phase 15 plan 17 (OPS-10) added `alloy` -- the Grafana
+ * Alloy log-shipping sidecar; see docker/alloy/config.alloy. */
+export const EXPECTED_SERVICES = ["db", "redis", "api", "worker", "web", "migrate", "pgbackrest", "alloy"];
 
 /** WR-04: every service other than `db` must never carry a negative
  * oom_score_adj -- `db` alone is favored to survive an OOM event. Explicit
@@ -78,8 +79,14 @@ const PGBACKREST_CONFIG_REL = path.join("docker", "pgbackrest", "pgbackrest.conf
  * built by THIS repo's own CI (.github/workflows/images.yml), unlike
  * `db`/`redis`'s official base images, whose floating minor-version tags
  * (`postgres:17`, `redis:7`) are a pre-existing, deliberate project decision
- * unrelated to OPS-01/OPS-02's "no unreviewed local tree" concern. */
-const FIRST_PARTY_IMAGE_SERVICES = new Set(["api", "worker", "web", "migrate"]);
+ * unrelated to OPS-01/OPS-02's "no unreviewed local tree" concern.
+ *
+ * Phase 15 plan 17 (OPS-10) adds `alloy`: unlike `db`/`redis`, this
+ * service's own must_haves truth requires "an explicitly pinned image tag
+ * rather than a mutable one" as a first-class, gate-enforced invariant
+ * (not merely authored correctly once) -- so it joins this set even though
+ * it is a third-party vendor image, not a repo-built one. */
+const FIRST_PARTY_IMAGE_SERVICES = new Set(["api", "worker", "web", "migrate", "alloy"]);
 
 const MUTABLE_TAG_NAMES = new Set(["latest", "main", "master", "develop", "dev", "staging", ""]);
 
