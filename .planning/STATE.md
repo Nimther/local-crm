@@ -2,38 +2,38 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Production Hardening
-current_phase: 15
-current_phase_name: observability-alerting-frontend-resilience
-status: executing
-stopped_at: Phase 15 context gathered
-last_updated: "2026-08-17T02:47:59.840Z"
+current_phase: 16
+current_phase_name: Live SendGrid Verification
+status: planning
+stopped_at: Phase 15 complete, ready to plan Phase 16
+last_updated: "2026-08-17T03:41:26.270Z"
 last_activity: 2026-08-17
-last_activity_desc: Phase 15 execution resumed (wave continue)
+last_activity_desc: Phase 15 complete, transitioned to Phase 16
 progress:
   total_phases: 9
-  completed_phases: 7
+  completed_phases: 8
   total_plans: 115
-  completed_plans: 114
-  percent: 78
+  completed_plans: 115
+  percent: 89
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-08-12)
+See: .planning/PROJECT.md (updated 2026-08-17)
 
 **Core value:** Маркетолог настраивает триггерную цепочку или кампанию — и письма надёжно и вовремя доходят до нужных контактов, со сквозным отслеживанием статусов (delivered/opened/clicked/bounced).
-**Current focus:** Phase 15 — observability-alerting-frontend-resilience
+**Current focus:** Phase 16 — Live SendGrid Verification
 
 ## Current Position
 
 Milestone: v1.1 Production Hardening (Phases 8-16, 95 requirements)
-Phase: 15 (observability-alerting-frontend-resilience) — EXECUTING
-Plan: 1 of 21
-Status: Executing Phase 15
-Last activity: 2026-08-17 — Phase 15 execution resumed (wave continue)
-Progress: [████████████████████] 79/79 plans ([██████████] 100%) — 6/9 v1.1 phases complete (8–13), 54/95 requirements
+Phase: 16 — Live SendGrid Verification
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-08-17 — Phase 15 complete, transitioned to Phase 16
+Progress: [████████████████████] 115/115 plans (100%) — 8/9 v1.1 phases complete (8–15), 90/95 requirements (remaining: UAT-01..05, Phase 16)
 
 ✓ **Deadline closed (2026-08-07):** Phase 9 (DB-01/DB-02 partition automation) completed ahead of the hard **2026-09-01** deadline — 20 attached monthly partitions (2026-09…2027-06) confirmed by catalog query against a migrated database.
 
@@ -53,7 +53,7 @@ All 14 phase-14 plans now have committed SUMMARYs (14-01 through 14-14, includin
 
 **Velocity:**
 
-- Total plans completed: 189
+- Total plans completed: 211
 - Average duration: — min
 - Total execution time: 0 hours
 
@@ -75,6 +75,7 @@ All 14 phase-14 plans now have committed SUMMARYs (14-01 through 14-14, includin
 | 12 | 14 | - | - |
 | 13 | 16 | - | - |
 | 14 | 14 | - | - |
+| 15 | 22 | - | - |
 
 **Recent Trend:**
 
@@ -200,6 +201,17 @@ All 14 phase-14 plans now have committed SUMMARYs (14-01 through 14-14, includin
 
 Full decision log for v1.0 lives in PROJECT.md (Key Decisions) and the archived phase summaries in .planning/milestones/v1.0-phases/.
 
+**Phase 15 decisions (2026-08-17, full log in PROJECT.md and phase summaries):**
+
+- Sentry-redaction CI-гейт (`check:sentry-redaction`, leak-фикстуры + negative control) собран ДО первого `Sentry.init()` в репозитории; `sentryBeforeSend` делегирует всё событие общему `scrub()` — второго rule-list'а не существует (Pitfall 18 закрыт)
+- DSN-доставка исключительно через `env_file` (CR-01): compose-интерполяция `${VAR}` резолвится из invoking shell и молча стирала операторский DSN на каждом деплое; `IMAGE_TAG` — единственное легитимное исключение
+- Worker-side Sentry-тэги читаются из job payload, не из ALS: `run()`-стор не переживает continuation boundary внешнего awaiter'а (доказано эмпирически); идентичное API-side ограничение задокументировано executable-тестом, не пофикшено (~10 route-модулей)
+- `wrapProcessor` на всех 20 воркер-фабриках с filesystem-enumerating coverage-тестом; fallback `requestId → job.id` удалён (WR-03) — unbound поле честнее склейки двух осей корреляции
+- Инфраструктурный конфиг парсится реальным бинарём в CI (урок G-15-4): `validate-alloy-config.mjs` = static-скан + `alloy fmt` под pinned-образом, resolved at run time из compose; `ALLOY_VALIDATE_REQUIRE_BINARY=1` в CI — недоступный Docker это violation, не skip
+- `ops_alert_state` — одна keyed-таблица для всех watchdog'ов (миграция 0064), атомарный claim без seed-строки; terminal-сплит failed-send-share выведен из `SEND_STATUS_TRANSITIONS`, не hard-coded
+- Миграция 0065 (human-approved override запрета «no new migration»): column-level `GRANT SELECT (last_event_at)` для webhook-lag — таблица несёт `path_token`/`public_key`, table-level grant недопустим
+- Correlation ids остаются в JSON-теле логов (`| json` в LogQL), никогда не Loki-лейблы (кардинальность)
+
 **Phase 13 decisions (2026-08-12, full log in PROJECT.md and phase summaries):**
 
 - Dedup-ключ `send_events` пересажен с нестабильного `sg_event_id` на `(workspace_id, send_id, event_type, occurred_at)` (миграция 0057, expand/contract без DELETE, RAISE при выживших дублях); `sg_event_id` остаётся NOT NULL forensic-колонкой
@@ -295,7 +307,15 @@ Open decisions to resolve at `/gsd-discuss-phase` (recorded in ROADMAP.md § Ope
 - **Phase 11 (Pitfall 2):** the `send_status` enum change must not backfill historical rows in the same migration; verify `workspace_daily_rollup` totals are unchanged afterwards.
 - **Phase 10 / SEC-05 (Pitfall 12):** adding RLS to Better Auth tables as a checklist item breaks login/signup/session validation platform-wide, with no SQL error.
 - ~~Phase 14 (Pitfall 17): `CREATE UNIQUE INDEX CONCURRENTLY` over existing duplicates leaves an INVALID index~~ — closed by Phase 13 (миграция 0057: blocking parent-level build, RAISE unless `pg_index.indisvalid`, duplicate pre-check without DELETE).
-- **Phase 15 (Pitfall 18):** Sentry has no retroactive redaction — `beforeSend` scrub rules must be tested against representative leak payloads *before* Sentry receives live traffic.
+- ~~Phase 15 (Pitfall 18): Sentry has no retroactive redaction — `beforeSend` scrub rules must be tested against representative leak payloads *before* Sentry receives live traffic~~ — closed by Phase 15 (15-06: `check:sentry-redaction` блокирующий CI-гейт собран до первого `Sentry.init()`; live UAT подтвердил отсутствие PII).
+
+**Phase 15 open items (2026-08-17):**
+
+- ⚠️ [Phase 15] Все пороги OPS-13-алертов и `STALE_DATA_LAG_THRESHOLD_MINUTES=15` — flagged assumptions, не валидированы реальной нагрузкой; константы и файлы названы в Threshold Tuning секциях runbook'ов
+- ⚠️ [Phase 15] API-side Sentry gap: исключение внутри route-level `withTenant(...)` доходит до Sentry без `workspace_id` (`request_id` выживает); документировано + executable test, фикс = ~10 route-модулей
+- ⚠️ [Phase 15] Два user-visible UI-дефекта из sweep'а 15-07 (вне scope фазы, follow-ups): `LaunchConfirmDialog` — упавший audience-breakdown молча скрывает карточку, кнопка запуска остаётся активной; `CsvImportWizard` — `if (!status)` смешивает loading и вечный fetch-fail без error-state/Retry
+- ⚠️ [Phase 15] bullmq 5.79.1→5.79.4 lockstep bump (peer-требование `@bull-board/api@8.6.1`) — технически верифицирован, ждёт explicit human ratification классификации (15-16, coverage D8)
+- ⚠️ [Phase 15] Робастность alloy-гейта: static-скан без backtick-raw-string state (false positive и false negative доказаны), untested image-resolution-fails branch, hardcoded образ в recovery-команде runbook'а — anti-patterns, backstop'ятся real-binary слоем CI
 
 Research flags carried from v1.0:
 
@@ -325,13 +345,13 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-14T13:31:04.225Z
-Stopped at: Phase 15 context gathered
-Resume file: .planning/phases/15-observability-alerting-frontend-resilience/15-CONTEXT.md
+Last session: 2026-08-17
+Stopped at: Phase 15 complete, ready to plan Phase 16
+Resume file: None
 
 ## Operator Next Steps
 
-- Phase 13 complete (2026-08-12): 16/16 plans (14 scoped + 2 gap-closure), UAT 5/5 passed, verification passed, security review verified (122/122 threats closed, 0 open)
-- Known operational item carried from Phase 12: `npm run db:migrate` (drizzle-kit CLI) hangs in the dev sandbox under Node v26 — migrations proven via test:migrations but not applied to the dev DB (now also covers Phase 13 migrations 0055–0061)
-- Next: `/gsd-discuss-phase 14` → `/gsd-plan-phase 14` — Deployment & Database Durability (no CONTEXT.md yet); open decision DB-14 (PgBouncer now vs defer to SCALE-02) resolves at discuss
-- Branch note: per convention Phase 14 starts a new `gsd/phase-14-{slug}` branch (Phase 13 branch: `gsd/phase-13-compliance-analytics-integrity`)
+- Phase 15 complete (2026-08-17): 22/22 plans (18 scoped + 4 gap-closure), UAT 5/5 passed (G-15-4 alloy-config gap closed by plan 15-22, live redeploy of the committed config confirmed), verification passed, security verified (threats_open: 0)
+- Known operational item carried from Phase 12: `npm run db:migrate` (drizzle-kit CLI) hangs in the dev sandbox under Node v26 — migrations proven via test:migrations but not applied to the dev DB
+- Next: `/gsd-plan-phase 16` — Live SendGrid Verification (UAT-01..05, the milestone's final release barrier; requires the deployed env + verified sender from Phase 14)
+- Branch note: per convention Phase 16 starts a new `gsd/phase-16-{slug}` branch (Phase 15 branch: `gsd/phase-15-observability-alerting-frontend-resilience`)

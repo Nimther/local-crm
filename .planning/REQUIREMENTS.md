@@ -115,20 +115,20 @@
 - [x] **OPS-03**: Процедура отката деплоя задокументирована
 - [x] **OPS-04**: `/healthz` отвечает о живости процесса
 - [x] **OPS-05**: `/readyz` проверяет доступность PostgreSQL и Redis и не сообщает готовность до завершения миграций
-- [ ] **OPS-06**: Worker логирует структурно через Pino
-- [ ] **OPS-07**: Redaction применяется к логам worker и API единообразно
-- [ ] **OPS-08**: Sentry принимает исключения frontend, API и worker
-- [ ] **OPS-09**: Секреты и PII не попадают в Sentry — подтверждено тестом
+- [x] **OPS-06**: Worker логирует структурно через Pino
+- [x] **OPS-07**: Redaction применяется к логам worker и API единообразно
+- [x] **OPS-08**: Sentry принимает исключения frontend, API и worker
+- [x] **OPS-09**: Секреты и PII не попадают в Sentry — подтверждено тестом
 - [x] **OPS-10**: Логи уходят в hosted-провайдер с настроенными алертами
-- [ ] **OPS-11**: `request_id`, `tenant_id`, `job_id` и `send_id` проходят сквозь HTTP, очередь и worker
-- [ ] **OPS-12**: Trace correlation связывает HTTP-запрос, job и запрос к Postgres
-- [ ] **OPS-13**: Алерты настроены на queue depth, oldest job age, webhook lag и долю неуспешных отправок
-- [ ] **OPS-14**: Bull Board доступен под закрытым административным доступом
-- [ ] **OPS-15**: Runbook'и описывают типовые инциденты и порядок восстановления
-- [ ] **OPS-16**: Frontend использует route-level code splitting; canvas/editor и тяжёлые dashboard-компоненты грузятся лениво
-- [ ] **OPS-17**: Frontend корректно обрабатывает ошибки API, пустые состояния и пагинацию
-- [ ] **OPS-18**: Устаревшая аналитика отображается честно
-- [ ] **OPS-19**: Несохранённые изменения canvas вызывают предупреждение; ошибка сохранения видна пользователю
+- [x] **OPS-11**: `request_id`, `tenant_id`, `job_id` и `send_id` проходят сквозь HTTP, очередь и worker
+- [x] **OPS-12**: Trace correlation связывает HTTP-запрос, job и запрос к Postgres
+- [x] **OPS-13**: Алерты настроены на queue depth, oldest job age, webhook lag и долю неуспешных отправок
+- [x] **OPS-14**: Bull Board доступен под закрытым административным доступом
+- [x] **OPS-15**: Runbook'и описывают типовые инциденты и порядок восстановления
+- [x] **OPS-16**: Frontend использует route-level code splitting; canvas/editor и тяжёлые dashboard-компоненты грузятся лениво
+- [x] **OPS-17**: Frontend корректно обрабатывает ошибки API, пустые состояния и пагинацию
+- [x] **OPS-18**: Устаревшая аналитика отображается честно
+- [x] **OPS-19**: Несохранённые изменения canvas вызывают предупреждение; ошибка сохранения видна пользователю
 
 ### Live SendGrid Verification
 
@@ -248,20 +248,20 @@
 | OPS-03 | Phase 14 | Complete |
 | OPS-04 | Phase 14 | Complete |
 | OPS-05 | Phase 14 | Complete |
-| OPS-06 | Phase 15 | Pending |
-| OPS-07 | Phase 15 | Pending |
-| OPS-08 | Phase 15 | Pending |
-| OPS-09 | Phase 15 | Pending |
+| OPS-06 | Phase 15 | Complete |
+| OPS-07 | Phase 15 | Complete |
+| OPS-08 | Phase 15 | Complete |
+| OPS-09 | Phase 15 | Complete |
 | OPS-10 | Phase 15 | Complete |
-| OPS-11 | Phase 15 | Pending |
-| OPS-12 | Phase 15 | Pending |
-| OPS-13 | Phase 15 | Pending |
-| OPS-14 | Phase 15 | Pending |
-| OPS-15 | Phase 15 | Pending |
-| OPS-16 | Phase 15 | Pending |
-| OPS-17 | Phase 15 | Pending |
-| OPS-18 | Phase 15 | Pending |
-| OPS-19 | Phase 15 | Pending |
+| OPS-11 | Phase 15 | Complete |
+| OPS-12 | Phase 15 | Complete |
+| OPS-13 | Phase 15 | Complete |
+| OPS-14 | Phase 15 | Complete |
+| OPS-15 | Phase 15 | Complete |
+| OPS-16 | Phase 15 | Complete |
+| OPS-17 | Phase 15 | Complete |
+| OPS-18 | Phase 15 | Complete |
+| OPS-19 | Phase 15 | Complete |
 | UAT-01 | Phase 16 | Pending |
 | UAT-02 | Phase 16 | Pending |
 | UAT-03 | Phase 16 | Pending |

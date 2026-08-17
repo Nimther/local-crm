@@ -37,7 +37,7 @@ Full phase details: [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md)
 - [x] **Phase 12: Worker Reliability & Tenant Fairness** - One tenant, one huge segment, or a restart cannot degrade the platform (completed 2026-08-10)
 - [x] **Phase 13: Compliance & Analytics Integrity** - Consent and delivery numbers mean exactly what they claim (completed 2026-08-12)
 - [x] **Phase 14: Deployment & Database Durability** - Reproducible deploy, gated migrations, rehearsed restore, enforced constraints (completed 2026-08-14)
-- [ ] **Phase 15: Observability, Alerting & Frontend Resilience** - The system reports its true state to operators and to users
+- [x] **Phase 15: Observability, Alerting & Frontend Resilience** - The system reports its true state to operators and to users (completed 2026-08-17)
 - [ ] **Phase 16: Live SendGrid Verification** - Every delivery guarantee confirmed against the real provider (release barrier)
 
 ## Phase Details
@@ -745,7 +745,7 @@ Phase 9 has no dependents and may be scheduled in parallel at any point after Ph
 | 12. Worker Reliability & Tenant Fairness | v1.1 | 14/14 | Complete    | 2026-08-11 |
 | 13. Compliance & Analytics Integrity | v1.1 | 16/16 | Complete    | 2026-08-12 |
 | 14. Deployment & Database Durability | v1.1 | 14/14 | Complete    | 2026-08-14 |
-| 15. Observability, Alerting & Frontend Resilience | v1.1 | 22/22 | In Progress|  |
+| 15. Observability, Alerting & Frontend Resilience | v1.1 | 22/22 | Complete    | 2026-08-17 |
 | 16. Live SendGrid Verification | v1.1 | 0/TBD | Not started | - |
 
 ---

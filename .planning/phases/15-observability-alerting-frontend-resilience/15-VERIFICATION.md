@@ -25,7 +25,7 @@ human_verification:
 
 **Phase Goal:** The system reports its true state — to an operator through structured logs, correlated traces and alerts, and to a user through honest error, empty and stale states.
 **Verified:** 2026-08-17
-**Status:** human_needed
+**Status:** passed <!-- human_needed → passed 2026-08-17: UAT test 5 confirmed the production redeploy with the committed config.alloy (container running, logs arriving in Loki) -->
 **Re-verification:** Yes — after gap closure (plan 15-22, closing G-15-4)
 
 ## Re-Verification Summary
@@ -158,7 +158,7 @@ No TBD/FIXME/XXX debt markers found in any of the 10 files this plan's diff touc
 
 **No gaps remain.** G-15-4 is independently confirmed closed this session by running the real gate and the real pinned Alloy binary directly (not by trusting the SUMMARY) — the committed `docker/alloy/config.alloy` parses cleanly, the regression-lock fixture still reproduces the original shipped defect exactly, the false-positive guard is confirmed for the must-have's stated scope (quoted strings), and the gate is wired into a required, fail-closed CI check. All three regression gates touched by this diff (spec-env-coverage, runbook-coverage, prod-compose invariants) were re-run this session and pass. No debt markers found.
 
-Status remains `human_needed` rather than `passed` for exactly one reason: an actual production redeploy of the committed configuration has not been confirmed in this repository (the plan's own `<human-check>` scopes this precisely). This is a live-infrastructure confirmation step, not a code-level gap — the automated evidence for it is as strong as this repository can produce without deploying.
+Status was held at `human_needed` for exactly one reason: an actual production redeploy of the committed configuration had not been confirmed (the plan's own `<human-check>` scopes this precisely). That confirmation landed 2026-08-17 as UAT test 5 (`15-UAT.md`): the prod compose stack was redeployed with the committed `docker/alloy/config.alloy`, the `alloy` container reached and held a running state, and structured JSON log lines kept arriving in Grafana Cloud Loki — status is now `passed`.
 
 The code review (`15-REVIEW.md`) surfaced four Warning and two Info findings in the new gate's own robustness (backtick raw-string blind spot, an untested branch, a weak test assertion, a hardcoded image tag in a runbook example) — none of these undermine G-15-4's closure, because CI's real-binary layer is the authoritative parser and backstops the actual defect class in both directions. They are recorded as Anti-Patterns for a future cleanup pass, not as blocking gaps.
 
