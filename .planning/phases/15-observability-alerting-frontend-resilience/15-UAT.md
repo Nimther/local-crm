@@ -26,9 +26,9 @@ result: pass
 
 ### 4. Grafana Cloud Loki shipping and backstop alerts
 expected: Provision Grafana Cloud Loki push credentials and the two documented backstop alert rules (no-logs dead-man's-switch, error-rate spike); Loki receives structured JSON log lines from all three prod-compose services via Alloy, and both rules fire on their documented conditions.
-result: issue
-reported: "docker/alloy/config.alloy uses # comments; grafana/alloy:v1.18.1 rejects them (illegal character U+0023), so the production Alloy container restart-loops. With a temporary //-corrected config, Loki shipping/correlation works and Grafana rules/contact are provisioned."
-severity: blocker
+result: pass
+resolved_by: G-15-4 (plan 15-22 converted config.alloy to // comments + CI validation gate); committed config confirmed live in test 5
+originally_reported: "docker/alloy/config.alloy uses # comments; grafana/alloy:v1.18.1 rejects them (illegal character U+0023), so the production Alloy container restart-loops. With a temporary //-corrected config, Loki shipping/correlation works and Grafana rules/contact are provisioned."
 
 ### 5. Production redeploy with the committed config.alloy
 expected: Redeploy the prod compose stack with the committed docker/alloy/config.alloy and confirm the `alloy` container runs (not Restarting) and structured log lines keep arriving in Grafana Cloud Loki. (The UAT-session confirmation in test 4 was against a temporary //-corrected config applied ad hoc; the committed file was independently proven to parse cleanly under the pinned grafana/alloy:v1.18.1 binary — exit 0 — so this confirms the exact committed bytes in the live path.)
@@ -37,8 +37,8 @@ result: pass
 ## Summary
 
 total: 5
-passed: 4
-issues: 1
+passed: 5
+issues: 0
 pending: 0
 skipped: 0
 blocked: 0

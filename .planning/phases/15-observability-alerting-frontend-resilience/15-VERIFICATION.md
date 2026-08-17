@@ -1,7 +1,7 @@
 ---
 phase: 15-observability-alerting-frontend-resilience
 verified: 2026-08-17T08:30:00Z
-status: human_needed
+status: passed
 score: 5/5 must-haves verified
 behavior_unverified: 0
 overrides_applied: 0
@@ -9,11 +9,13 @@ re_verification:
   previous_status: human_needed
   previous_score: 5/5
   gaps_closed:
+
     - "G-15-4 (OPS-10): docker/alloy/config.alloy used `#` comment tokens Grafana Alloy's lexer rejects (illegal character U+0023 at 1:1), restart-looping the production alloy sidecar and silently stopping all log delivery. Closed by plan 15-22: 88 `#` lines converted to `//`, a new scripts/validate-alloy-config.mjs gate (static comment/string-aware scanner + real-binary `alloy fmt` parse under the exact image docker-compose.prod.yml pins) wired into CI's `static` required job with a fail-closed ALLOY_VALIDATE_REQUIRE_BINARY switch."
   gaps_remaining: []
   regressions: []
 overrides: []
 human_verification:
+
   - test: "Operator-side, at the next production deploy: redeploy the prod compose stack with the committed docker/alloy/config.alloy and confirm the `alloy` container reaches and stays in a running state (not restarting), and that log lines continue to arrive in Loki."
     expected: "The `alloy` container runs (not `Restarting`) and structured log lines keep arriving in Grafana Cloud Loki with the documented labels."
     why_human: "The operator's UAT confirmation (15-UAT.md test 4) was against a temporary //-corrected config applied ad hoc during UAT, not byte-identical to the file now committed (which also gained a 16-line explanatory header paragraph in Task 2). This session independently proved the committed file parses cleanly under the real pinned grafana/alloy:v1.18.1 binary (exit 0, zero diagnostics) — the parse-level risk is effectively closed — but an actual production redeploy confirmation of this exact committed file is a live-infrastructure step this repository cannot exercise, and the plan's own <human-check> block scopes exactly this residual as outstanding."
