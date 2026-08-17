@@ -43,12 +43,13 @@
 // the runbook's bind-mount invocation form only ever needs to mount one path
 // (see this plan's SUMMARY for the discovery that drove that decision).
 
+import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { resolveEnvPath } from "./env-path.mjs";
 
 /** Subcommands this CLI accepts today. Later plans append to this list. */
-const ACCEPTED_SUBCOMMANDS = ["send-attribution", "event-coverage"];
+const ACCEPTED_SUBCOMMANDS = ["send-attribution", "event-coverage", "dedup"];
 
 /**
  * Boolean (value-less) flags across every subcommand's parser below. Any
@@ -127,6 +128,37 @@ export function parseArgs(argv) {
       since: flags.since ?? null,
       requireCampaign: Boolean(flags["require-campaign"]),
       requireFlowStep: Boolean(flags["require-flow-step"]),
+      json: Boolean(flags.json),
+    };
+  }
+
+  if (subcommand === "dedup") {
+    if (!flags.workspace) {
+      throw new Error("uat-verify dedup: --workspace <uuid> is required");
+    }
+    if (!flags.mode || !["snapshot", "compare"].includes(flags.mode)) {
+      throw new Error("uat-verify dedup: --mode snapshot|compare is required");
+    }
+    if (!flags.snapshot) {
+      throw new Error("uat-verify dedup: --snapshot <path> is required");
+    }
+    if (!flags["send-id"]) {
+      throw new Error("uat-verify dedup: --send-id <uuid> is required");
+    }
+    if (!flags["event-type"]) {
+      throw new Error("uat-verify dedup: --event-type <type> is required");
+    }
+    if (!flags["occurred-at"]) {
+      throw new Error("uat-verify dedup: --occurred-at <iso8601> is required");
+    }
+    return {
+      subcommand,
+      workspace: flags.workspace,
+      mode: flags.mode,
+      snapshotPath: flags.snapshot,
+      sendId: flags["send-id"],
+      eventType: flags["event-type"],
+      occurredAt: flags["occurred-at"],
       json: Boolean(flags.json),
     };
   }
@@ -324,6 +356,113 @@ export function formatEventCoverageReport(result, { json = false } = {}) {
     );
   }
   return lines.join("\n");
+}
+
+/**
+ * Phase 16 plan 04 (UAT-03/UAT-04, D-12). Pure two-layer exactly-once
+ * assertion over a before/after pair of dedup snapshots (each shaped exactly
+ * like `collectDedupSnapshot`'s return value below). No I/O -- unit-testable
+ * with in-memory fixtures, same discipline as `assertExpectations` and
+ * `summariseEventCoverage` above.
+ *
+ * Encodes RESEARCH.md Pitfall 4's polarity EXPLICITLY, because getting it
+ * backwards produces a false failure on a correctly-working system:
+ *
+ * 1. `after.sendEventsCount` must be exactly 1 -- the dedup key is the four
+ *    columns of `send_events_dedup_v2_idx` (migration 0057:
+ *    `workspace_id, send_id, event_type, occurred_at`; `sg_event_id` is a
+ *    demoted forensic column, deliberately NOT part of the enforced key).
+ *    A byte-exact replay of an already-ingested event must NOT produce a
+ *    second row under this key -- 2 means a duplicate survived; 0 means the
+ *    row is missing entirely (a different defect, reported as its own
+ *    cause, never silently treated as "no duplicate, therefore pass").
+ * 2. `after.ingressJournalCount - before.ingressJournalCount` must be
+ *    exactly 1 -- `ingress_journal`'s job is "record every verified
+ *    delivery attempt," not dedup (that lives one layer downstream at the
+ *    `send_events` insert). A replay that reaches the verified webhook
+ *    route is journaled AGAIN, and an increase of exactly one is the
+ *    CORRECT, expected outcome, never a failure. A delta of 0 means the
+ *    replay was never ingested (a real defect); any other delta is
+ *    reported with the actual before/after numbers rather than a bare
+ *    non-zero exit.
+ * 3. Every `workspace_daily_rollup` counter and every `campaigns` counter
+ *    must be byte-identical between `before` and `after` -- a dedup that
+ *    stops the duplicate ROW but still double-increments an aggregate
+ *    counter is a real defect this helper must catch, per D-12's own
+ *    "counted exactly once, at both layers" requirement. Comparing at
+ *    field granularity (not just "did state change") is what lets the
+ *    failure message name exactly which counter drifted and by how much.
+ *
+ * Returns `{ passed, reasons }`, never throws -- the CLI decides the exit
+ * code and how to print `reasons`.
+ */
+export function compareDedupSnapshot(before, after) {
+  const reasons = [];
+
+  const sendEventsCount = after.sendEventsCount;
+  if (sendEventsCount !== 1) {
+    if (sendEventsCount > 1) {
+      reasons.push(
+        `send_events count for the dedup key (workspace_id=${String(after.workspaceId)}, send_id=${String(after.sendId)}, event_type=${String(after.eventType)}, occurred_at=${String(after.occurredAt)}) is ${String(sendEventsCount)} -- duplicate rows survived the replay; expected exactly 1.`,
+      );
+    } else {
+      reasons.push(
+        `send_events count for the dedup key (workspace_id=${String(after.workspaceId)}, send_id=${String(after.sendId)}, event_type=${String(after.eventType)}, occurred_at=${String(after.occurredAt)}) is 0 -- the row is absent, not merely undeduplicated; expected exactly 1.`,
+      );
+    }
+  }
+
+  const journalDelta = after.ingressJournalCount - before.ingressJournalCount;
+  if (journalDelta !== 1) {
+    if (journalDelta === 0) {
+      reasons.push(
+        `ingress_journal row count for workspace ${String(after.workspaceId)} did not increase (before=${String(before.ingressJournalCount)}, after=${String(after.ingressJournalCount)}) -- the replay was never ingested.`,
+      );
+    } else {
+      reasons.push(
+        `ingress_journal row count for workspace ${String(after.workspaceId)} changed by ${String(journalDelta)} (before=${String(before.ingressJournalCount)}, after=${String(after.ingressJournalCount)}), not the expected increase of exactly 1 -- an increase of exactly one is the correct outcome, not a failure, so any other delta is reported as its own defect.`,
+      );
+    }
+  }
+
+  const ROLLUP_FIELDS = [
+    "sentCount",
+    "deliveredCount",
+    "openedCount",
+    "clickedCount",
+    "bouncedCount",
+    "unsubscribedCount",
+  ];
+  for (const field of ROLLUP_FIELDS) {
+    const beforeVal = before.rollup ? before.rollup[field] ?? null : null;
+    const afterVal = after.rollup ? after.rollup[field] ?? null : null;
+    if (beforeVal !== afterVal) {
+      reasons.push(
+        `workspace_daily_rollup.${field} changed from ${String(beforeVal)} to ${String(afterVal)} -- every rollup and campaign counter must be unchanged by a correctly-deduplicated replay.`,
+      );
+    }
+  }
+
+  const CAMPAIGN_FIELDS = [
+    "sentCount",
+    "failedCount",
+    "deliveredCount",
+    "openedCount",
+    "clickedCount",
+    "bouncedCount",
+    "unsubscribedCount",
+  ];
+  for (const field of CAMPAIGN_FIELDS) {
+    const beforeVal = before.campaignCounters ? before.campaignCounters[field] ?? null : null;
+    const afterVal = after.campaignCounters ? after.campaignCounters[field] ?? null : null;
+    if (beforeVal !== afterVal) {
+      reasons.push(
+        `campaigns.${field} changed from ${String(beforeVal)} to ${String(afterVal)} -- every rollup and campaign counter must be unchanged by a correctly-deduplicated replay.`,
+      );
+    }
+  }
+
+  return { passed: reasons.length === 0, reasons };
 }
 
 // ---------------------------------------------------------------------------
@@ -535,6 +674,195 @@ async function runEventCoverage(parsed) {
   return 0;
 }
 
+/**
+ * Phase 16 plan 04 (UAT-03/UAT-04, D-12): collects one dedup snapshot --
+ * the `send_events` count for the exact four-column dedup key, the
+ * workspace's total `ingress_journal` row count, the `workspace_daily_rollup`
+ * row for the UTC day of `occurred_at`, and the campaign counter columns for
+ * the campaign the send belongs to (`null` when the send carries no
+ * campaign, e.g. a flow-step send). Called identically from BOTH
+ * `--mode snapshot` (written to disk) and `--mode compare` (the "after"
+ * side, compared in-memory against the "before" side read from disk) --
+ * `compareDedupSnapshot` above is what gives the two calls different
+ * meaning, not this collection step.
+ *
+ * Scoped through `withTenant`/`withTenantTransaction` bound to `--workspace`,
+ * same as `runSendAttribution`/`runEventCoverage` above -- no new grant, no
+ * cross-tenant read.
+ */
+async function collectDedupSnapshot(client, parsed) {
+  // Dedup key is EXACTLY these four columns -- send_events_dedup_v2_idx
+  // (migration 0057, Phase 13 CMP-07/D-15). `sg_event_id` is a demoted,
+  // NOT NULL forensic-correlation column, deliberately excluded from the
+  // enforced uniqueness -- filtering on it here would test the wrong thing.
+  const { rows: sendEventsRows } = await client.query(
+    `SELECT count(*)::int AS count
+       FROM send_events
+      WHERE workspace_id = $1
+        AND send_id = $2
+        AND event_type = $3
+        AND occurred_at = $4::timestamptz`,
+    [parsed.workspace, parsed.sendId, parsed.eventType, parsed.occurredAt],
+  );
+  const sendEventsCount = sendEventsRows[0].count;
+
+  const { rows: journalRows } = await client.query(
+    `SELECT count(*)::int AS count FROM ingress_journal WHERE workspace_id = $1`,
+    [parsed.workspace],
+  );
+  const ingressJournalCount = journalRows[0].count;
+
+  const { rows: sendRows } = await client.query(`SELECT campaign_id FROM sends WHERE id = $1`, [
+    parsed.sendId,
+  ]);
+  const campaignId = sendRows[0]?.campaign_id ?? null;
+
+  // Phase 13's UTC day semantics (workspace-daily-rollup.ts, CMP-02): bucket
+  // by the SAME `AT TIME ZONE 'UTC'` cast the incremental/reconciliation
+  // writers use -- a bare `::date` cast would depend on this session's
+  // `TimeZone` GUC and could silently select the wrong day's row.
+  const { rows: rollupRows } = await client.query(
+    `SELECT sent_count, delivered_count, opened_count, clicked_count, bounced_count, unsubscribed_count
+       FROM workspace_daily_rollup
+      WHERE workspace_id = $1
+        AND day = ($2::timestamptz AT TIME ZONE 'UTC')::date`,
+    [parsed.workspace, parsed.occurredAt],
+  );
+  const rollupRow = rollupRows[0] ?? null;
+
+  let campaignCounters = null;
+  if (campaignId) {
+    const { rows: campaignRows } = await client.query(
+      `SELECT sent_count, failed_count, delivered_count, opened_count, clicked_count, bounced_count, unsubscribed_count
+         FROM campaigns
+        WHERE id = $1`,
+      [campaignId],
+    );
+    const c = campaignRows[0];
+    if (c) {
+      campaignCounters = {
+        sentCount: c.sent_count,
+        failedCount: c.failed_count,
+        deliveredCount: c.delivered_count,
+        openedCount: c.opened_count,
+        clickedCount: c.clicked_count,
+        bouncedCount: c.bounced_count,
+        unsubscribedCount: c.unsubscribed_count,
+      };
+    }
+  }
+
+  return {
+    workspaceId: parsed.workspace,
+    sendId: parsed.sendId,
+    eventType: parsed.eventType,
+    occurredAt: parsed.occurredAt,
+    sendEventsCount,
+    ingressJournalCount,
+    campaignId,
+    rollup: rollupRow
+      ? {
+          sentCount: rollupRow.sent_count,
+          deliveredCount: rollupRow.delivered_count,
+          openedCount: rollupRow.opened_count,
+          clickedCount: rollupRow.clicked_count,
+          bouncedCount: rollupRow.bounced_count,
+          unsubscribedCount: rollupRow.unsubscribed_count,
+        }
+      : null,
+    campaignCounters,
+    capturedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Runs the `dedup` subcommand (Phase 16 plan 04, UAT-03/UAT-04). In
+ * `--mode snapshot`, collects and writes a snapshot file. In
+ * `--mode compare`, reads that same file as the "before" side, collects a
+ * fresh "after" snapshot, and hands both to `compareDedupSnapshot`.
+ *
+ * The snapshot-file read happens FIRST, before any DATABASE_URL check or
+ * database access -- a missing or unparseable snapshot file is a usage
+ * error (exit 2), never a false pass, and this ordering is what lets that
+ * one failure mode be exercised by a plain `node` invocation with no
+ * database at all (mirrors this file's own "usage error, exit 2" contract
+ * for `parseArgs` failures, extended to this one runtime-only usage error
+ * that `parseArgs` itself cannot detect, since the path could be well-formed
+ * and merely point at a missing/corrupt file).
+ */
+async function runDedup(parsed) {
+  let beforeSnapshot = null;
+  if (parsed.mode === "compare") {
+    try {
+      beforeSnapshot = JSON.parse(readFileSync(parsed.snapshotPath, "utf8"));
+    } catch (err) {
+      console.error(
+        `uat-verify dedup: could not read/parse snapshot file at "${parsed.snapshotPath}" -- ${describeError(err)}. Compare mode requires a valid snapshot written by a prior --mode snapshot run.`,
+      );
+      return 2;
+    }
+  }
+
+  if (!process.env.DATABASE_URL) {
+    try {
+      process.loadEnvFile(resolveEnvPath());
+    } catch {
+      // No configuration file -- rely on already-exported environment
+      // variables (CI, containers: every variable is exported directly).
+    }
+  }
+
+  if (!process.env.DATABASE_URL) {
+    console.error(
+      "uat-verify: DATABASE_URL is required -- set it in the resolved env file or export it directly",
+    );
+    return 2;
+  }
+
+  // eslint-disable-next-line import-x/no-extraneous-dependencies
+  const { withTenant, withTenantTransaction, pool } = await import("@mega-crm/tenant-context");
+
+  let snapshot;
+  try {
+    snapshot = await withTenant(parsed.workspace, () =>
+      withTenantTransaction((client) => collectDedupSnapshot(client, parsed)),
+    );
+  } finally {
+    await pool.end();
+  }
+
+  if (parsed.mode === "snapshot") {
+    writeFileSync(parsed.snapshotPath, JSON.stringify(snapshot, null, 2));
+    console.log(`uat-verify dedup: snapshot written to ${parsed.snapshotPath}`);
+    console.log(parsed.json ? JSON.stringify(snapshot) : JSON.stringify(snapshot, null, 2));
+    return 0;
+  }
+
+  const result = compareDedupSnapshot(beforeSnapshot, snapshot);
+  if (parsed.json) {
+    console.log(JSON.stringify(result));
+  } else {
+    console.log(`dedup compare: ${result.passed ? "PASS" : "FAIL"}`);
+    for (const reason of result.reasons) {
+      console.log(`  ${reason}`);
+    }
+  }
+  // Anti-vacuous-pass discipline, same convention as the other subcommands.
+  console.log(
+    `send_events count for the dedup key: ${String(snapshot.sendEventsCount)}; ingress_journal delta: ${String(
+      snapshot.ingressJournalCount - beforeSnapshot.ingressJournalCount,
+    )}.`,
+  );
+
+  if (!result.passed) {
+    for (const reason of result.reasons) {
+      console.error(`FAIL: ${reason}`);
+    }
+    return 1;
+  }
+  return 0;
+}
+
 // ---------------------------------------------------------------------------
 // CLI -- guarded so importing this module for tests does not execute it.
 // ---------------------------------------------------------------------------
@@ -586,6 +914,17 @@ async function main() {
     let exitCode;
     try {
       exitCode = await runEventCoverage(parsed);
+    } catch (err) {
+      console.error("uat-verify: FAILED --", describeError(err));
+      exitCode = 1;
+    }
+    process.exit(exitCode);
+  }
+
+  if (parsed.subcommand === "dedup") {
+    let exitCode;
+    try {
+      exitCode = await runDedup(parsed);
     } catch (err) {
       console.error("uat-verify: FAILED --", describeError(err));
       exitCode = 1;
