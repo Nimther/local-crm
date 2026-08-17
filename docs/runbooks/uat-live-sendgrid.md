@@ -173,3 +173,120 @@ Ordered procedure — complete every step before running the final verification 
 6. **If the bounce arrives as a soft bounce or a deferral rather than a hard bounce (a 550-class rejection), stop and record that outcome.** This does NOT satisfy UAT-02 — do not retry blindly against another domain. Record it as a gap-closure item under D-16 for a later pass at this checkpoint.
 
 **Note:** this SendGrid account is shared across every tenant that has ever connected a key on it. Events for a sibling tenant's sends may transiently reach this platform's webhook endpoint during this procedure and be discarded by the existing sibling-drop path — that is expected, correct behavior (RESEARCH.md Pitfall 6), not a defect, and `event-coverage`'s tenant-scoped query never counts a discarded sibling event as UAT-02 evidence.
+
+## 12. Capturing the signed payload (plan 16-04, D-09)
+
+**Precondition:** plan 16-03's seams (`SENDGRID_BASE_URL`, `WEBHOOK_RAW_CAPTURE_WORKSPACE_ID`) must already be deployed to the production VPS via `scripts/deploy.sh`, and `WEBHOOK_RAW_CAPTURE_WORKSPACE_ID` must be set to the UAT workspace id (§3) in `MEGA_CRM_ENV_FILE`, with the `api` container restarted so the value is in effect (`process.env` is read directly at the request handler, not through `apps/api/src/env.ts`'s frozen zod schema — see 16-03-SUMMARY.md — but the api container's own process environment is still only refreshed on container start, so a restart is required after editing `MEGA_CRM_ENV_FILE`).
+
+**Do this in the SAME session as the replay (§13)** — the captured signature's timestamp has a limited freshness window (see §13's freshness note below); extracting the capture now and replaying it days later will fail for a reason that looks identical to a broken verifier.
+
+1. **Trigger a fresh webhook event for the UAT workspace.** Any of §8/§9/§11's sends produces one — the simplest is re-opening or re-clicking an already-delivered UAT message (produces `open`/`click`), or launching a fresh one-recipient campaign (produces `delivered`). Any single event type works for the replay's own purposes (D-09/D-11 do not require a specific event type) — reuse whichever is fastest to trigger live.
+2. **Extract the capture log line.** The primary path (fastest — no external round trip, and the operator is already on the host) is grepping the `api` container's own log buffer for plan 16-03's marker literal, exported as `WEBHOOK_RAW_CAPTURE_LOG_MARKER` (`apps/api/src/modules/webhooks/webhooks.routes.ts`):
+
+   ```bash
+   docker compose -f docker/docker-compose.prod.yml logs --no-color --tail 500 api | grep 'UAT16_WEBHOOK_RAW_CAPTURE'
+   ```
+
+   **Fallback**, if the line has already rotated past the container's local log buffer: run the same LogQL query pattern this project's own log-shipping runbook documents (`docs/runbooks/log-shipping-and-backstop-alerts.md`), scoped to the marker literal, in Grafana Cloud → Explore:
+
+   ```logql
+   {service="api"} |= "UAT16_WEBHOOK_RAW_CAPTURE"
+   ```
+
+3. **Parse the JSON log line** (both paths above emit one structured Pino line) and read off its three capture fields — named `rawBodyBase64`, `signatureHeaderValue` and `timestampHeaderValue` (16-03-SUMMARY.md; these names deliberately differ from the four-key fixture format below, chosen to bypass Pino's path-based redaction, not to obscure anything).
+4. **Assemble the four-key capture file** the replay harness (§13) and plan 16-05's committed fixture both read, mapping the log's field names onto the fixture's own key names, plus the endpoint's stored public key (read from the `webhook_endpoints` table for the UAT workspace, or from wherever the operator originally recorded it at provisioning time — §5):
+
+   ```json
+   {
+     "rawBodyBase64": "<rawBodyBase64 from the log line>",
+     "signature": "<signatureHeaderValue from the log line>",
+     "timestamp": "<timestampHeaderValue from the log line>",
+     "publicKey": "<the UAT workspace's webhook endpoint public key>"
+   }
+   ```
+
+   Save this to a scratch path first (e.g. `/tmp/uat16-capture.json`) — **do not** write directly to the repository fixture path yet. §13 step 10 below is the only point at which this file is saved into the repository, and only after the decode-and-inspect gate has passed.
+
+## 13. UAT-03/UAT-04 procedure — the freshness choreography (plan 16-04, D-11/D-12)
+
+**State the freshness window plainly before starting:** `WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS` (default 600 seconds, `apps/api/src/env.ts`) bounds how old the signature's own timestamp header may be, in EITHER direction, before the endpoint rejects the request. A stale replay is rejected with the **exact same** fail-closed 400 response as a bad signature (`apps/api/src/modules/webhooks/webhooks.routes.ts` — `isValid`/`isFresh` are combined into one indistinguishable rejection) — so a session that runs long between capture and replay looks **identical** to a genuinely broken verifier. Keep capture and replay inside one sitting, well within the window, and have the fallback below staged in advance rather than discovered mid-session.
+
+Ordered procedure — complete every step in sequence, without a long pause between steps 3 and 6:
+
+1. **Take the dedup snapshot BEFORE the replay.** Identify the send/event this session will replay (its `send_id`, `event_type`, `occurred_at` — from §12 step 1's trigger, or from a `send-attribution`/`event-coverage` lookup against it) and run:
+
+   ```bash
+   docker compose -f docker/docker-compose.prod.yml run --rm --no-deps \
+     -v "$(pwd)/scripts/uat-verify.mjs:/app/scripts/uat-verify.mjs:ro" \
+     api node scripts/uat-verify.mjs dedup \
+       --workspace <UAT_WORKSPACE_ID> \
+       --mode snapshot \
+       --snapshot /tmp/uat16-dedup-before.json \
+       --send-id <send_id> \
+       --event-type <event_type> \
+       --occurred-at <occurred_at, ISO-8601>
+   ```
+
+2. **Trigger the fresh event and extract the capture** (§12 steps 1-4 above), assembling `/tmp/uat16-capture.json`.
+3. **Replay byte-exactly**, from the same repo checkout `./scripts/deploy.sh` is run from, against the real public HTTPS endpoint (never localhost/loopback — D-09 requires the full stack: Caddy, the raw-body route, and ECDSA verification):
+
+   ```bash
+   npm run uat:replay -- --capture /tmp/uat16-capture.json --url https://<hostname>/webhooks/sendgrid/<pathToken>
+   ```
+
+   Expect a 2xx. `--flip-byte` is deferred to step 6 below — do not run it here; running the mutation first would journal a REJECTED delivery, which is not itself a problem, but keeps this ordering matched to the compare step's own expectation (exactly one accepted replay between the two snapshots).
+4. **Take the dedup snapshot AFTER the accepted replay and compare:**
+
+   ```bash
+   docker compose -f docker/docker-compose.prod.yml run --rm --no-deps \
+     -v "$(pwd)/scripts/uat-verify.mjs:/app/scripts/uat-verify.mjs:ro" \
+     api node scripts/uat-verify.mjs dedup \
+       --workspace <UAT_WORKSPACE_ID> \
+       --mode compare \
+       --snapshot /tmp/uat16-dedup-before.json \
+       --send-id <send_id> \
+       --event-type <event_type> \
+       --occurred-at <occurred_at, ISO-8601>
+   ```
+
+   Must exit `0`: `send_events` count for the dedup key is exactly 1, `ingress_journal`'s count increased by exactly 1 (the replay WAS journaled again — that is correct, not a defect, per RESEARCH.md Pitfall 4), and every `workspace_daily_rollup`/campaign counter is unchanged.
+5. **Confirm the replay was accepted, not merely journaled** — re-read step 3's HTTP status: it must be a genuine 2xx from the public endpoint, not a client-side timeout or a locally-cached response.
+6. **Run the flipped-byte replay** (D-11's negative check) against the SAME capture file:
+
+   ```bash
+   npm run uat:replay -- --capture /tmp/uat16-capture.json --url https://<hostname>/webhooks/sendgrid/<pathToken> --flip-byte 0
+   ```
+
+   Expect the endpoint's fail-closed response (400) — not a 2xx. Re-run step 4's compare command again: the `send_events` count for the SAME dedup key must still be exactly 1 (the rejected mutated body produced no new row), and the `ingress_journal` count must NOT have grown a second time (a rejected request never reaches `writeIngressJournal` — the route returns 400 before that point).
+7. **If any step above required widening the freshness tolerance** (the session ran long, or step 3's replay was rejected as stale rather than as a genuine signature failure):
+   1. Edit `WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS` in `MEGA_CRM_ENV_FILE` to a larger value (e.g. `3600`).
+   2. Restart the `api` container — required, because `apps/api/src/env.ts` parses this value once at process start into a frozen `env` object (`export const env = parsed.data`), not per-request; a running process never observes an edited env file until it restarts:
+      ```bash
+      docker compose -f docker/docker-compose.prod.yml up -d --force-recreate api
+      ```
+   3. Re-run steps 2-6 above.
+   4. **Restore the original tolerance value in `MEGA_CRM_ENV_FILE` and restart the `api` container again** — this is a required numbered step, not a closing remark:
+      ```bash
+      docker compose -f docker/docker-compose.prod.yml up -d --force-recreate api
+      ```
+   5. Confirm the restore took effect by reading the value back — e.g. `docker compose -f docker/docker-compose.prod.yml exec api node -e "console.log(process.env.WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS)"` should print the original value (or nothing, if it was unset before), never the widened one.
+8. **Decode and read the captured batch before saving it anywhere in the repository.** Confirm it contains only events belonging to the UAT workspace's own sends, addressed to the designated throwaway UAT recipient (§2/§6) — no sibling-workspace event, no platform system-mail event, no third party's address (this SendGrid account is shared and fans events out across every connected tenant, RESEARCH.md Pitfall 6 — this inspection is a real gate, not a formality). If the batch contains anything else, discard it and capture an isolated batch during a quiet window instead — do not proceed to step 10 with an uninspected or mixed-tenant capture.
+9. **Record the following** — plan 16-07's UAT report cites them:
+
+   ```
+   UAT03_04_SEND_ID       = <fill in>
+   UAT03_04_EVENT_TYPE    = <fill in>
+   UAT03_04_OCCURRED_AT   = <fill in, ISO-8601>
+   UAT03_04_REPLAY_HTTP_STATUS       = <fill in — step 3's status, expect 2xx>
+   UAT03_04_FLIP_BYTE_HTTP_STATUS    = <fill in — step 6's status, expect 400>
+   UAT03_04_DEDUP_COMPARE_EXIT_CODE  = <fill in — step 4's re-run after step 6, expect 0>
+   UAT03_04_TOLERANCE_FALLBACK_USED  = <yes/no>
+   ```
+
+10. **Only after step 8's inspection has passed**, save the capture file to the repository fixture path with exactly its four keys:
+
+    ```bash
+    cp /tmp/uat16-capture.json apps/api/src/modules/webhooks/__tests__/fixtures/uat-signed-payload.json
+    ```
+
+    This file is what makes plan 16-05 autonomous — without it, that plan cannot run.
