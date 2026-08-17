@@ -48,7 +48,17 @@ import path from "node:path";
 import { resolveEnvPath } from "./env-path.mjs";
 
 /** Subcommands this CLI accepts today. Later plans append to this list. */
-const ACCEPTED_SUBCOMMANDS = ["send-attribution"];
+const ACCEPTED_SUBCOMMANDS = ["send-attribution", "event-coverage"];
+
+/**
+ * Boolean (value-less) flags across every subcommand's parser below. Any
+ * `--xxx` NOT in this set is treated as taking the following argv token as
+ * its value (plan 16-01's original convention) -- `event-coverage`'s
+ * `--require-campaign`/`--require-flow-step` switches are added here rather
+ * than duplicating the parsing loop, so plan 16-01's `--json` handling stays
+ * unchanged.
+ */
+const BOOLEAN_FLAGS = new Set(["json", "require-campaign", "require-flow-step"]);
 
 /**
  * Parses `process.argv.slice(2)`-shaped argv into a subcommand-specific
@@ -69,12 +79,13 @@ export function parseArgs(argv) {
   const flags = {};
   for (let i = 0; i < rest.length; i++) {
     const arg = rest[i];
-    if (arg === "--json") {
-      flags.json = true;
-      continue;
-    }
     if (arg.startsWith("--")) {
-      flags[arg.slice(2)] = rest[i + 1];
+      const name = arg.slice(2);
+      if (BOOLEAN_FLAGS.has(name)) {
+        flags[name] = true;
+        continue;
+      }
+      flags[name] = rest[i + 1];
       i++;
       continue;
     }
@@ -106,9 +117,23 @@ export function parseArgs(argv) {
     };
   }
 
+  if (subcommand === "event-coverage") {
+    if (!flags.workspace) {
+      throw new Error("uat-verify event-coverage: --workspace <uuid> is required");
+    }
+    return {
+      subcommand,
+      workspace: flags.workspace,
+      since: flags.since ?? null,
+      requireCampaign: Boolean(flags["require-campaign"]),
+      requireFlowStep: Boolean(flags["require-flow-step"]),
+      json: Boolean(flags.json),
+    };
+  }
+
   // Unreachable given the ACCEPTED_SUBCOMMANDS guard above -- kept so the
-  // dispatch shape stays extensible for 16-02/16-04/16-06's subcommands
-  // without restructuring this function's control flow when they land.
+  // dispatch shape stays extensible for 16-04/16-06's subcommands without
+  // restructuring this function's control flow when they land.
   throw new Error(`uat-verify: subcommand "${subcommand}" has no flag parser registered`);
 }
 
@@ -173,6 +198,130 @@ export function formatReport(observed, { json = false } = {}) {
   lines.push(`observed ${String(events.length)} event(s):`);
   for (const e of events) {
     lines.push(`  ${e.eventType} at ${e.occurredAt}`);
+  }
+  return lines.join("\n");
+}
+
+/**
+ * Phase 16 plan 02 (UAT-02). The four SendGrid event types this plan's
+ * checkpoint must observe live, spelled EXACTLY as
+ * `apps/worker/src/queues/webhook-events.worker.ts`'s `extractEventRow`
+ * stores them into `send_events.event_type` (`event.event`, SendGrid's own
+ * wire field, stored VERBATIM -- never the normalized/human labels
+ * "opened"/"clicked"/"bounced"). Cross-checked against
+ * `apps/api/src/modules/webhooks/sendgrid-webhook-provision.ts`'s
+ * `EVENT_FLAGS`, which provisions the identical wire spelling
+ * (`delivered`, `bounce`, `open`, `click`). A hard-coded string anywhere
+ * else in this file would silently drift from this source; this is the one
+ * named constant every event-coverage check reads from.
+ */
+const EXPECTED_EVENT_TYPES = ["delivered", "open", "click", "bounce"];
+
+/**
+ * Pure summarisation over already-fetched `send_events` JOIN `sends` rows
+ * (`{ eventType, occurredAt, sendId, campaignId, nodeId }`). No I/O, no
+ * database -- unit-testable in the `scripts/` lane exactly like
+ * `assertExpectations` above. `options.since` (an ISO-8601 string) excludes
+ * rows whose `occurredAt` precedes it; `options.requireCampaign` /
+ * `options.requireFlowStep` gate the result on at least one observed event
+ * attributing to a send carrying a non-null `campaignId` / `nodeId`
+ * respectively -- the flow "step" reference is `nodeId` (not `flowRunId`):
+ * a flow send with a set `flowRunId` but a null `nodeId` is the exact
+ * silent attribution gap `--require-flow-step` exists to catch
+ * (packages/db/src/schema/sends.ts).
+ */
+export function summariseEventCoverage(rows, options = {}) {
+  const { since = null, requireCampaign = false, requireFlowStep = false } = options;
+
+  const sinceMs = since ? new Date(since).getTime() : null;
+  const filteredRows = sinceMs === null ? rows : rows.filter((r) => new Date(r.occurredAt).getTime() >= sinceMs);
+
+  const byType = new Map();
+  const campaignAttributedSendIds = new Set();
+  const flowStepAttributedSendIds = new Set();
+  const unattributedCampaignSendIds = new Set();
+  const unattributedFlowStepSendIds = new Set();
+
+  for (const row of filteredRows) {
+    if (!byType.has(row.eventType)) {
+      byType.set(row.eventType, { count: 0, sendId: row.sendId });
+    }
+    byType.get(row.eventType).count += 1;
+
+    if (row.campaignId) {
+      campaignAttributedSendIds.add(row.sendId);
+    } else {
+      unattributedCampaignSendIds.add(row.sendId);
+    }
+    if (row.nodeId) {
+      flowStepAttributedSendIds.add(row.sendId);
+    } else {
+      unattributedFlowStepSendIds.add(row.sendId);
+    }
+  }
+
+  const observed = EXPECTED_EVENT_TYPES.filter((type) => byType.has(type)).map((type) => ({
+    eventType: type,
+    ...byType.get(type),
+  }));
+  // Any observed type outside the expected set is reported too, never
+  // silently dropped -- unlikely (EVENT_FLAGS is the provisioning
+  // superset), but a summarisation that hides an unrecognised row would
+  // itself be a vacuous-pass risk.
+  for (const [type, info] of byType) {
+    if (!EXPECTED_EVENT_TYPES.includes(type)) {
+      observed.push({ eventType: type, ...info });
+    }
+  }
+
+  const missing = EXPECTED_EVENT_TYPES.filter((type) => !byType.has(type));
+
+  const hasCampaignAttribution = campaignAttributedSendIds.size > 0;
+  const hasFlowStepAttribution = flowStepAttributedSendIds.size > 0;
+
+  const unattributed = {};
+  if (requireCampaign && !hasCampaignAttribution) {
+    unattributed.campaign = [...unattributedCampaignSendIds];
+  }
+  if (requireFlowStep && !hasFlowStepAttribution) {
+    unattributed.flowStep = [...unattributedFlowStepSendIds];
+  }
+
+  const pass =
+    missing.length === 0 &&
+    (!requireCampaign || hasCampaignAttribution) &&
+    (!requireFlowStep || hasFlowStepAttribution);
+
+  return { pass, observed, missing, unattributed };
+}
+
+/**
+ * Renders a `summariseEventCoverage` result as either a human-readable
+ * report or, under `--json`, a single `JSON.parse`-able line. Pure --
+ * mirrors `formatReport`'s json/human split above.
+ */
+export function formatEventCoverageReport(result, { json = false } = {}) {
+  if (json) {
+    return JSON.stringify(result);
+  }
+
+  const lines = [];
+  lines.push(`event-coverage: ${result.pass ? "PASS" : "FAIL"}`);
+  for (const o of result.observed) {
+    lines.push(`  ${o.eventType}: ${String(o.count)} observed, attributed to send ${o.sendId ?? "(none)"}`);
+  }
+  if (result.missing.length > 0) {
+    lines.push(`missing event type(s): ${result.missing.join(", ")}`);
+  }
+  if (result.unattributed.campaign) {
+    lines.push(
+      `no campaign-attributed send observed (unattributed send id(s): ${result.unattributed.campaign.join(", ")})`,
+    );
+  }
+  if (result.unattributed.flowStep) {
+    lines.push(
+      `no flow-step-attributed send observed (unattributed send id(s): ${result.unattributed.flowStep.join(", ")})`,
+    );
   }
   return lines.join("\n");
 }
@@ -301,6 +450,91 @@ async function runSendAttribution(parsed) {
   return 0;
 }
 
+/**
+ * Runs the `event-coverage` subcommand (Phase 16 plan 02, UAT-02): every
+ * `send_events` row for this workspace, joined to `sends` for its campaign
+ * and flow-step (`node_id`) reference, summarised by `summariseEventCoverage`.
+ * Scoped through `withTenant`/`withTenantTransaction` exactly like
+ * `runSendAttribution` above -- no new grant, no cross-tenant read (T-16-06).
+ *
+ * The JOIN's `send_id IS NOT NULL` guard mirrors D-15 (webhook worker,
+ * migration-era note): a `send_events` row with no resolved send can never
+ * carry campaign/flow-step attribution and is out of scope for this
+ * subcommand's own truths (attribution, not raw event volume).
+ */
+async function runEventCoverage(parsed) {
+  if (!process.env.DATABASE_URL) {
+    try {
+      process.loadEnvFile(resolveEnvPath());
+    } catch {
+      // No configuration file -- rely on already-exported environment
+      // variables (CI, containers: every variable is exported directly).
+    }
+  }
+
+  if (!process.env.DATABASE_URL) {
+    console.error(
+      "uat-verify: DATABASE_URL is required -- set it in the resolved env file or export it directly",
+    );
+    return 2;
+  }
+
+  // eslint-disable-next-line import-x/no-extraneous-dependencies
+  const { withTenant, withTenantTransaction, pool } = await import("@mega-crm/tenant-context");
+
+  let rows;
+  try {
+    rows = await withTenant(parsed.workspace, () =>
+      withTenantTransaction(async (client) => {
+        const { rows: joined } = await client.query(
+          `SELECT se.event_type, se.occurred_at, se.send_id, s.campaign_id, s.node_id
+             FROM send_events se
+             JOIN sends s ON s.id = se.send_id
+            WHERE se.send_id IS NOT NULL
+            ORDER BY se.occurred_at ASC`,
+        );
+        return joined.map((r) => ({
+          eventType: r.event_type,
+          occurredAt: r.occurred_at,
+          sendId: r.send_id,
+          campaignId: r.campaign_id,
+          nodeId: r.node_id,
+        }));
+      }),
+    );
+  } finally {
+    await pool.end();
+  }
+
+  const result = summariseEventCoverage(rows, {
+    since: parsed.since,
+    requireCampaign: parsed.requireCampaign,
+    requireFlowStep: parsed.requireFlowStep,
+  });
+
+  console.log(formatEventCoverageReport(result, { json: parsed.json }));
+  // Anti-vacuous-pass discipline, same convention as runSendAttribution.
+  console.log(`observed ${String(rows.length)} send_events row(s) with a resolved send.`);
+
+  if (!result.pass) {
+    if (result.missing.length > 0) {
+      console.error(`FAIL: missing event type(s): ${result.missing.join(", ")}`);
+    }
+    if (result.unattributed.campaign) {
+      console.error(
+        `FAIL: no campaign-attributed send observed among: ${result.unattributed.campaign.join(", ")}`,
+      );
+    }
+    if (result.unattributed.flowStep) {
+      console.error(
+        `FAIL: no flow-step-attributed send observed among: ${result.unattributed.flowStep.join(", ")}`,
+      );
+    }
+    return 1;
+  }
+  return 0;
+}
+
 // ---------------------------------------------------------------------------
 // CLI -- guarded so importing this module for tests does not execute it.
 // ---------------------------------------------------------------------------
@@ -341,6 +575,17 @@ async function main() {
     let exitCode;
     try {
       exitCode = await runSendAttribution(parsed);
+    } catch (err) {
+      console.error("uat-verify: FAILED --", describeError(err));
+      exitCode = 1;
+    }
+    process.exit(exitCode);
+  }
+
+  if (parsed.subcommand === "event-coverage") {
+    let exitCode;
+    try {
+      exitCode = await runEventCoverage(parsed);
     } catch (err) {
       console.error("uat-verify: FAILED --", describeError(err));
       exitCode = 1;
