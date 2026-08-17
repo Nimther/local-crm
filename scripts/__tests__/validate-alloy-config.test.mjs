@@ -186,3 +186,16 @@ describe("in-container path cannot drift from the compose service's own declarat
     expect(readFileSync(path.join(REPO_ROOT, ALLOY_CONFIG_REL), "utf8").length).toBeGreaterThan(0);
   });
 });
+
+describe("wiring lock -- the gate cannot silently become advisory (Task 3)", () => {
+  it("package.json declares the verify:alloy-config script pointing at this gate", () => {
+    const pkg = JSON.parse(readFileSync(path.join(REPO_ROOT, "package.json"), "utf8"));
+    expect(pkg.scripts?.["verify:alloy-config"]).toBe("node scripts/validate-alloy-config.mjs");
+  });
+
+  it(".github/workflows/ci.yml's static job runs verify:alloy-config with ALLOY_VALIDATE_REQUIRE_BINARY set", () => {
+    const ciText = readFileSync(path.join(REPO_ROOT, ".github/workflows/ci.yml"), "utf8");
+    expect(ciText).toMatch(/run:\s*npm run verify:alloy-config/);
+    expect(ciText).toMatch(/ALLOY_VALIDATE_REQUIRE_BINARY:\s*["']1["']/);
+  });
+});

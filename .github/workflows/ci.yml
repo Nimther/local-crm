@@ -143,6 +143,28 @@ jobs:
       - name: Production compose invariants
         run: npm run verify:prod-compose
 
+      # Phase 15 gap closure 15-22 (OPS-10, G-15-4): the machine half of
+      # "docker/alloy/config.alloy actually parses as Alloy" -- 15-17-SUMMARY.md
+      # pre-flagged that no automated check anywhere in this repository ever
+      # ran a real Alloy binary against this file, and the committed file
+      # shipped with an illegal `#` comment token that restart-looped the
+      # production sidecar and silently stopped all log delivery. This step
+      # runs the SAME image reference docker-compose.prod.yml pins for the
+      # `alloy` service (resolved at run time, never restated), inside
+      # --network none with a single read-only mount -- no Grafana Cloud
+      # credential is ever present here.
+      #
+      # ALLOY_VALIDATE_REQUIRE_BINARY=1 is set here deliberately: this
+      # ubuntu runner has a Docker daemon, so the real parser runs on every
+      # CI run. Without this variable, a runner that lost Docker would
+      # silently degrade to the static scan alone and this gate would quietly
+      # stop doing the one thing it exists for -- a real binary parse. This
+      # step pulls the pinned grafana/alloy vendor image on a cold runner.
+      - name: Alloy config gate (OPS-10)
+        env:
+          ALLOY_VALIDATE_REQUIRE_BINARY: "1"
+        run: npm run verify:alloy-config
+
       # Phase 14 plan 13 (DB-14 SPECIFICATION.md filing gate): the machine
       # half of .claude/CLAUDE.md's "a new secret must be recorded in the
       # same change" rule for the secrets section specifically -- every
