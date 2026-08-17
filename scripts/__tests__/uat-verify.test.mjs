@@ -8,7 +8,13 @@
 
 import { describe, expect, it } from "vitest";
 
-import { assertExpectations, formatReport, parseArgs } from "../uat-verify.mjs";
+import {
+  assertExpectations,
+  formatEventCoverageReport,
+  formatReport,
+  parseArgs,
+  summariseEventCoverage,
+} from "../uat-verify.mjs";
 
 describe("parseArgs", () => {
   it("rejects an invocation with no subcommand, naming the accepted set", () => {
@@ -46,6 +52,29 @@ describe("parseArgs", () => {
     const parsed = parseArgs(["send-attribution", "--workspace", "ws-1", "--message-id", "sg-msg-1"]);
     expect(parsed.sendId).toBeNull();
     expect(parsed.messageId).toBe("sg-msg-1");
+  });
+
+  it("lists event-coverage among the accepted subcommands when the subcommand is missing", () => {
+    expect(() => parseArgs([])).toThrowError(/event-coverage/);
+  });
+
+  it("rejects an event-coverage invocation missing --workspace", () => {
+    expect(() => parseArgs(["event-coverage"])).toThrowError(/--workspace/);
+  });
+
+  it("parses event-coverage's boolean flags without consuming the next token as their value", () => {
+    const parsed = parseArgs([
+      "event-coverage",
+      "--workspace",
+      "ws-1",
+      "--require-campaign",
+      "--require-flow-step",
+      "--since",
+      "2026-01-01T00:00:00Z",
+    ]);
+    expect(parsed.requireCampaign).toBe(true);
+    expect(parsed.requireFlowStep).toBe(true);
+    expect(parsed.since).toBe("2026-01-01T00:00:00Z");
   });
 });
 
@@ -112,5 +141,104 @@ describe("formatReport", () => {
     expect(parsed.sgMessageId).toBe("sg-1");
     expect(parsed.status).toBe("sent");
     expect(parsed.events[0].eventType).toBe("delivered");
+  });
+});
+
+// Phase 16 plan 02 (UAT-02): summariseEventCoverage/formatEventCoverageReport
+// are the pure helpers behind the `event-coverage` subcommand -- exercised
+// here with no database, same discipline as send-attribution's helpers
+// above. Rows are shaped exactly like the query's mapped output:
+// { eventType, occurredAt, sendId, campaignId, nodeId }.
+describe("summariseEventCoverage", () => {
+  const allFourRows = [
+    { eventType: "delivered", occurredAt: "2026-01-01T00:00:00Z", sendId: "s1", campaignId: "camp-1", nodeId: null },
+    { eventType: "open", occurredAt: "2026-01-01T00:01:00Z", sendId: "s1", campaignId: "camp-1", nodeId: null },
+    { eventType: "click", occurredAt: "2026-01-01T00:02:00Z", sendId: "s1", campaignId: "camp-1", nodeId: null },
+    { eventType: "bounce", occurredAt: "2026-01-01T00:03:00Z", sendId: "s2", campaignId: null, nodeId: null },
+  ];
+
+  it("returns a passing result with an empty missing list when rows cover all four expected types", () => {
+    const result = summariseEventCoverage(allFourRows, {});
+    expect(result.pass).toBe(true);
+    expect(result.missing).toEqual([]);
+  });
+
+  it("returns a failing result naming exactly the one missing type when rows are missing it", () => {
+    const rowsMissingBounce = allFourRows.filter((r) => r.eventType !== "bounce");
+    const result = summariseEventCoverage(rowsMissingBounce, {});
+    expect(result.pass).toBe(false);
+    expect(result.missing).toEqual(["bounce"]);
+  });
+
+  it("returns a failing result naming all four types as missing when given zero rows, never a pass", () => {
+    const result = summariseEventCoverage([], {});
+    expect(result.pass).toBe(false);
+    expect(result.missing).toEqual(["delivered", "open", "click", "bounce"]);
+  });
+
+  it("with requireCampaign, fails naming the unattributed send id when every observed send has a null campaign reference", () => {
+    const rowsNoCampaign = allFourRows.map((r) => ({ ...r, campaignId: null }));
+    const result = summariseEventCoverage(rowsNoCampaign, { requireCampaign: true });
+    expect(result.pass).toBe(false);
+    expect(result.unattributed.campaign).toEqual(expect.arrayContaining(["s1", "s2"]));
+  });
+
+  it("with requireFlowStep, fails naming the unattributed send id when every observed send has a null flow step reference", () => {
+    const result = summariseEventCoverage(allFourRows, { requireFlowStep: true });
+    expect(result.pass).toBe(false);
+    expect(result.unattributed.flowStep).toEqual(expect.arrayContaining(["s1", "s2"]));
+  });
+
+  it("with both requireCampaign and requireFlowStep, passes only when at least one campaign-attributed send AND at least one flow-step-attributed send are present", () => {
+    const rows = [
+      { eventType: "delivered", occurredAt: "2026-01-01T00:00:00Z", sendId: "camp-send", campaignId: "camp-1", nodeId: null },
+      { eventType: "open", occurredAt: "2026-01-01T00:01:00Z", sendId: "flow-send", campaignId: null, nodeId: "node-1" },
+      { eventType: "click", occurredAt: "2026-01-01T00:02:00Z", sendId: "flow-send", campaignId: null, nodeId: "node-1" },
+      { eventType: "bounce", occurredAt: "2026-01-01T00:03:00Z", sendId: "camp-send", campaignId: "camp-1", nodeId: null },
+    ];
+    const result = summariseEventCoverage(rows, { requireCampaign: true, requireFlowStep: true });
+    expect(result.pass).toBe(true);
+    expect(result.unattributed).toEqual({});
+  });
+
+  it("--since excludes rows whose occurred_at precedes the given instant", () => {
+    const rowsWithOneStale = [
+      { eventType: "delivered", occurredAt: "2025-01-01T00:00:00Z", sendId: "old-send", campaignId: null, nodeId: null },
+      ...allFourRows,
+    ];
+    const result = summariseEventCoverage(rowsWithOneStale, { since: "2026-01-01T00:00:00Z" });
+    expect(result.pass).toBe(true);
+    expect(result.observed.find((o) => o.eventType === "delivered").sendId).not.toBe("old-send");
+  });
+
+  it("reports, per observed event type, the count and the send id it was attributed to", () => {
+    const rows = [...allFourRows, { eventType: "delivered", occurredAt: "2026-01-01T00:04:00Z", sendId: "s3", campaignId: null, nodeId: null }];
+    const result = summariseEventCoverage(rows, {});
+    const delivered = result.observed.find((o) => o.eventType === "delivered");
+    expect(delivered.count).toBe(2);
+    expect(delivered.sendId).toBeDefined();
+  });
+});
+
+describe("formatEventCoverageReport", () => {
+  it("renders a line per observed event type with its count and attributed send id", () => {
+    const result = {
+      pass: true,
+      observed: [{ eventType: "delivered", count: 1, sendId: "s1" }],
+      missing: [],
+      unattributed: {},
+    };
+    const text = formatEventCoverageReport(result);
+    expect(text).toContain("delivered");
+    expect(text).toContain("s1");
+    expect(text).toContain("PASS");
+  });
+
+  it("under --json emits parseable JSON carrying the same fields", () => {
+    const result = { pass: false, observed: [], missing: ["bounce"], unattributed: {} };
+    const text = formatEventCoverageReport(result, { json: true });
+    const parsed = JSON.parse(text);
+    expect(parsed.pass).toBe(false);
+    expect(parsed.missing).toEqual(["bounce"]);
   });
 });
