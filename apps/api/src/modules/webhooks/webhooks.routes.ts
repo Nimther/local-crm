@@ -5,6 +5,15 @@ import { findWebhookEndpointByToken } from "./webhook-endpoint.repository.js";
 import { verifyWebhookSignature, isWebhookTimestampFresh } from "./signature-verify.js";
 import { enqueueWebhookBatch } from "./enqueue.js";
 import { env } from "../../env.js";
+import { logger } from "../../logger.js";
+
+/**
+ * Phase 16 (D-09): the fixed, greppable marker the capture log line below
+ * carries in its message -- plan 16-04's operator extracts the capture with
+ * a `docker compose logs | grep` on exactly this literal, so it must stay
+ * stable (recorded verbatim in 16-03-SUMMARY.md).
+ */
+export const WEBHOOK_RAW_CAPTURE_LOG_MARKER = "UAT16_WEBHOOK_RAW_CAPTURE";
 
 /**
  * Public SendGrid Event Webhook receiver (WBHK-01, D-14/D-16). Registered
@@ -127,6 +136,50 @@ export async function registerWebhookRoutes(fastify: FastifyInstance): Promise<v
         // stale/future/malformed/missing timestamp all take this SAME
         // return -- no JSON.parse, no enqueue, no distinguishing message.
         return reply.code(400).send();
+      }
+
+      // Phase 16 (D-09): raw-payload capture -- strictly AFTER both gates
+      // above have passed (never earlier "to catch everything just in
+      // case", T-16-12) and strictly BEFORE the JSON.parse below (so the
+      // captured bytes are always the exact, already-verified wire bytes,
+      // never a re-serialised/parsed form -- `ingress_journal` stores the
+      // latter and therefore cannot be UAT-03's replay source, RESEARCH.md
+      // Pattern 3). Read directly from `process.env`, NOT through
+      // `apps/api/src/env.ts`'s frozen zod-parsed `env` object -- see
+      // 16-03-SUMMARY.md for the placement decision (a UAT-session-scoped
+      // toggle must be flippable within a single running process, matching
+      // this file's own request-time read pattern rather than a boot-time
+      // schema value). Scoped by an EXACT workspace-id match (never a
+      // prefix/list/boolean, T-16-11) and default-off; an empty string
+      // counts as absent. Adds no branch that changes any response an
+      // external caller can observe (T-16-13) -- every codepath after this
+      // block runs identically whether or not the capture fired.
+      const captureWorkspaceId = process.env.WEBHOOK_RAW_CAPTURE_WORKSPACE_ID;
+      if (
+        captureWorkspaceId &&
+        captureWorkspaceId.length > 0 &&
+        captureWorkspaceId === endpoint.workspaceId
+      ) {
+        // Field names deliberately avoid every REDACTION_RULES.keyRules name
+        // (packages/redaction/src/rules.ts) -- `rawBodyBase64`,
+        // `signatureHeaderValue`, `timestampHeaderValue` match none of
+        // `token`/`secret`/`email`/etc, so Pino's `PINO_REDACT_OPTIONS`
+        // field-path redaction never touches this line and the base64
+        // payload survives fully decodable for UAT-03's byte-exact replay.
+        // Pino's `redact` option is a PATH-based mechanism only (no
+        // value-pattern matching on a structured log call, unlike
+        // `scrub()`'s freeform-payload walk), so this finding does not
+        // depend on the base64 encoding itself -- it is a consequence of the
+        // chosen field names, recorded here and in 16-03-SUMMARY.md.
+        logger.info(
+          {
+            rawBodyBase64: rawBody.toString("base64"),
+            signatureHeaderValue: signature,
+            timestampHeaderValue: timestamp,
+            workspaceId: endpoint.workspaceId,
+          },
+          `${WEBHOOK_RAW_CAPTURE_LOG_MARKER} verified raw webhook payload captured for the configured UAT capture workspace`
+        );
       }
 
       let events: unknown[];
