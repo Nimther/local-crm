@@ -1,0 +1,16 @@
+// This line comment names the rejected character in prose: '#' (U+0023) is
+// not a valid Alloy comment token, only // and /* */ are.
+/* This block comment also names the rejected character: '#' must never
+   appear as a comment marker in this file. */
+
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+// A quoted string value legitimately containing the rejected character
+// must not trip the scanner either.
+loki.write "grafana_cloud" {
+  endpoint {
+    url = "https://example.invalid/push#fragment"
+  }
+}

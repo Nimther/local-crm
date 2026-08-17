@@ -1,0 +1,3 @@
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock" # trailing hash comment, illegal in Alloy
+}
