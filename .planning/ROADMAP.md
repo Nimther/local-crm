@@ -670,7 +670,7 @@ Plans:
   3. A genuinely signed SendGrid webhook payload passes signature verification through the full HTTP stack, and a redelivery of that same payload is counted exactly once.
   4. A real SendGrid 429 or transient error defers only the affected tenant's sends and resolves without duplicate or lost mail.
 
-**Plans**: 1/7 plans executed
+**Plans**: 3/7 plans executed
 
 Plans:
 **Wave 1**
@@ -679,8 +679,8 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 16-02-PLAN.md — Live opened/clicked/bounced with campaign and flow-step attribution (UAT-02)
-- [ ] 16-03-PLAN.md — SENDGRID_BASE_URL seam + raw webhook capture + SPECIFICATION filing (UAT-03, UAT-05)
+- [x] 16-02-PLAN.md — Live opened/clicked/bounced with campaign and flow-step attribution (UAT-02)
+- [x] 16-03-PLAN.md — SENDGRID_BASE_URL seam + raw webhook capture + SPECIFICATION filing (UAT-03, UAT-05)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -769,7 +769,7 @@ Phase 9 has no dependents and may be scheduled in parallel at any point after Ph
 | 13. Compliance & Analytics Integrity | v1.1 | 16/16 | Complete    | 2026-08-12 |
 | 14. Deployment & Database Durability | v1.1 | 14/14 | Complete    | 2026-08-14 |
 | 15. Observability, Alerting & Frontend Resilience | v1.1 | 22/22 | Complete    | 2026-08-17 |
-| 16. Live SendGrid Verification | v1.1 | 1/7 | In Progress|  |
+| 16. Live SendGrid Verification | v1.1 | 3/7 | In Progress|  |
 
 ---
 *Roadmap for v1.1 created: 2026-07-27*
