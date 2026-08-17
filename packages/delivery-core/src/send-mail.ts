@@ -117,6 +117,26 @@ export interface SendTenantMailResult {
 export const SENDGRID_TIMEOUT_MS = 20_000;
 
 /**
+ * `sendTenantMailV3`'s target URL (Phase 16, D-06/D-07) -- versioned
+ * constant, same Phase 9 D-12 convention as `SENDGRID_TIMEOUT_MS` above (a
+ * change must be visible in a diff, never silently absorbed into a library
+ * default). The default -- and the ONLY value any production boot ever
+ * uses -- is the real SendGrid `mail/send` endpoint. `SENDGRID_BASE_URL`
+ * exists solely for Phase 16's fault-injection UAT session, where a real
+ * HTTP 429 must reach this production fetch path without genuinely
+ * exceeding SendGrid's own rate ceiling (D-06). An empty-string value is
+ * treated as absent -- an accidentally-blanked env line must not
+ * half-enable this seam. Only this call site reads the override; the
+ * tenant key-check client (`apps/api/src/modules/tenancy/sendgrid-client.ts`)
+ * and the platform system-mail sender are structurally separate files and
+ * never read it.
+ */
+export const SENDGRID_MAIL_SEND_URL: string =
+  process.env.SENDGRID_BASE_URL && process.env.SENDGRID_BASE_URL.length > 0
+    ? process.env.SENDGRID_BASE_URL
+    : "https://api.sendgrid.com/v3/mail/send";
+
+/**
  * Redacts the tenant's decrypted API key from any thrown/logged error
  * message or stack (T-04-03-04) -- the key must never end up in logs even
  * transitively via an error object.
@@ -150,7 +170,7 @@ export async function sendTenantMailV3(
   payload: SendGridMailSendRequest
 ): Promise<SendTenantMailResult> {
   try {
-    const res = await fetch("https://api.sendgrid.com/v3/mail/send", {
+    const res = await fetch(SENDGRID_MAIL_SEND_URL, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
