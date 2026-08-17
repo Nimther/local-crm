@@ -156,7 +156,7 @@ Ordered procedure — complete every step before running the final verification 
 1. **Fire the flow trigger** (§9 step 5) and confirm a flow-step send was dispatched (§9 step 7).
 2. **Open the received mail in the operator's real mail client** — not a preview pane with images blocked; enable images for this message if that client blocks them by default. This is what produces the `open` event; no automated step can substitute for it.
 3. **Click the UAT Dynamic Template's visible link** (§2) and confirm it resolves. This is what produces the `click` event.
-4. **Send to the chosen bounce address** (§10) using the same BYO-key campaign or a one-off send, and wait for SendGrid's delivery outcome.
+4. **Send to the chosen bounce address through the platform, not directly from SendGrid or a mail client** — `event-coverage`'s query only sees `send_events` rows that resolve to a `sends` row (`JOIN sends` + `send_id IS NOT NULL`); a bounce induced outside the platform has no `send_id` and will never appear in the report, silently failing as "missing: bounce" for a reason this runbook would otherwise never explain. Create a second UAT contact whose email is the chosen bounce address (§10) and address a one-recipient campaign at it, same shape as §6 step 2 (reusing the UAT Dynamic Template). Launch that campaign and wait for SendGrid's delivery outcome.
 5. Run the verification command (§7's invocation form) with the `event-coverage` subcommand:
 
    ```bash
