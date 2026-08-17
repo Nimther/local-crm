@@ -104,3 +104,72 @@ Add `--json` for a machine-parseable single-line report instead of the human-rea
    ```
 
 7. If any step above required a command not documented in this runbook, that is a defect in **this runbook**, to be fixed here — not a note left for the operator to remember next time.
+
+## 9. UAT flow definition (plan 16-02, UAT-02's flow-step leg)
+
+This section defines the **minimal** flow that exercises flow-step attribution — deliberately the smallest shape that still produces a send with a non-null `sends.node_id`: **one trigger event type, one immediate email step, no wait step, no branching.**
+
+1. In the UAT workspace, create a flow with an **event trigger** (not a segment trigger). Name the trigger event exactly:
+
+   ```
+   UAT_TRIGGER_EVENT_NAME = uat_flow_trigger
+   ```
+
+2. Add exactly **one** node to the canvas: an email-send step referencing the **same UAT Dynamic Template id** recorded in §2 — do not create a second template. Do not add a wait step or any branch/condition node; the flow is one trigger → one send, nothing else.
+3. Publish the flow.
+4. **Ensure the UAT contact created in §6 exists before firing the trigger** — the event-ingestion endpoint identifies the contact by `email` or `externalId`; it does not create a flow enrollment for an unknown contact on its own.
+5. Fire the trigger event by posting to the platform's event-ingestion endpoint (`apps/api/src/modules/events/events-api.routes.ts`), authenticated with an API key scoped to `events:write` (create one at the workspace's API Keys settings page, `apps/web/src/features/api-keys/ApiKeysSettings.tsx`, if one does not already exist for UAT):
+
+   ```bash
+   curl -s -X POST "https://<hostname>/v1/events" \
+     -H "Authorization: Bearer <UAT_API_KEY>" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "name": "uat_flow_trigger",
+       "email": "<operator-mailbox-from-section-2>"
+     }'
+   ```
+
+   Expect a `202` response with `{"results":[{"eventId":"<uuid>","status":"accepted"}]}`. A `202`/`accepted` response means **validated and queued**, not processed (D-24) — the flow-triggered send is dispatched asynchronously by the events-ingest and flow-enrollment workers, same as every other event in this platform.
+6. **The flow's recipient is the operator's own mailbox** — the same mailbox §2/§6 already use for the campaign send. Never target any other address from this section.
+7. Confirm the flow's run/step actually dispatched: check the flow's detail page (`apps/web/src/features/flows/detail/FlowDetailPage.tsx`'s runs table) for a new run in a terminal state, or query `sends` directly for a row with `kind = 'flow'` and a non-null `node_id` for this workspace/contact.
+
+## 10. Bounce-target selection (D-05)
+
+**Rule:** the bounce-test address MUST be a syntactically valid but definitely nonexistent local part **at a domain the operator personally controls**, confirmed to have live MX records and **no catch-all mailbox**. SendGrid publishes no official bounce-test address (RESEARCH.md Pitfall 5 / A1) — there is no shortcut around this confirmation step.
+
+**Why the no-catch-all check is a precondition, not a formality:** a catch-all domain silently accepts mail addressed to any local part, including one that was never provisioned. Sending to a nonexistent address on a catch-all domain produces **no bounce event at all** — the mail is accepted and vanishes, and the UAT-02 checkpoint would wait indefinitely for an event that SendGrid will never fire. Confirm this BEFORE sending, not after waiting and wondering why nothing arrived.
+
+**MUST NOT:** use a third party's mail infrastructure, a public/shared bounce-test address, or any domain the operator does not personally control to induce this bounce.
+
+Fill in before proceeding to §11:
+
+```
+BOUNCE_TARGET_ADDRESS = <fill in — e.g. definitely-nonexistent-local-part@a-domain-you-control.example>
+NO_CATCH_ALL_CONFIRMED_HOW = <fill in — e.g. "sent a probe to a second, separately-nonexistent local part at the same domain and confirmed it also hard-bounced" / "domain admin console shows no catch-all/wildcard rule configured">
+```
+
+## 11. UAT-02 procedure
+
+Ordered procedure — complete every step before running the final verification command:
+
+1. **Fire the flow trigger** (§9 step 5) and confirm a flow-step send was dispatched (§9 step 7).
+2. **Open the received mail in the operator's real mail client** — not a preview pane with images blocked; enable images for this message if that client blocks them by default. This is what produces the `open` event; no automated step can substitute for it.
+3. **Click the UAT Dynamic Template's visible link** (§2) and confirm it resolves. This is what produces the `click` event.
+4. **Send to the chosen bounce address** (§10) using the same BYO-key campaign or a one-off send, and wait for SendGrid's delivery outcome.
+5. Run the verification command (§7's invocation form) with the `event-coverage` subcommand:
+
+   ```bash
+   docker compose -f docker/docker-compose.prod.yml run --rm --no-deps \
+     -v "$(pwd)/scripts/uat-verify.mjs:/app/scripts/uat-verify.mjs:ro" \
+     api node scripts/uat-verify.mjs event-coverage \
+       --workspace <UAT_WORKSPACE_ID> \
+       --since <session-start-iso8601> \
+       --require-campaign \
+       --require-flow-step
+   ```
+
+   It must exit `0`, with a report showing all four event types observed, at least one event attributed to a campaign send, and at least one attributed to a flow-step send with a non-null `node_id`.
+6. **If the bounce arrives as a soft bounce or a deferral rather than a hard bounce (a 550-class rejection), stop and record that outcome.** This does NOT satisfy UAT-02 — do not retry blindly against another domain. Record it as a gap-closure item under D-16 for a later pass at this checkpoint.
+
+**Note:** this SendGrid account is shared across every tenant that has ever connected a key on it. Events for a sibling tenant's sends may transiently reach this platform's webhook endpoint during this procedure and be discarded by the existing sibling-drop path — that is expected, correct behavior (RESEARCH.md Pitfall 6), not a defect, and `event-coverage`'s tenant-scoped query never counts a discarded sibling event as UAT-02 evidence.
