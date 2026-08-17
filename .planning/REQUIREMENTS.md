@@ -119,7 +119,7 @@
 - [ ] **OPS-07**: Redaction применяется к логам worker и API единообразно
 - [ ] **OPS-08**: Sentry принимает исключения frontend, API и worker
 - [ ] **OPS-09**: Секреты и PII не попадают в Sentry — подтверждено тестом
-- [ ] **OPS-10**: Логи уходят в hosted-провайдер с настроенными алертами
+- [x] **OPS-10**: Логи уходят в hosted-провайдер с настроенными алертами
 - [ ] **OPS-11**: `request_id`, `tenant_id`, `job_id` и `send_id` проходят сквозь HTTP, очередь и worker
 - [ ] **OPS-12**: Trace correlation связывает HTTP-запрос, job и запрос к Postgres
 - [ ] **OPS-13**: Алерты настроены на queue depth, oldest job age, webhook lag и долю неуспешных отправок
@@ -252,7 +252,7 @@
 | OPS-07 | Phase 15 | Pending |
 | OPS-08 | Phase 15 | Pending |
 | OPS-09 | Phase 15 | Pending |
-| OPS-10 | Phase 15 | Pending |
+| OPS-10 | Phase 15 | Complete |
 | OPS-11 | Phase 15 | Pending |
 | OPS-12 | Phase 15 | Pending |
 | OPS-13 | Phase 15 | Pending |

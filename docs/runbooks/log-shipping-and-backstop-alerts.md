@@ -141,14 +141,37 @@ in production the way there is for the dead-man's-switch above.
 
 ### No-logs-received fired
 
-1. **Confirm this is not the drill above left mid-run** — check whether
+1. **Check whether `alloy` is stuck restart-looping rather than merely
+   stopped** — a sidecar that never reaches a running state is a distinct
+   symptom from one that is cleanly stopped (`docker compose -f
+   docker/docker-compose.prod.yml ps alloy` shows it cycling through
+   `Restarting`, not `Exited`/`Up`). This is exactly what happened in
+   G-15-4: `docker/alloy/config.alloy` shipped with an illegal `#` comment
+   token, Alloy's own lexer reported `illegal character U+0023 '#'` with a
+   line and column at startup, the process exited immediately on every
+   attempt, and `restart: unless-stopped` restart-looped it forever —
+   producing a total, silent log-delivery outage behind an otherwise green
+   deploy. The dead-man's-switch rule below is the alert expected to catch
+   exactly this. Confirm directly against the pinned image:
+   ```bash
+   docker run --rm --network none \
+     -v "$PWD/docker/alloy/config.alloy:/etc/alloy/config.alloy:ro" \
+     grafana/alloy:v1.18.1 fmt /etc/alloy/config.alloy
+   ```
+   A non-zero exit with an `illegal character`/parse diagnostic confirms
+   this cause. `npm run verify:alloy-config` runs this same check (plus a
+   comment-aware static scan) and is the pre-deploy gate that should have
+   caught it before the config ever reached production — if this fires on
+   a deployed config, treat it as a gate-bypass incident, not merely a
+   config typo.
+2. **Confirm this is not the drill above left mid-run** — check whether
    `alloy` is stopped (`docker compose -f docker/docker-compose.prod.yml ps
    alloy`) and simply start it if so.
-2. **Check whether the whole host is reachable at all** — if SSH itself is
+3. **Check whether the whole host is reachable at all** — if SSH itself is
    unreachable, this is a VPS-level incident (the host is down, not merely
    a container), and no container-level recovery step applies until the
    host itself is back.
-3. **Check whether Docker itself is running**:
+4. **Check whether Docker itself is running**:
    ```bash
    docker compose -f docker/docker-compose.prod.yml ps
    ```
@@ -158,7 +181,7 @@ in production the way there is for the dead-man's-switch above.
    ```bash
    docker compose -f docker/docker-compose.prod.yml up -d
    ```
-4. **If only `alloy` itself is unhealthy** (host and other containers fine),
+5. **If only `alloy` itself is unhealthy** (host and other containers fine),
    check its own logs before restarting it — a credential rotation on the
    Grafana Cloud side (`GRAFANA_LOKI_PUSH_URL`/`GRAFANA_LOKI_USER`/
    `GRAFANA_CLOUD_API_TOKEN`) is a plausible cause distinct from an
