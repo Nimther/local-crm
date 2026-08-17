@@ -4,10 +4,11 @@
 // subprocess for exit-code behavior (what CI runs, not the imported
 // function).
 //
-// This file deliberately does NOT assert anything about the real
-// docker/alloy/config.alloy being clean -- that regression lock is Task 2's
-// (added once the file is actually fixed); asserting it here would make this
-// task's own verification unpassable by construction.
+// Task 2 (GREEN) added the regression lock below -- `scanIllegalCommentTokens`
+// over the REAL committed docker/alloy/config.alloy returns an empty array.
+// That assertion could not exist before Task 2's fix; it is the one that
+// fails the moment anyone reintroduces the defect this gap closure exists
+// to prevent (G-15-4).
 
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -165,6 +166,13 @@ describe("CLI wiring -- exercised as a real subprocess (this is what CI runs)", 
     }
     expect(threw).toBe(true);
     expect(output).toMatch(/alloy-binary-check-unavailable/);
+  });
+});
+
+describe("regression lock -- the real committed config stays clean (G-15-4)", () => {
+  it("scanIllegalCommentTokens over the real docker/alloy/config.alloy returns an empty array", () => {
+    const realConfigText = readFileSync(path.join(REPO_ROOT, ALLOY_CONFIG_REL), "utf8");
+    expect(scanIllegalCommentTokens(realConfigText)).toEqual([]);
   });
 });
 
