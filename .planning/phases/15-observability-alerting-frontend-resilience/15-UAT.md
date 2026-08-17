@@ -1,14 +1,22 @@
 ---
-status: diagnosed
+status: testing
 phase: 15-observability-alerting-frontend-resilience
 source: [15-VERIFICATION.md]
 started: 2026-08-16T10:45:00Z
-updated: 2026-08-17T00:00:00Z
+updated: 2026-08-17T03:45:00Z
 ---
 
 ## Current Test
 
-[testing complete]
+number: 5
+name: Production redeploy with the committed config.alloy
+expected: |
+  Redeploy the prod compose stack with the committed docker/alloy/config.alloy
+  (the //-converted file, which also gained a 16-line explanatory header vs the
+  temporary config tested during UAT). The `alloy` container reaches and stays
+  in a running state (not Restarting), and structured JSON log lines keep
+  arriving in Grafana Cloud Loki with the documented labels.
+awaiting: user response
 
 ## Tests
 
@@ -30,12 +38,16 @@ result: issue
 reported: "docker/alloy/config.alloy uses # comments; grafana/alloy:v1.18.1 rejects them (illegal character U+0023), so the production Alloy container restart-loops. With a temporary //-corrected config, Loki shipping/correlation works and Grafana rules/contact are provisioned."
 severity: blocker
 
+### 5. Production redeploy with the committed config.alloy
+expected: Redeploy the prod compose stack with the committed docker/alloy/config.alloy and confirm the `alloy` container runs (not Restarting) and structured log lines keep arriving in Grafana Cloud Loki. (The UAT-session confirmation in test 4 was against a temporary //-corrected config applied ad hoc; the committed file was independently proven to parse cleanly under the pinned grafana/alloy:v1.18.1 binary — exit 0 — so this confirms the exact committed bytes in the live path.)
+result: [pending]
+
 ## Summary
 
-total: 4
+total: 5
 passed: 3
 issues: 1
-pending: 0
+pending: 1
 skipped: 0
 blocked: 0
 
@@ -43,7 +55,8 @@ blocked: 0
 
 - gap_id: G-15-4
   truth: "Loki receives structured JSON log lines from all three prod-compose services via Alloy, and both backstop alert rules (no-logs dead-man's-switch, error-rate spike) fire on their documented conditions."
-  status: failed
+  status: resolved
+  resolved_by: "plan 15-22 (2026-08-17): docker/alloy/config.alloy converted to // comments (0 leading # lines, was 88); scripts/validate-alloy-config.mjs gate added and wired into the required CI static job with ALLOY_VALIDATE_REQUIRE_BINARY=1; committed file passes the pinned grafana/alloy:v1.18.1 parser (exit 0). Residual live-redeploy confirmation tracked as UAT test 5."
   reason: "User reported: docker/alloy/config.alloy uses # comments; grafana/alloy:v1.18.1 rejects them (illegal character U+0023), so the production Alloy container restart-loops. With a temporary //-corrected config, Loki shipping/correlation works and Grafana rules/contact are provisioned."
   severity: blocker
   test: 4

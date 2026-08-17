@@ -1,8 +1,8 @@
 ---
-status: diagnosed
+status: resolved
 trigger: "UAT Phase 15 gap G-15-4: docker/alloy/config.alloy uses # comments; grafana/alloy:v1.18.1 rejects them (illegal character U+0023), so the production Alloy container restart-loops. With a temporary //-corrected config, Loki shipping/correlation works and Grafana rules/contact are provisioned."
 created: 2026-08-17T00:00:00Z
-updated: 2026-08-17T00:30:00Z
+updated: 2026-08-17T03:45:00Z
 ---
 
 ## Current Focus

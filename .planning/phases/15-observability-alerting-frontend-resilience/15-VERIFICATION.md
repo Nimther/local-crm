@@ -1,58 +1,59 @@
 ---
 phase: 15-observability-alerting-frontend-resilience
-verified: 2026-08-16T15:25:00Z
+verified: 2026-08-17T08:30:00Z
 status: human_needed
 score: 5/5 must-haves verified
-behavior_unverified: 2
+behavior_unverified: 0
 overrides_applied: 0
 re_verification:
-  previous_status: gaps_found
-  previous_score: 4/5
+  previous_status: human_needed
+  previous_score: 5/5
   gaps_closed:
-    - "OPS-11: request_id, tenant_id (workspaceId), job_id AND send_id thread through HTTP, queue and worker (send_id half — closed by plans 15-19/15-20)"
-    - "15-18's must_have: ARCHITECTURE.md describes the correlation model accurately (closed by plan 15-21, Task 1)"
-    - "CLAUDE.md's mandatory same-change documentation rule: SPECIFICATION.md must reflect current secrets-delivery mechanism (closed by plan 15-21, Task 2)"
+    - "G-15-4 (OPS-10): docker/alloy/config.alloy used `#` comment tokens Grafana Alloy's lexer rejects (illegal character U+0023 at 1:1), restart-looping the production alloy sidecar and silently stopping all log delivery. Closed by plan 15-22: 88 `#` lines converted to `//`, a new scripts/validate-alloy-config.mjs gate (static comment/string-aware scanner + real-binary `alloy fmt` parse under the exact image docker-compose.prod.yml pins) wired into CI's `static` required job with a fail-closed ALLOY_VALIDATE_REQUIRE_BINARY switch."
   gaps_remaining: []
   regressions: []
-behavior_unverified_items:
-  - truth: "A render error inside any feature route is caught by RouteErrorBoundary, rendering a contained panel while the shell stays usable (15-11 truth)"
-    test: "Force a render throw inside a lazy-loaded feature route (e.g. component that throws in render) while running the app in a browser/jsdom, and observe the error panel + intact nav/workspace shell"
-    expected: "Contained error panel renders in place of the failing route; navigation and workspace shell remain interactive; reload/back recovers"
-    why_human: "15-11's own SUMMARY (coverage D2) flags this as human_judgment: true — no DOM test environment (jsdom/happy-dom) is installed in apps/web (vitest runs with environment: \"node\"), so only source-level wiring was verified, not an actual click-through. This gap-closure diff (e1ac2cc..HEAD) touches zero apps/web files, so this item carries forward unchanged from the prior verification."
-  - truth: "Navigating away from the flow canvas with unsaved changes opens a blocking dialog; beforeunload fires natively; a failed save shows a persistent banner with working Retry (15-09 truths)"
-    test: "Run apps/web/e2e/flow-unsaved-changes.spec.ts (npm run test:e2e -w apps/web -- flow-unsaved-changes.spec.ts) against a provisioned e2e database"
-    expected: "4/4 Playwright tests pass (in-app nav blocked+dialog, saved-state no dialog, failed-save persistent banner+retry, native beforeunload prompt)"
-    why_human: "15-09-SUMMARY.md documents this was run and passed (4/4, run twice) during execution, but this session did not independently re-run it — it requires provisioning a live e2e database and a real browser, outside the read-only/no-side-effect spot-check budget (Step 7b). This gap-closure diff touches zero apps/web files, so this item carries forward unchanged from the prior verification."
 overrides: []
 human_verification:
-  - test: "Force a render throw inside a lazy feature route in a real browser session and observe RouteErrorBoundary's contained panel + intact shell/navigation"
-    expected: "Contained, recoverable error panel; shell/nav stay usable; no full-page blank"
-    why_human: "No DOM test environment in this repo (apps/web vitest runs with environment: \"node\"); 15-11's own SUMMARY flags this exact gap as human_judgment: true"
-  - test: "Run apps/web/e2e/flow-unsaved-changes.spec.ts against a live e2e database"
-    expected: "4/4 Playwright tests pass, matching 15-09-SUMMARY.md's documented run"
-    why_human: "Requires a provisioned e2e database and a real browser — outside this verification session's read-only/no-side-effect budget; SUMMARY claims a passing run but that claim was not independently reproduced here"
-  - test: "Provision real Sentry DSNs (SENTRY_DSN_API, SENTRY_DSN_WORKER, VITE_SENTRY_DSN) in the operator's Sentry org and confirm a real event reaches each of the three projects, tagged with workspace_id/request_id and scrubbed"
-    expected: "An intentionally-thrown test error in each process appears in its own Sentry project with no secret/PII field and the correct tags"
-    why_human: "Live DSNs are operator-supplied at deploy time (decision: proceed-live-dsn) — cannot be exercised from a code-only verification pass"
-  - test: "Provision Grafana Cloud Loki push credentials and the two documented backstop alert rules (no-logs dead-man's-switch, error-rate spike), then confirm logs actually arrive and both rules fire correctly"
-    expected: "Loki receives structured JSON log lines from all three prod-compose services via Alloy; both alert rules trigger on their documented conditions"
-    why_human: "Live Grafana Cloud stack/credentials provisioning is an operator setup step outside this repository's automatable scope"
+  - test: "Operator-side, at the next production deploy: redeploy the prod compose stack with the committed docker/alloy/config.alloy and confirm the `alloy` container reaches and stays in a running state (not restarting), and that log lines continue to arrive in Loki."
+    expected: "The `alloy` container runs (not `Restarting`) and structured log lines keep arriving in Grafana Cloud Loki with the documented labels."
+    why_human: "The operator's UAT confirmation (15-UAT.md test 4) was against a temporary //-corrected config applied ad hoc during UAT, not byte-identical to the file now committed (which also gained a 16-line explanatory header paragraph in Task 2). This session independently proved the committed file parses cleanly under the real pinned grafana/alloy:v1.18.1 binary (exit 0, zero diagnostics) — the parse-level risk is effectively closed — but an actual production redeploy confirmation of this exact committed file is a live-infrastructure step this repository cannot exercise, and the plan's own <human-check> block scopes exactly this residual as outstanding."
 ---
 
 # Phase 15: Observability, Alerting & Frontend Resilience Verification Report
 
 **Phase Goal:** The system reports its true state — to an operator through structured logs, correlated traces and alerts, and to a user through honest error, empty and stale states.
-**Verified:** 2026-08-16
+**Verified:** 2026-08-17
 **Status:** human_needed
-**Re-verification:** Yes — after gap closure (plans 15-19, 15-20, 15-21)
+**Re-verification:** Yes — after gap closure (plan 15-22, closing G-15-4)
 
 ## Re-Verification Summary
 
-The prior verification (superseded, committed at `e1ac2cc`) found `status: gaps_found` with three gaps (G-15-1 sendId dispatch+webhook, G-15-2 ARCHITECTURE.md §18 stale, G-15-3 SPECIFICATION.md §3 stale). This session independently re-verified all three closure plans (15-19, 15-20, 15-21) against the actual current codebase — not the SUMMARYs' claims — by reading the modified source, re-running every named test the plans reference, and re-running the doc-region grep/node-oneliner gates directly.
+The prior verification (`15-VERIFICATION.md`, superseded, committed 2026-08-16) found `status: human_needed` with 5/5 roadmap truths verified but 4 outstanding human-verification items, one of which (live Grafana Cloud/Loki provisioning) was subsequently exercised via UAT (`15-UAT.md`, 2026-08-17) and found a blocker: `docker/alloy/config.alloy` shipped with shell/YAML-style `#` comments that Grafana Alloy's lexer rejects at the very first byte, restart-looping the production `alloy` sidecar under `restart: unless-stopped` and silently stopping all log delivery — logged as gap `G-15-4`.
 
-**All three gaps are closed.** No regressions found in the touched surface or in the broader test suites re-run this session (apps/web unit suite, packages/redaction suite, packages/tenant-context application-name suite, all send-dispatch and webhook-events regression suites).
+Plan 15-22 (gap closure, `gap_ids: [G-15-4]`, `requirements: [OPS-10]`) executed to close it. This session independently re-verified the closure against the actual current codebase — not the SUMMARY's claims — by running the real gate, the real pinned Alloy binary, the full test suite, and every named regression gate directly.
 
-**Scope of this diff** (`git diff --name-only e1ac2cc..HEAD -- . ':!.planning/'`): exactly 7 files — `ARCHITECTURE.md`, `SPECIFICATION.md`, `apps/worker/src/__tests__/correlation-tracer.test.ts`, `apps/worker/src/queues/__tests__/send-dispatch-error-listener.test.ts` (merge-conflict mock fix, see Anti-Patterns), `apps/worker/src/queues/__tests__/webhook-events-sendid-correlation.test.ts`, `apps/worker/src/queues/send-dispatch.ts`, `apps/worker/src/queues/webhook-events.worker.ts`. Nothing in `apps/web` changed, so the two behavior-unverified items from the prior report (RouteErrorBoundary click-through, canvas e2e) are unaffected and carry forward unchanged — they were never in scope for this gap-closure wave.
+**G-15-4 is genuinely closed.** Independent evidence gathered this session (not reproduced from the SUMMARY):
+
+| Check | Command (run this session) | Result |
+|---|---|---|
+| Real pinned binary parses the committed file | `ALLOY_VALIDATE_REQUIRE_BINARY=1 node scripts/validate-alloy-config.mjs` | Exit 0. Output: `resolved image: grafana/alloy:v1.18.1` / `ran the real Alloy binary (alloy fmt) against the committed config` / `all checks OK.` — the *exact* command class that reproduced `illegal character U+0023 '#'` at 1:1 on the pre-fix file now succeeds. |
+| Leading `#` comment lines in config.alloy | `grep -nc '^\s*#' docker/alloy/config.alloy` | 0 (was 88) |
+| Leading `//` comment lines in config.alloy | `grep -nc '^\s*//' docker/alloy/config.alloy` | 104 (88 converted + 16 new header lines) |
+| Gate test suite | `npx vitest run --root scripts __tests__/validate-alloy-config.test.mjs` | 18/18 PASS |
+| Fail-first fixture still reproduces the shipped defect | Ran `scanIllegalCommentTokens` directly against `hash-comment-header.alloy` | Violation at line 1, column 1 — matches the original defect exactly |
+| Comment/string-awareness (false-positive guard) | Ran `scanIllegalCommentTokens` against `valid-with-slash-comments.alloy` (names `#` in `//` comment, block comment, and a quoted URL fragment `https://example.invalid/push#fragment`) | 0 violations |
+| `package.json` script wired | `grep -n "verify:alloy-config" package.json` | `"verify:alloy-config": "node scripts/validate-alloy-config.mjs"` present |
+| CI wiring, `static` job | Read `.github/workflows/ci.yml` directly | Step "Alloy config gate (OPS-10)" at line 163, inside the `static` job (lines 48-222+), with `ALLOY_VALIDATE_REQUIRE_BINARY: "1"` in its `env:` |
+| `static` is a required status check | Confirmed via `.github/workflows/ci.yml` comment (line 35: "`static`, `test` and `failure-injection` are the required status checks") and `SPECIFICATION.md` line 83 ("Required status checks на `master`: `static`, `test`, `failure-injection`") | Confirmed — the gate is blocking with no branch-protection admin action needed |
+| Image resolved from compose, not hardcoded | Exported-helper import check: `grep -n "import.*validate-prod-compose" scripts/validate-alloy-config.mjs` | Imports `parseEnvFile`, `resolveViaYamlFallback` from `validate-prod-compose.mjs`; confirmed both exist as named exports there |
+| Docker-unreachable fail-closed behavior | Read the vitest subprocess test (line 153) and confirmed it passed in the 18/18 run | Test asserts: no `docker` on PATH + `ALLOY_VALIDATE_REQUIRE_BINARY=1` exits non-zero naming `alloy-binary-check-unavailable` |
+| Regression: SPECIFICATION.md env coverage (this diff touched SPECIFICATION.md) | `npm run check:spec-env-coverage` | 53 names, all present, exit 0 |
+| Regression: runbook coverage (this diff touched the runbook) | `node scripts/check-runbook-coverage.mjs` | 4/4 alerts covered, exit 0 |
+| Regression: prod-compose invariants (docker-compose.prod.yml untouched by this plan) | `npm run verify:prod-compose` | 8 services, 43 invariants OK, exit 0 |
+| Debt markers in the 10 files this plan touched | `grep -nE "TBD|FIXME|XXX"` over all 10 `files_modified` | 0 hits |
+| SPECIFICATION.md and runbook actually describe the gate | Read both files directly | SPECIFICATION.md §7/§8.2 describe the gate, the image reuse, and cite the exact defect; the runbook's "No-logs-received fired" section adds the restart-loop symptom, reproduction command, and gate pointer |
+
+**No regressions found.** All gates unaffected by this diff (spec-env-coverage, runbook-coverage, prod-compose invariants) were independently re-run this session and pass.
 
 ## Goal Achievement
 
@@ -60,134 +61,106 @@ The prior verification (superseded, committed at `e1ac2cc`) found `status: gaps_
 
 | # | Truth | Status | Evidence |
 |---|-------|--------|----------|
-| 1 | A single send can be followed from HTTP request through queue job to Postgres query using one correlation identifier, in structured API/worker logs reaching the hosted log provider | ✓ VERIFIED (gap closed — all four identifiers) | `requestId`/`jobId`/`workspaceId` proven end-to-end as before. **`send_id` gap now closed**: `apps/worker/src/queues/send-dispatch.ts` opens 3 `withCorrelation({ sendId ... })` scopes (campaign L476, test L596, flow L764) each immediately followed by a `logger.info(...)` call (L477/597/765) and `handleAmbiguousSendMailError`'s `logger.warn` (L377) runs inside those scopes; `apps/worker/src/queues/webhook-events.worker.ts` opens 1 per-event `withCorrelation({ sendId: send.id })` scope (L810) immediately after the `if (!send) continue;` re-check (L804), with `logger.info` at L811. Independently re-ran `npx vitest run --root apps/worker src/__tests__/correlation-tracer.test.ts` (3/3 pass, including the new test asserting the log line's `sendId` is byte-identical to the SendGrid `custom_args.send_id`) and `npx vitest run --root apps/worker src/queues/__tests__/webhook-events-sendid-correlation.test.ts` (3/3 pass, including the two-distinct-sendId-per-batch proof). |
-| 2 | An exception from frontend/API/worker reaches Sentry tagged with tenant+request, and a test proves no SendGrid key/contact email/freeform JSONB reaches it | ✓ VERIFIED | Unchanged since prior verification; re-ran `npx vitest run --root packages/redaction` this session — 5 files, 29/29 tests pass. |
-| 3 | Alerts fire on queue depth, oldest job age, webhook lag, failed-send share; Bull Board reachable only behind admin access; a runbook exists per alert | ✓ VERIFIED | Unchanged since prior verification; re-ran `node scripts/check-runbook-coverage.mjs` this session — 4/4 alerts covered, exit 0. |
-| 4 | The app loads with route-level code splitting — canvas/heavy-dashboard chunks arrive only when opened | ✓ VERIFIED | Unchanged since prior verification. Not rebuilt this session (this diff touches zero `apps/web` files — `git diff --name-only e1ac2cc..HEAD` confirms), but the apps/web unit suite was re-run green (84/84) as a regression check. |
-| 5 | A failed API call, empty list, paginated list, stale analytics and unsaved canvas changes each show the user what is true, not a blank/silently-wrong screen | ✓ VERIFIED (two behaviors present+wired but not behaviorally re-proven — see below) | Unchanged since prior verification (this diff touches zero `apps/web` files). `QueryErrorState`/`EmptyState`/`StaleDataBanner`/`DataAsOfLabel`/`useUnsavedChangesGuard`/`SaveErrorBanner` all confirmed present and wired in the prior session. **Two behaviors remain present+wired but not behaviorally re-confirmed this session** (RouteErrorBoundary click-through, canvas e2e) — tracked under behavior_unverified_items, unaffected by this gap-closure wave. |
+| 1 | A single send can be followed from HTTP request through queue job to Postgres query using one correlation identifier, in structured API/worker logs reaching the hosted log provider | ✓ VERIFIED | Unchanged from prior verification (all four identifiers: requestId/jobId/workspaceId/sendId proven end-to-end in the 2026-08-16 session). This diff (15-22) touches zero correlation-tracer files. |
+| 2 | An exception from frontend/API/worker reaches Sentry tagged with tenant+request, and a test proves no SendGrid key/contact email/freeform JSONB reaches it | ✓ VERIFIED | Unchanged. |
+| 3 | Alerts fire on queue depth, oldest job age, webhook lag, failed-send share; Bull Board reachable only behind admin access; a runbook exists per alert | ✓ VERIFIED | Unchanged; re-ran `node scripts/check-runbook-coverage.mjs` this session — 4/4 alerts covered, exit 0. |
+| 4 | The app loads with route-level code splitting — canvas/heavy-dashboard chunks arrive only when opened | ✓ VERIFIED | Unchanged (this diff touches zero `apps/web` files). |
+| 5 | A failed API call, empty list, paginated list, stale analytics and unsaved canvas changes each show the user what is true, not a blank/silently-wrong screen | ✓ VERIFIED | Unchanged — code confirmed present+wired in the prior session. **Both previously behavior-unverified sub-items (RouteErrorBoundary click-through, canvas unsaved-changes e2e) are now human-confirmed**: `15-UAT.md` records test 1 (RouteErrorBoundary) `result: pass` and test 2 (canvas e2e, `flow-unsaved-changes.spec.ts`) `result: pass`, run 2026-08-17. `behavior_unverified` accordingly drops to 0 this session (was 2). |
 
-**Score:** 5/5 truths verified — up from 4/5 in the prior report. SC1 now cleanly closes (all four correlation identifiers proven, not three); SC5 keeps its two behavior-unverified sub-items tracked separately (they do not block SC5's own VERIFIED status, since the code they describe is present and wired — only the runtime click-through/e2e re-confirmation is outstanding).
+**Score:** 5/5 truths verified. Roadmap SC1-SC5 all clean; the two truths carried forward as behavior-unverified in the prior report are now closed via the 2026-08-17 UAT session, not by this gap-closure diff itself, but that evidence exists in the repository (`15-UAT.md`) and this session confirmed it directly.
 
-### Gap Closure Detail (this session's independent verification)
+### Gap Closure Detail (G-15-4, this session's independent verification)
 
-**G-15-1 (OPS-11 send_id) — CLOSED.**
+See table above ("Re-Verification Summary"). Summary: the committed `docker/alloy/config.alloy` parses cleanly under the exact pinned `grafana/alloy:v1.18.1` binary (verified by running the gate myself, not trusting the SUMMARY), the gate's regression-lock fixture still reproduces the original defect at 1:1, the comment/string-awareness guard correctly ignores `#` inside `//` comments and inside a quoted URL, and the gate is wired into `static` — already a required status check — with a fail-closed require-binary switch, verified present in both the CI YAML text and the passing subprocess test.
 
-| Check | Command | Result |
-|---|---|---|
-| Dispatch bindings count | `grep -c 'withCorrelation({ sendId' apps/worker/src/queues/send-dispatch.ts` | 3 (campaign L476, test L596, flow L764) |
-| Dispatch log call-sites | `grep -nE 'logger\.(info\|warn\|error)\('` (non-comment) over send-dispatch.ts | 4 (L377, L477, L597, L765) |
-| No PII in dispatch log calls | `grep -cE 'claim\.to\|testTo\|dynamicTemplateData\|apiKey\|\.email'` over those 4 lines | 0 |
-| `composeApplicationName` unaffected | node one-liner reading `packages/tenant-context/src/index.ts` | no `sendId` reference — unchanged |
-| Dispatch test suite | `npx vitest run --root apps/worker src/__tests__/correlation-tracer.test.ts` | 3/3 PASS (re-run this session) |
-| Webhook binding count | `grep -c 'withCorrelation({ sendId' apps/worker/src/queues/webhook-events.worker.ts` | 1 (L810) |
-| Webhook log call-site | `grep -nE 'logger\.(info\|warn\|error)\('` (non-comment) over webhook-events.worker.ts | 1 (L811) |
-| No PII in webhook log call | `grep -cE 'row\.reason\|row\.payload\|rawEvent\|\.email'` | 0 |
-| `scrubbedConsole` site preserved | `grep -c 'scrubbedConsole'` | 5 (untouched) |
-| Webhook binding placement | Read source directly (L775-818) | Scope opens exactly after the `if (!send) continue;` guard (L804), wraps only `applyEventSideEffects` |
-| Webhook test suite | `npx vitest run --root apps/worker src/queues/__tests__/webhook-events-sendid-correlation.test.ts` | 3/3 PASS (re-run this session) |
-| Regression: 4 pre-existing webhook suites | `npx vitest run` on webhook-events-status/idempotency/sibling-drop/open-click-counts | 22/22 PASS (re-run this session) |
-| Regression: send-dispatch suites | durability + idempotency + error-listener | 11 + 3 = 14/14 PASS (re-run this session) |
-| Regression: application-name suite | `packages/tenant-context/src/__tests__/application-name-correlation.test.ts` | 7/7 PASS (re-run this session) |
-| Type-check | `npx tsc -p apps/worker/tsconfig.json --noEmit` | exits 0 |
-
-**G-15-2 (ARCHITECTURE.md §18 stale) — CLOSED.**
-
-Region-scoped node check over `## 18. The correlation model` .. `## 19. Error-tracking topology`: banned literals (`"falling back to the job"`, `"the same four fields"`) — both absent. Required citations (`processor-wrapper.ts`, `send-dispatch.ts`, `webhook-events.worker.ts`, `WR-03`, `req=-`) — all present. Read the section directly: it now states `requestId` stays genuinely unbound (no `job.id` substitution) when a job payload carries none, cites `processor-wrapper.ts:196` by name, and gives a per-field presence/absence table for `workspaceId`/`requestId`/`jobId`/`sendId` including the correct post-15-19/15-20 boundary (sendId bound in the 3 dispatch scopes + 1 webhook scope, absent from `wrapProcessor`'s own completion/failure lines and from all `apps/api` lines). Independently confirmed `processor-wrapper.ts:196` reads `const requestId = extractRequestId(job.data);` with no `?? job.id` fallback — matches the doc's claim exactly.
-
-**G-15-3 (SPECIFICATION.md §3 stale) — CLOSED.**
-
-Region-scoped node check over `## 3. Секреты` .. `## 4. Схема данных`: banned literals (`"Передаётся ЯВНО"`, `"не через неявный"`) — both absent. All three Sentry rows (`SENTRY_DSN_API`, `SENTRY_DSN_WORKER`, `SENTRY_ENVIRONMENT`) name `env_file`, name `MEGA_CRM_ENV_FILE`, and carry the `план 15-21` tag. `IMAGE_TAG` compose-interpolation exception still noted. No DSN-shaped literal anywhere in the file (`grep -cE 'https://[0-9a-zA-Z]+@[a-z0-9.-]*(sentry|ingest)'` → 0). Independently re-checked the underlying fact against `docker/docker-compose.prod.yml` directly (not just the doc's claim about it): zero non-comment lines assign any of the three names inside either service's `environment:` block — the doc now matches the actual compose file. `npm run check:spec-env-coverage` (53 names, all present) and `npm run verify:prod-compose` (8 services, 43 invariants) both re-run and pass.
-
-### Required Artifacts (spot-checked, focused on the gap-closure diff)
+### Required Artifacts
 
 | Artifact | Expected | Status | Details |
 |---|---|---|---|
-| `apps/worker/src/queues/send-dispatch.ts` | 3 sendId correlation scopes + 4 log call sites | ✓ VERIFIED | Confirmed by direct read + grep; all inside scope, none logs PII |
-| `apps/worker/src/queues/webhook-events.worker.ts` | 1 per-event sendId scope + 1 log call site | ✓ VERIFIED | Confirmed by direct read; placed exactly after live-send re-check |
-| `apps/worker/src/__tests__/correlation-tracer.test.ts` | 3rd test proving sendId on captured log line | ✓ VERIFIED | Re-ran, 3/3 pass |
-| `apps/worker/src/queues/__tests__/webhook-events-sendid-correlation.test.ts` | New suite, per-event proof | ✓ VERIFIED | Re-ran, 3/3 pass |
-| `ARCHITECTURE.md` §18 | Accurate correlation model description | ✓ VERIFIED (was ✗ STALE) | Rewritten; matches `processor-wrapper.ts:196` and both new binding sites exactly |
-| `SPECIFICATION.md` §7, §3 | Accurate correlation + Sentry-secrets description | ✓ VERIFIED (was ✗ STALE) | Both sections rewritten; matches `docker-compose.prod.yml` and the code exactly |
+| `scripts/validate-alloy-config.mjs` | Static scanner + real-binary orchestration | ✓ VERIFIED | Exists, substantive (14KB, exported pure helpers + CLI guard mirroring `validate-prod-compose.mjs`), ran successfully this session with exit 0 |
+| `scripts/__tests__/validate-alloy-config.test.mjs` | Full test suite incl. regression lock | ✓ VERIFIED | 18/18 pass, re-run this session |
+| `scripts/__fixtures__/alloy-config/hash-comment-header.alloy` | Fail-first fixture reproducing the shipped defect | ✓ VERIFIED | Confirmed 1:1 violation via direct scanner invocation this session |
+| `scripts/__fixtures__/alloy-config/hash-trailing-comment.alloy` | Mid-line variant | ✓ VERIFIED (via passing test suite) | |
+| `scripts/__fixtures__/alloy-config/valid-with-slash-comments.alloy` | False-positive guard fixture | ✓ VERIFIED | Confirmed 0 violations via direct scanner invocation this session, including a quoted-string case (`#fragment` in a URL) |
+| `docker/alloy/config.alloy` | Corrected config, no `#` comments | ✓ VERIFIED | 0 leading `#` lines, 104 `//` lines; parses under the real pinned binary (exit 0) |
+| `package.json` | `verify:alloy-config` script | ✓ VERIFIED | Present, wired |
+| `.github/workflows/ci.yml` | Blocking `static`-job step with require-binary switch | ✓ VERIFIED | Present at line 163-166, inside `static` (a required check) |
+| `SPECIFICATION.md` §7/§8 | Describes the gate as built | ✓ VERIFIED | Confirmed by direct read — cites the gate, the image reuse, and the exact defect |
+| `docs/runbooks/log-shipping-and-backstop-alerts.md` | Recovery section updated with restart-loop symptom | ✓ VERIFIED | Confirmed by direct read |
 
 ### Key Link Verification
 
 | From | To | Via | Status | Details |
 |---|---|---|---|---|
-| `send-dispatch.ts` (3 paths) | correlation ALS (`sendId`) | `withCorrelation({ sendId })` | ✓ WIRED (was ✗ NOT WIRED) | All 3 scopes confirmed opened at the correct point, each followed by a log call inside the scope |
-| `webhook-events.worker.ts` per-event loop | correlation ALS (`sendId`) | `withCorrelation({ sendId: send.id })` | ✓ WIRED (was ✗ NOT WIRED) | Confirmed opened immediately after `if (!send) continue;`, wraps only `applyEventSideEffects` |
-| `handleAmbiguousSendMailError` | inherited `sendId` scope | Called from inside campaign (L530) and flow (L812) `withCorrelation` scopes | ✓ WIRED | Confirmed both call sites sit inside their respective scopes |
-| `ARCHITECTURE.md` §18 | `apps/worker/src/queues/send-dispatch.ts` / `webhook-events.worker.ts` | Doc cites both files by name with the correct per-field boundary | ✓ WIRED | Confirmed doc text matches code exactly, not paraphrased |
-| `SPECIFICATION.md` §3 Sentry rows | `docker/docker-compose.prod.yml` | `env_file: ${MEGA_CRM_ENV_FILE}` | ✓ WIRED | Confirmed doc claim against the compose file directly — no `environment:` block assignment for any of the three names |
+| `scripts/validate-alloy-config.mjs` | `scripts/validate-prod-compose.mjs`'s `parseEnvFile`/`resolveViaYamlFallback` | named import | ✓ WIRED | Confirmed both exports exist in `validate-prod-compose.mjs` (lines 104, 273) and are imported (line 42) |
+| `scripts/validate-alloy-config.mjs`'s image resolution | `docker/docker-compose.prod.yml`'s `alloy` service `image:` | `resolveAlloyImageRef` | ✓ WIRED | Gate run this session resolved `grafana/alloy:v1.18.1` — matches the compose file's pinned tag, not hardcoded |
+| `.github/workflows/ci.yml` `static` job | `npm run verify:alloy-config` | CI step | ✓ WIRED | Confirmed present at the correct job scope; asserted by the wiring-lock test which passed |
+| `ALLOY_VALIDATE_REQUIRE_BINARY=1` (CI step env) | `runValidation`'s fail-closed branch | env var read | ✓ WIRED | Confirmed present in CI YAML and exercised by a passing subprocess test in the 18/18 run |
+| `scripts/validate-alloy-config.mjs` test suite (mutable-tag assertion) | `validate-prod-compose.mjs`'s `extractImageTag`/`isMutableTag` | named import in test file | ✓ WIRED | Confirmed import at test file line 29, assertion at lines 79-80 |
 
 ### Behavioral Spot-Checks
 
 | Behavior | Command | Result | Status |
 |---|---|---|---|
-| Dispatch-side sendId correlation (G-15-1 dispatch half) | `npx vitest run --root apps/worker src/__tests__/correlation-tracer.test.ts` | 3 tests passed | ✓ PASS |
-| Webhook-side sendId correlation (G-15-1 webhook half) | `npx vitest run --root apps/worker src/queues/__tests__/webhook-events-sendid-correlation.test.ts` | 3 tests passed | ✓ PASS |
-| Webhook regression (4 pre-existing suites) | `npx vitest run --root apps/worker src/queues/__tests__/webhook-events-{status,idempotency,sibling-drop}.test.ts src/queues/__tests__/webhook-open-click-counts.test.ts` | 22 tests passed | ✓ PASS |
-| Send-dispatch regression (durability, idempotency, error-listener) | `npx vitest run --root apps/worker src/queues/__tests__/send-dispatch-{durability,idempotency,error-listener}.test.ts` | 14 tests passed | ✓ PASS |
-| `application_name` composition unaffected | `npx vitest run --root packages/tenant-context src/__tests__/application-name-correlation.test.ts` | 7 tests passed | ✓ PASS |
-| apps/web unit suite (regression — diff touches zero apps/web files) | `npx vitest run --root apps/web` | 84 tests passed | ✓ PASS |
-| Redaction suite (regression) | `npx vitest run --root packages/redaction` | 29 tests passed | ✓ PASS |
-| Worker type-check | `npx tsc -p apps/worker/tsconfig.json --noEmit` | exit 0 | ✓ PASS |
-| `composeApplicationName` no sendId regression | node one-liner over `packages/tenant-context/src/index.ts` | no `sendId` reference | ✓ PASS |
-| Runbook coverage gate (regression) | `node scripts/check-runbook-coverage.mjs` | 4/4 alerts covered, exit 0 | ✓ PASS |
-| SPECIFICATION.md env coverage gate | `npm run check:spec-env-coverage` | 53 names, all present, exit 0 | ✓ PASS |
-| Prod-compose invariants gate (regression) | `npm run verify:prod-compose` | 8 services, 43 invariants OK | ✓ PASS |
-| ARCHITECTURE.md §18 region check | node one-liner (banned literals absent, required citations present) | pass | ✓ PASS |
-| SPECIFICATION.md §7/§3 region checks | node one-liners (banned literals absent, plan tags present) | pass | ✓ PASS |
-| RouteErrorBoundary click-through | n/a — requires DOM env / browser | not run | ? SKIP (see human_verification — unchanged from prior report) |
-| Canvas unsaved-changes e2e (Playwright) | `npm run test:e2e -w apps/web -- flow-unsaved-changes.spec.ts` | not run (requires live e2e DB) | ? SKIP (see human_verification — unchanged from prior report) |
+| Real pinned Alloy binary parses the committed config | `ALLOY_VALIDATE_REQUIRE_BINARY=1 node scripts/validate-alloy-config.mjs` (Docker daemon reachable on this machine) | Exit 0, "all checks OK" | ✓ PASS |
+| Gate test suite | `npx vitest run --root scripts __tests__/validate-alloy-config.test.mjs` | 18/18 pass | ✓ PASS |
+| Fail-first fixture reproduces original defect | Direct `scanIllegalCommentTokens` call against `hash-comment-header.alloy` | Violation at 1:1 | ✓ PASS |
+| False-positive guard (comment/string-aware) | Direct `scanIllegalCommentTokens` call against `valid-with-slash-comments.alloy` | 0 violations | ✓ PASS |
+| SPECIFICATION.md env coverage (regression, file touched this diff) | `npm run check:spec-env-coverage` | 53 names, all present, exit 0 | ✓ PASS |
+| Runbook coverage (regression, file touched this diff) | `node scripts/check-runbook-coverage.mjs` | 4/4 alerts covered, exit 0 | ✓ PASS |
+| Prod-compose invariants (regression, unrelated file) | `npm run verify:prod-compose` | 8 services, 43 invariants OK, exit 0 | ✓ PASS |
+| Debt markers on the 10 touched files | `grep -nE "TBD\|FIXME\|XXX"` | 0 hits | ✓ PASS |
 
 ### Requirements Coverage
 
 | Requirement | Source Plan(s) | Description | Status | Evidence |
 |---|---|---|---|---|
-| OPS-06 | 15-01, 15-02, 15-08 | Worker logs structurally via Pino | ✓ SATISFIED | Unchanged; plus 5 new structured log call sites this session confirmed |
-| OPS-07 | 15-04 | Redaction uniform across worker/API | ✓ SATISFIED | Re-ran 29/29 redaction tests this session |
-| OPS-08 | 15-01, 15-10, 15-11, 15-21 | Sentry captures frontend/API/worker exceptions | ✓ SATISFIED | Plus SPECIFICATION.md §3's secrets-delivery description now corrected (G-15-3) |
+| OPS-06 | 15-01, 15-02, 15-08 | Worker logs structurally via Pino | ✓ SATISFIED | Unchanged |
+| OPS-07 | 15-04 | Redaction uniform across worker/API | ✓ SATISFIED | Unchanged |
+| OPS-08 | 15-01, 15-10, 15-11, 15-21 | Sentry captures frontend/API/worker exceptions | ✓ SATISFIED | Unchanged |
 | OPS-09 | 15-06 | Secrets/PII proven absent from Sentry by test | ✓ SATISFIED | Unchanged |
-| OPS-10 | 15-17 | Logs reach hosted provider with alerts configured | ✓ SATISFIED (config); provisioning unverified | Unchanged — live push remains operator setup (human_verification) |
-| OPS-11 | 15-02, 15-19, 15-20 | request_id/tenant_id/job_id/**send_id** thread through HTTP, queue, worker | ✓ SATISFIED (was ⚠️ PARTIAL) | **send_id now bound on both dispatch (3 scopes) and webhook (1 per-event scope) paths, proven by 2 independently re-run test suites this session** |
+| OPS-10 | 15-17, 15-22 | Logs reach hosted provider with alerts configured | ✓ SATISFIED (was ✓ config-only; live path now closed) | **G-15-4 closed this session** — the config that ships to production now parses under the real pinned binary; live Loki arrival + both backstop alert rules were confirmed by the operator during UAT (test 3/4 in `15-UAT.md`, against a temporary corrected config) — the outstanding item is confirming the exact *committed* file behaves identically at the next production redeploy (human_verification, below) |
+| OPS-11 | 15-02, 15-19, 15-20 | request_id/tenant_id/job_id/send_id thread through HTTP, queue, worker | ✓ SATISFIED | Unchanged |
 | OPS-12 | 15-02 | Trace correlation links HTTP/job/Postgres | ✓ SATISFIED | Unchanged |
 | OPS-13 | 15-12, 15-13, 15-14 | Alerts on queue depth/oldest job age/webhook lag/failed-send share | ✓ SATISFIED | Unchanged |
 | OPS-14 | 15-01, 15-16 | Bull Board behind closed admin access | ✓ SATISFIED | Unchanged |
-| OPS-15 | 15-18, 15-21 | Runbooks describe incidents/recovery | ✓ SATISFIED (was ⚠️ PARTIAL) | Runbook coverage unchanged; **ARCHITECTURE.md §18 (the correlation-model doc this requirement's own must-have covers) now accurate — G-15-2 closed** |
-| OPS-16 | 15-03 | Route-level code splitting | ✓ SATISFIED | Unchanged (diff touches zero apps/web files) |
-| OPS-17 | 15-05, 15-07, 15-11 | Frontend handles errors/empty/pagination correctly | ✓ SATISFIED | Unchanged |
+| OPS-15 | 15-18, 15-21 | Runbooks describe incidents/recovery | ✓ SATISFIED | Unchanged; the log-shipping runbook additionally gained the G-15-4 recovery procedure this diff |
+| OPS-16 | 15-03 | Route-level code splitting | ✓ SATISFIED | Unchanged |
+| OPS-17 | 15-05, 15-07, 15-11 | Frontend handles errors/empty/pagination correctly | ✓ SATISFIED | RouteErrorBoundary click-through now human-confirmed via UAT test 1 |
 | OPS-18 | 15-12, 15-15 | Stale analytics shown honestly | ✓ SATISFIED | Unchanged |
-| OPS-19 | 15-09 | Unsaved canvas changes warn; save errors visible | ✓ SATISFIED (wiring); e2e re-confirmation pending | Unchanged — code confirmed present+wired, e2e not independently re-run (human_verification) |
+| OPS-19 | 15-09 | Unsaved canvas changes warn; save errors visible | ✓ SATISFIED | Canvas e2e now human-confirmed via UAT test 2 |
 
-No orphaned requirements — all 14 IDs mapped to REQUIREMENTS.md Phase 15 row are claimed by at least one plan (confirmed by cross-reference: `.planning/REQUIREMENTS.md` lines 251-264, 282).
+No orphaned requirements — all 14 IDs mapped to REQUIREMENTS.md Phase 15 row (`.planning/REQUIREMENTS.md` line 282) are claimed by at least one plan.
+
+**Note on REQUIREMENTS.md checkboxes:** the milestone-tracking checkbox list (lines 118-131) shows only OPS-10 checked `[x]`; OPS-06/07/08/09/11-19 remain `[ ]`. This is a bookkeeping-convention artifact, not a functional gap — the traceability table (lines 251-264) and this verification's code-level evidence are what establish SATISFIED status; per this repository's own pattern, per-requirement checkboxes appear to be flipped at milestone-close time rather than per-plan. Not treated as a gap; flagged here for the record.
 
 ### Anti-Patterns Found
 
 | File | Line | Pattern | Severity | Impact |
 |---|---|---|---|---|
-| `apps/worker/src/queues/send-dispatch.ts` | 377 | `handleAmbiguousSendMailError` logs `"send outcome ambiguous"` unconditionally before branching, including on the `pre_connection_retryable` path which the function's own doc comment describes as NOT ambiguous (REVIEW.md IN-01, confirmed present in current source — not fixed) | ℹ️ Info | Message/field mismatch, not a correctness bug: the structured `classification` field disambiguates for any consumer filtering on it; only a message-text-matching alert/panel would over-count. Does not block. |
-| `apps/api/src/modules/ops/webhook-lag-watchdog.ts` | 104-198 | Platform-wide `MAX(last_event_at)` signal can mask one dead tenant webhook behind another healthy one (REVIEW.md IN-01 from initial review) | ℹ️ Info (carried forward, deliberate documented scope choice) | Runbook should note this limitation; not a functional defect |
-| `packages/db/src/migration-tiers.ts` | 63-64 | Stale file-count comment (carried forward from initial review) | ℹ️ Info (cosmetic) | No behavior depends on it |
-| `apps/web/src/features/campaigns/TemplateSenderPickers.tsx` | 67-114, 180-226 | Duplicate error-state render when popover open + empty (carried forward from initial review) | ℹ️ Info (cosmetic) | Minor UI duplication, not a correctness defect |
+| `scripts/validate-alloy-config.mjs` | 85-148 | Static scanner's four-state walk (code/string/lineComment/blockComment) has no backtick-delimited raw-string state; River (Alloy's config language) supports backtick raw strings. `15-REVIEW.md` WR-01 empirically proved both a false positive (`regex = \`a#b\`` — legal Alloy, real binary accepts it, static scanner flags it) and a false negative (an unescaped `"` inside a backtick string desyncs the scanner into permanent string-state, silently swallowing a real illegal `#` later in the file) | ⚠️ Warning (carried from code review, not newly found) | Neither direction lets the actual production defect class go undetected: CI's `ALLOY_VALIDATE_REQUIRE_BINARY=1` real-binary layer is the authoritative parser and backstops both — a false positive fails loud (blocks a legal config, availability/DX cost) and a false negative in the static scan is still caught because `alloy fmt` itself rejects genuinely invalid syntax. The committed `config.alloy` contains no backtick strings today, so this is a latent robustness gap for future edits, not a live defect. Confirmed this session: the must-have's actual wording ("a `//` comment or a **quoted string**") is satisfied — I independently verified the double-quoted case (`#fragment` in a URL) returns 0 violations; backtick strings are outside that stated scope. |
+| `scripts/validate-alloy-config.mjs` | 258-311 | `runValidation`'s branch order has an untested combination (Docker reachable + image resolution fails) that doesn't explicitly check `requireBinary`, unlike the symmetric Docker-unreachable branch (`15-REVIEW.md` WR-02) | ⚠️ Warning (carried from code review) | Currently masked/non-exploitable — `resolveAlloyImageRef` always throws before `imageRef` can be `undefined` in this branch, so the violations array is still non-empty and CI still exits non-zero. Untested edge case, not a live fail-open bug. |
+| `scripts/__tests__/validate-alloy-config.test.mjs` | 83-88 | The "throws a named error when compose declares no alloy service" test hits a bare `ENOENT` before reaching the code path it claims to test; `AlloyImageResolutionError` is never imported or asserted via `instanceof` (`15-REVIEW.md` WR-03) | ⚠️ Warning (carried from code review) | Test doesn't prove what it claims; a regression in the "no alloy service"/"no image" detection logic would not be caught |
+| `docs/runbooks/log-shipping-and-backstop-alerts.md` | 156-159 | Recovery command hardcodes `grafana/alloy:v1.18.1` literally, contradicting the runbook's own stated "restate nothing, link instead" convention (`15-REVIEW.md` WR-04) | ⚠️ Warning (carried from code review) | Currently correct (matches the pinned tag) but would silently validate against a stale image if the tag is ever bumped without this runbook being updated in lockstep — this is specifically the production-incident recovery path |
+| `scripts/validate-alloy-config.mjs` | 217-234 | `execFileSync` timeout in `runAlloyFmt` is reported identically to a real parse failure, not distinguished (`15-REVIEW.md` IN-01) | ℹ️ Info (carried from code review) | Fails safe (CI still goes red) but misdirects investigation toward config typos rather than image-pull/network health |
+| `scripts/__tests__/validate-alloy-config.test.mjs` | 179-183 | Container-path drift test only checks substring presence, not that it appears as the specific mount target and command argument (`15-REVIEW.md` IN-02) | ℹ️ Info (carried from code review) | Weaker guarantee than the doc comment claims; not a live defect |
+| `apps/web/src/lib/sentry.ts`, `apps/worker/src/__tests__/correlation-tracer.test.ts` | various | Two pre-existing lint errors unrelated to this plan's files (logged in `deferred-items.md`) | ℹ️ Info (carried forward, out of 15-22's scope) | `npx eslint` on 15-22's own new files is clean; these predate this plan (15-11, 15-19) |
 
-No TBD/FIXME/XXX debt markers found in any of the 7 gap-closure-diff files (re-scanned this session: `send-dispatch.ts`, `webhook-events.worker.ts`, `correlation-tracer.test.ts`, `webhook-events-sendid-correlation.test.ts`, `send-dispatch-error-listener.test.ts`, `ARCHITECTURE.md`, `SPECIFICATION.md`).
-
-**Note on diff scope:** `apps/worker/src/queues/__tests__/send-dispatch-error-listener.test.ts` appears in the gap-closure diff even though no gap-closure plan's `files_modified` lists it. Confirmed via `git log` this is a merge-conflict resolution (commit `2c0a6a1`, "fix: resolve post-merge conflicts from wave 1"): `send-dispatch.ts` now imports `../logger.js` (plan 15-19), which reads `PINO_REDACT_OPTIONS` from `@mega-crm/redaction` at module load, so the pre-existing test's `vi.mock("@mega-crm/redaction", ...)` needed to preserve the real module's other exports rather than fully replacing them. Behavior-preserving; re-ran this session, 3/3 pass.
+No TBD/FIXME/XXX debt markers found in any of the 10 files this plan's diff touches (re-scanned this session).
 
 ### Human Verification Required
 
-1. **RouteErrorBoundary click-through** — Force a render error inside a lazy feature route in a real browser and confirm the contained panel + intact shell. No DOM test env exists in this repo (`environment: "node"` for `apps/web` vitest); 15-11's own SUMMARY already flags this as `human_judgment: true`. Unchanged from the prior verification — this gap-closure diff touches zero `apps/web` files.
-2. **Canvas unsaved-changes e2e** — Run `apps/web/e2e/flow-unsaved-changes.spec.ts` against a provisioned e2e database and confirm 4/4 pass, matching what 15-09-SUMMARY.md documents but this session did not independently reproduce. Unchanged from the prior verification.
-3. **Live Sentry DSN provisioning** — Configure real DSNs for the three Sentry projects and confirm a real event reaches each, tagged correctly, with nothing sensitive leaking (operator-supplied, decision: proceed-live-dsn). Unchanged.
-4. **Live Grafana Cloud/Loki provisioning** — Configure real Loki push credentials and the two documented backstop alert rules, and confirm both logs arrival and alert firing (operator setup, outside repo scope). Unchanged.
+1. **Production redeploy confirmation of the committed config.alloy** — At the next production deploy, redeploy the prod compose stack and confirm the `alloy` container reaches and stays in a running state (not restarting), and that log lines continue to arrive in Loki. Expected: container runs (not `Restarting`), structured logs keep arriving with the documented labels. Why human: this session's own real-binary parse (exit 0, zero diagnostics) makes the parse-level risk near-zero, but the operator's UAT confirmation of live shipping was against a temporary corrected config, not byte-identical to the file now committed (which gained a 16-line explanatory header). The plan's own `<human-check>` block scopes exactly this residual as outstanding, and an actual production redeploy is outside this repository's automatable scope.
 
 ### Gaps Summary
 
-**No gaps remain.** All three gaps from the prior verification (G-15-1 sendId dispatch+webhook halves, G-15-2 ARCHITECTURE.md §18 staleness, G-15-3 SPECIFICATION.md §3 staleness) are independently confirmed closed against the actual current codebase in this session — not merely claimed by the SUMMARYs. Every grep/node-oneliner gate the gap-closure plans specify was re-run directly against the current files and passed; every named test the plans reference was re-run in this session (not merely trusted from the SUMMARYs) and passed; the underlying facts the two doc fixes describe (docker-compose.prod.yml's environment blocks, processor-wrapper.ts:196's actual code) were independently re-checked against the source, not just against the doc's own claim about them.
+**No gaps remain.** G-15-4 is independently confirmed closed this session by running the real gate and the real pinned Alloy binary directly (not by trusting the SUMMARY) — the committed `docker/alloy/config.alloy` parses cleanly, the regression-lock fixture still reproduces the original shipped defect exactly, the false-positive guard is confirmed for the must-have's stated scope (quoted strings), and the gate is wired into a required, fail-closed CI check. All three regression gates touched by this diff (spec-env-coverage, runbook-coverage, prod-compose invariants) were re-run this session and pass. No debt markers found.
 
-Status is `human_needed`, not `passed`, solely because of the four carried-forward human-verification items (two in-repo runtime checks this repository cannot exercise without a DOM environment or a live e2e database, two operator-side provisioning steps for live Sentry/Grafana Cloud). None of these four items were touched by this gap-closure diff and none represent a regression — they were already `human_needed` in the prior report and remain exactly as they were.
+Status remains `human_needed` rather than `passed` for exactly one reason: an actual production redeploy of the committed configuration has not been confirmed in this repository (the plan's own `<human-check>` scopes this precisely). This is a live-infrastructure confirmation step, not a code-level gap — the automated evidence for it is as strong as this repository can produce without deploying.
+
+The code review (`15-REVIEW.md`) surfaced four Warning and two Info findings in the new gate's own robustness (backtick raw-string blind spot, an untested branch, a weak test assertion, a hardcoded image tag in a runbook example) — none of these undermine G-15-4's closure, because CI's real-binary layer is the authoritative parser and backstops the actual defect class in both directions. They are recorded as Anti-Patterns for a future cleanup pass, not as blocking gaps.
 
 ---
 
-_Verified: 2026-08-16_
+_Verified: 2026-08-17_
 _Verifier: Claude (gsd-verifier)_
