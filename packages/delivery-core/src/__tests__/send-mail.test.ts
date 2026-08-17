@@ -189,7 +189,7 @@ describe("SENDGRID_BASE_URL override seam (Phase 16, D-06/D-07)", () => {
     let capturedUrl: string | undefined;
     const originalFetch = globalThis.fetch;
     // eslint-disable-next-line @typescript-eslint/require-await -- test double
-    globalThis.fetch = async (url: string | URL) => {
+    globalThis.fetch = async (url: string | URL | Request) => {
       capturedUrl = String(url);
       return new Response(null, { status: 202 });
     };
@@ -209,7 +209,7 @@ describe("SENDGRID_BASE_URL override seam (Phase 16, D-06/D-07)", () => {
     let capturedUrl: string | undefined;
     const originalFetch = globalThis.fetch;
     // eslint-disable-next-line @typescript-eslint/require-await -- test double
-    globalThis.fetch = async (url: string | URL) => {
+    globalThis.fetch = async (url: string | URL | Request) => {
       capturedUrl = String(url);
       return new Response(null, { status: 202 });
     };
@@ -230,7 +230,7 @@ describe("SENDGRID_BASE_URL override seam (Phase 16, D-06/D-07)", () => {
     let capturedInit: RequestInit | undefined;
     const originalFetch = globalThis.fetch;
     // eslint-disable-next-line @typescript-eslint/require-await -- test double
-    globalThis.fetch = async (url: string | URL, init?: RequestInit) => {
+    globalThis.fetch = async (url: string | URL | Request, init?: RequestInit) => {
       capturedUrl = String(url);
       capturedInit = init;
       return new Response(null, { status: 202, headers: { "x-message-id": "sg-fixture-message-id" } });

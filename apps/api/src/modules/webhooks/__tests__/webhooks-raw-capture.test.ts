@@ -131,7 +131,7 @@ describe("POST /webhooks/sendgrid/:pathToken raw capture (Phase 16, D-09)", () =
   }
 
   function captureLogCalls() {
-    return infoSpy.mock.calls.filter(([, msg]) => typeof msg === "string" && msg.includes(WEBHOOK_RAW_CAPTURE_LOG_MARKER));
+    return infoSpy.mock.calls.filter(([, msg]: unknown[]) => typeof msg === "string" && msg.includes(WEBHOOK_RAW_CAPTURE_LOG_MARKER));
   }
 
   it("with the capture variable unset, a verified delivery produces no capture log line and a normal 200", async () => {
