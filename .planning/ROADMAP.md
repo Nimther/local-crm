@@ -673,12 +673,26 @@ Plans:
 **Plans**: 7 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 16-01-PLAN.md — TRACER: UAT workspace, BYO key, Dynamic Template, first live send end-to-end (UAT-01, delivered leg of UAT-02)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 16-02-PLAN.md — Live opened/clicked/bounced with campaign and flow-step attribution (UAT-02)
 - [ ] 16-03-PLAN.md — SENDGRID_BASE_URL seam + raw webhook capture + SPECIFICATION filing (UAT-03, UAT-05)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 16-04-PLAN.md — Live signed-payload capture, byte-exact replay, dedup proof, byte-flip rejection (UAT-03, UAT-04)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 16-05-PLAN.md — Committed CI fixture + full-HTTP-stack replay test, closing the Phase 5 gap (UAT-03, UAT-04)
 - [ ] 16-06-PLAN.md — Fault proxy + live 429 and timeout, defer/resolve/exactly-once (UAT-05)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
 - [ ] 16-07-PLAN.md — UAT report, standing-canary procedure, teardown verification (UAT-01..05)
 
 **Why UAT is its own final phase (deliberate decision):**
