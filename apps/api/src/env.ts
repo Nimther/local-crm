@@ -53,6 +53,28 @@ export const envSchema = z
     // signature-verify.ts's DEFAULT_WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS;
     // keep the two in sync if either changes.
     WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS: z.coerce.number().int().positive().default(600),
+    // Phase 15 plan 10 (OPS-08): all three optional -- a missing DSN must
+    // never fail boot or fail validation (RESEARCH.md Pitfall 18's
+    // one-way-door risk means Sentry init is opt-in per environment, never
+    // required). apps/api/src/sentry.ts's initSentry() simply stays
+    // uninitialized when SENTRY_DSN_API is unset. Real values are supplied
+    // only in the deployed environment (see docker/prod.env.example and this
+    // plan's SUMMARY.md "User Setup Required").
+    SENTRY_DSN_API: z.string().optional(),
+    // Overrides Sentry's own "environment" tag; defaults to NODE_ENV
+    // (apps/api/src/sentry.ts) when unset rather than being required here,
+    // since NODE_ENV already carries this information for every other
+    // purpose in this schema.
+    SENTRY_ENVIRONMENT: z.string().optional(),
+    // Reuses docker-compose.prod.yml's existing IMAGE_TAG (the full deployed
+    // image SHA, plan 14-08/14-09) as Sentry's release identifier rather
+    // than introducing a second, parallel release variable -- this plan's
+    // Task 3 threads it through to the container's own process environment
+    // (previously IMAGE_TAG only selected which image tag `docker compose`
+    // pulls; it was never passed into the container itself). Optional
+    // because dev/test never sets it -- Sentry simply omits `release` from
+    // the event in that case.
+    IMAGE_TAG: z.string().optional(),
   })
   .superRefine((val, ctx) => {
     // Boot-time guard (RESEARCH.md Pitfall 3 / Open Question 2): the

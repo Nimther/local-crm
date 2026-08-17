@@ -29,7 +29,22 @@ async function registerAndCreateWorkspace(page: Page): Promise<string> {
   await page.getByLabel(/имя/i).fill("Segments Behavior Owner");
   await page.getByLabel(/email/i).fill(email);
   await page.getByLabel(/пароль/i).fill("correct horse battery staple 42");
+
+  const signUpResponse = page.waitForResponse(
+    (response) => response.url().endsWith("/api/auth/sign-up/email") && response.request().method() === "POST",
+  );
   await page.getByRole("button", { name: "Зарегистрироваться" }).click();
+
+  const response = await signUpResponse;
+  if (response.status() === 429) {
+    // The full serial E2E corpus legitimately exercises enough /api/auth/*
+    // requests to reach the production-shaped shared bucket. Respect the
+    // server's own backoff contract rather than weakening rate limiting in
+    // test mode or sleeping unconditionally on every registration.
+    const retryAfterSeconds = Number(response.headers()["retry-after"] ?? "1");
+    await page.waitForTimeout((Number.isFinite(retryAfterSeconds) ? retryAfterSeconds + 1 : 2) * 1_000);
+    await page.getByRole("button", { name: "Зарегистрироваться" }).click();
+  }
 
   await page.waitForURL("**/create-workspace");
   await page.getByLabel(/название/i).fill(`Behavior Test ${Date.now()}`);

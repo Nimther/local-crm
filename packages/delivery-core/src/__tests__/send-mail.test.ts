@@ -1,6 +1,8 @@
 import { createServer } from "node:http";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildMailSendRequest, sendTenantMailV3, SENDGRID_TIMEOUT_MS } from "../send-mail.js";
+
+const REAL_SENDGRID_MAIL_SEND_URL = "https://api.sendgrid.com/v3/mail/send";
 
 function sampleParams(overrides: Partial<Parameters<typeof buildMailSendRequest>[0]> = {}) {
   return {
@@ -151,5 +153,125 @@ describe("sendTenantMailV3 timeout/abort (D-15, DLV-06)", () => {
     expect(caught?.message).not.toContain(apiKey);
     expect(caught?.stack).toContain("[REDACTED]");
     expect(caught?.stack).not.toContain(apiKey);
+  });
+});
+
+/**
+ * Phase 16 (D-06/D-07): `SENDGRID_BASE_URL` process-scoped override seam.
+ * `SENDGRID_MAIL_SEND_URL` is a MODULE-LEVEL constant (same versioned-constant
+ * convention as `SENDGRID_TIMEOUT_MS`), so each variant below sets
+ * `process.env.SENDGRID_BASE_URL` and re-imports the module fresh via
+ * `vi.resetModules()` -- reading the already-imported module-level export at
+ * the top of this file would only ever see the value resolved at THIS
+ * file's first import, never a per-test override.
+ */
+describe("SENDGRID_BASE_URL override seam (Phase 16, D-06/D-07)", () => {
+  const originalOverride = process.env.SENDGRID_BASE_URL;
+
+  afterEach(() => {
+    if (originalOverride === undefined) {
+      delete process.env.SENDGRID_BASE_URL;
+    } else {
+      process.env.SENDGRID_BASE_URL = originalOverride;
+    }
+  });
+
+  async function importFreshSendMailModule() {
+    vi.resetModules();
+    return import("../send-mail.js");
+  }
+
+  it("with the override unset, sendTenantMailV3 calls the real SendGrid mail/send URL -- byte-identical to before this change", async () => {
+    delete process.env.SENDGRID_BASE_URL;
+    const { sendTenantMailV3: freshSend, SENDGRID_MAIL_SEND_URL } = await importFreshSendMailModule();
+    expect(SENDGRID_MAIL_SEND_URL).toBe(REAL_SENDGRID_MAIL_SEND_URL);
+
+    let capturedUrl: string | undefined;
+    const originalFetch = globalThis.fetch;
+    // eslint-disable-next-line @typescript-eslint/require-await -- test double
+    globalThis.fetch = async (url: string | URL | Request) => {
+      capturedUrl = url instanceof Request ? url.url : String(url);
+      return new Response(null, { status: 202 });
+    };
+    try {
+      await freshSend("SG.fixture_key", buildMailSendRequest(sampleParams()));
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    expect(capturedUrl).toBe(REAL_SENDGRID_MAIL_SEND_URL);
+  });
+
+  it("with the override set to an empty string, behaves identically to unset", async () => {
+    process.env.SENDGRID_BASE_URL = "";
+    const { sendTenantMailV3: freshSend, SENDGRID_MAIL_SEND_URL } = await importFreshSendMailModule();
+    expect(SENDGRID_MAIL_SEND_URL).toBe(REAL_SENDGRID_MAIL_SEND_URL);
+
+    let capturedUrl: string | undefined;
+    const originalFetch = globalThis.fetch;
+    // eslint-disable-next-line @typescript-eslint/require-await -- test double
+    globalThis.fetch = async (url: string | URL | Request) => {
+      capturedUrl = url instanceof Request ? url.url : String(url);
+      return new Response(null, { status: 202 });
+    };
+    try {
+      await freshSend("SG.fixture_key", buildMailSendRequest(sampleParams()));
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    expect(capturedUrl).toBe(REAL_SENDGRID_MAIL_SEND_URL);
+  });
+
+  it("with the override set to a URL, sendTenantMailV3 calls that URL instead, changing nothing else about the request", async () => {
+    process.env.SENDGRID_BASE_URL = "http://127.0.0.1:9999/fault-proxy/mail/send";
+    const { sendTenantMailV3: freshSend, SENDGRID_MAIL_SEND_URL } = await importFreshSendMailModule();
+    expect(SENDGRID_MAIL_SEND_URL).toBe("http://127.0.0.1:9999/fault-proxy/mail/send");
+
+    let capturedUrl: string | undefined;
+    let capturedInit: RequestInit | undefined;
+    const originalFetch = globalThis.fetch;
+    // eslint-disable-next-line @typescript-eslint/require-await -- test double
+    globalThis.fetch = async (url: string | URL | Request, init?: RequestInit) => {
+      capturedUrl = url instanceof Request ? url.url : String(url);
+      capturedInit = init;
+      return new Response(null, { status: 202, headers: { "x-message-id": "sg-fixture-message-id" } });
+    };
+    const payload = buildMailSendRequest(sampleParams());
+    try {
+      const result = await freshSend("SG.fixture_key", payload);
+      expect(result.status).toBe(202);
+      expect(result.messageId).toBe("sg-fixture-message-id");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    expect(capturedUrl).toBe("http://127.0.0.1:9999/fault-proxy/mail/send");
+    expect(capturedInit?.method).toBe("POST");
+    expect((capturedInit?.headers as Record<string, string>)?.Authorization).toBe("Bearer SG.fixture_key");
+    expect((capturedInit?.headers as Record<string, string>)?.["Content-Type"]).toBe("application/json");
+    expect(capturedInit?.body).toBe(JSON.stringify(payload));
+    expect(capturedInit?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("a thrown error from fetch is still redacted through redactApiKey when the override is active", async () => {
+    process.env.SENDGRID_BASE_URL = "http://127.0.0.1:9999/fault-proxy/mail/send";
+    const { sendTenantMailV3: freshSend } = await importFreshSendMailModule();
+
+    const apiKey = "SG.override_path_secret_key_00000";
+    const originalFetch = globalThis.fetch;
+    // eslint-disable-next-line @typescript-eslint/require-await -- test double
+    globalThis.fetch = async () => {
+      throw new Error(`connection refused for key ${apiKey}`);
+    };
+    let caught: Error | undefined;
+    try {
+      await freshSend(apiKey, buildMailSendRequest(sampleParams()));
+    } catch (err) {
+      caught = err as Error;
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect(caught?.message).toContain("[REDACTED]");
+    expect(caught?.message).not.toContain(apiKey);
   });
 });

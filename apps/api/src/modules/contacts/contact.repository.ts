@@ -440,8 +440,15 @@ export async function updateContact(id: string, patch: UpdateContactInput): Prom
  * through the shared `@mega-crm/queue-core` factory (Phase 12, WRK-11,
  * D-10) like every other producer in this codebase -- never a hand-rolled
  * connection/job-options literal.
+ *
+ * Phase 15 plan 13 (OPS-13, Rule 3): exported (was module-private) so
+ * `apps/api/src/modules/ops/queue-monitor.ts` can read this queue's job
+ * counts through the SAME handle this module already holds, instead of
+ * constructing a second, duplicate `Queue` instance for the same
+ * `ERASURE_SCRUB_QUEUE` name -- exactly the "reuse the seven Queue handles
+ * apps/api already constructs" instruction that plan's Task 1 gives.
  */
-const erasureScrubQueue = new Queue<ErasureScrubJob>(ERASURE_SCRUB_QUEUE, {
+export const erasureScrubQueue = new Queue<ErasureScrubJob>(ERASURE_SCRUB_QUEUE, {
   connection: buildRedisConnectionOptions(env.REDIS_URL),
   defaultJobOptions: buildJobOptions(STANDARD_JOB_RETENTION),
 });

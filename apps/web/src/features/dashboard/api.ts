@@ -47,6 +47,21 @@ export interface WorkspaceDashboardResponse {
   kpis: DashboardKpis;
   recentCampaigns: DashboardRecentCampaign[];
   activeFlows: DashboardActiveFlow[];
+  /**
+   * OPS-18 / D-12 (plan 15-12/15-15): the newest `workspace_daily_rollup`
+   * watermark among this response's rows, or `null` for a brand-new
+   * workspace with no rollup rows yet. Mirrors
+   * `@mega-crm/shared-schemas`'s `WorkspaceDashboardFreshness.dataAsOf` --
+   * this frontend-only interface isn't imported from the shared package
+   * directly since the rest of this file's shape predates it.
+   */
+  dataAsOf: string | null;
+  /**
+   * The age, in minutes, of the oldest outstanding dirty rollup day, or
+   * `null` when none is outstanding. Mirrors
+   * `WorkspaceDashboardFreshness.lagMinutes`.
+   */
+  lagMinutes: number | null;
 }
 
 /** GET /api/workspaces/:slug/dashboard?period=7|30|90 -- ANLT-04/D-08. */

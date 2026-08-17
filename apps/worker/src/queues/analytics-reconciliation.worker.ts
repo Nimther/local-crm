@@ -3,9 +3,15 @@ import type { PoolClient } from "pg";
 import { withCrossWorkspaceScan, withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { scrubbedConsole } from "@mega-crm/redaction";
 import { buildJobOptions, STANDARD_JOB_RETENTION } from "@mega-crm/queue-core";
+import { wrapProcessor } from "../processor-wrapper.js";
 
-/** The reconciliation job's own repeatable-tick queue -- self-produced and self-consumed within this file/process only. */
-const ANALYTICS_RECONCILE_QUEUE = "analytics-reconcile";
+/**
+ * The reconciliation job's own repeatable-tick queue -- self-produced and
+ * self-consumed within this file/process only. Exported (Phase 15 plan 16,
+ * OPS-14) so `board-queues.ts` can derive its Bull Board queue list from
+ * this constant rather than a hand-typed duplicate string.
+ */
+export const ANALYTICS_RECONCILE_QUEUE = "analytics-reconcile";
 /**
  * A few minutes, per D-08b's stated freshness bound for the "correctness
  * backstop" path. Exported (test-only consumer: `scheduler-registration.test.ts`)
@@ -102,12 +108,20 @@ interface WorkspaceRow {
  * timezone. This same pitfall applies to ANY future query in this codebase
  * that buckets a `timestamptz` column by calendar day -- bucket in UTC
  * explicitly, never rely on the bare cast.
+ *
+ * `updated_at` (Phase 15, OPS-18, D-12, migration 0064): set to `now()` on
+ * every overwrite, same as the incremental path
+ * (`incrementWorkspaceDailyRollup`, packages/db/src/analytics/daily-rollup.ts).
+ * Missing this here specifically would make the dashboard's "data as of"
+ * watermark lie in exactly the case that matters most -- a day this
+ * reconciler just re-verified would still show an OLD watermark, understating
+ * how fresh the number actually is.
  */
 export async function reconcileWorkspaceDay(client: PoolClient, workspaceId: string, day: string): Promise<void> {
   await client.query(
     `INSERT INTO workspace_daily_rollup (
        workspace_id, day, sent_count, delivered_count, opened_count,
-       clicked_count, bounced_count, unsubscribed_count
+       clicked_count, bounced_count, unsubscribed_count, updated_at
      )
      SELECT
        $1, $2::date,
@@ -120,7 +134,8 @@ export async function reconcileWorkspaceDay(client: PoolClient, workspaceId: str
             OR (dropped_at IS NOT NULL AND (dropped_at AT TIME ZONE 'UTC')::date = $2::date)
             OR (spam_reported_at IS NOT NULL AND (spam_reported_at AT TIME ZONE 'UTC')::date = $2::date)
        ),
-       count(*) FILTER (WHERE unsubscribed_at IS NOT NULL AND (unsubscribed_at AT TIME ZONE 'UTC')::date = $2::date)
+       count(*) FILTER (WHERE unsubscribed_at IS NOT NULL AND (unsubscribed_at AT TIME ZONE 'UTC')::date = $2::date),
+       now()
      FROM sends
      WHERE workspace_id = $1
      ON CONFLICT (workspace_id, day) DO UPDATE SET
@@ -129,7 +144,8 @@ export async function reconcileWorkspaceDay(client: PoolClient, workspaceId: str
        opened_count = EXCLUDED.opened_count,
        clicked_count = EXCLUDED.clicked_count,
        bounced_count = EXCLUDED.bounced_count,
-       unsubscribed_count = EXCLUDED.unsubscribed_count`,
+       unsubscribed_count = EXCLUDED.unsubscribed_count,
+       updated_at = EXCLUDED.updated_at`,
     [workspaceId, day]
   );
 }
@@ -339,7 +355,7 @@ export function createAnalyticsReconciliationWorker(
 
   const worker = new Worker(
     ANALYTICS_RECONCILE_QUEUE,
-    async () => {
+    wrapProcessor(ANALYTICS_RECONCILE_QUEUE, async () => {
       const rows = await withCrossWorkspaceScan(async (client) => {
         const { rows: workspaceRows } = await client.query<WorkspaceRow>(`SELECT id FROM organization`);
         return workspaceRows;
@@ -347,7 +363,7 @@ export function createAnalyticsReconciliationWorker(
       for (const row of rows) {
         await reconcileWorkspace(row.id, RECONCILE_WINDOW_DAYS);
       }
-    },
+    }),
     // G-12-1: the `autorun` key is included ONLY when a caller actually
     // supplied a value (mirrors `flow-segment-sweep.worker.ts`, which never
     // mentions the key at all) -- never nullish-coalesced to a restated

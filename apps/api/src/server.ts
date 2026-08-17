@@ -1,5 +1,11 @@
 import "./load-env.js";
+import { randomUUID } from "node:crypto";
 import Fastify from "fastify";
+// Phase 15 plan 10 (OPS-08): namespace import, not a named import of the
+// Fastify error-handler helper below -- keeps this file's only mention of
+// that helper's name on its single call-site line, not duplicated here too.
+import * as Sentry from "@sentry/node";
+import { initSentry } from "./sentry.js";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import { Redis } from "ioredis";
@@ -9,6 +15,7 @@ import {
   validatorCompiler,
   type ZodTypeProvider,
 } from "@fastify/type-provider-zod";
+import { withCorrelation } from "@mega-crm/tenant-context";
 import { logger } from "./logger.js";
 import { env } from "./env.js";
 import { pool } from "./db.js";
@@ -43,6 +50,31 @@ import {
   REPUTATION_ALERT_DEDUP_HOURS,
   type ReputationAlertMessage,
 } from "./modules/ops/reputation-watchdog.js";
+import {
+  startQueueDepthWatchdog,
+  QUEUE_DEPTH_WATCHDOG_INTERVAL_MS,
+  QUEUE_DEPTH_ALERT_DEDUP_HOURS,
+  type QueueDepthAlertMessage,
+} from "./modules/ops/queue-depth-watchdog.js";
+import {
+  startOldestJobAgeWatchdog,
+  OLDEST_JOB_AGE_WATCHDOG_INTERVAL_MS,
+  OLDEST_JOB_AGE_ALERT_DEDUP_HOURS,
+  type OldestJobAgeAlertMessage,
+} from "./modules/ops/oldest-job-age-watchdog.js";
+import {
+  startWebhookLagWatchdog,
+  WEBHOOK_LAG_WATCHDOG_INTERVAL_MS,
+  WEBHOOK_LAG_ALERT_DEDUP_HOURS,
+  type WebhookLagAlertMessage,
+} from "./modules/ops/webhook-lag-watchdog.js";
+import {
+  startFailedSendShareWatchdog,
+  FAILED_SEND_SHARE_WATCHDOG_INTERVAL_MS,
+  FAILED_SEND_SHARE_ALERT_DEDUP_HOURS,
+  type FailedSendShareAlertMessage,
+} from "./modules/ops/failed-send-share-watchdog.js";
+import { closeQueueMonitorQueues } from "./modules/ops/queue-monitor.js";
 import { authPlugin } from "./modules/auth/plugin.js";
 import { registerWorkspaceRoutes } from "./modules/tenancy/workspaces.js";
 import { registerProfileRoutes } from "./modules/tenancy/profile.js";
@@ -80,8 +112,42 @@ export interface BuildServerOptions {
   rateLimitRedisUrl?: string;
 }
 
+/**
+ * Phase 15 plan 02 (OPS-11, RESEARCH.md Pitfall 6): Fastify's default
+ * `genReqId` is a per-process monotonic counter (`req-1`, `req-2`, ...) that
+ * restarts at 1 on every deploy -- two different deploys, or two API
+ * replicas, can log the identical `request_id` for two unrelated requests,
+ * defeating a Loki correlation query entirely. An inbound `x-request-id`
+ * header is echoed back so a caller/reverse-proxy can supply its own
+ * correlation id, but that header is attacker-controlled input (T-15-04) --
+ * it is used ONLY as an opaque correlation label (never for auth/dedup) and
+ * constrained to a bounded-length safe character set before being echoed, so
+ * a crafted header cannot inject a `set_config`-breaking separator into the
+ * `application_name` value it eventually reaches (packages/tenant-context's
+ * `composeApplicationName`). Any value outside that pattern falls back to
+ * `crypto.randomUUID()` (Node 22 built-in, no new dependency), same as no
+ * header at all.
+ */
+const REQUEST_ID_SAFE_PATTERN = /^[A-Za-z0-9._-]{1,100}$/;
+
+function resolveRequestId(header: string | string[] | undefined): string {
+  const value = Array.isArray(header) ? header[0] : header;
+  if (value !== undefined && REQUEST_ID_SAFE_PATTERN.test(value)) {
+    return value;
+  }
+  return randomUUID();
+}
+
 /** Assembles the Fastify app: zod type provider, better-auth handler, workspace/profile/invite/member routes. */
 export async function buildServer(options: BuildServerOptions = {}) {
+  // Phase 15 plan 10 (OPS-08): initialized before the Fastify instance is
+  // built, per this plan's own instruction -- a missing DSN is a no-op
+  // (initSentry logs once and returns false), so this never blocks/slows
+  // boot and every apps/api integration test calling buildServer() directly
+  // (there is no separate DSN in the test environment) hits exactly that
+  // no-op path.
+  initSentry();
+
   const app = Fastify({
     loggerInstance: logger,
     // 04-03: find-my-way's default maxParamLength (100) is too small for the
@@ -90,10 +156,26 @@ export async function buildServer(options: BuildServerOptions = {}) {
     // chars. Without this, find-my-way returns a 414 for every genuine
     // token, defeating the endpoint entirely.
     routerOptions: { maxParamLength: 1024 },
+    genReqId: (req) => resolveRequestId(req.headers["x-request-id"]),
   }).withTypeProvider<ZodTypeProvider>();
 
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
+
+  // OPS-11 (RESEARCH.md Pattern 1/Pitfall 7): the FIRST onRequest hook
+  // registered, so every later hook (including the migration-currency guard
+  // below) and the route handler itself run inside this correlation scope --
+  // Fastify hooks execute in registration order. Deliberately never reads or
+  // consumes `request.body` -- the SendGrid webhook route's raw-body ECDSA
+  // signature verification depends on those exact bytes reaching its own
+  // content-type parser untouched. `done()` is called SYNCHRONOUSLY from
+  // inside `withCorrelation`'s callback (not `async (request) => { await
+  // withCorrelation(...) }`) so the ALS context is established for the
+  // continuation Fastify runs when `done()` fires, not just for the
+  // synchronous body of this hook.
+  app.addHook("onRequest", (request, _reply, done) => {
+    withCorrelation({ requestId: request.id }, () => done());
+  });
 
   // SEC-11 (T-10-12-01): a per-process (in-memory) rate-limit store silently
   // multiplies every configured limit by however many API replicas are
@@ -254,6 +336,13 @@ export async function buildServer(options: BuildServerOptions = {}) {
   await app.register(registerAnalyticsRoutes);
   await app.register(registerSendLogRoutes);
 
+  // Phase 15 plan 10 (OPS-08): registered AFTER every route above, per this
+  // plan's own instruction. Safe to call unconditionally (even with no DSN
+  // configured, i.e. every test run) -- it only adds an onError hook that
+  // forwards to Sentry's own captureException, which itself no-ops when no
+  // client is initialized.
+  Sentry.setupFastifyErrorHandler(app);
+
   // Every apps/api integration test calls `buildServer()` and closes the
   // returned instance in teardown -- closing the limiter's Redis client here
   // (rather than leaving every call site to remember it exists) is what
@@ -265,6 +354,17 @@ export async function buildServer(options: BuildServerOptions = {}) {
   // command over.
   app.addHook("onClose", () => {
     rateLimitRedis.disconnect();
+  });
+
+  // Phase 15 plan 13 (OPS-13, Task 1): closes queue-monitor.ts's own new
+  // read-only `emailTriggeredQueue` handle -- the one BullMQ `Queue` that
+  // module constructs itself (every other queue it reads is a REUSED handle
+  // already owned, and already closed where relevant, by its own producer
+  // module). Same rationale as the `rateLimitRedis.disconnect()` hook just
+  // above: without this, `npx vitest run --root apps/api` would hang on an
+  // open ioredis handle after the suite finishes.
+  app.addHook("onClose", async () => {
+    await closeQueueMonitorQueues();
   });
 
   return app;
@@ -347,6 +447,64 @@ async function sendReputationAlert(message: ReputationAlertMessage): Promise<voi
   });
 }
 
+/**
+ * Phase 15 (OPS-13, plan 15-13): the queue-depth watchdog's own real
+ * dispatch -- same platform-key-only, plain-text discipline as every
+ * sibling above, a sixth distinct subject line so all six alert channels
+ * stay distinguishable in an operator's inbox.
+ */
+async function sendQueueDepthAlert(message: QueueDepthAlertMessage): Promise<void> {
+  await sgMail.send({
+    to: message.to,
+    from: env.PLATFORM_MAIL_FROM,
+    subject: "Mega CRM queue depth alert",
+    text: message.text,
+  });
+}
+
+/**
+ * Phase 15 (OPS-13, plan 15-13): the oldest-job-age watchdog's own real
+ * dispatch -- same platform-key-only, plain-text discipline as every
+ * sibling above, a seventh distinct subject line.
+ */
+async function sendOldestJobAgeAlert(message: OldestJobAgeAlertMessage): Promise<void> {
+  await sgMail.send({
+    to: message.to,
+    from: env.PLATFORM_MAIL_FROM,
+    subject: "Mega CRM oldest-job-age alert",
+    text: message.text,
+  });
+}
+
+/**
+ * Phase 15 (OPS-13, plan 15-14): the webhook-lag watchdog's own real
+ * dispatch -- same platform-key-only, plain-text discipline as every
+ * sibling above, an eighth distinct subject line.
+ */
+async function sendWebhookLagAlert(message: WebhookLagAlertMessage): Promise<void> {
+  await sgMail.send({
+    to: message.to,
+    from: env.PLATFORM_MAIL_FROM,
+    subject: "Mega CRM webhook-lag alert",
+    text: message.text,
+  });
+}
+
+/**
+ * Phase 15 (OPS-13, plan 15-14): the failed-send-share watchdog's own real
+ * dispatch -- same platform-key-only, plain-text discipline as every
+ * sibling above, a ninth distinct subject line so all nine alert channels
+ * stay distinguishable in an operator's inbox.
+ */
+async function sendFailedSendShareAlert(message: FailedSendShareAlertMessage): Promise<void> {
+  await sgMail.send({
+    to: message.to,
+    from: env.PLATFORM_MAIL_FROM,
+    subject: "Mega CRM failed-send-share alert",
+    text: message.text,
+  });
+}
+
 async function main(): Promise<void> {
   const app = await buildServer();
   await app.listen({ port: env.API_PORT, host: "0.0.0.0" });
@@ -414,6 +572,57 @@ async function main(): Promise<void> {
     operatorEmail: env.OPERATOR_ALERT_EMAIL,
     sendMail: sendReputationAlert,
   });
+  // Phase 15 (OPS-13, plan 15-13): a SIXTH independent dead-man's switch,
+  // over BullMQ queue depth across all 8 monitored send-pipeline lanes. It
+  // claims through the SHARED ops_alert_state table (plan 15-12) under its
+  // own alert name ("queue-depth") and its own dedup window
+  // (QUEUE_DEPTH_ALERT_DEDUP_HOURS), independent of every watchdog above and
+  // below -- a claim under one alert name can never satisfy or block
+  // another's WHERE predicate, so none of these nine watchdogs can mask or
+  // be masked by any other.
+  startQueueDepthWatchdog({
+    client: pool,
+    operatorEmail: env.OPERATOR_ALERT_EMAIL,
+    sendMail: sendQueueDepthAlert,
+  });
+  // Phase 15 (OPS-13, plan 15-13): a SEVENTH independent dead-man's switch,
+  // over the oldest pending BullMQ job's age AND the oldest outstanding
+  // sends.reconciling_since, evaluated together into one alert
+  // ("oldest-job-age") so a send stuck at either stage produces exactly one
+  // email, never two. Deliberately set BELOW send-reconciler-watchdog.ts's
+  // own RECONCILING_AGE_ALERT_HOURS (see that module's own constant
+  // comments) -- an earlier warning on the same underlying signal, never a
+  // simultaneous duplicate.
+  startOldestJobAgeWatchdog({
+    client: pool,
+    operatorEmail: env.OPERATOR_ALERT_EMAIL,
+    sendMail: sendOldestJobAgeAlert,
+  });
+  // Phase 15 (OPS-13, plan 15-14): an EIGHTH independent dead-man's switch,
+  // answering "is delivery evidence still arriving" -- a deliberately
+  // DIFFERENT question from ingestion-health-watchdog.ts's "is an
+  // already-arrived batch stuck" (see webhook-lag-watchdog.ts's own header
+  // for the full distinction). Claims under its own alert name
+  // ("webhook-lag") and its own dedup window, so it cannot mask or be
+  // masked by ingestion-health-watchdog above or any other watchdog here.
+  startWebhookLagWatchdog({
+    client: pool,
+    operatorEmail: env.OPERATOR_ALERT_EMAIL,
+    sendMail: sendWebhookLagAlert,
+  });
+  // Phase 15 (OPS-13, plan 15-14): a NINTH independent dead-man's switch,
+  // over the share of terminal (sent/failed) sends that failed, over a
+  // rolling window -- rate-limited deferrals and other non-terminal
+  // control-flow outcomes are structurally excluded from both sides of the
+  // ratio (see failed-send-share-watchdog.ts's own header), so routine
+  // per-tenant backpressure can never read as a false outage. Claims under
+  // its own alert name ("failed-send-share") and its own dedup window,
+  // independent of every watchdog above.
+  startFailedSendShareWatchdog({
+    client: pool,
+    operatorEmail: env.OPERATOR_ALERT_EMAIL,
+    sendMail: sendFailedSendShareAlert,
+  });
 
   // Names only the interval/threshold numbers -- never the operator
   // address or anything derived from the SendGrid key (T-09-11).
@@ -440,6 +649,22 @@ async function main(): Promise<void> {
   logger.info(
     { pollIntervalMs: REPUTATION_WATCHDOG_INTERVAL_MS, alertDedupHours: REPUTATION_ALERT_DEDUP_HOURS },
     "reputation watchdog armed -- watching reputation_alert_state for warn/critical tier crossings"
+  );
+  logger.info(
+    { pollIntervalMs: QUEUE_DEPTH_WATCHDOG_INTERVAL_MS, alertDedupHours: QUEUE_DEPTH_ALERT_DEDUP_HOURS },
+    "queue-depth watchdog armed -- watching all 8 monitored BullMQ send-pipeline lanes for a backing-up queue"
+  );
+  logger.info(
+    { pollIntervalMs: OLDEST_JOB_AGE_WATCHDOG_INTERVAL_MS, alertDedupHours: OLDEST_JOB_AGE_ALERT_DEDUP_HOURS },
+    "oldest-job-age watchdog armed -- watching the oldest pending BullMQ job and the oldest outstanding sends.reconciling_since"
+  );
+  logger.info(
+    { pollIntervalMs: WEBHOOK_LAG_WATCHDOG_INTERVAL_MS, alertDedupHours: WEBHOOK_LAG_ALERT_DEDUP_HOURS },
+    "webhook-lag watchdog armed -- watching workspace_webhook_endpoints.last_event_at against outstanding reconciling sends"
+  );
+  logger.info(
+    { pollIntervalMs: FAILED_SEND_SHARE_WATCHDOG_INTERVAL_MS, alertDedupHours: FAILED_SEND_SHARE_ALERT_DEDUP_HOURS },
+    "failed-send-share watchdog armed -- watching the rolling share of terminal sends that failed"
   );
 }
 

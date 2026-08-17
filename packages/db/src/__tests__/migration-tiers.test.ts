@@ -104,9 +104,8 @@ describe("tierFor", () => {
 });
 
 describe("newestAutoReversibleTier", () => {
-  it("returns a contiguous trailing run of tags, all of which are auto-reversible", () => {
+  it("returns a contiguous trailing run of tags, all of which are auto-reversible (possibly empty, when the newest shipped migration is itself forward-only)", () => {
     const run = newestAutoReversibleTier(MIGRATIONS_DIR);
-    expect(run.length).toBeGreaterThan(0);
     for (const tag of run) {
       expect(tierFor(tag)).toBe("auto-reversible");
     }
@@ -125,17 +124,19 @@ describe("newestAutoReversibleTier", () => {
     }
   });
 
-  it("returns the current repository's trailing run as exactly [0062_member_unique_org_user, 0063_partition_retention_drops]", () => {
-    // 0061 (drops the plaintext suppression column/constraint) is
-    // forward-only, so the trailing run starts at 0062 (an additive unique
-    // constraint) and now also includes 0063 (Phase 14 plan 12, DB-11: pure
-    // ADD COLUMN + CREATE TABLE, also additive). Pinned explicitly so a
-    // future migration silently changing this fails loudly here rather than
-    // only inside the rehearsal test.
-    expect(newestAutoReversibleTier(MIGRATIONS_DIR)).toEqual([
-      "0062_member_unique_org_user",
-      "0063_partition_retention_drops",
-    ]);
+  it("returns the current repository's trailing run as exactly [] -- 0065 (the newest shipped migration) is forward-only", () => {
+    // Phase 15 (OPS-13, plan 15-14, Task 1): 0065 is a grants-only migration
+    // (column-level GRANT + CREATE POLICY on workspace_webhook_endpoints,
+    // human-approved override of this plan's own "no new migration"
+    // prohibition -- see 0065's own header comment and 15-14-SUMMARY.md's
+    // Deviations section). A CREATE POLICY is forward-only by this module's
+    // own reason (2) (an access-control posture change), so the trailing
+    // run RESETS to empty here -- it does not extend the previous
+    // [0062, 0063, 0064] run, because 0065 now sits strictly after all
+    // three and is itself not auto-reversible. Pinned explicitly so a
+    // future migration silently changing this fails loudly here rather
+    // than only inside the rehearsal test.
+    expect(newestAutoReversibleTier(MIGRATIONS_DIR)).toEqual([]);
   });
 
   it("returns an empty run when the newest migration is forward-only", () => {

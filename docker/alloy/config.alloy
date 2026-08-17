@@ -1,0 +1,153 @@
+// GAP CLOSURE G-15-4 (OPS-10, plan 15-22) -- READ BEFORE EDITING THIS FILE'S
+// COMMENTS. This configuration language's only comment tokens are the line
+// (`//`) and block (`/* */`) forms Alloy itself defines. The marker this
+// file previously used -- `#`, shell/YAML-style -- is NOT one of them, and
+// is rejected by Alloy's lexer at the very first byte (`illegal character
+// U+0023 '#'`). That parse failure meant the production `alloy` sidecar
+// could never load this file at all, and under `restart: unless-stopped`
+// it restart-looped forever -- restarting endlessly instead of running --
+// silently stopping ALL log delivery to Grafana Cloud, with both backstop
+// alert rules (dead-man's-switch, error-rate-spike) left reading an empty
+// stream the entire time. `npm run verify:alloy-config`
+// (scripts/validate-alloy-config.mjs) now parses this exact file with the
+// real pinned `grafana/alloy` binary before it can ship -- reintroducing a
+// `#` comment anywhere in this file fails that gate (and the CI `static`
+// job it is wired into) before merge, not after a silent production outage.
+//
+// Phase 15 plan 17 (OPS-10, D-01, D-02, D-03). Grafana Alloy sidecar:
+// discovers every container Docker is running on this host, tails each
+// container's OWN `json-file` log capture via Docker's API (NOT a
+// per-process log transport, NOT the Docker `loki` logging driver -- D-02
+// rejected both explicitly: log delivery must survive an application
+// crash, which only holds if shipping reads Docker's own capture rather
+// than living inside the process being shipped or replacing its logging
+// driver), and pushes every line to Grafana Cloud Loki over https with
+// basic-auth credentials read from the environment.
+//
+// LABEL STRATEGY -- READ THIS BEFORE ADDING A LABEL. Loki's index is keyed
+// by the FULL SET of a stream's label values: a label with high
+// cardinality (one distinct value per request/job/send, not one value per
+// service) turns every distinct value into its own stream, which is
+// Grafana's own documented guidance for why Loki index/query performance
+// degrades under high-cardinality labels. This phase put four correlation
+// identifiers into the JSON body of every log line -- requestId, jobId,
+// sendId, workspaceId (packages/tenant-context's CorrelationStore,
+// stamped by apps/api|worker's logger `mixin()`) -- and NONE of them may
+// ever become a Loki label (T-15-63). They stay exactly where the
+// application put them: inside the JSON log line, queried at QUERY TIME
+// with LogQL's `| json` parser (see
+// docs/observability/grafana-cloud-alerts.md's copy-pasteable example).
+// Only three labels are declared below, all low-cardinality by
+// construction:
+//   - service   -- the compose service name (`db`, `api`, `worker`, ...) --
+//                  bounded by EXPECTED_SERVICES
+//                  (scripts/validate-prod-compose.mjs), a handful of
+//                  values ever
+//   - container -- the container name Docker assigns -- bounded by however
+//                  many replicas of a service actually run, never
+//                  per-request
+//   - level     -- pino's numeric log level (10/20/30/40/50/60) -- a fixed
+//                  small enum
+// `service` and `container` come from Docker's own container METADATA
+// (discovery.relabel below), never from log content -- neither can ever
+// carry a correlation id no matter what the application logs. `level` is
+// the ONLY label extracted from the log body itself, via a scoped
+// `stage.json` that reads exactly one field and nothing else. A future
+// change that promotes any of the four correlation ids to a label (or
+// relabels a request-scoped value into `service`/`container`) violates
+// this phase's own threat register (T-15-63) and this file's own design --
+// do not "improve" this by adding more labels without re-reading this
+// comment.
+//
+// CREDENTIALS -- no literal value appears anywhere in this file. The three
+// Grafana Cloud values below are read from the Alloy process's OWN
+// environment (`env()`, Alloy's standard-library function for reading an
+// environment variable at config-evaluation time), which the `alloy`
+// service in docker/docker-compose.prod.yml populates from
+// `${MEGA_CRM_ENV_FILE}` -- the SAME externally-resolved secrets file
+// every secret in this project has read from since Phase 8
+// (scripts/env-path.mjs's convention):
+//   GRAFANA_LOKI_PUSH_URL    -- Loki push endpoint, MUST be https
+//   GRAFANA_LOKI_USER        -- Loki tenant/instance id (basic-auth user)
+//   GRAFANA_CLOUD_API_TOKEN  -- an access-policy token scoped to logs:write
+// docker/prod.env.example documents all three (names, source, purpose --
+// never a value). See docs/observability/grafana-cloud-alerts.md for the
+// two Grafana Cloud backstop alert rules (dead-man's-switch,
+// error-rate-spike) this shipping pipeline feeds, and for the
+// copy-pasteable end-to-end correlation query.
+//
+// DOCKER SOCKET -- `discovery.docker`'s container-discovery mechanism
+// requires the read-only bind mount of `/var/run/docker.sock` declared on
+// the `alloy` service in docker-compose.prod.yml. This is effectively
+// root-equivalent access to the host's container runtime -- recorded as an
+// accepted risk (T-15-59) of this shipping mechanism (D-02) in this plan's
+// threat register, scoped to this one pinned-tag first-party-vendor
+// sidecar with no published port, never mounted silently.
+
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+// Attaches the two container-metadata labels before any log line is even
+// read: `service` from the compose-assigned service label, `container`
+// from Docker's own container name (stripped of its leading "/"). Both
+// come from Docker's container METADATA, never from log content.
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "^/(.*)$"
+    target_label  = "container"
+  }
+}
+
+// Tails each discovered container's own json-file log capture via the
+// Docker API (not a bind-mounted log directory) -- this is the mechanism
+// that survives an application crash: Alloy reads what Docker already
+// captured independently of the process being shipped, it never depends
+// on that process being alive to emit anything.
+loki.source.docker "containers" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.relabel.containers.output
+  relabel_rules = discovery.relabel.containers.rules
+  forward_to    = [loki.process.add_level_label.receiver]
+}
+
+// The ONLY body-content-derived label this pipeline adds: pino's numeric
+// `level` field, extracted with a scoped `stage.json` (which reads the
+// body without promoting anything else in it) and promoted to a label by
+// `stage.labels`. Every OTHER field in the JSON body -- including all four
+// correlation ids -- passes through untouched, still in the body, still
+// queryable with `| json` at query time, never as a label.
+loki.process "add_level_label" {
+  forward_to = [loki.write.grafana_cloud.receiver]
+
+  stage.json {
+    expressions = { level = "level" }
+  }
+
+  stage.labels {
+    values = { level = "" }
+  }
+}
+
+// Pushes to Grafana Cloud Loki over https. T-15-64: a plaintext push
+// endpoint is rejected by construction here -- this endpoint is
+// operator-provisioned (user_setup) and documented as https-only in both
+// docker/prod.env.example and docs/observability/grafana-cloud-alerts.md.
+loki.write "grafana_cloud" {
+  endpoint {
+    url = env("GRAFANA_LOKI_PUSH_URL")
+
+    basic_auth {
+      username = env("GRAFANA_LOKI_USER")
+      password = env("GRAFANA_CLOUD_API_TOKEN")
+    }
+  }
+}

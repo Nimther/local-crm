@@ -11,8 +11,10 @@ import { Filter, X } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { EmptyState } from "@/components/EmptyState";
+import { QueryErrorState } from "@/components/QueryErrorState";
 import {
   Command,
   CommandGroup,
@@ -267,10 +269,28 @@ export function SendLogPage() {
 
   const hasActiveFilters = Boolean(contactId || campaignId || flowId || statuses.length > 0 || period !== DEFAULT_PERIOD);
 
+  // OPS-17/D-11: names WHICH filters are active in the empty-state copy, so
+  // "no sends match this filter" reads distinctly from "we could not load
+  // your sends" -- the send log is the surface where those two currently
+  // look identical (a filter matching nothing vs a failed request).
+  const activeFilterLabels: string[] = [];
+  if (contactId) activeFilterLabels.push("контакт");
+  if (campaignId) activeFilterLabels.push("кампания");
+  if (flowId) activeFilterLabels.push("цепочка");
+  if (statuses.length > 0) activeFilterLabels.push(`статус (${statuses.length})`);
+  if (period !== DEFAULT_PERIOD) activeFilterLabels.push(`период: ${period} дней`);
+
   const items = sendLogQuery.data?.items ?? [];
   const total = sendLogQuery.data?.total ?? 0;
   const pageSize = sendLogQuery.data?.pageSize ?? 50;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  // Same fully-errored/stale-errored/out-of-range split as ContactsListPage
+  // (T-15-14): a failed background refetch keeps showing stale rows with a
+  // banner rather than clobbering the table; a `page` search-param beyond
+  // the real total gets an explicit out-of-range state, not an empty table.
+  const isFullyErrored = sendLogQuery.isError && !sendLogQuery.data;
+  const isStaleErrored = sendLogQuery.isError && Boolean(sendLogQuery.data);
+  const isOutOfRange = total > 0 && page > totalPages;
 
   const columns = useMemo(
     () => [
@@ -406,27 +426,51 @@ export function SendLogPage() {
 
       {isInitialLoad ? (
         <Skeleton className="h-96 w-full" />
+      ) : isFullyErrored ? (
+        <QueryErrorState
+          title="Не удалось загрузить журнал отправок"
+          isFetching={sendLogQuery.isFetching}
+          onRetry={() => void sendLogQuery.refetch()}
+        />
       ) : (
         <div className={cn("space-y-6 transition-opacity duration-200", isRefetching && "opacity-50")}>
+          {isStaleErrored ? (
+            <QueryErrorState
+              title="Не удалось обновить журнал отправок"
+              detail="Показаны последние загруженные данные."
+              isFetching={sendLogQuery.isFetching}
+              onRetry={() => void sendLogQuery.refetch()}
+            />
+          ) : null}
           {total === 0 && !hasActiveFilters ? (
-            <Card>
-              <CardHeader>
-                <CardTitle>Отправок пока нет</CardTitle>
-                <CardDescription>Письма появятся здесь после первой кампании или цепочки.</CardDescription>
-              </CardHeader>
-            </Card>
+            <EmptyState
+              title="Отправок пока нет"
+              description="Письма появятся здесь после первой кампании или цепочки."
+            />
           ) : total === 0 && hasActiveFilters ? (
-            <Card>
-              <CardHeader>
-                <CardTitle>Ничего не найдено</CardTitle>
-                <CardDescription>Попробуйте изменить период или сбросить фильтры.</CardDescription>
-              </CardHeader>
-              <CardContent>
+            <EmptyState
+              title="Ничего не найдено"
+              description={
+                activeFilterLabels.length > 0
+                  ? `Нет отправок по фильтрам: ${activeFilterLabels.join(", ")}. Попробуйте изменить период или сбросить фильтры.`
+                  : "Попробуйте изменить период или сбросить фильтры."
+              }
+              action={
                 <Button variant="outline" size="sm" onClick={resetFilters}>
                   Сбросить фильтры
                 </Button>
-              </CardContent>
-            </Card>
+              }
+            />
+          ) : isOutOfRange ? (
+            <EmptyState
+              title="Страница не найдена"
+              description={`Всего страниц: ${totalPages}.`}
+              action={
+                <Button variant="outline" size="sm" onClick={() => setPage(1)}>
+                  Вернуться на первую страницу
+                </Button>
+              }
+            />
           ) : (
             <>
               <Card>

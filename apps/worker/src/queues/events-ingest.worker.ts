@@ -3,6 +3,7 @@ import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { upsertContactByIdentity } from "@mega-crm/contacts-core";
 import { EVENTS_INGEST_QUEUE, eventsIngestJobSchema, type EventsIngestJob } from "@mega-crm/shared-schemas";
 import { flowTriggerEvaluatorQueue } from "./flows/flow-queues.js";
+import { wrapProcessor } from "../processor-wrapper.js";
 
 /**
  * The events:ingest job handler (EVNT-02/EVNT-03, Pattern 2): re-derives
@@ -79,9 +80,9 @@ export async function processEventIngestJob(data: EventsIngestJob): Promise<void
 export function createEventsIngestWorker(connection: ConnectionOptions): Worker<EventsIngestJob> {
   return new Worker<EventsIngestJob>(
     EVENTS_INGEST_QUEUE,
-    async (job: Job<EventsIngestJob>) => {
+    wrapProcessor(EVENTS_INGEST_QUEUE, async (job: Job<EventsIngestJob>) => {
       await processEventIngestJob(job.data);
-    },
+    }),
     { connection }
   );
 }

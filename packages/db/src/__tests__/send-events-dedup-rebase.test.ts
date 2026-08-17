@@ -15,8 +15,6 @@ import {
   SCAN_ROLE,
 } from "@mega-crm/test-support";
 
-import { incrementWorkspaceDailyRollup } from "../analytics/daily-rollup.js";
-
 import {
   countAllDuplicates,
   countDuplicatesForWorkspace,
@@ -391,11 +389,20 @@ describe("migration 0057 (Phase 13, CMP-07, plan 13-07, Task 2)", () => {
 
       // Seed a workspace_daily_rollup row BEFORE 0057 is applied, so the
       // "rollup totals unchanged" truth has a real before/after pair rather
-      // than an assumption. `occurredAt` is deliberately TODAY (UTC) so
-      // `incrementWorkspaceDailyRollup` takes its plain (non-dirtied) path.
+      // than an assumption. A direct INSERT, deliberately NOT
+      // `incrementWorkspaceDailyRollup` (Phase 15, plan 15-12, Rule 1 fix):
+      // that shared function is CURRENT code and, since migration 0064,
+      // unconditionally writes `updated_at` -- a column this checkpoint (only
+      // through 0056) does not have yet. This test is pinned to a specific
+      // historical migration state to prove 0057's OWN behavior in isolation;
+      // it needs only SOME rollup row to exist, not the current analytics
+      // function's exact column list.
       const day = new Date().toISOString().slice(0, 10);
       await withTenantWrite(appPool, workspaceId, (client) =>
-        incrementWorkspaceDailyRollup(client, workspaceId, new Date().toISOString(), "delivered"),
+        client.query(
+          `INSERT INTO workspace_daily_rollup (workspace_id, day, delivered_count) VALUES ($1, $2, 1)`,
+          [workspaceId, day],
+        ),
       );
       const before = await withTenantWrite(appPool, workspaceId, async (client) => {
         const { rows } = await client.query<{ delivered_count: number }>(

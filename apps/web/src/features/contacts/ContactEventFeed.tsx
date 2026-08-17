@@ -4,8 +4,9 @@ import { Activity, ChevronDown, ChevronRight, Mail, ArrowRightLeft, LogIn } from
 
 import { apiGet } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { EmptyState } from "@/components/EmptyState";
+import { QueryErrorState } from "@/components/QueryErrorState";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -280,16 +281,41 @@ export function ContactEventFeed({ slug, contactId }: { slug: string; contactId:
     );
   }
 
+  // OPS-17/D-11: a failed fetch with no prior data gets the full-region
+  // error; a failed background refetch that still has stale rows keeps
+  // showing them with a banner instead (T-15-14) -- a failed event feed
+  // must not blank the contact detail page around it.
+  if (timelineQuery.isError && !timelineQuery.data) {
+    return (
+      <div className="space-y-2">
+        <div className="flex justify-end">{filterControl}</div>
+        <QueryErrorState
+          title="Не удалось загрузить события"
+          isFetching={timelineQuery.isFetching}
+          onRetry={() => void timelineQuery.refetch()}
+        />
+      </div>
+    );
+  }
+
   const rows = timelineQuery.data ?? [];
+  const isStaleErrored = timelineQuery.isError && Boolean(timelineQuery.data);
 
   if (rows.length === 0) {
     return (
       <div className="space-y-2">
         <div className="flex justify-end">{filterControl}</div>
-        <Card>
-          <CardHeader>
-            <CardTitle>Активности пока нет</CardTitle>
-            <CardDescription>
+        {isStaleErrored ? (
+          <QueryErrorState
+            title="Не удалось обновить события"
+            isFetching={timelineQuery.isFetching}
+            onRetry={() => void timelineQuery.refetch()}
+          />
+        ) : null}
+        <EmptyState
+          title="Активности пока нет"
+          description={
+            <>
               Здесь появятся события, отправленные письма, открытия, клики и смены статуса подписки, как только они
               произойдут.
               {typeFilter === "events" && (
@@ -302,9 +328,9 @@ export function ContactEventFeed({ slug, contactId }: { slug: string; contactId:
                   .
                 </>
               )}
-            </CardDescription>
-          </CardHeader>
-        </Card>
+            </>
+          }
+        />
       </div>
     );
   }
@@ -312,6 +338,13 @@ export function ContactEventFeed({ slug, contactId }: { slug: string; contactId:
   return (
     <div className="space-y-2">
       <div className="flex justify-end">{filterControl}</div>
+      {isStaleErrored ? (
+        <QueryErrorState
+          title="Не удалось обновить события"
+          isFetching={timelineQuery.isFetching}
+          onRetry={() => void timelineQuery.refetch()}
+        />
+      ) : null}
       {rows.map((row, index) => (
         <TimelineRowView key={`${row.kind}-${index}-${row.occurredAt}`} row={row} />
       ))}

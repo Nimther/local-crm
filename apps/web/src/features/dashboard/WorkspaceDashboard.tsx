@@ -3,7 +3,11 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DataAsOfLabel } from "@/components/DataAsOfLabel";
+import { EmptyState } from "@/components/EmptyState";
+import { QueryErrorState } from "@/components/QueryErrorState";
+import { StaleDataBanner } from "@/components/StaleDataBanner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
@@ -17,8 +21,6 @@ const PERIOD_PRESETS: { value: DashboardPeriod; label: string }[] = [
   { value: 30, label: "30 дней" },
   { value: 90, label: "90 дней" },
 ];
-
-const GENERIC_ERROR = "Не удалось загрузить дашборд. Обновите страницу — если ошибка повторится, попробуйте позже.";
 
 /** D-06: «—» for a zero-denominator rate, never NaN%/Infinity% (mirrors CampaignProgress.tsx's rateLabel). */
 function rateLabel(rate: number | null): string {
@@ -63,6 +65,18 @@ export function WorkspaceDashboard() {
     data && data.kpis.sent === 0 && data.recentCampaigns.length === 0 && data.activeFlows.length === 0
   );
 
+  // OPS-17/D-11/T-15-21: this endpoint returns one combined payload for
+  // every widget on this page (KPIs, both charts, both mini-lists) -- there
+  // is no per-widget query to split without changing the API contract,
+  // which this plan does not do. Within that constraint, a failure still
+  // renders as two distinct, region-scoped QueryErrorState cards (the
+  // KPI/chart region and the lists region) rather than one page-wide
+  // message, and the header/period selector/OnboardingChecklist above
+  // never disappear regardless of this query's state -- no early return
+  // ever replaces the whole page.
+  const isFullyErrored = dashboardQuery.isError && !dashboardQuery.data;
+  const isStaleErrored = dashboardQuery.isError && Boolean(dashboardQuery.data);
+
   return (
     <div className="space-y-6 p-8">
       <div className="flex items-center justify-between gap-4">
@@ -96,28 +110,56 @@ export function WorkspaceDashboard() {
           <Skeleton className="h-72 w-full" />
           <Skeleton className="h-72 w-full" />
         </div>
-      ) : dashboardQuery.isError ? (
-        <p className="text-sm font-medium text-destructive">{GENERIC_ERROR}</p>
+      ) : isFullyErrored ? (
+        <div className="space-y-6">
+          <QueryErrorState
+            title="Не удалось загрузить KPI и графики"
+            isFetching={dashboardQuery.isFetching}
+            onRetry={() => void dashboardQuery.refetch()}
+          />
+          <QueryErrorState
+            title="Не удалось загрузить последние кампании и цепочки"
+            isFetching={dashboardQuery.isFetching}
+            onRetry={() => void dashboardQuery.refetch()}
+          />
+        </div>
       ) : !data ? null : isEmpty ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Пока нет отправок</CardTitle>
-            <CardDescription>
-              Как только вы запустите первую кампанию или цепочку, здесь появится динамика доставок и открытий.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
+        <EmptyState
+          title="Пока нет отправок"
+          description="Как только вы запустите первую кампанию или цепочку, здесь появится динамика доставок и открытий."
+          action={
             <Button variant="secondary" onClick={() => void navigate(`/w/${slug}/campaigns`)}>
               Создать кампанию
             </Button>
-          </CardContent>
-        </Card>
+          }
+        />
       ) : (
         <div className="space-y-6">
+          {isStaleErrored ? (
+            <QueryErrorState
+              title="Не удалось обновить дашборд"
+              detail="Показаны последние загруженные данные."
+              isFetching={dashboardQuery.isFetching}
+              onRetry={() => void dashboardQuery.refetch()}
+            />
+          ) : null}
+
+          {/*
+            OPS-18/D-12 (plan 15-15): one banner for the whole rollup-derived
+            region below, not one per widget -- a delayed pipeline is one
+            message. `newContacts` (below) and the growth chart/mini-lists
+            further down are read LIVE from contacts/campaigns/flows, never
+            from the rollup, so this signal deliberately does not cover them
+            (T-15-52 -- labelling a live number with a rollup watermark would
+            be a new lie in place of the old one).
+          */}
+          <StaleDataBanner lagMinutes={data.lagMinutes} />
+
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
             <KpiCard label="Отправлено" value={String(data.kpis.sent)} />
             <KpiCard label="Доставлено" value={rateLabel(data.kpis.deliveredRate)} />
             <KpiCard label="Открыто" value={rateLabel(data.kpis.openedRate)} />
+            {/* `newContacts` is grouped from `contacts.created_at` (RESEARCH A2), not workspace_daily_rollup -- live, always current, deliberately outside the freshness label's scope below. */}
             <KpiCard label="Новые контакты" value={String(data.kpis.newContacts)} />
             <KpiCard label="Отписки" value={String(data.kpis.unsubscribes)} />
           </div>
@@ -125,6 +167,15 @@ export function WorkspaceDashboard() {
           <Card>
             <CardHeader>
               <CardTitle>Динамика отправок</CardTitle>
+              {/*
+                Scoped to this card: `sent`/`deliveredRate`/`openedRate`
+                (grid above) and `trend` (below) all come from the SAME
+                `workspace_daily_rollup` query for the SAME period window
+                (dashboard.repository.ts), so one watermark honestly
+                describes all of them. `unsubscribes` (grid above) is also
+                rollup-derived (summed from the same rows).
+              */}
+              <DataAsOfLabel dataAsOf={data.dataAsOf} />
             </CardHeader>
             <CardContent>
               <TrendChart data={data.trend} />

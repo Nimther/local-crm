@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Edge } from "@xyflow/react";
 import { flowNodeSchema, type FlowDefinition, type FlowEdge, type FlowNode } from "@mega-crm/flows-core";
 
@@ -95,6 +95,42 @@ export function deriveAutosaveState({
   return "idle";
 }
 
+/**
+ * OPS-19/D-13: is there work the server has not accepted yet, from the SAME
+ * inputs `deriveAutosaveState` already reads plus a debounce-pending flag.
+ * Kept standalone from `deriveAutosaveState` on purpose -- that function's
+ * three-state output drives the toolbar label and its behavior is pinned by
+ * existing tests (WR-05/T-06-21-02); this is a narrower boolean answering a
+ * different question ("unsaved?" vs "what should the label read?"), cheaper
+ * to add than to widen a tested contract.
+ *
+ * - The debounce still pending (the live serialization differs from the
+ *   debounced one) is itself unsaved work -- the PATCH has not even fired yet.
+ * - A save in flight (`isPending`) is unsaved by definition, including the
+ *   paused-offline case (`isPending && isPaused`): TanStack Query's mutation
+ *   is still "pending" while paused, so `isPending` alone already covers it.
+ * - A failed save with changes still outstanding (`isError && dirty`) is
+ *   unsaved even with nothing in flight right now -- this is exactly the
+ *   state `SaveErrorBanner` renders for.
+ * - Anything else -- debounce settled, nothing in flight, last save
+ *   succeeded (or a stale error with nothing left to save) -- is saved.
+ */
+export function deriveUnsavedChanges({
+  debouncePending,
+  isPending,
+  isPaused,
+  isError,
+  dirty,
+}: {
+  debouncePending: boolean;
+  isPending: boolean;
+  isPaused: boolean;
+  isError: boolean;
+  dirty: boolean;
+}): boolean {
+  return debouncePending || isPending || isPaused || (isError && dirty);
+}
+
 /** Bounded single delayed retry after a failed autosave (T-06-21-02: never a hot loop). */
 const RETRY_DELAY_MS = 4000;
 
@@ -119,7 +155,7 @@ export function useAutosaveDraft({
   flowId: string;
   nodes: CanvasNode[];
   edges: Edge[];
-}): { saveState: AutosaveState; serialized: SerializedCanvas } {
+}): { saveState: AutosaveState; serialized: SerializedCanvas; unsaved: boolean; retry: () => void } {
   const serialized = useMemo(() => serializeCanvas(nodes, edges), [nodes, edges]);
   const json = useMemo(() => JSON.stringify(serialized.definition), [serialized]);
 
@@ -184,5 +220,30 @@ export function useAutosaveDraft({
     dirty,
   });
 
-  return { saveState, serialized };
+  const unsaved = deriveUnsavedChanges({
+    debouncePending: json !== debouncedJson,
+    isPending: mutation.isPending,
+    isPaused: mutation.isPaused,
+    isError: mutation.isError,
+    dirty,
+  });
+
+  // OPS-19: manual retry from `SaveErrorBanner` -- re-fires the SAME target
+  // immediately, without waiting for another edit or for the bounded
+  // `RETRY_DELAY_MS` delayed retry above. Mirrors that retry's own
+  // onError/baseline-reset shape exactly.
+  const retry = useCallback(() => {
+    const target = debouncedJson;
+    lastSavedRef.current = target;
+    mutateRef.current(
+      { definition: JSON.parse(target) as FlowDefinition },
+      {
+        onError: () => {
+          lastSavedRef.current = "";
+        },
+      }
+    );
+  }, [debouncedJson]);
+
+  return { saveState, serialized, unsaved, retry };
 }

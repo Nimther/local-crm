@@ -3,6 +3,8 @@ import { EMAIL_BROADCAST_QUEUE, type EmailBroadcastJob } from "@mega-crm/shared-
 import { processSendJob, type ProcessSendJobDeps } from "./send-dispatch.js";
 import { SEND_LOCK_DURATION_MS } from "@mega-crm/queue-core";
 import { deferForTenantBucket } from "./tenant-deferral.js";
+import { logger } from "../logger.js";
+import { wrapProcessor } from "../processor-wrapper.js";
 
 /**
  * The broadcast Worker's per-job handler, factored out of the `Worker`
@@ -13,6 +15,13 @@ import { deferForTenantBucket } from "./tenant-deferral.js";
  * round trip. `deps` defaults to `{}` so every existing call site
  * (`createEmailBroadcastWorker(connection)`, unchanged) behaves identically
  * to before this export existed.
+ *
+ * Phase 15 plan 08 (OPS-06): the per-job `withCorrelation` scope this
+ * handler used to open inline (Phase 15 plan 02's targeted tracer fix) now
+ * lives in the shared `wrapProcessor` helper the factory below routes
+ * through -- this function no longer opens its own scope, so a caller that
+ * invokes it directly (bypassing the factory/wrapper, e.g. a test) must wrap
+ * the call itself if it needs the correlation scope active.
  */
 export async function handleEmailBroadcastJob(
   job: Job<EmailBroadcastJob>,
@@ -20,6 +29,10 @@ export async function handleEmailBroadcastJob(
   deps: ProcessSendJobDeps = {},
   token?: string
 ): Promise<void> {
+  logger.info(
+    { queue: EMAIL_BROADCAST_QUEUE, kind: job.data.kind, campaignId: job.data.campaignId },
+    "email-broadcast job processing",
+  );
   const result = await processSendJob(job.data, deps);
   // Phase 11 (D-11, plan 11-10): a test-send's `{ outcome: "unknown" }`
   // (and every other non-`rate_limited` outcome) falls through this `if`
@@ -69,7 +82,9 @@ export async function handleEmailBroadcastJob(
 export function createEmailBroadcastWorker(connection: ConnectionOptions): Worker<EmailBroadcastJob> {
   const worker: Worker<EmailBroadcastJob> = new Worker<EmailBroadcastJob>(
     EMAIL_BROADCAST_QUEUE,
-    (job: Job<EmailBroadcastJob>, token) => handleEmailBroadcastJob(job, worker, {}, token),
+    wrapProcessor(EMAIL_BROADCAST_QUEUE, (job: Job<EmailBroadcastJob>, token) =>
+      handleEmailBroadcastJob(job, worker, {}, token)
+    ),
     // Bounded, not always-on -- broadcast fan-out must never monopolise the
     // process while the triggered lane (Phase 6) needs to keep draining.
     { connection, concurrency: 5, lockDuration: SEND_LOCK_DURATION_MS }

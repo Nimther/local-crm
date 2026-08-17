@@ -7,6 +7,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { QueryErrorState } from "@/components/QueryErrorState";
 import { listCampaignSenders, listCampaignTemplates } from "@/features/campaigns/api";
 
 const TEMPLATE_EMPTY_COPY =
@@ -39,6 +40,10 @@ export function TemplatePicker({
 
   const templates = templatesQuery.data?.templates ?? [];
   const selected = templates.find((t) => t.id === value);
+  // OPS-17/D-11: a failed fetch must never render as "this account has no
+  // templates" -- that has previously been a real support question. Only a
+  // successful fetch that returned zero templates counts as genuinely empty.
+  const isFullyErrored = templatesQuery.isError && !templatesQuery.data;
 
   function choose(id: string) {
     onChange(id);
@@ -61,7 +66,15 @@ export function TemplatePicker({
               <CommandInput placeholder="Поиск шаблона…" value={search} onValueChange={setSearch} />
               <CommandList>
                 <CommandEmpty>
-                  <p className="px-2 py-1.5 text-sm text-muted-foreground">{TEMPLATE_EMPTY_COPY}</p>
+                  {isFullyErrored ? (
+                    <QueryErrorState
+                      title="Не удалось загрузить шаблоны"
+                      isFetching={templatesQuery.isFetching}
+                      onRetry={() => void templatesQuery.refetch()}
+                    />
+                  ) : (
+                    <p className="px-2 py-1.5 text-sm text-muted-foreground">{TEMPLATE_EMPTY_COPY}</p>
+                  )}
                 </CommandEmpty>
                 <CommandGroup heading="Dynamic Templates">
                   {templates.map((template) => (
@@ -89,7 +102,15 @@ export function TemplatePicker({
         </Button>
       </div>
       {!templatesQuery.isLoading && templates.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{TEMPLATE_EMPTY_COPY}</p>
+        isFullyErrored ? (
+          <QueryErrorState
+            title="Не удалось загрузить шаблоны"
+            isFetching={templatesQuery.isFetching}
+            onRetry={() => void templatesQuery.refetch()}
+          />
+        ) : (
+          <p className="text-sm text-muted-foreground">{TEMPLATE_EMPTY_COPY}</p>
+        )
       ) : null}
       <div className="space-y-1">
         <Label htmlFor="template-id-manual" className="text-sm text-muted-foreground">
@@ -131,6 +152,10 @@ export function SenderPicker({
 
   const senders = sendersQuery.data?.senders ?? [];
   const selected = senders.find((s) => String(s.id) === value);
+  // OPS-17/D-11: same distinction as TemplatePicker -- a failed fetch must
+  // never read as "no verified senders", which reads as an instruction to
+  // go verify one when a verified sender may already exist.
+  const isFullyErrored = sendersQuery.isError && !sendersQuery.data;
 
   function choose(id: number) {
     onChange(String(id));
@@ -153,7 +178,15 @@ export function SenderPicker({
               <CommandInput placeholder="Поиск отправителя…" value={search} onValueChange={setSearch} />
               <CommandList>
                 <CommandEmpty>
-                  <p className="px-2 py-1.5 text-sm text-muted-foreground">{SENDER_EMPTY_COPY}</p>
+                  {isFullyErrored ? (
+                    <QueryErrorState
+                      title="Не удалось загрузить отправителей"
+                      isFetching={sendersQuery.isFetching}
+                      onRetry={() => void sendersQuery.refetch()}
+                    />
+                  ) : (
+                    <p className="px-2 py-1.5 text-sm text-muted-foreground">{SENDER_EMPTY_COPY}</p>
+                  )}
                 </CommandEmpty>
                 <CommandGroup heading="Верифицированные отправители">
                   {senders.map((sender) => (
@@ -181,7 +214,15 @@ export function SenderPicker({
         </Button>
       </div>
       {!sendersQuery.isLoading && senders.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{SENDER_EMPTY_COPY}</p>
+        isFullyErrored ? (
+          <QueryErrorState
+            title="Не удалось загрузить отправителей"
+            isFetching={sendersQuery.isFetching}
+            onRetry={() => void sendersQuery.refetch()}
+          />
+        ) : (
+          <p className="text-sm text-muted-foreground">{SENDER_EMPTY_COPY}</p>
+        )
       ) : null}
     </div>
   );

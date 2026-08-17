@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import pino from "pino";
 import { scrub } from "../scrub.js";
 import { PINO_REDACT_OPTIONS } from "../pino-redact.js";
-import { CENSOR } from "../rules.js";
+import { CENSOR, REDACTION_RULES } from "../rules.js";
 
 /**
  * The literal `redact.paths` array `apps/api/src/logger.ts` declared
@@ -75,9 +75,53 @@ describe("rules parity", () => {
     expect(scrubbed.properties.orderId).toBe("ord_123");
   });
 
-  test("Test 9: every field name the previous logger configuration redacted is still covered by the compiled path list", () => {
+  test("Test 9: every field name the previous logger configuration redacted is still covered by the compiled path list (subset assertion -- coverage may only grow, never narrow)", () => {
     for (const path of PREVIOUS_LOGGER_PATHS) {
       expect(PINO_REDACT_OPTIONS.paths).toContain(path);
     }
+  });
+
+  test("Test 10: a sendgridKey nested four levels deep (three intermediate objects) is censored -- Pitfall 18's explicit depth-deepening instruction", () => {
+    const payload = {
+      a: {
+        b: {
+          c: {
+            sendgridKey: "SG.aaaaaaaaaa.bbbbbbbbbb",
+          },
+        },
+      },
+    };
+
+    const logged = logViaPino(payload);
+    const a = logged.a as Record<string, unknown>;
+    const b = a.b as Record<string, unknown>;
+    const c = b.c as Record<string, unknown>;
+    expect(c.sendgridKey).toBe(CENSOR);
+  });
+
+  test("Test 11: an email nested five levels deep (four intermediate objects) is censored", () => {
+    const payload = {
+      a: {
+        b: {
+          c: {
+            d: {
+              email: "marketer@example.com",
+            },
+          },
+        },
+      },
+    };
+
+    const logged = logViaPino(payload);
+    const a = logged.a as Record<string, unknown>;
+    const b = a.b as Record<string, unknown>;
+    const c = b.c as Record<string, unknown>;
+    const d = c.d as Record<string, unknown>;
+    expect(d.email).toBe(CENSOR);
+  });
+
+  test("Test 12: the compiled path list has no duplicate entries and enumerates exactly five depths per key rule", () => {
+    expect(new Set(PINO_REDACT_OPTIONS.paths).size).toBe(PINO_REDACT_OPTIONS.paths.length);
+    expect(PINO_REDACT_OPTIONS.paths.length).toBe(REDACTION_RULES.keyRules.length * 5);
   });
 });

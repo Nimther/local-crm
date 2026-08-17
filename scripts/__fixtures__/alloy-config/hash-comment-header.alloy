@@ -1,0 +1,14 @@
+# Phase 15 plan 17 (OPS-10, D-01, D-02, D-03). Grafana Alloy sidecar:
+# discovers every container Docker is running on this host, tails each
+# container's OWN `json-file` log capture via Docker's API (NOT a
+# per-process log transport, NOT the Docker `loki` logging driver -- D-02
+# rejected both explicitly: log delivery must survive an application
+# crash, which only holds if shipping reads Docker's own capture rather
+# than living inside the process being shipped or replacing its logging
+# driver), and pushes every line to Grafana Cloud Loki over https with
+# basic-auth credentials read from the environment.
+#
+
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}

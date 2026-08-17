@@ -1,0 +1,9 @@
+# Fixture: `alloy`'s image carries the mutable `:latest` tag instead of a
+# pinned released version (this plan's own must_haves truth: "an explicitly
+# pinned image tag rather than a mutable one" -- FIRST_PARTY_IMAGE_SERVICES
+# includes `alloy` specifically so this is a gate-enforced invariant, not
+# just an authoring convention).
+services:
+  alloy:
+    image: grafana/alloy:latest
+    mem_limit: 256m

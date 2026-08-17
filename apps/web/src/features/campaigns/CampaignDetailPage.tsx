@@ -7,6 +7,8 @@ import type { WorkspaceResponse } from "@mega-crm/shared-schemas";
 import { apiGet } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { EmptyState } from "@/components/EmptyState";
+import { QueryErrorState } from "@/components/QueryErrorState";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import {
@@ -171,6 +173,15 @@ function SummaryView({ slug, campaign }: { slug: string; campaign: CampaignRespo
  * scheduled/sending/sent/canceled each get their own dedicated view. Replaces
  * the 04-07 placeholder that routed every /campaigns/:id request straight to
  * the builder.
+ *
+ * OPS-18/D-12 (plan 15-15): deliberately NO `DataAsOfLabel`/`StaleDataBanner`
+ * on this page. Every number here -- the `campaigns` row's own counters,
+ * `getCampaignProgress`'s live re-aggregation of the `sends` ledger
+ * (campaign.repository.ts's `CampaignProgress`), and the audience-breakdown
+ * snapshot -- is read live, never from `workspace_daily_rollup`. Mounting a
+ * rollup watermark over these figures would be a new lie in place of the old
+ * one (T-15-52): the freshness signal plan 15-12 added exists only on the
+ * workspace dashboard response and does not apply here.
  */
 export function CampaignDetailPage() {
   const { slug = "", id = "" } = useParams<{ slug: string; id: string }>();
@@ -195,19 +206,17 @@ export function CampaignDetailPage() {
     void queryClient.invalidateQueries({ queryKey: campaignQueryKey(slug, id) });
   }
 
-  if (campaignQuery.isError || (!campaignQuery.isLoading && !campaignQuery.data)) {
-    return (
-      <div className="p-8">
-        <Card>
-          <CardHeader>
-            <CardTitle>Кампания не найдена</CardTitle>
-          </CardHeader>
-        </Card>
-      </div>
-    );
-  }
+  // OPS-17/D-11: split the previously-conflated isError/not-found branch --
+  // a failed fetch with no prior data is Retry-able (QueryErrorState); a
+  // successful fetch that legitimately found nothing is a fact, not a
+  // failure (EmptyState, no Retry). CampaignDetailPage polls this same
+  // query every 3s while sending, so a failed poll that still has the last
+  // successfully-loaded campaign must NOT replace the page -- it renders as
+  // a contained banner instead (isStaleErrored below), matching
+  // CampaignProgress's own stale-poll behaviour.
+  const isFullyErrored = campaignQuery.isError && !campaignQuery.data;
 
-  if (campaignQuery.isLoading || !campaignQuery.data) {
+  if (campaignQuery.isLoading) {
     return (
       <div className="space-y-4 p-8">
         <Skeleton className="h-8 w-64" />
@@ -216,11 +225,41 @@ export function CampaignDetailPage() {
     );
   }
 
+  if (isFullyErrored) {
+    return (
+      <div className="p-8">
+        <QueryErrorState
+          title="Не удалось загрузить кампанию"
+          isFetching={campaignQuery.isFetching}
+          onRetry={() => void campaignQuery.refetch()}
+        />
+      </div>
+    );
+  }
+
+  if (!campaignQuery.data) {
+    return (
+      <div className="p-8">
+        <EmptyState title="Кампания не найдена" />
+      </div>
+    );
+  }
+
   const campaign = campaignQuery.data;
+  const isStaleErrored = campaignQuery.isError && Boolean(campaignQuery.data);
+  const staleErrorBanner = isStaleErrored ? (
+    <QueryErrorState
+      title="Не удалось обновить кампанию"
+      detail="Показаны последние загруженные данные."
+      isFetching={campaignQuery.isFetching}
+      onRetry={() => void campaignQuery.refetch()}
+    />
+  ) : null;
 
   if (campaign.status === "draft") {
     return (
       <div className="space-y-6">
+        {staleErrorBanner ? <div className="px-8 pt-8">{staleErrorBanner}</div> : null}
         <CampaignBuilderPage />
         <div className="space-y-6 px-8 pb-8">
           <TestSendPanel slug={slug} campaign={campaign} />
@@ -236,6 +275,8 @@ export function CampaignDetailPage() {
         <h1 className="text-display font-semibold">{campaign.name}</h1>
         <CampaignStatusBadge status={campaign.status} />
       </div>
+
+      {staleErrorBanner}
 
       {campaign.status === "scheduled" ? <ScheduledView slug={slug} campaign={campaign} /> : null}
       {campaign.status === "sending" ? (

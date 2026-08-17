@@ -36,8 +36,8 @@ Full phase details: [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md)
 - [x] **Phase 11: Delivery Correctness** - No mail lost, duplicated or misclassified at crash, timeout and ambiguous-outcome boundaries (completed 2026-08-09)
 - [x] **Phase 12: Worker Reliability & Tenant Fairness** - One tenant, one huge segment, or a restart cannot degrade the platform (completed 2026-08-10)
 - [x] **Phase 13: Compliance & Analytics Integrity** - Consent and delivery numbers mean exactly what they claim (completed 2026-08-12)
-- [ ] **Phase 14: Deployment & Database Durability** - Reproducible deploy, gated migrations, rehearsed restore, enforced constraints
-- [ ] **Phase 15: Observability, Alerting & Frontend Resilience** - The system reports its true state to operators and to users
+- [x] **Phase 14: Deployment & Database Durability** - Reproducible deploy, gated migrations, rehearsed restore, enforced constraints (completed 2026-08-14)
+- [x] **Phase 15: Observability, Alerting & Frontend Resilience** - The system reports its true state to operators and to users (completed 2026-08-17)
 - [ ] **Phase 16: Live SendGrid Verification** - Every delivery guarantee confirmed against the real provider (release barrier)
 
 ## Phase Details
@@ -501,7 +501,7 @@ Plans:
   4. A point-in-time restore from backup has actually been performed and written up, not merely configured.
   5. Postgres connections use TLS, every pool has an error handler, the missing constraints exist and are verifiably enforced, and retention deletes aged data on a defined schedule.
 
-**Plans**: 11/14 plans executed
+**Plans**: 14/14 plans executed
 
 Plans:
 **Wave 1**
@@ -527,12 +527,12 @@ Plans:
 
 **Wave 5**
 
-- [ ] 14-09-PLAN.md — `deploy.sh <sha>`: readiness-gated, fail-before-replace, stop-old-then-start-new worker; deploy/rollback runbook (OPS-02, OPS-03)
-- [ ] 14-10-PLAN.md — pgBackRest: WAL archiving, scheduled backups, off-host encrypted S3 repository (DB-09)
+- [x] 14-09-PLAN.md — `deploy.sh <sha>`: readiness-gated, fail-before-replace, stop-old-then-start-new worker; deploy/rollback runbook (OPS-02, OPS-03)
+- [x] 14-10-PLAN.md — pgBackRest: WAL archiving, scheduled backups, off-host encrypted S3 repository (DB-09)
 
 **Wave 6**
 
-- [ ] 14-11-PLAN.md — DB-10: scripted PITR drill into a scratch container with a tested verification query set, actually performed (DB-10)
+- [x] 14-11-PLAN.md — DB-10: scripted PITR drill into a scratch container with a tested verification query set, actually performed (DB-10)
 
 **Wave 7**
 
@@ -569,7 +569,82 @@ Plans:
   4. The app loads with route-level code splitting — canvas and heavy dashboard chunks arrive only when those routes are opened.
   5. A failed API call, an empty list, a paginated list, stale analytics and unsaved canvas changes each show the user what is actually true rather than a blank or silently-wrong screen.
 
-**Plans**: TBD
+**Plans**: 22/22 plans executed
+
+Plans:
+**Wave 1**
+
+- [x] 15-01-PLAN.md — Dependency gate: blocking package-legitimacy checkpoint, all installs, `fastify` promoted to a runtime dep, out-of-scope scope notes
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [x] 15-02-PLAN.md — TRACER: one correlation id from HTTP request through queue job to Postgres `application_name` (merge-safe ALS, worker Pino logger, one wired send path)
+- [x] 15-03-PLAN.md — Data-router migration + `React.lazy` routes + pinned vendor chunks + CI chunk-boundary check (OPS-16)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [x] 15-04-PLAN.md — Deepened pino redaction + behavioural API/worker uniformity test (OPS-07)
+- [x] 15-05-PLAN.md — Shared inline error/empty components + contacts, segments, send-log conversion (OPS-17)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [x] 15-06-PLAN.md — `sentryBeforeSend` + leak-fixture test wired as a blocking CI gate (OPS-09, Pitfall 18)
+- [x] 15-07-PLAN.md — Campaigns, flows, dashboard, team and settings error/empty conversion (OPS-17)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [x] 15-08-PLAN.md — Shared BullMQ processor wrapper across every factory + control-flow allowlist + `console.*` retirement (OPS-06)
+- [x] 15-09-PLAN.md — Unsaved canvas guard: router blocker, `beforeunload`, persistent save-error banner (OPS-19)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [x] 15-10-PLAN.md — Sentry init for API + worker behind a one-way-door decision checkpoint (OPS-08)
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
+- [x] 15-11-PLAN.md — Web Sentry (errors only) + route error boundary + build-time DSN pipeline (OPS-08/OPS-17)
+
+**Wave 8** *(blocked on Wave 7 completion)*
+
+- [x] 15-12-PLAN.md — Migration 0064: keyed `ops_alert_state` + rollup watermark, claim primitive, analytics freshness API (OPS-13/OPS-18)
+
+**Wave 9** *(blocked on Wave 8 completion)*
+
+- [x] 15-13-PLAN.md — Queue-depth and oldest-job-age watchdogs (OPS-13)
+
+**Wave 10** *(blocked on Wave 9 completion)*
+
+- [x] 15-14-PLAN.md — Webhook-lag and failed-send-share watchdogs + boot wiring for all four (OPS-13)
+- [x] 15-15-PLAN.md — Data-as-of label + conditional stale-analytics banner (OPS-18)
+
+**Wave 11** *(blocked on Wave 10 completion)*
+
+- [x] 15-16-PLAN.md — Bull Board on the loopback-only worker health server, contract pinned first (OPS-14)
+
+**Wave 12** *(blocked on Wave 11 completion)*
+
+- [x] 15-17-PLAN.md — Grafana Alloy sidecar, bounded log rotation, cloud backstop alert rules (OPS-10)
+
+**Wave 13** *(blocked on Wave 12 completion)*
+
+- [x] 15-18-PLAN.md — Runbook per alert + Bull Board access runbook + runbook-coverage gate + ARCHITECTURE.md (OPS-15)
+
+**Wave 14** *(gap closure — G-15-1, dispatch half)*
+
+- [x] 15-19-PLAN.md — Bind sendId into the correlation store on all three dispatch paths + emit Pino lines inside those scopes (OPS-11)
+
+**Wave 15** *(gap closure — G-15-1, webhook half; blocked on Wave 14)*
+
+- [x] 15-20-PLAN.md — Bind sendId per resolved webhook event + first Pino line in webhook-events.worker.ts (OPS-11)
+
+**Wave 16** *(gap closure — G-15-2/G-15-3; blocked on Wave 15)*
+
+- [x] 15-21-PLAN.md — ARCHITECTURE.md §18 correlation model + SPECIFICATION.md §7/§3 corrected to shipped behaviour (OPS-15, OPS-08)
+
+**Wave 17** *(gap closure — G-15-4; blocked on Wave 16)*
+
+- [x] 15-22-PLAN.md — Alloy config comment-token fix + `verify:alloy-config` gate parsing it with the real pinned binary, blocking in CI (OPS-10)
+
 **UI hint**: yes
 
 **Sequencing and pitfall notes:**
@@ -595,7 +670,30 @@ Plans:
   3. A genuinely signed SendGrid webhook payload passes signature verification through the full HTTP stack, and a redelivery of that same payload is counted exactly once.
   4. A real SendGrid 429 or transient error defers only the affected tenant's sends and resolves without duplicate or lost mail.
 
-**Plans**: TBD
+**Plans**: 3/7 plans executed
+
+Plans:
+**Wave 1**
+
+- [x] 16-01-PLAN.md — TRACER: UAT workspace, BYO key, Dynamic Template, first live send end-to-end (UAT-01, delivered leg of UAT-02)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [x] 16-02-PLAN.md — Live opened/clicked/bounced with campaign and flow-step attribution (UAT-02)
+- [x] 16-03-PLAN.md — SENDGRID_BASE_URL seam + raw webhook capture + SPECIFICATION filing (UAT-03, UAT-05)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 16-04-PLAN.md — Live signed-payload capture, byte-exact replay, dedup proof, byte-flip rejection (UAT-03, UAT-04)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 16-05-PLAN.md — Committed CI fixture + full-HTTP-stack replay test, closing the Phase 5 gap (UAT-03, UAT-04)
+- [ ] 16-06-PLAN.md — Fault proxy + live 429 and timeout, defer/resolve/exactly-once (UAT-05)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 16-07-PLAN.md — UAT report, standing-canary procedure, teardown verification (UAT-01..05)
 
 **Why UAT is its own final phase (deliberate decision):**
 
@@ -669,9 +767,9 @@ Phase 9 has no dependents and may be scheduled in parallel at any point after Ph
 | 11. Delivery Correctness | v1.1 | 11/11 | Complete    | 2026-08-09 |
 | 12. Worker Reliability & Tenant Fairness | v1.1 | 14/14 | Complete    | 2026-08-11 |
 | 13. Compliance & Analytics Integrity | v1.1 | 16/16 | Complete    | 2026-08-12 |
-| 14. Deployment & Database Durability | v1.1 | 11/14 | In Progress|  |
-| 15. Observability, Alerting & Frontend Resilience | v1.1 | 0/TBD | Not started | - |
-| 16. Live SendGrid Verification | v1.1 | 0/TBD | Not started | - |
+| 14. Deployment & Database Durability | v1.1 | 14/14 | Complete    | 2026-08-14 |
+| 15. Observability, Alerting & Frontend Resilience | v1.1 | 22/22 | Complete    | 2026-08-17 |
+| 16. Live SendGrid Verification | v1.1 | 3/7 | In Progress|  |
 
 ---
 *Roadmap for v1.1 created: 2026-07-27*

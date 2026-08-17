@@ -7,6 +7,7 @@ import type { WorkspaceResponse } from "@mega-crm/shared-schemas";
 import { ApiError, apiGet, apiPut } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { QueryErrorState } from "@/components/QueryErrorState";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -117,6 +118,23 @@ export function SendSettingsPage() {
       <div className="space-y-4 p-8">
         <Skeleton className="h-8 w-64" />
         <Skeleton className="h-64 w-full" />
+      </div>
+    );
+  }
+
+  // OPS-17/D-11: settingsQuery drives the entire form -- a failed fetch
+  // with no prior data must not render as an empty/default form (which
+  // would silently offer "Частотный лимит: 3" as if that were the real
+  // saved value). No keepPreviousData is set on this query, so isError
+  // with no data is the genuine first-load failure case.
+  if (settingsQuery.isError && !settingsQuery.data) {
+    return (
+      <div className="p-8">
+        <QueryErrorState
+          title="Не удалось загрузить настройки отправки"
+          isFetching={settingsQuery.isFetching}
+          onRetry={() => void settingsQuery.refetch()}
+        />
       </div>
     );
   }

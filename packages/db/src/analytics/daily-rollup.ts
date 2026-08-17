@@ -72,6 +72,15 @@ import type { PoolClient } from "pg";
  * measures against the sweep's own start time. The `dirtied_at` is set in
  * the INSERT branch too, for the case where the late event is the first
  * write for that (workspace, day) at all.
+ *
+ * `updated_at` (Phase 15, OPS-18, D-12, migration 0064): every branch below
+ * sets it to `now()` on write -- this is the freshness watermark the
+ * dashboard's "data as of" timestamp
+ * (`apps/api/src/modules/analytics/dashboard.repository.ts`) reads. Set
+ * unconditionally (never `COALESCE`d against the existing value, unlike
+ * `dirtied_at`): this column answers "when was this row last written",
+ * which by definition changes on every write, not "when was the first late
+ * event observed".
  */
 export type RollupMetric = "sent" | "delivered" | "opened" | "clicked" | "bounced" | "unsubscribed";
 
@@ -111,20 +120,23 @@ export async function incrementWorkspaceDailyRollup(
 
   if (isNotToday(day, now)) {
     await client.query(
-      `INSERT INTO workspace_daily_rollup (workspace_id, day, ${column}, dirtied_at)
-       VALUES ($1, $2, 1, now())
+      `INSERT INTO workspace_daily_rollup (workspace_id, day, ${column}, dirtied_at, updated_at)
+       VALUES ($1, $2, 1, now(), now())
        ON CONFLICT (workspace_id, day) DO UPDATE SET
          ${column} = workspace_daily_rollup.${column} + 1,
-         dirtied_at = COALESCE(workspace_daily_rollup.dirtied_at, now())`,
+         dirtied_at = COALESCE(workspace_daily_rollup.dirtied_at, now()),
+         updated_at = now()`,
       [workspaceId, day]
     );
     return;
   }
 
   await client.query(
-    `INSERT INTO workspace_daily_rollup (workspace_id, day, ${column})
-     VALUES ($1, $2, 1)
-     ON CONFLICT (workspace_id, day) DO UPDATE SET ${column} = workspace_daily_rollup.${column} + 1`,
+    `INSERT INTO workspace_daily_rollup (workspace_id, day, ${column}, updated_at)
+     VALUES ($1, $2, 1, now())
+     ON CONFLICT (workspace_id, day) DO UPDATE SET
+       ${column} = workspace_daily_rollup.${column} + 1,
+       updated_at = now()`,
     [workspaceId, day]
   );
 }

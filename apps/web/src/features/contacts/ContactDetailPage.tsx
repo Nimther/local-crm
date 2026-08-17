@@ -17,7 +17,9 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { EmptyState } from "@/components/EmptyState";
+import { QueryErrorState } from "@/components/QueryErrorState";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ContactEventFeed } from "@/features/contacts/ContactEventFeed";
@@ -106,6 +108,26 @@ function PropertiesTab({ slug, contact }: { slug: string; contact: ContactRespon
     },
   });
 
+  if (registryQuery.isLoading) {
+    return (
+      <Card>
+        <CardContent className="p-6">
+          <Skeleton className="h-48 w-full" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (registryQuery.isError) {
+    return (
+      <QueryErrorState
+        title="Не удалось загрузить список свойств"
+        isFetching={registryQuery.isFetching}
+        onRetry={() => void registryQuery.refetch()}
+      />
+    );
+  }
+
   return (
     <Card>
       <CardContent className="space-y-4 p-6">
@@ -142,15 +164,26 @@ export function ContactDetailPage() {
     );
   }
 
+  // Split the two states a single `if (!contact)` used to conflate: a
+  // failed fetch (isError, Retry-able) is not the same fact as a successful
+  // fetch that legitimately found nothing (not-found, no Retry control).
+  if (contactQuery.isError) {
+    return (
+      <div className="p-8">
+        <QueryErrorState
+          title="Не удалось загрузить контакт"
+          isFetching={contactQuery.isFetching}
+          onRetry={() => void contactQuery.refetch()}
+        />
+      </div>
+    );
+  }
+
   const contact = contactQuery.data;
   if (!contact) {
     return (
       <div className="p-8">
-        <Card>
-          <CardHeader>
-            <CardTitle>Контакт не найден</CardTitle>
-          </CardHeader>
-        </Card>
+        <EmptyState title="Контакт не найден" />
       </div>
     );
   }

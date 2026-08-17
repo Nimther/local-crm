@@ -6,7 +6,9 @@ import { MoreHorizontal } from "lucide-react";
 import type { SegmentListResponse, SegmentResponse } from "@mega-crm/shared-schemas";
 import { apiGet } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { EmptyState } from "@/components/EmptyState";
+import { QueryErrorState } from "@/components/QueryErrorState";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -65,6 +67,11 @@ export function SegmentsListPage() {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const isInitialLoad = segmentsQuery.isLoading;
   const isRefetching = segmentsQuery.isPlaceholderData || segmentsQuery.isFetching;
+  // OPS-17/D-11: same split as ContactsListPage -- a fetch failure with no
+  // prior data gets the full-region error; a failed background refetch that
+  // still has stale data keeps the table visible with a banner (T-15-14).
+  const isFullyErrored = segmentsQuery.isError && !segmentsQuery.data;
+  const isStaleErrored = segmentsQuery.isError && Boolean(segmentsQuery.data);
 
   return (
     <div className="space-y-6 p-8">
@@ -80,107 +87,127 @@ export function SegmentsListPage() {
 
       {isInitialLoad ? (
         <Skeleton className="h-96 w-full" />
-      ) : items.length === 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Сегментов пока нет</CardTitle>
-            <CardDescription>
-              Создайте сегмент — объедините контакты по свойствам и поведению. Он сразу станет доступен как
-              аудитория для кампаний и цепочек.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button onClick={() => void navigate(`/w/${slug}/segments/new`)}>Создать сегмент</Button>
-          </CardContent>
-        </Card>
+      ) : isFullyErrored ? (
+        <QueryErrorState
+          title="Не удалось загрузить сегменты"
+          isFetching={segmentsQuery.isFetching}
+          onRetry={() => void segmentsQuery.refetch()}
+        />
       ) : (
-        <Card className={cn("transition-opacity duration-200", isRefetching && "opacity-50")}>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Имя</TableHead>
-                  <TableHead>Участников</TableHead>
-                  <TableHead>Обновлён</TableHead>
-                  <TableHead>Автор</TableHead>
-                  <TableHead className="text-right" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {items.map((segment) => (
-                  <TableRow
-                    key={segment.id}
-                    className="h-12 cursor-pointer"
-                    onClick={() => void navigate(`/w/${slug}/segments/${segment.id}`)}
-                  >
-                    <TableCell>{segment.name}</TableCell>
-                    <TableCell>
-                      {segment.memberCount === null ? (
-                        "—"
-                      ) : (
-                        <div>
-                          <p className="text-display font-semibold">{segment.memberCount.toLocaleString("ru-RU")}</p>
-                          {segment.memberCountAt ? (
-                            <p className="text-sm text-muted-foreground">
-                              на {new Date(segment.memberCountAt).toLocaleString("ru-RU")}
-                            </p>
-                          ) : null}
-                        </div>
-                      )}
-                    </TableCell>
-                    <TableCell>{new Date(segment.updatedAt).toLocaleString("ru-RU")}</TableCell>
-                    <TableCell>
-                      {segment.createdByUserId ? memberNameById.get(segment.createdByUserId) ?? "—" : "—"}
-                    </TableCell>
-                    <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" aria-label="Действия">
-                            <MoreHorizontal className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onSelect={() => void navigate(`/w/${slug}/segments/${segment.id}`)}>
-                            Изменить
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            className="text-destructive focus:text-destructive"
-                            onSelect={() => setSegmentPendingDelete(segment)}
-                          >
-                            Удалить
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      )}
+        <div className="space-y-6">
+          {isStaleErrored ? (
+            <QueryErrorState
+              title="Не удалось обновить список сегментов"
+              detail="Показаны последние загруженные данные."
+              isFetching={segmentsQuery.isFetching}
+              onRetry={() => void segmentsQuery.refetch()}
+            />
+          ) : null}
+          {items.length === 0 ? (
+            <EmptyState
+              title="Сегментов пока нет"
+              description="Создайте сегмент — объедините контакты по свойствам и поведению. Он сразу станет доступен как аудитория для кампаний и цепочек."
+              action={<Button onClick={() => void navigate(`/w/${slug}/segments/new`)}>Создать сегмент</Button>}
+            />
+          ) : (
+            <>
+              <Card className={cn("transition-opacity duration-200", isRefetching && "opacity-50")}>
+                <CardContent className="p-0">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Имя</TableHead>
+                        <TableHead>Участников</TableHead>
+                        <TableHead>Обновлён</TableHead>
+                        <TableHead>Автор</TableHead>
+                        <TableHead className="text-right" />
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {items.map((segment) => (
+                        <TableRow
+                          key={segment.id}
+                          className="h-12 cursor-pointer"
+                          onClick={() => void navigate(`/w/${slug}/segments/${segment.id}`)}
+                        >
+                          <TableCell>{segment.name}</TableCell>
+                          <TableCell>
+                            {segment.memberCount === null ? (
+                              "—"
+                            ) : (
+                              <div>
+                                <p className="text-display font-semibold">
+                                  {segment.memberCount.toLocaleString("ru-RU")}
+                                </p>
+                                {segment.memberCountAt ? (
+                                  <p className="text-sm text-muted-foreground">
+                                    на {new Date(segment.memberCountAt).toLocaleString("ru-RU")}
+                                  </p>
+                                ) : null}
+                              </div>
+                            )}
+                          </TableCell>
+                          <TableCell>{new Date(segment.updatedAt).toLocaleString("ru-RU")}</TableCell>
+                          <TableCell>
+                            {segment.createdByUserId ? memberNameById.get(segment.createdByUserId) ?? "—" : "—"}
+                          </TableCell>
+                          <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon" aria-label="Действия">
+                                  <MoreHorizontal className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem
+                                  onSelect={() => void navigate(`/w/${slug}/segments/${segment.id}`)}
+                                >
+                                  Изменить
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  className="text-destructive focus:text-destructive"
+                                  onSelect={() => setSegmentPendingDelete(segment)}
+                                >
+                                  Удалить
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
 
-      {!isInitialLoad && items.length > 0 ? (
-        <div className="flex items-center justify-between">
-          <p className="text-sm text-muted-foreground">Всего: {total}</p>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
-              Назад
-            </Button>
-            <span className="text-sm text-muted-foreground">
-              Стр. {page} из {totalPages}
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            >
-              Вперёд
-            </Button>
-          </div>
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-muted-foreground">Всего: {total}</p>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={page <= 1}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  >
+                    Назад
+                  </Button>
+                  <span className="text-sm text-muted-foreground">
+                    Стр. {page} из {totalPages}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={page >= totalPages}
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  >
+                    Вперёд
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
         </div>
-      ) : null}
+      )}
 
       {segmentPendingDelete ? (
         <DeleteSegmentDialog

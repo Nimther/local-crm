@@ -68,6 +68,20 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # Phase 15 plan 06 (OPS-09, Pitfall 18): Sentry has no retroactive
+      # redaction -- the only remedy for a field that reaches a live DSN is
+      # deleting the project's entire event history. This step is the
+      # blocking proof that `sentryBeforeSend` (packages/redaction) removes
+      # every planted secret/PII needle from a full serialization of the
+      # event body BEFORE any Sentry SDK is initialized against a live DSN
+      # anywhere in this codebase (see packages/redaction/src/sentry-scrub.ts
+      # and its fixture test's own header comment). Lives in `static` --
+      # already a required check under branch protection -- rather than a
+      # new job, so this becomes blocking immediately with no
+      # repository-admin action.
+      - name: Sentry redaction fixture gate (OPS-09)
+        run: npm run check:sentry-redaction
+
       # Without this, an ignores-glob typo makes `eslint .` check nothing and
       # exit 0 — a green gate that examined no files.
       - name: Lint file-count floor
@@ -129,6 +143,28 @@ jobs:
       - name: Production compose invariants
         run: npm run verify:prod-compose
 
+      # Phase 15 gap closure 15-22 (OPS-10, G-15-4): the machine half of
+      # "docker/alloy/config.alloy actually parses as Alloy" -- 15-17-SUMMARY.md
+      # pre-flagged that no automated check anywhere in this repository ever
+      # ran a real Alloy binary against this file, and the committed file
+      # shipped with an illegal `#` comment token that restart-looped the
+      # production sidecar and silently stopped all log delivery. This step
+      # runs the SAME image reference docker-compose.prod.yml pins for the
+      # `alloy` service (resolved at run time, never restated), inside
+      # --network none with a single read-only mount -- no Grafana Cloud
+      # credential is ever present here.
+      #
+      # ALLOY_VALIDATE_REQUIRE_BINARY=1 is set here deliberately: this
+      # ubuntu runner has a Docker daemon, so the real parser runs on every
+      # CI run. Without this variable, a runner that lost Docker would
+      # silently degrade to the static scan alone and this gate would quietly
+      # stop doing the one thing it exists for -- a real binary parse. This
+      # step pulls the pinned grafana/alloy vendor image on a cold runner.
+      - name: Alloy config gate (OPS-10)
+        env:
+          ALLOY_VALIDATE_REQUIRE_BINARY: "1"
+        run: npm run verify:alloy-config
+
       # Phase 14 plan 13 (DB-14 SPECIFICATION.md filing gate): the machine
       # half of .claude/CLAUDE.md's "a new secret must be recorded in the
       # same change" rule for the secrets section specifically -- every
@@ -137,6 +173,14 @@ jobs:
       # itself never reads a real secret.
       - name: SPECIFICATION env coverage
         run: npm run check:spec-env-coverage
+
+      # Phase 15 plan 18 (OPS-15, T-15-66): the machine half of "every alert
+      # this phase introduces has its own runbook" -- enumerates every
+      # `*_ALERT_NAME` constant apps/api/src/modules/ops declares and fails
+      # if a matching docs/runbooks/<name>-alert.md file does not exist, so a
+      # future alert cannot ship undocumented.
+      - name: Runbook coverage
+        run: npm run check:runbook-coverage
 
   # ---------------------------------------------------------------------------
   # The full corpus against live services, then the coverage threshold and the

@@ -14,7 +14,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "bullmq": "5.79.1",
+    "bullmq": "5.79.4",
     "ioredis": "5.11.0",
     "@mega-crm/redaction": "0.1.0"
   },

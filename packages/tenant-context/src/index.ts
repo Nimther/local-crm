@@ -43,25 +43,155 @@ export { closeScanPool, withCrossWorkspaceScan } from "./scan.js";
 export const pool = createPgPool({ connectionString: process.env.DATABASE_URL ?? "", name: "tenant-context" });
 
 /**
- * Request/job-scoped tenant context — AsyncLocalStorage ONLY, never a
+ * Phase 15 plan 02 (OPS-11/OPS-12, `assumption_delta_decision`: promote):
+ * the ALS store's identity is now the general CORRELATION context, not just
+ * "the tenant" -- `workspaceId` demotes to one field of it, alongside
+ * `requestId`/`jobId`/`sendId`. This is deliberately NOT a second parallel
+ * ALS instance: a nested-run clobbering bug (RESEARCH.md Pitfall 7, below)
+ * would reappear one layer up if correlation and tenant identity lived in
+ * two independent AsyncLocalStorage instances instead of one shared store.
+ */
+export interface CorrelationStore {
+  workspaceId?: string;
+  requestId?: string;
+  jobId?: string;
+  sendId?: string;
+}
+
+/**
+ * Request/job-scoped correlation context — AsyncLocalStorage ONLY, never a
  * module-level mutable variable (a module-level var would leak across
  * concurrent requests/jobs sharing the same Node event loop; see
  * 01-RESEARCH.md Pitfall 1 / Anti-Patterns).
  */
-const tenantContext = new AsyncLocalStorage<{ workspaceId: string }>();
+const tenantContext = new AsyncLocalStorage<CorrelationStore>();
 
-/** Runs `fn` with `workspaceId` bound as the active tenant for its entire async scope. */
+/**
+ * RESEARCH.md Pitfall 7 (highest-severity finding, Phase 15 research):
+ * `AsyncLocalStorage.run(store, fn)` REPLACES the entire store for `fn`'s
+ * async scope -- nesting two `run()` calls does NOT merge them, the inner
+ * call wins completely. Every `run()` call in this module MUST therefore
+ * spread the CURRENT store (`...tenantContext.getStore()`) forward before
+ * adding its own fields, in either nesting order (correlation-then-tenant,
+ * or tenant-then-correlation) -- otherwise binding a workspace inside an
+ * already-correlation-scoped request (or binding correlation fields inside
+ * an already-tenant-scoped job) silently drops the outer fields for the
+ * rest of that scope.
+ *
+ * A key explicitly passed as `undefined` must not overwrite an
+ * already-bound value of that key -- `definedCorrelationFields` strips
+ * `undefined` entries out of a caller-supplied partial store before it is
+ * spread on top of the current one, so `withCorrelation({ requestId:
+ * undefined })` (or any other explicit-`undefined` field) cannot clobber a
+ * real value already bound outside it. A plain object-literal merge
+ * (`{ ...current, ...incoming }`) would NOT have this property: an
+ * explicit `undefined` key in `incoming` still overwrites `current`'s
+ * value for that key in a plain spread.
+ */
+function definedCorrelationFields(fields: CorrelationStore): Partial<CorrelationStore> {
+  const defined: CorrelationStore = {};
+  for (const [key, value] of Object.entries(fields) as [keyof CorrelationStore, string | undefined][]) {
+    if (value !== undefined) {
+      defined[key] = value;
+    }
+  }
+  return defined;
+}
+
+/**
+ * Runs `fn` with `workspaceId` bound as the active tenant for its entire
+ * async scope. Merge-forward (Pitfall 7): any `requestId`/`jobId`/`sendId`
+ * already bound by an outer `withCorrelation` call survives into `fn`,
+ * exactly as required by OPS-11's "extend ALS, never thread parameters"
+ * contract -- the API's `onRequest` hook binds `requestId` before the
+ * workspace is even known, and this call must not erase it.
+ */
 export function withTenant<T>(workspaceId: string, fn: () => Promise<T>): Promise<T> {
-  return tenantContext.run({ workspaceId }, fn);
+  return tenantContext.run({ ...tenantContext.getStore(), workspaceId }, fn);
+}
+
+/**
+ * Runs `fn` with the supplied correlation fields (any of `requestId`,
+ * `jobId`, `sendId`, `workspaceId`) merged into the current store for its
+ * entire async scope. Merge-forward (Pitfall 7): if `fn` later calls
+ * `withTenant`/`withTenantTransaction`, or is itself nested inside an outer
+ * `withTenant` scope, every already-bound field on either side survives --
+ * this helper works in EITHER nesting order (correlation-then-tenant, the
+ * API's shape; tenant-then-correlation, a shape a future caller could
+ * introduce), since neither call spreads a fresh literal.
+ *
+ * Deliberately typed as `fn: () => T` (matching `AsyncLocalStorage.run`'s own
+ * generic signature) rather than `() => Promise<T>` -- every existing async
+ * caller is unaffected (`T` is simply inferred as the `Promise<X>` an async
+ * arrow function already returns), but this also admits a plain synchronous
+ * callback. `apps/api/src/server.ts`'s `onRequest` hook needs exactly that:
+ * it binds `requestId` and synchronously calls Fastify's `done()` (a `void`
+ * return) from inside this scope so the ALS context propagates to the
+ * continuation `done()` triggers -- forcing an `async () => { done(); }`
+ * wrapper there just to satisfy a `Promise<T>`-only signature would add a
+ * microtask tick with no benefit.
+ */
+export function withCorrelation<T>(fields: CorrelationStore, fn: () => T): T {
+  return tenantContext.run({ ...tenantContext.getStore(), ...definedCorrelationFields(fields) }, fn);
+}
+
+/**
+ * Returns the currently-bound correlation fields as a plain object -- `{}`
+ * when no ALS scope is active at all (e.g. a boot-time log line emitted
+ * before any request/job has started). Never throws: the pino `mixin()` in
+ * both `apps/api/src/logger.ts` and `apps/worker/src/logger.ts` calls this
+ * on every single log call, including ones that run outside any scope.
+ */
+export function getCorrelationContext(): CorrelationStore {
+  return tenantContext.getStore() ?? {};
 }
 
 /** Returns the active tenant's workspace_id. Throws if no tenant context is set. */
 export function getWorkspaceId(): string {
   const ctx = tenantContext.getStore();
-  if (!ctx) {
+  if (!ctx || ctx.workspaceId === undefined) {
     throw new Error("No tenant context set for this request");
   }
   return ctx.workspaceId;
+}
+
+/**
+ * Phase 15 plan 02 (OPS-12, RESEARCH.md Pattern 4): Postgres truncates
+ * `application_name` at 63 bytes -- silently, at whatever byte happens to
+ * land on the boundary. This budget is the SAME 63 the server enforces, held
+ * here as a named constant (not a magic number at the call site below) so a
+ * future author who wants to append a third field to the composed value
+ * re-checks this budget instead of discovering the silent Postgres cut in
+ * production. Do not raise this without also widening the column Postgres
+ * itself uses -- it cannot be raised on our side alone.
+ */
+export const APPLICATION_NAME_BYTE_BUDGET = 63;
+
+/**
+ * Composes the `application_name` value from the current correlation store:
+ * a compact `req=<requestId or -> job=<jobId or ->` pair. Deterministically
+ * truncated to `APPLICATION_NAME_BYTE_BUDGET` bytes -- not left to Postgres's
+ * own silent truncation -- and truncated on a whole-character boundary (never
+ * mid multi-byte UTF-8 sequence), since `requestId` ultimately derives from
+ * an attacker-controlled `x-request-id` header (T-15-04) upstream of this
+ * function, even though the request-id gate itself (plan 15-02 task 3)
+ * constrains that header to a bounded-length safe character set before it
+ * ever reaches here.
+ */
+export function composeApplicationName(ctx: CorrelationStore): string {
+  const raw = `req=${ctx.requestId ?? "-"} job=${ctx.jobId ?? "-"}`;
+  if (Buffer.byteLength(raw, "utf8") <= APPLICATION_NAME_BYTE_BUDGET) {
+    return raw;
+  }
+  let truncated = "";
+  let bytes = 0;
+  for (const char of raw) {
+    const charBytes = Buffer.byteLength(char, "utf8");
+    if (bytes + charBytes > APPLICATION_NAME_BYTE_BUDGET) break;
+    truncated += char;
+    bytes += charBytes;
+  }
+  return truncated;
 }
 
 /**
@@ -73,6 +203,13 @@ export function getWorkspaceId(): string {
  * is what makes this safe under connection-pool reuse — proven by
  * apps/api/src/db/__tests__/rls-pooling-chaos.test.ts.
  *
+ * Phase 15 plan 02 (OPS-12, RESEARCH.md Pattern 4): the SAME statement also
+ * sets `application_name` to a compact `req=.../job=...` correlation label —
+ * one extra `set_config` argument in the existing `SELECT`, no second round
+ * trip, no schema change. With no requestId/jobId bound at all, this still
+ * sets a well-formed `req=- job=-` placeholder rather than leaving
+ * `application_name` at the pool's default.
+ *
  * Always releases the client in `finally` so a broken/aborted connection is
  * never silently kept alive in the pool.
  */
@@ -80,7 +217,14 @@ export async function withTenantTransaction<T>(
   fn: (client: PoolClient) => Promise<T>
 ): Promise<T> {
   const ctx = tenantContext.getStore();
-  if (!ctx) {
+  // Phase 15 plan 02: `ctx` can now be a truthy correlation-only store (e.g.
+  // `{ requestId }` bound by the API's onRequest hook before any workspace
+  // is resolved) -- the bare `!ctx` check from before the store's promotion
+  // would let that case through with `ctx.workspaceId === undefined`, and
+  // the `set_config` call below would silently bind an empty string.
+  // `withTenantTransaction` still requires a REAL workspace, same as
+  // `getWorkspaceId`'s throw-if-absent contract.
+  if (!ctx || ctx.workspaceId === undefined) {
     throw new Error("No tenant context set for this request");
   }
 
@@ -88,9 +232,10 @@ export async function withTenantTransaction<T>(
   let releaseWithError: Error | undefined;
   try {
     await client.query("BEGIN");
-    await client.query("SELECT set_config('app.current_workspace_id', $1, true)", [
-      ctx.workspaceId,
-    ]);
+    await client.query(
+      "SELECT set_config('app.current_workspace_id', $1, true), set_config('application_name', $2, true)",
+      [ctx.workspaceId, composeApplicationName(ctx)],
+    );
     const result = await fn(client);
     await client.query("COMMIT");
     return result;

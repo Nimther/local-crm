@@ -15,7 +15,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { EmptyState } from "@/components/EmptyState";
+import { QueryErrorState } from "@/components/QueryErrorState";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -117,6 +119,12 @@ export function CampaignsListPage() {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const isInitialLoad = campaignsQuery.isLoading;
   const isRefetching = campaignsQuery.isPlaceholderData || campaignsQuery.isFetching;
+  // OPS-17/D-11: same full-vs-stale error split as ContactsListPage -- a
+  // failed fetch with no prior data gets the full-region QueryErrorState; a
+  // failed background refetch that still has stale rows gets a contained
+  // banner above the still-rendered table instead of clobbering it.
+  const isFullyErrored = campaignsQuery.isError && !campaignsQuery.data;
+  const isStaleErrored = campaignsQuery.isError && Boolean(campaignsQuery.data);
 
   return (
     <div className="space-y-6 p-8">
@@ -130,19 +138,29 @@ export function CampaignsListPage() {
 
       {isInitialLoad ? (
         <Skeleton className="h-96 w-full" />
-      ) : items.length === 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Кампаний пока нет</CardTitle>
-            <CardDescription>
-              Создайте кампанию — выберите сегмент-аудиторию и шаблон, чтобы отправить рассылку через SendGrid.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button onClick={() => void navigate(`/w/${slug}/campaigns/new`)}>Создать кампанию</Button>
-          </CardContent>
-        </Card>
+      ) : isFullyErrored ? (
+        <QueryErrorState
+          title="Не удалось загрузить кампании"
+          isFetching={campaignsQuery.isFetching}
+          onRetry={() => void campaignsQuery.refetch()}
+        />
       ) : (
+        <div className="space-y-6">
+          {isStaleErrored ? (
+            <QueryErrorState
+              title="Не удалось обновить список кампаний"
+              detail="Показаны последние загруженные данные."
+              isFetching={campaignsQuery.isFetching}
+              onRetry={() => void campaignsQuery.refetch()}
+            />
+          ) : null}
+          {items.length === 0 ? (
+            <EmptyState
+              title="Кампаний пока нет"
+              description="Создайте кампанию — выберите сегмент-аудиторию и шаблон, чтобы отправить рассылку через SendGrid."
+              action={<Button onClick={() => void navigate(`/w/${slug}/campaigns/new`)}>Создать кампанию</Button>}
+            />
+          ) : (
         <Card className={cn("transition-opacity duration-200", isRefetching && "opacity-50")}>
           <CardContent className="p-0">
             <Table>
@@ -218,6 +236,8 @@ export function CampaignsListPage() {
             </Table>
           </CardContent>
         </Card>
+          )}
+        </div>
       )}
 
       {serverError ? <p className="text-sm font-medium text-destructive">{serverError}</p> : null}

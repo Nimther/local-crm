@@ -6,8 +6,12 @@ import { attachSharedErrorListeners, buildRedisConnectionOptions, createRedisCon
 import { pool } from "@mega-crm/tenant-context";
 import { assertMigrationsCurrent } from "@mega-crm/db";
 import { markWorkerDraining, startWorkerHealthServer, type WorkerHealthServer } from "./health-server.js";
+import { logger } from "./logger.js";
+import { mountBullBoard } from "./bull-board.js";
 import { closeTrackedQueues } from "./queues/queue-registry.js";
 import { isTerminalJobFailure, writeDeadLetterOnTerminalFailure } from "./queues/dead-letter/dead-letter-writer.js";
+import { setProcessorErrorReporter } from "./processor-wrapper.js";
+import { initSentry, reportProcessorError, flushSentry, SENTRY_FLUSH_TIMEOUT_MS } from "./sentry.js";
 import { createEventsIngestWorker } from "./queues/events-ingest.worker.js";
 import { createImportsCsvWorker } from "./queues/imports-csv.worker.js";
 import { createEmailBroadcastWorker } from "./queues/email-broadcast.worker.js";
@@ -89,6 +93,14 @@ export async function closeWorkerRuntime(
 ): Promise<void> {
   await Promise.all(workers.map((worker) => worker.close()));
   await closeTrackedQueues();
+  // Phase 15 plan 10 (OPS-08, T-15-32): flushes any Sentry event still
+  // in-flight AFTER every worker/queue has fully drained, so a real
+  // in-flight capture is not racing a job that is still being processed --
+  // but BEFORE the shared connection disconnects and the health server
+  // closes, so a hanging flush is still bounded by its own explicit timeout
+  // rather than by anything downstream. A no-op (resolves immediately) when
+  // Sentry was never initialized (no DSN configured).
+  await flushSentry(SENTRY_FLUSH_TIMEOUT_MS);
   connection.disconnect();
   if (healthServer) {
     await healthServer.close();
@@ -130,6 +142,33 @@ export function attachSharedListeners(workers: Worker[]): void {
 }
 
 /**
+ * Phase 16 (D-06/D-07): the worker's loud, non-fatal boot-time announcement
+ * for the `SENDGRID_BASE_URL` override -- factored out of `buildWorker()`
+ * (same testability reasoning as `attachSharedListeners`/`closeWorkerRuntime`
+ * above) so `sendgrid-base-url-boot-log.test.ts` can drive it directly
+ * against an injected logger double, without constructing all twenty
+ * production BullMQ workers.
+ *
+ * Deliberately does NOT throw when the override is active: D-07 explicitly
+ * rejected a production guard here, because the UAT itself runs on the
+ * production VPS -- the override must remain usable for its own purpose. The
+ * absent/empty-string case is a silent no-op, mirroring
+ * `packages/delivery-core/src/send-mail.ts`'s own absent-is-default
+ * treatment of the same variable. `log` defaults to the module's real Pino
+ * logger; tests inject a stub.
+ */
+export function logSendgridBaseUrlOverrideIfActive(log: Pick<typeof logger, "warn"> = logger): void {
+  const override = process.env.SENDGRID_BASE_URL;
+  if (!override || override.length === 0) {
+    return;
+  }
+  log.warn(
+    { sendgridBaseUrlOverride: override },
+    "SENDGRID_BASE_URL override is active -- tenant mail is NOT going to real SendGrid. This must NEVER be set outside a Phase 16 UAT fault-injection session."
+  );
+}
+
+/**
  * Assembles the worker runtime: one shared Redis connection plus the
  * events:ingest (EVNT-02/EVNT-03) and imports:csv (CONT-02) BullMQ Workers.
  * No HTTP listener; this is a long-running background process, not a
@@ -139,6 +178,16 @@ export function attachSharedListeners(workers: Worker[]): void {
 // so the require-await disable this function needed before that change is
 // stale -- removed rather than left as a now-inert directive.
 export async function buildWorker(): Promise<WorkerRuntime> {
+  // Phase 15 plan 10 (OPS-08): initialized once at boot, before anything
+  // else -- a missing SENTRY_DSN_WORKER is a no-op (initSentry logs once and
+  // returns false), so this never blocks/slows boot. The reporter is
+  // injected into processor-wrapper.ts's seam UNCONDITIONALLY, DSN or not --
+  // `reportProcessorError`'s own Sentry.captureException call already
+  // no-ops when no client is initialized, exactly like
+  // apps/api/src/server.ts's Sentry.setupFastifyErrorHandler wiring.
+  initSentry();
+  setProcessorErrorReporter(reportProcessorError);
+
   const redisUrl = process.env.REDIS_URL;
   if (!redisUrl) {
     throw new Error("REDIS_URL is required for apps/worker to start");
@@ -176,6 +225,11 @@ export async function buildWorker(): Promise<WorkerRuntime> {
       "PUBLIC_APP_URL is required for apps/worker to start -- it builds the public unsubscribe link"
     );
   }
+
+  // Phase 16 (D-06/D-07): inverse-polarity check -- warn (never throw) when
+  // SENDGRID_BASE_URL is active, so a forgotten override is discovered at
+  // the next boot rather than by a delivery incident.
+  logSendgridBaseUrlOverrideIfActive();
 
   const connection = createRedisConnection(redisUrl);
   const workers: Worker[] = [
@@ -279,10 +333,19 @@ export async function buildWorker(): Promise<WorkerRuntime> {
   // is `assertMigrationsCurrent` (D-13, packages/db/src/migration-journal.ts)
   // bound to that pool -- the identical applied-vs-shipped definition
   // apps/api's /readyz uses, never a second comparison.
+  //
+  // Phase 15 plan 16 (OPS-14, D-09/D-10): `beforeListen` mounts the
+  // read-only Bull Board onto this SAME Fastify instance -- `board-queues.ts`'s
+  // handles are already constructed by the time this module graph finished
+  // loading (its module-level `boardQueues` array is built at import time,
+  // before `main()` ever runs), so "after the queue handles exist" holds by
+  // construction; this hook itself runs before `app.listen(...)` starts
+  // accepting connections (`health-server.ts`'s own contract for the hook).
   const healthServer = await startWorkerHealthServer({
     queryPostgres: () => pool.query("SELECT 1"),
     redisConnection: connection,
     checkMigrationsCurrent: () => assertMigrationsCurrent(pool),
+    beforeListen: mountBullBoard,
   });
 
   const close = (): Promise<void> => closeWorkerRuntime(workers, connection, healthServer);
