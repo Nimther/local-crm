@@ -569,7 +569,7 @@ Plans:
   4. The app loads with route-level code splitting — canvas and heavy dashboard chunks arrive only when those routes are opened.
   5. A failed API call, an empty list, a paginated list, stale analytics and unsaved canvas changes each show the user what is actually true rather than a blank or silently-wrong screen.
 
-**Plans**: 22 plans (21 executed; 15-22 is gap closure for UAT gap G-15-4)
+**Plans**: 22/22 plans executed
 
 Plans:
 **Wave 1**
@@ -643,7 +643,7 @@ Plans:
 
 **Wave 17** *(gap closure — G-15-4; blocked on Wave 16)*
 
-- [ ] 15-22-PLAN.md — Alloy config comment-token fix + `verify:alloy-config` gate parsing it with the real pinned binary, blocking in CI (OPS-10)
+- [x] 15-22-PLAN.md — Alloy config comment-token fix + `verify:alloy-config` gate parsing it with the real pinned binary, blocking in CI (OPS-10)
 
 **UI hint**: yes
 
@@ -745,7 +745,7 @@ Phase 9 has no dependents and may be scheduled in parallel at any point after Ph
 | 12. Worker Reliability & Tenant Fairness | v1.1 | 14/14 | Complete    | 2026-08-11 |
 | 13. Compliance & Analytics Integrity | v1.1 | 16/16 | Complete    | 2026-08-12 |
 | 14. Deployment & Database Durability | v1.1 | 14/14 | Complete    | 2026-08-14 |
-| 15. Observability, Alerting & Frontend Resilience | v1.1 | 21/21 | In Progress|  |
+| 15. Observability, Alerting & Frontend Resilience | v1.1 | 22/22 | In Progress|  |
 | 16. Live SendGrid Verification | v1.1 | 0/TBD | Not started | - |
 
 ---
