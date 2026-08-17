@@ -6,6 +6,7 @@ import { attachSharedErrorListeners, buildRedisConnectionOptions, createRedisCon
 import { pool } from "@mega-crm/tenant-context";
 import { assertMigrationsCurrent } from "@mega-crm/db";
 import { markWorkerDraining, startWorkerHealthServer, type WorkerHealthServer } from "./health-server.js";
+import { logger } from "./logger.js";
 import { mountBullBoard } from "./bull-board.js";
 import { closeTrackedQueues } from "./queues/queue-registry.js";
 import { isTerminalJobFailure, writeDeadLetterOnTerminalFailure } from "./queues/dead-letter/dead-letter-writer.js";
@@ -141,6 +142,33 @@ export function attachSharedListeners(workers: Worker[]): void {
 }
 
 /**
+ * Phase 16 (D-06/D-07): the worker's loud, non-fatal boot-time announcement
+ * for the `SENDGRID_BASE_URL` override -- factored out of `buildWorker()`
+ * (same testability reasoning as `attachSharedListeners`/`closeWorkerRuntime`
+ * above) so `sendgrid-base-url-boot-log.test.ts` can drive it directly
+ * against an injected logger double, without constructing all twenty
+ * production BullMQ workers.
+ *
+ * Deliberately does NOT throw when the override is active: D-07 explicitly
+ * rejected a production guard here, because the UAT itself runs on the
+ * production VPS -- the override must remain usable for its own purpose. The
+ * absent/empty-string case is a silent no-op, mirroring
+ * `packages/delivery-core/src/send-mail.ts`'s own absent-is-default
+ * treatment of the same variable. `log` defaults to the module's real Pino
+ * logger; tests inject a stub.
+ */
+export function logSendgridBaseUrlOverrideIfActive(log: Pick<typeof logger, "warn"> = logger): void {
+  const override = process.env.SENDGRID_BASE_URL;
+  if (!override || override.length === 0) {
+    return;
+  }
+  log.warn(
+    { sendgridBaseUrlOverride: override },
+    "SENDGRID_BASE_URL override is active -- tenant mail is NOT going to real SendGrid. This must NEVER be set outside a Phase 16 UAT fault-injection session."
+  );
+}
+
+/**
  * Assembles the worker runtime: one shared Redis connection plus the
  * events:ingest (EVNT-02/EVNT-03) and imports:csv (CONT-02) BullMQ Workers.
  * No HTTP listener; this is a long-running background process, not a
@@ -197,6 +225,11 @@ export async function buildWorker(): Promise<WorkerRuntime> {
       "PUBLIC_APP_URL is required for apps/worker to start -- it builds the public unsubscribe link"
     );
   }
+
+  // Phase 16 (D-06/D-07): inverse-polarity check -- warn (never throw) when
+  // SENDGRID_BASE_URL is active, so a forgotten override is discovered at
+  // the next boot rather than by a delivery incident.
+  logSendgridBaseUrlOverrideIfActive();
 
   const connection = createRedisConnection(redisUrl);
   const workers: Worker[] = [
