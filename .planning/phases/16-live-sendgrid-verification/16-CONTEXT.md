@@ -130,7 +130,7 @@ This is a verification phase, not a feature phase — with **one deliberate exce
 <deferred>
 ## Deferred Ideas
 
-- **Adopting the SENDGRID_BASE_URL seam in Phase 8's failure-injection scenarios** (killing the literal production entrypoint against a local stub) — planner may fold it in if cheap; otherwise an explicit follow-up.
+- **Adopting the SENDGRID_BASE_URL seam in Phase 8's failure-injection scenarios** (killing the literal production entrypoint against a local stub) — planner may fold it in if cheap; otherwise an explicit follow-up. **Planning decision (2026-08-17): NOT folded into Phase 16** — the planner judged it out of scope for a verification phase (D-07 permitted either). Recorded here as the explicit follow-up D-07's Deferred section requires; pick up in a future quality/failure-injection phase.
 - **Real rate-ceiling burst as bonus UAT-05 evidence** — rejected as the gate; could be attempted opportunistically but is not part of this phase's pass criteria.
 - **Two-live-workspace fairness demonstration** — rests on Phase 12 CI evidence; revisit only if a real multi-tenant incident suggests the CI scenario diverges from production behavior.
 
