@@ -670,7 +670,16 @@ Plans:
   3. A genuinely signed SendGrid webhook payload passes signature verification through the full HTTP stack, and a redelivery of that same payload is counted exactly once.
   4. A real SendGrid 429 or transient error defers only the affected tenant's sends and resolves without duplicate or lost mail.
 
-**Plans**: TBD
+**Plans**: 7 plans
+
+Plans:
+- [ ] 16-01-PLAN.md — TRACER: UAT workspace, BYO key, Dynamic Template, first live send end-to-end (UAT-01, delivered leg of UAT-02)
+- [ ] 16-02-PLAN.md — Live opened/clicked/bounced with campaign and flow-step attribution (UAT-02)
+- [ ] 16-03-PLAN.md — SENDGRID_BASE_URL seam + raw webhook capture + SPECIFICATION filing (UAT-03, UAT-05)
+- [ ] 16-04-PLAN.md — Live signed-payload capture, byte-exact replay, dedup proof, byte-flip rejection (UAT-03, UAT-04)
+- [ ] 16-05-PLAN.md — Committed CI fixture + full-HTTP-stack replay test, closing the Phase 5 gap (UAT-03, UAT-04)
+- [ ] 16-06-PLAN.md — Fault proxy + live 429 and timeout, defer/resolve/exactly-once (UAT-05)
+- [ ] 16-07-PLAN.md — UAT report, standing-canary procedure, teardown verification (UAT-01..05)
 
 **Why UAT is its own final phase (deliberate decision):**
 
