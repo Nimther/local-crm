@@ -228,9 +228,9 @@ describe("correlation tracer: one requestId across worker log + application_name
     });
 
     let capturedSendId = "";
-    const sendMail = async (_apiKey: string, payload: { personalizations: Array<{ custom_args: { send_id: string } }> }) => {
+    const sendMail = (_apiKey: string, payload: { personalizations: Array<{ custom_args: { send_id: string } }> }) => {
       capturedSendId = payload.personalizations[0].custom_args.send_id;
-      return { status: 202, headers: new Headers(), messageId: "sg-message-id-fixture-sendid" };
+      return Promise.resolve({ status: 202, headers: new Headers(), messageId: "sg-message-id-fixture-sendid" });
     };
 
     const wrapped = wrapProcessor(EMAIL_BROADCAST_QUEUE, (job: Job<EmailBroadcastJob>, token) =>
