@@ -1,22 +1,14 @@
 ---
-status: testing
+status: complete
 phase: 15-observability-alerting-frontend-resilience
 source: [15-VERIFICATION.md]
 started: 2026-08-16T10:45:00Z
-updated: 2026-08-17T03:45:00Z
+updated: 2026-08-17T09:00:00Z
 ---
 
 ## Current Test
 
-number: 5
-name: Production redeploy with the committed config.alloy
-expected: |
-  Redeploy the prod compose stack with the committed docker/alloy/config.alloy
-  (the //-converted file, which also gained a 16-line explanatory header vs the
-  temporary config tested during UAT). The `alloy` container reaches and stays
-  in a running state (not Restarting), and structured JSON log lines keep
-  arriving in Grafana Cloud Loki with the documented labels.
-awaiting: user response
+[testing complete]
 
 ## Tests
 
@@ -40,14 +32,14 @@ severity: blocker
 
 ### 5. Production redeploy with the committed config.alloy
 expected: Redeploy the prod compose stack with the committed docker/alloy/config.alloy and confirm the `alloy` container runs (not Restarting) and structured log lines keep arriving in Grafana Cloud Loki. (The UAT-session confirmation in test 4 was against a temporary //-corrected config applied ad hoc; the committed file was independently proven to parse cleanly under the pinned grafana/alloy:v1.18.1 binary — exit 0 — so this confirms the exact committed bytes in the live path.)
-result: [pending]
+result: pass
 
 ## Summary
 
 total: 5
-passed: 3
+passed: 4
 issues: 1
-pending: 1
+pending: 0
 skipped: 0
 blocked: 0
 
