@@ -55,6 +55,20 @@
 | UAT-05 | Поведение при 429 и временных ошибках SendGrid подтверждено live | Architecture Pattern 2 (the two asymmetric injection modes, traced directly from `send-dispatch.ts`) + Pitfall 2 (the consequence of getting them backwards) — this is the highest-risk requirement in the phase and the research resolves its core implementation question explicitly |
 </phase_requirements>
 
+## Project Constraints (from CLAUDE.md)
+
+Directives from `.claude/CLAUDE.md` that bind this phase's plans:
+
+- **SPECIFICATION.md same-change rule (binding, project-wide):** "при добавлении любой новой библиотеки или технологии — дописать её в SPECIFICATION.md в соответствующий раздел в том же изменении." Concretely for this phase:
+  - `SENDGRID_BASE_URL` (new env var, D-06) → §3 "Секреты" in the SAME commit that adds the env read.
+  - `WEBHOOK_RAW_CAPTURE_WORKSPACE_ID` (new env var, this research's Pattern 3 recommendation for D-09) → also §3, same rule — this is a NEW variable this research introduces, not one CONTEXT.md already named, so the planner must not miss it just because it isn't in the Claude's Discretion list verbatim.
+  - The webhook-route capture addition and the `SENDGRID_BASE_URL` read both plausibly touch §6 "Публичные точки входа" / §5 "Планировщик и пайплайн отправки" respectively — the planner should confirm which section per the routing table in CLAUDE.md ("новая переменная окружения... → раздел 3", "новый HTTP-роут... → раздел 6").
+  - The fault-injection proxy (`scripts/uat-fault-proxy.mjs` or equivalent) is a session-scoped throwaway tool, not a dependency or a permanent architectural component — it does NOT trigger the SPECIFICATION.md package/dependency rule (§2) as long as no new npm package is added (see Package Legitimacy Audit: none is).
+  - If any of the above lands with a version/library that diverges from the Technology Stack section of CLAUDE.md, §8 "Расхождения" also needs an entry — not expected here, since no new library is introduced.
+- **"Never parse the SendGrid webhook body with a JSON body-parser before signature verification"** (CLAUDE.md What NOT to Use, restated from the codebase's own `webhooks.routes.ts` comments): the D-09 raw-capture insertion point in Architecture Pattern 3 above is placed AFTER `isValid`/`isFresh` both pass and BEFORE `JSON.parse` — this satisfies the directive as written, but the plan-checker should verify the insertion point explicitly rather than re-derive it, since misplacing it even slightly (e.g., capturing before signature verification, to "capture everything just in case") would violate this rule.
+- **"Never `@sendgrid/mail`'s module-level `sgMail` singleton for tenant sends... always a per-call `Authorization: Bearer` header"** (CLAUDE.md What NOT to Use + `send-mail.ts`'s own doc comment): the `SENDGRID_BASE_URL` seam edit must change ONLY the URL string passed to `fetch`, not the raw-fetch-per-call architecture itself. Do not refactor `sendTenantMailV3` to use `@sendgrid/mail` while adding this seam.
+- **No new npm packages without updating SPECIFICATION.md §2**: moot for this phase per the Package Legitimacy Audit (no new packages recommended), but binds any plan that deviates from this research's dependency-free-proxy recommendation.
+
 ## Summary
 
 Phase 16 does not build a new system — it wires four small, reversible seams onto code that Phases 8–15 already built and verified against mocks, then proves each of UAT-01..05 against the real SendGrid account and a real inbox. Three of the four "new" surfaces are single-purpose and temporary: a `SENDGRID_BASE_URL` env read in `sendTenantMailV3` (one line, default-real-URL, D-06/D-07), a raw-webhook-capture mechanism for the UAT workspace only (D-09 — resolved below: `ingress_journal` cannot be the replay source), and a pass-through fault proxy for the 429/timeout session (D-06). The fourth is durable: a committed CI fixture that closes a signature-replay test gap carried since Phase 5 (D-10).
