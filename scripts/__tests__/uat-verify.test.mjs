@@ -31,7 +31,9 @@ import {
   formatEventCoverageReport,
   formatReport,
   parseArgs,
+  parseCapturedRawBatch,
   summariseEventCoverage,
+  validateCapturedDedupKey,
 } from "../uat-verify.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -127,10 +129,10 @@ describe("parseArgs", () => {
     );
   });
 
-  it("rejects a dedup invocation missing --send-id, --event-type or --occurred-at", () => {
+  it("rejects a dedup invocation missing --capture, --send-id, --event-type or --occurred-at", () => {
     expect(() =>
       parseArgs(["dedup", "--workspace", "ws-1", "--mode", "snapshot", "--snapshot", "/tmp/x.json"]),
-    ).toThrowError(/--send-id/);
+    ).toThrowError(/--capture/);
     expect(() =>
       parseArgs([
         "dedup",
@@ -140,6 +142,8 @@ describe("parseArgs", () => {
         "snapshot",
         "--snapshot",
         "/tmp/x.json",
+        "--capture",
+        "/tmp/capture.json",
         "--send-id",
         "send-1",
       ]),
@@ -153,6 +157,8 @@ describe("parseArgs", () => {
         "snapshot",
         "--snapshot",
         "/tmp/x.json",
+        "--capture",
+        "/tmp/capture.json",
         "--send-id",
         "send-1",
         "--event-type",
@@ -170,6 +176,8 @@ describe("parseArgs", () => {
       "compare",
       "--snapshot",
       "/tmp/dedup-snapshot.json",
+      "--capture",
+      "/tmp/capture.json",
       "--send-id",
       "send-1",
       "--event-type",
@@ -183,11 +191,71 @@ describe("parseArgs", () => {
       workspace: "ws-1",
       mode: "compare",
       snapshotPath: "/tmp/dedup-snapshot.json",
+      capturePath: "/tmp/capture.json",
       sendId: "send-1",
       eventType: "delivered",
       occurredAt: "2026-01-01T00:00:00Z",
       json: true,
     });
+  });
+});
+
+describe("parseCapturedRawBatch", () => {
+  it("decodes a non-empty SendGrid batch and returns a stable digest without exposing other capture fields", () => {
+    const rawBatch = [{ event: "click", send_id: "send-1" }];
+    const result = parseCapturedRawBatch(
+      JSON.stringify({
+        publicKey: "secret-adjacent",
+        rawBodyBase64: Buffer.from(JSON.stringify(rawBatch)).toString("base64"),
+        signature: "secret-adjacent",
+        timestamp: "123",
+      }),
+    );
+    expect(JSON.parse(result.rawBatchJson)).toEqual(rawBatch);
+    expect(result.captureDigest).toMatch(/^[a-f0-9]{64}$/);
+    expect(JSON.stringify(result)).not.toContain("secret-adjacent");
+  });
+
+  it("rejects a missing, malformed, or empty decoded batch", () => {
+    expect(() => parseCapturedRawBatch("{}")).toThrowError(/rawBodyBase64/);
+    expect(() => parseCapturedRawBatch(JSON.stringify({ rawBodyBase64: "%%%=" }))).toThrowError(/base64/);
+    expect(() =>
+      parseCapturedRawBatch(JSON.stringify({ rawBodyBase64: Buffer.from("[]").toString("base64") })),
+    ).toThrowError(/non-empty/);
+  });
+});
+
+describe("validateCapturedDedupKey", () => {
+  const rawBatchJson = JSON.stringify([
+    { event: "click", send_id: "send-1", timestamp: 1767225600 },
+    { event: "open", send_id: "send-2", timestamp: 1767225601 },
+  ]);
+
+  it("accepts only a dedup key that belongs to an event in the captured batch", () => {
+    expect(
+      validateCapturedDedupKey(rawBatchJson, {
+        sendId: "send-1",
+        eventType: "click",
+        occurredAt: "2026-01-01T00:00:00.000Z",
+      }),
+    ).toBe(true);
+    expect(
+      validateCapturedDedupKey(rawBatchJson, {
+        sendId: "send-1",
+        eventType: "delivered",
+        occurredAt: "2026-01-01T00:00:00.000Z",
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects invalid occurred-at input without treating it as a match", () => {
+    expect(
+      validateCapturedDedupKey(rawBatchJson, {
+        sendId: "send-1",
+        eventType: "click",
+        occurredAt: "not-a-timestamp",
+      }),
+    ).toBe(false);
   });
 });
 
@@ -394,6 +462,7 @@ describe("compareDedupSnapshot", () => {
       rollup: { ...baseRollup },
       campaignCounters: { ...baseCampaignCounters },
       capturedAt: "2026-01-01T00:05:00Z",
+      captureDigest: "a".repeat(64),
       ...overrides,
     };
   }
@@ -446,6 +515,30 @@ describe("compareDedupSnapshot", () => {
     expect(result.reasons.join(" ")).toMatch(/12/);
   });
 
+  it("fails when snapshot and compare use different capture payloads", () => {
+    const before = makeSnapshot({ ingressJournalCount: 10 });
+    const after = makeSnapshot({ ingressJournalCount: 11, captureDigest: "b".repeat(64) });
+    const result = compareDedupSnapshot(before, after);
+    expect(result.passed).toBe(false);
+    expect(result.reasons.join(" ")).toMatch(/different capture/i);
+  });
+
+  it("fails when snapshot and compare use different dedup identity fields", () => {
+    for (const override of [
+      { workspaceId: "ws-2" },
+      { sendId: "send-2" },
+      { eventType: "open" },
+      { occurredAt: "2026-01-01T00:00:01Z" },
+    ]) {
+      const result = compareDedupSnapshot(
+        makeSnapshot({ ingressJournalCount: 10 }),
+        makeSnapshot({ ingressJournalCount: 11, ...override }),
+      );
+      expect(result.passed).toBe(false);
+      expect(result.reasons.join(" ")).toMatch(/different dedup identity/i);
+    }
+  });
+
   it("fails when any rollup counter changed, naming the changed field and both values", () => {
     const before = makeSnapshot({ ingressJournalCount: 10 });
     const after = makeSnapshot({
@@ -492,6 +585,14 @@ describe("dedup-key query provenance (static source check)", () => {
     );
   });
 
+  it("scopes ingress_journal to the captured raw batch so unrelated shared-account traffic is ignored", () => {
+    const source = readSourceFile();
+    expect(source).toMatch(/raw_batch\s*=\s*\$2::jsonb/);
+    expect(source).not.toMatch(
+      /SELECT count\(\*\)::int AS count FROM ingress_journal WHERE workspace_id = \$1[\s`]/,
+    );
+  });
+
   function readSourceFile() {
     return readFileSync(UAT_VERIFY_SCRIPT, "utf8");
   }
@@ -512,6 +613,8 @@ describe("dedup CLI: usage error on a bad snapshot file", () => {
     "2026-01-01T00:00:00Z",
     "--mode",
     "compare",
+    "--capture",
+    "/tmp/uat16-capture.json",
   ];
 
   function runDedupCli(extraArgs) {

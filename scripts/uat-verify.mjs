@@ -43,6 +43,7 @@
 // the runbook's bind-mount invocation form only ever needs to mount one path
 // (see this plan's SUMMARY for the discovery that drove that decision).
 
+import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
@@ -142,6 +143,9 @@ export function parseArgs(argv) {
     if (!flags.snapshot) {
       throw new Error("uat-verify dedup: --snapshot <path> is required");
     }
+    if (!flags.capture) {
+      throw new Error("uat-verify dedup: --capture <path> is required");
+    }
     if (!flags["send-id"]) {
       throw new Error("uat-verify dedup: --send-id <uuid> is required");
     }
@@ -156,6 +160,7 @@ export function parseArgs(argv) {
       workspace: flags.workspace,
       mode: flags.mode,
       snapshotPath: flags.snapshot,
+      capturePath: flags.capture,
       sendId: flags["send-id"],
       eventType: flags["event-type"],
       occurredAt: flags["occurred-at"],
@@ -167,6 +172,55 @@ export function parseArgs(argv) {
   // dispatch shape stays extensible for 16-04/16-06's subcommands without
   // restructuring this function's control flow when they land.
   throw new Error(`uat-verify: subcommand "${subcommand}" has no flag parser registered`);
+}
+
+/**
+ * Reads the only capture field the dedup query needs without ever exposing
+ * the signature, public key, or decoded recipient data in CLI output. The
+ * decoded JSON is re-serialized solely as a parameter for Postgres `jsonb`
+ * equality; a SHA-256 digest pins snapshot/compare to the same capture.
+ */
+export function parseCapturedRawBatch(captureText) {
+  const capture = JSON.parse(captureText);
+  const encoded = capture?.rawBodyBase64;
+  if (typeof encoded !== "string" || encoded.length === 0) {
+    throw new Error("capture must contain a non-empty rawBodyBase64 string");
+  }
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(encoded) || encoded.length % 4 !== 0) {
+    throw new Error("capture rawBodyBase64 is not valid canonical base64");
+  }
+
+  const rawBytes = Buffer.from(encoded, "base64");
+  if (rawBytes.toString("base64") !== encoded) {
+    throw new Error("capture rawBodyBase64 is not valid canonical base64");
+  }
+
+  const rawBatch = JSON.parse(rawBytes.toString("utf8"));
+  if (!Array.isArray(rawBatch) || rawBatch.length === 0) {
+    throw new Error("capture rawBodyBase64 must decode to a non-empty SendGrid event array");
+  }
+
+  return {
+    rawBatchJson: JSON.stringify(rawBatch),
+    captureDigest: createHash("sha256").update(rawBytes).digest("hex"),
+  };
+}
+
+/** Proves the CLI's four-column dedup selector names an event in the capture. */
+export function validateCapturedDedupKey(rawBatchJson, { sendId, eventType, occurredAt }) {
+  const occurredAtMs = Date.parse(occurredAt);
+  if (!Number.isFinite(occurredAtMs)) return false;
+
+  const rawBatch = JSON.parse(rawBatchJson);
+  return rawBatch.some((event) => {
+    const eventTimestampSeconds = Number(event?.timestamp);
+    return (
+      String(event?.send_id ?? "") === sendId &&
+      String(event?.event ?? "") === eventType &&
+      Number.isFinite(eventTimestampSeconds) &&
+      eventTimestampSeconds * 1000 === occurredAtMs
+    );
+  });
 }
 
 /**
@@ -381,8 +435,10 @@ export function formatEventCoverageReport(result, { json = false } = {}) {
  *    delivery attempt," not dedup (that lives one layer downstream at the
  *    `send_events` insert). A replay that reaches the verified webhook
  *    route is journaled AGAIN, and an increase of exactly one is the
- *    CORRECT, expected outcome, never a failure. A delta of 0 means the
- *    replay was never ingested (a real defect); any other delta is
+ *    CORRECT, expected outcome, never a failure. The count is scoped to
+ *    `raw_batch = captured batch`, so unrelated traffic on a shared
+ *    SendGrid account cannot contaminate this assertion. A delta of 0 means
+ *    the replay was never ingested (a real defect); any other delta is
  *    reported with the actual before/after numbers rather than a bare
  *    non-zero exit.
  * 3. Every `workspace_daily_rollup` counter and every `campaigns` counter
@@ -398,6 +454,15 @@ export function formatEventCoverageReport(result, { json = false } = {}) {
  */
 export function compareDedupSnapshot(before, after) {
   const reasons = [];
+
+  if (before.captureDigest !== after.captureDigest) {
+    reasons.push("dedup snapshot and compare used different capture payloads");
+  }
+  for (const field of ["workspaceId", "sendId", "eventType", "occurredAt"]) {
+    if (before[field] !== after[field]) {
+      reasons.push(`dedup snapshot and compare used a different dedup identity field: ${field}`);
+    }
+  }
 
   const sendEventsCount = after.sendEventsCount;
   if (sendEventsCount !== 1) {
@@ -416,11 +481,11 @@ export function compareDedupSnapshot(before, after) {
   if (journalDelta !== 1) {
     if (journalDelta === 0) {
       reasons.push(
-        `ingress_journal row count for workspace ${String(after.workspaceId)} did not increase (before=${String(before.ingressJournalCount)}, after=${String(after.ingressJournalCount)}) -- the replay was never ingested.`,
+        `ingress_journal row count for the captured batch in workspace ${String(after.workspaceId)} did not increase (before=${String(before.ingressJournalCount)}, after=${String(after.ingressJournalCount)}) -- the replay was never ingested.`,
       );
     } else {
       reasons.push(
-        `ingress_journal row count for workspace ${String(after.workspaceId)} changed by ${String(journalDelta)} (before=${String(before.ingressJournalCount)}, after=${String(after.ingressJournalCount)}), not the expected increase of exactly 1 -- an increase of exactly one is the correct outcome, not a failure, so any other delta is reported as its own defect.`,
+        `ingress_journal row count for the captured batch in workspace ${String(after.workspaceId)} changed by ${String(journalDelta)} (before=${String(before.ingressJournalCount)}, after=${String(after.ingressJournalCount)}), not the expected increase of exactly 1 -- an increase of exactly one is the correct outcome, not a failure, so any other delta is reported as its own defect.`,
       );
     }
   }
@@ -677,7 +742,7 @@ async function runEventCoverage(parsed) {
 /**
  * Phase 16 plan 04 (UAT-03/UAT-04, D-12): collects one dedup snapshot --
  * the `send_events` count for the exact four-column dedup key, the
- * workspace's total `ingress_journal` row count, the `workspace_daily_rollup`
+ * `ingress_journal` count for the captured `raw_batch`, the `workspace_daily_rollup`
  * row for the UTC day of `occurred_at`, and the campaign counter columns for
  * the campaign the send belongs to (`null` when the send carries no
  * campaign, e.g. a flow-step send). Called identically from BOTH
@@ -707,8 +772,11 @@ async function collectDedupSnapshot(client, parsed) {
   const sendEventsCount = sendEventsRows[0].count;
 
   const { rows: journalRows } = await client.query(
-    `SELECT count(*)::int AS count FROM ingress_journal WHERE workspace_id = $1`,
-    [parsed.workspace],
+    `SELECT count(*)::int AS count
+       FROM ingress_journal
+      WHERE workspace_id = $1
+        AND raw_batch = $2::jsonb`,
+    [parsed.workspace, parsed.captureRawBatchJson],
   );
   const ingressJournalCount = journalRows[0].count;
 
@@ -759,6 +827,7 @@ async function collectDedupSnapshot(client, parsed) {
     occurredAt: parsed.occurredAt,
     sendEventsCount,
     ingressJournalCount,
+    captureDigest: parsed.captureDigest,
     campaignId,
     rollup: rollupRow
       ? {
@@ -801,6 +870,22 @@ async function runDedup(parsed) {
       );
       return 2;
     }
+  }
+
+  try {
+    const capture = parseCapturedRawBatch(readFileSync(parsed.capturePath, "utf8"));
+    if (!validateCapturedDedupKey(capture.rawBatchJson, parsed)) {
+      throw new Error(
+        "--send-id/--event-type/--occurred-at do not identify an event in the captured batch",
+      );
+    }
+    parsed.captureRawBatchJson = capture.rawBatchJson;
+    parsed.captureDigest = capture.captureDigest;
+  } catch (err) {
+    console.error(
+      `uat-verify dedup: could not read/parse capture file at "${parsed.capturePath}" -- ${describeError(err)}. Both snapshot and compare require the same valid replay capture.`,
+    );
+    return 2;
   }
 
   if (!process.env.DATABASE_URL) {

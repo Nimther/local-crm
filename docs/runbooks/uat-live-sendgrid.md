@@ -205,7 +205,13 @@ Ordered procedure — complete every step before running the final verification 
    }
    ```
 
-   Save this to a scratch path first (e.g. `/tmp/uat16-capture.json`) — **do not** write directly to the repository fixture path yet. §13 step 10 below is the only point at which this file is saved into the repository, and only after the decode-and-inspect gate has passed.
+   Prepare a host scratch directory owned by the image's runtime UID (`node`, UID 1000) and save the capture there as `/tmp/mega-crm-uat16/capture.json`:
+
+   ```bash
+   install -d -m 0700 -o 1000 -g 1000 /tmp/mega-crm-uat16
+   ```
+
+   **Do not** write directly to the repository fixture path yet. §13 step 10 below is the only point at which this file is saved into the repository, and only after the decode-and-inspect gate has passed.
 
 ## 13. UAT-03/UAT-04 procedure — the freshness choreography (plan 16-04, D-11/D-12)
 
@@ -223,25 +229,27 @@ the database row contains only encrypted fields/key mask, then run one
 worker-driven test send to prove the worker can decrypt the same key. Only
 after those checks pass continue the capture/replay procedure below.
 
-1. **Take the dedup snapshot BEFORE the replay.** Identify the send/event this session will replay (its `send_id`, `event_type`, `occurred_at` — from §12 step 1's trigger, or from a `send-attribution`/`event-coverage` lookup against it) and run:
+1. **Trigger the fresh event and extract the capture** (§12 steps 1-4 above), assembling `/tmp/mega-crm-uat16/capture.json`. Identify its `send_id`, `event_type`, and `occurred_at` with `send-attribution`/`event-coverage`.
+2. **Take the dedup snapshot BEFORE the replay.** The journal count is scoped to the capture's decoded `rawBodyBase64`, not to every journal row in the workspace. This is required because the documented shared SendGrid account can receive unrelated live traffic during the test. Run:
 
    ```bash
    docker compose -f docker/docker-compose.prod.yml run --rm --no-deps \
      -v "$(pwd)/scripts/uat-verify.mjs:/app/scripts/uat-verify.mjs:ro" \
+     -v /tmp/mega-crm-uat16:/uat16 \
      api node scripts/uat-verify.mjs dedup \
        --workspace <UAT_WORKSPACE_ID> \
        --mode snapshot \
-       --snapshot /tmp/uat16-dedup-before.json \
+       --snapshot /uat16/dedup-before.json \
+       --capture /uat16/capture.json \
        --send-id <send_id> \
        --event-type <event_type> \
        --occurred-at <occurred_at, ISO-8601>
    ```
 
-2. **Trigger the fresh event and extract the capture** (§12 steps 1-4 above), assembling `/tmp/uat16-capture.json`.
 3. **Replay byte-exactly**, from the same repo checkout `./scripts/deploy.sh` is run from, against the real public HTTPS endpoint (never localhost/loopback — D-09 requires the full stack: Caddy, the raw-body route, and ECDSA verification):
 
    ```bash
-   npm run uat:replay -- --capture /tmp/uat16-capture.json --url https://<hostname>/webhooks/sendgrid/<pathToken>
+   npm run uat:replay -- --capture /tmp/mega-crm-uat16/capture.json --url https://<hostname>/webhooks/sendgrid/<pathToken>
    ```
 
    Expect a 2xx. `--flip-byte` is deferred to step 6 below — do not run it here; running the mutation first would journal a REJECTED delivery, which is not itself a problem, but keeps this ordering matched to the compare step's own expectation (exactly one accepted replay between the two snapshots).
@@ -250,21 +258,23 @@ after those checks pass continue the capture/replay procedure below.
    ```bash
    docker compose -f docker/docker-compose.prod.yml run --rm --no-deps \
      -v "$(pwd)/scripts/uat-verify.mjs:/app/scripts/uat-verify.mjs:ro" \
+     -v /tmp/mega-crm-uat16:/uat16 \
      api node scripts/uat-verify.mjs dedup \
        --workspace <UAT_WORKSPACE_ID> \
        --mode compare \
-       --snapshot /tmp/uat16-dedup-before.json \
+       --snapshot /uat16/dedup-before.json \
+       --capture /uat16/capture.json \
        --send-id <send_id> \
        --event-type <event_type> \
        --occurred-at <occurred_at, ISO-8601>
    ```
 
-   Must exit `0`: `send_events` count for the dedup key is exactly 1, `ingress_journal`'s count increased by exactly 1 (the replay WAS journaled again — that is correct, not a defect, per RESEARCH.md Pitfall 4), and every `workspace_daily_rollup`/campaign counter is unchanged.
+   Must exit `0`: `send_events` count for the dedup key is exactly 1, the `ingress_journal` count for this exact captured `raw_batch` increased by exactly 1 (the replay WAS journaled again — that is correct, not a defect, per RESEARCH.md Pitfall 4), and every `workspace_daily_rollup`/campaign counter is unchanged. Unrelated journal rows from the shared SendGrid account are intentionally excluded.
 5. **Confirm the replay was accepted, not merely journaled** — re-read step 3's HTTP status: it must be a genuine 2xx from the public endpoint, not a client-side timeout or a locally-cached response.
 6. **Run the flipped-byte replay** (D-11's negative check) against the SAME capture file:
 
    ```bash
-   npm run uat:replay -- --capture /tmp/uat16-capture.json --url https://<hostname>/webhooks/sendgrid/<pathToken> --flip-byte 0
+   npm run uat:replay -- --capture /tmp/mega-crm-uat16/capture.json --url https://<hostname>/webhooks/sendgrid/<pathToken> --flip-byte 0
    ```
 
    Expect the endpoint's fail-closed response (400) — not a 2xx. Re-run step 4's compare command again: the `send_events` count for the SAME dedup key must still be exactly 1 (the rejected mutated body produced no new row), and the `ingress_journal` count must NOT have grown a second time (a rejected request never reaches `writeIngressJournal` — the route returns 400 before that point).
@@ -274,7 +284,7 @@ after those checks pass continue the capture/replay procedure below.
       ```bash
       docker compose -f docker/docker-compose.prod.yml up -d --force-recreate api
       ```
-   3. Re-run steps 2-6 above.
+   3. Re-run steps 1-6 above.
    4. **Restore the original tolerance value in `MEGA_CRM_ENV_FILE` and restart the `api` container again** — this is a required numbered step, not a closing remark:
       ```bash
       docker compose -f docker/docker-compose.prod.yml up -d --force-recreate api
@@ -296,7 +306,7 @@ after those checks pass continue the capture/replay procedure below.
 10. **Only after step 8's inspection has passed**, save the capture file to the repository fixture path with exactly its four keys:
 
     ```bash
-    cp /tmp/uat16-capture.json apps/api/src/modules/webhooks/__tests__/fixtures/uat-signed-payload.json
+    cp /tmp/mega-crm-uat16/capture.json apps/api/src/modules/webhooks/__tests__/fixtures/uat-signed-payload.json
     ```
 
     This file is what makes plan 16-05 autonomous — without it, that plan cannot run.
