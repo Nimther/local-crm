@@ -1131,7 +1131,6 @@ async function runUat05State(parsed) {
   const { withTenant, withTenantTransaction, pool } = await import("@mega-crm/tenant-context");
   // eslint-disable-next-line import-x/no-extraneous-dependencies
   const { buildRedisConnectionOptions } = await import("@mega-crm/queue-core");
-  // eslint-disable-next-line import-x/no-extraneous-dependencies
   const { deriveCampaignSendId, deriveFlowSendId } = await import("@mega-crm/delivery-core");
   // eslint-disable-next-line import-x/no-extraneous-dependencies
   const { EMAIL_BROADCAST_QUEUE, EMAIL_TRIGGERED_QUEUE } = await import("@mega-crm/shared-schemas");

@@ -319,6 +319,8 @@ This procedure temporarily routes **tenant** `mail/send` calls through the inter
 
 Create two fresh one-recipient campaigns in the retained UAT workspace, both addressed only to the operator mailbox from §2. Reuse the UAT Dynamic Template but give the messages unmistakable values such as `UAT05-429` and `UAT05-TIMEOUT`. Do not launch either campaign yet. Record the UAT contact id and both campaign ids, then derive the two stable send ids before fault injection starts:
 
+Before creating them, record the workspace's effective frequency cap and the UAT contact's current `sent` count inside that window. There must be room for **both** real messages. If not, raise the cap only in the dedicated UAT workspace, record the original value, and add its restoration to §14.5. The kickoff gate runs before the proxy: a frequency-capped campaign is recorded as `excluded` and never exercises the armed fault.
+
 ```bash
 docker compose -f docker/docker-compose.prod.yml run --rm --no-deps api \
   node -e "import('@mega-crm/delivery-core').then(({deriveCampaignSendId}) => console.log(deriveCampaignSendId(process.argv[1], process.argv[2], process.argv[3])))" \
@@ -363,7 +365,7 @@ docker compose \
    docker compose \
      -f docker/docker-compose.prod.yml \
      -f docker/docker-compose.uat-proxy.yml \
-     up -d uat-fault-proxy
+     up -d --no-deps uat-fault-proxy
    ```
 
 3. Restart the worker stop-old-then-start-new so the module-level endpoint constant is re-evaluated from the edited env file:
@@ -371,7 +373,7 @@ docker compose \
    ```bash
    docker compose -f docker/docker-compose.prod.yml stop worker
    docker compose -f docker/docker-compose.prod.yml rm -f worker
-   docker compose -f docker/docker-compose.prod.yml up -d worker
+   docker compose -f docker/docker-compose.prod.yml up -d --no-deps worker
    ```
 
 4. Wait for the worker to become healthy. Its boot log **must** contain the warning `SENDGRID_BASE_URL override is active`. If the warning is absent, stop: neither fault leg is valid evidence.
@@ -400,7 +402,7 @@ docker compose \
 
    Expect `200` and `{"mode":"rate-limit-once"}`.
 2. Launch only the prepared `UAT05-429` campaign. The matching request receives 429 without any upstream SendGrid request; the mode immediately resets to pass-through. A sibling workspace request cannot consume this mode.
-3. Immediately run the §14.1 report with `UAT05_429_SEND_ID` and `--expect-status deferred`. The proxy supplies a ten-second `Retry-After` specifically so this transition can be observed. The report must show no current ledger row plus a retained waiting/delayed queue job — never `failed`.
+3. Immediately run the §14.1 report with `UAT05_429_SEND_ID` and `--expect-status deferred`. The report should show no current ledger row plus a retained waiting/delayed queue job — never `failed`. `Retry-After: 10` is recorded as provider guidance, but the production provider-backoff branch deliberately uses BullMQ's bounded exponential retry schedule (currently starting at two seconds), so a cold one-shot diagnostic process can miss this short window. If it does, preserve the worker's first-attempt `provider backoff` failure log and require the terminal report to show `attemptCount: 2`; together they are the durable proof that the 429 was consumed and retried rather than silently passed through.
 4. After the retry window, run the same report with `--expect-status sent`. It must show the terminal row, queue state/attempt count, dispatch timestamps, and attributed SendGrid events as they arrive.
 5. In the real operator mailbox, search for the distinctive `UAT05-429` value and count copies. The count must be **exactly 1**. A count of 2 means the rate-limit branch forwarded upstream and UAT-05 has failed.
 
@@ -416,9 +418,10 @@ Record both send ids, every observed status/queue transition with UTC timestamps
 
 ### 14.5 Mandatory teardown
 
-1. Remove both `SENDGRID_BASE_URL` and `UAT_FAULT_PROXY_WORKSPACE_ID` from `MEGA_CRM_ENV_FILE` — do not leave either key present with a blank value.
-2. Restart the worker stop-old-then-start-new using the three base-compose commands from §14.2 step 3. Wait for healthy and inspect the fresh boot logs: the `SENDGRID_BASE_URL override is active` warning must be absent.
-3. Stop and remove only the UAT proxy service — never run `compose down` against the production stack:
+1. If §14.1 temporarily raised the dedicated workspace's frequency cap, restore the exact recorded value and confirm the settings UI/API reads it back.
+2. Remove both `SENDGRID_BASE_URL` and `UAT_FAULT_PROXY_WORKSPACE_ID` from `MEGA_CRM_ENV_FILE` — do not leave either key present with a blank value.
+3. Restart the worker stop-old-then-start-new using the three base-compose commands from §14.2 step 3. Wait for healthy and inspect the fresh boot logs: the `SENDGRID_BASE_URL override is active` warning must be absent.
+4. Stop and remove only the UAT proxy service — never run `compose down` against the production stack:
 
    ```bash
    docker compose \
@@ -431,4 +434,4 @@ Record both send ids, every observed status/queue transition with UTC timestamps
      rm -f uat-fault-proxy
    ```
 
-4. Confirm `docker compose -f docker/docker-compose.prod.yml ps` contains no `uat-fault-proxy`, the worker is healthy, and the public `/readyz` returns 200. Plan 16-07's teardown checkpoint repeats these checks; completing them here is still mandatory.
+5. Confirm `docker compose -f docker/docker-compose.prod.yml ps` contains no `uat-fault-proxy`, the worker is healthy, and the public `/readyz` returns 200. Plan 16-07's teardown checkpoint repeats these checks; completing them here is still mandatory.
