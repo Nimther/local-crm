@@ -44,7 +44,7 @@ function runCli(args, { env = {} } = {}) {
 }
 
 /** A fresh scratch dir per test, plus a real capture file with a known decoded body. */
-function makeScratch() {
+function makeScratch(captureOverrides = {}) {
   const dir = mkdtempSync(path.join(os.tmpdir(), "uat-replay-test-"));
   const decodedBody = Buffer.from(JSON.stringify([{ event: "delivered", sg_message_id: "abc" }]));
   const capturePath = path.join(dir, "capture.json");
@@ -55,6 +55,7 @@ function makeScratch() {
       signature: "test-signature-value-xyz",
       timestamp: "1755400000",
       publicKey: "test-public-key-not-used-by-this-script",
+      ...captureOverrides,
     }),
   );
   return { dir, capturePath, decodedBody };
@@ -121,6 +122,38 @@ describe("argument validation", () => {
   it("exits non-zero when the capture file does not exist", () => {
     const run = runCli(["--dry-run", "--capture", "/tmp/definitely-does-not-exist-uat16.json", "--url", "https://example.test/x"]);
     expect(run.exitCode).not.toBe(0);
+  });
+
+  it.each([
+    ["signature", { signature: "" }],
+    ["timestamp", { timestamp: "" }],
+    ["publicKey", { publicKey: "" }],
+  ])("rejects a capture with a missing %s before attempting a request", (field, override) => {
+    const scratch = makeScratch(override);
+    const run = runCli([
+      "--dry-run",
+      "--capture",
+      scratch.capturePath,
+      "--url",
+      "https://example.test/webhooks/sendgrid/tok",
+    ]);
+
+    expect(run.exitCode).not.toBe(0);
+    expect(run.stderr).toContain(field);
+  });
+
+  it("rejects non-canonical base64 instead of silently decoding different bytes", () => {
+    const scratch = makeScratch({ rawBodyBase64: "not base64!" });
+    const run = runCli([
+      "--dry-run",
+      "--capture",
+      scratch.capturePath,
+      "--url",
+      "https://example.test/webhooks/sendgrid/tok",
+    ]);
+
+    expect(run.exitCode).not.toBe(0);
+    expect(run.stderr).toMatch(/base64/i);
   });
 });
 
