@@ -299,7 +299,7 @@ RESEARCH.md's Package Legitimacy Audit вернул вердикт `SUS` (`too-n
   Починить это изнутри `globalTeardown` невозможно — сам `globalTeardown` и есть хук, который отрабатывает слишком рано. Поэтому `globalTeardown` из конфига удалён, файл `apps/web/e2e/global-teardown.ts` удалён, а скриптом `test:e2e` в `apps/web/package.json` стала обёртка `apps/web/e2e/run-e2e.ts` (`tsx e2e/run-e2e.ts`): она спавнит `playwright test` (CLI резолвится через `require.resolve("@playwright/test/cli")` и запускается тем же `process.execPath` — без shell и без `npx`), дожидается его `close`, и только потом делает дроп — к этому моменту `webServer` уже остановил оба сервера и пулы закрыты. Состояние по-прежнему передаётся через временный файл (`E2E_STATE_FILE`), потому что провижининг происходит в процессе Playwright, а дроп — в родительском. `stdio: "inherit"` обязателен: CI гоняет `npm run test:e2e 2>&1 | tee e2e-output.txt` и грепает оттуда маркер `[e2e:database]`. Код возврата: результат тестов приоритетнее — красный прогон остаётся красным, упавший дроп красит в 1 только иначе-зелёный прогон; прерывание сигналом даёт `128+N`. `SIGINT`/`SIGTERM` перехватываются, чтобы обёртка пережила Ctrl+C и успела удалить базу. **Следствие:** запускать набор надо через `npm run test:e2e`, а не голым `playwright test` — во втором случае базу не удалит никто.
 
   `apps/web/e2e/database-isolation.spec.ts` (08-18) — ассерт, которого не хватало: спек регистрируется через реальный UI, затем **сам** открывает соединение к эфемерной базе и требует, чтобы строка оказалась там. Всё, что проверяло 08-10, относилось к стороне провижининга; куда пишет сервер, не проверял никто. Доказан в обе стороны: с сервером, направленным на dev-БД, спек падает (`Expected "1", Received "0"`); после исправления 8 спеков проходят, счётчик пользователей в dev-БД до и после прогона одинаков, эфемерная база удаляется.
-- `scripts/check-env.mjs` (`predev`-хук) читает и парсит `.env` **сам** (без зависимостей) и падает, если пусты: `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `WEB_URL`, `PLATFORM_SENDGRID_API_KEY`, `PLATFORM_MAIL_FROM`, `OPERATOR_ALERT_EMAIL` (09-02, DB-02 — presence-only здесь; формат проверяет `apps/api/src/env.ts`; без него сторож партиций был бы бесшумно обезоружен), `REDIS_URL`, `UNSUBSCRIBE_TOKEN_SECRET`, `PUBLIC_APP_URL`, плюс `KMS_KEK_ID` (если `KMS_PROVIDER=aws`) либо `KMS_LOCAL_KEK`. Это dev-only проверка — прод её не выполняет.
+- `scripts/check-env.mjs` (`predev`-хук) читает и парсит `.env` **сам** (без зависимостей) и падает, если пусты: `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `WEB_URL`, `PLATFORM_SENDGRID_API_KEY`, `PLATFORM_MAIL_FROM`, `OPERATOR_ALERT_EMAIL` (09-02, DB-02 — presence-only здесь; формат проверяет `apps/api/src/env.ts`; без него сторож партиций был бы бесшумно обезоружен), `REDIS_URL`, `UNSUBSCRIBE_TOKEN_SECRET`, `PUBLIC_APP_URL`, плюс provider-specific значение: `KMS_KEK_ID` для `aws`, `KMS_FILE_KEK_PATH` для `file` или `KMS_LOCAL_KEK` для `local`. Неизвестный provider отклоняется. Это dev-only проверка — прод её не выполняет.
 - В рабочем дереве также присутствует `dump.rdb` (Redis-дамп, ~9.8 КБ) — гитигнорится по `*.rdb`, но физически лежит в папке проекта и может содержать данные очередей.
 
 ### 3.2 Полный список читаемых переменных окружения
@@ -319,9 +319,10 @@ RESEARCH.md's Package Legitimacy Audit вернул вердикт `SUS` (`too-n
 | `PLATFORM_SENDGRID_API_KEY` | `apps/api/src/env.ts` → `modules/platform-mail/client.ts` | `min(1)` |
 | `PLATFORM_MAIL_FROM` | там же | `z.string().email()` |
 | `OPERATOR_ALERT_EMAIL` | `apps/api/src/env.ts` → `apps/api/src/server.ts`'s `main()` (передаётся в `startPartitionWatchdog` как `operatorEmail`) — **читает только `apps/api`**, `apps/worker` эту переменную не видит | `z.string().email(...)`, **обязательна, без `.optional()`/`.default()`** — API отказывается стартовать без адреса, куда слать алерт сторожа партиций (09-02, DB-02, D-01). Резолвится через тот же `MEGA_CRM_ENV_FILE`-путь, что и остальные переменные (см. 3.1); отдельного секретного хранилища не заводит. Новых учётных данных фаза не вводит: алерт использует уже существующую пару `PLATFORM_SENDGRID_API_KEY`/`PLATFORM_MAIL_FROM`, никогда не BYO-ключ тенанта |
-| `KMS_PROVIDER` | `apps/api/src/env.ts`, `packages/kms/src/env.ts:19` | `z.enum(["local","aws"]).default("local")` |
+| `KMS_PROVIDER` | `apps/api/src/env.ts`, `packages/kms/src/env.ts` | `z.enum(["local","aws","file"]).default("local")`; `local` запрещён в production |
 | `KMS_LOCAL_KEK` | читается в `packages/kms/src/env.ts:20`, потребляется в `local-provider.ts` | optional в схеме; провайдер требует base64 → **ровно 32 байта** |
 | `KMS_KEK_ID` | читается в `packages/kms/src/env.ts:21`, потребляется в `aws-provider.ts` | optional в схеме; обязателен при `KMS_PROVIDER=aws` (superRefine) |
+| `KMS_FILE_KEK_PATH` | `apps/api/src/env.ts`, `packages/kms/src/env.ts` → `file-provider.ts`; в production указывает на read-only mount `/run/secrets/mega-crm-kek` только в API/worker | обязателен при `KMS_PROVIDER=file`; файл должен быть regular, не symlink, `uid=0`, `gid=1999`, mode `0440`, strict base64 → ровно 32 байта |
 | `UNSUBSCRIBE_TOKEN_SECRET` | `apps/api/src/env.ts`; `apps/worker/src/server.ts` (ручная проверка `>= 32`); лениво в `packages/delivery-core/src/unsubscribe-token.ts` | **`z.string().min(32)`** |
 | `TEST_DATABASE_URL`, `TEST_REDIS_URL`, `TEST_PUBLIC_APP_URL` | `vitest.config.ts`; `TEST_DATABASE_URL` с 08-02 **выставляется самим** `packages/test-support/src/global-setup.ts` (DSN эфемерной БД), а не задаётся вызывающим. С Phase 10 (debug `aggregate-coverage-run-fails`) публикуется в ДВА канала — см. §3.2.1 | — |
 | `GSD_ADMIN_DATABASE_URL` | `scripts/ensure-db-roles.mjs` (`resolveAdminDsn`, 10-15) — высший приоритет из трёх источников этой функции: `GSD_ADMIN_DATABASE_URL` → `TEST_ADMIN_DATABASE_URL` → `DEFAULT_ADMIN_DSN` (compose-дефолт-константа) | при отсутствии — падает к `TEST_ADMIN_DATABASE_URL`, затем к compose-дефолту `postgres://postgres:postgres@localhost:5432/postgres` |
@@ -361,8 +362,9 @@ RESEARCH.md's Package Legitimacy Audit вернул вердикт `SUS` (`too-n
 
 1. `NODE_ENV=production` + `KMS_PROVIDER=local` → отказ старта.
 2. `KMS_PROVIDER=aws` без `KMS_KEK_ID` → отказ старта.
-3. `NODE_ENV=production` + `PUBLIC_APP_URL` начинается с `http://` → отказ старта.
-4. `NODE_ENV=production` + `BETTER_AUTH_SECRET` короче 32 символов → отказ старта (10-09, SEC-12) — сообщение называет и переменную, и требуемую длину.
+3. `KMS_PROVIDER=file` без `KMS_FILE_KEK_PATH` либо с небезопасным/невалидным файлом → отказ старта API и worker до readiness.
+4. `NODE_ENV=production` + `PUBLIC_APP_URL` начинается с `http://` → отказ старта.
+5. `NODE_ENV=production` + `BETTER_AUTH_SECRET` короче 32 символов → отказ старта (10-09, SEC-12) — сообщение называет и переменную, и требуемую длину.
 
 Дублирующий guard: `packages/kms/src/local-provider.ts` бросает на уровне модуля, если `NODE_ENV=production` (защищает воркер, у которого своей схемы нет).
 
@@ -383,11 +385,13 @@ RESEARCH.md's Package Legitimacy Audit вернул вердикт `SUS` (`too-n
 
 - `encryptTenantSecret(workspaceId, plaintext)`: `provider.generateDataKey()` → `createCipheriv("aes-256-gcm", plaintextDek, iv)` → возвращает `{encryptedDek, ciphertext, iv, authTag}`. Плейнтекст DEK зануляется `plaintextDek.fill(0)` в `finally` и наружу не отдаётся.
 - `decryptTenantSecret` — обратная операция, то же зануление.
-- Провайдер грузится **динамическим import'ом** по `KMS_PROVIDER`, поэтому `aws-provider.ts` не подтягивается в dev, а `local-provider.ts` — в prod.
+- Провайдер грузится **динамическим import'ом** по `KMS_PROVIDER`: `local` остаётся только dev/test, `aws` использует AWS KMS, а `file` — production KEK-файл DigitalOcean-топологии.
 
 **Провайдер `aws`** (`packages/kms/src/aws-provider.ts`): `KMSClient({})` — конфиг/креды берутся из дефолтной цепочки AWS SDK, **в репозитории не заданы** → **не определено**. `GenerateDataKey`/`Decrypt` с `KeySpec: "AES_256"` и `EncryptionContext: { workspaceId }` — DEK привязан к воркспейсу.
 
 **Провайдер `local`** (dev-only): статический KEK из `KMS_LOCAL_KEK` (base64, ровно 32 байта), `aes-256-gcm` с `setAAD(workspaceId)`, формат обёртки `base64(iv[12] || authTag[16] || wrapped)`.
+
+**Провайдер `file`** (single-VPS production): KEK читается только из root-owned read-only файла, смонтированного в API/worker; формат обёртки версионирован как `file:v1:` и использует AES-256-GCM с `workspaceId` как AAD. Он защищает от компрометации одной БД, но не от полного захвата VPS/root или процесса API/worker.
 
 **Путь ключа в рантайме:**
 
