@@ -16,6 +16,7 @@ const CONTROL_PATH = "/__control";
 const REAL_SENDGRID_MAIL_SEND_URL = "https://api.sendgrid.com/v3/mail/send";
 const DEFAULT_LISTEN_PORT = 4180;
 const DEFAULT_RESPONSE_DELAY_MS = SENDGRID_TIMEOUT_MS + 2_000;
+const RATE_LIMIT_RETRY_AFTER_SECONDS = 10;
 const HOP_BY_HOP_HEADERS = new Set([
   "connection",
   "keep-alive",
@@ -83,6 +84,18 @@ function parsePositiveInteger(value, name) {
   return parsed;
 }
 
+function requestBelongsToWorkspace(rawBody, targetWorkspaceId) {
+  if (!targetWorkspaceId) return true;
+  try {
+    const payload = JSON.parse(rawBody.toString("utf8"));
+    return payload?.personalizations?.some(
+      (personalization) => personalization?.custom_args?.workspace_id === targetWorkspaceId,
+    );
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Build the server without listening so tests can bind it to an ephemeral
  * loopback port. `uatListenPort` is attached for the guarded CLI wrapper.
@@ -91,6 +104,7 @@ export function createFaultProxy({
   upstreamUrl = REAL_SENDGRID_MAIL_SEND_URL,
   listenPort = DEFAULT_LISTEN_PORT,
   responseDelayMs = DEFAULT_RESPONSE_DELAY_MS,
+  targetWorkspaceId = null,
   fetchImpl = fetch,
 } = {}) {
   const parsedUpstreamUrl = new URL(upstreamUrl);
@@ -125,16 +139,20 @@ export function createFaultProxy({
         return;
       }
 
-      const requestMode = mode;
-      mode = nextMode(requestMode);
+      const rawBody = await readRawBody(request);
+      const matchesTarget = requestBelongsToWorkspace(rawBody, targetWorkspaceId);
+      const requestMode = matchesTarget ? mode : "pass-through";
+      if (matchesTarget) mode = nextMode(requestMode);
 
       if (requestMode === "rate-limit-once") {
-        response.writeHead(429, { "retry-after": "1", "content-length": "0" });
+        response.writeHead(429, {
+          "retry-after": String(RATE_LIMIT_RETRY_AFTER_SECONDS),
+          "content-length": "0",
+        });
         response.end();
         return;
       }
 
-      const rawBody = await readRawBody(request);
       const upstreamResponse = await fetchImpl(parsedUpstreamUrl, {
         method: request.method,
         headers: forwardHeaders(request.headers),
@@ -177,6 +195,7 @@ async function main() {
     listenPort: process.env.UAT_FAULT_PROXY_PORT ?? DEFAULT_LISTEN_PORT,
     responseDelayMs:
       process.env.UAT_FAULT_PROXY_RESPONSE_DELAY_MS ?? DEFAULT_RESPONSE_DELAY_MS,
+    targetWorkspaceId: process.env.UAT_FAULT_PROXY_WORKSPACE_ID ?? null,
   });
 
   server.on("error", (error) => {

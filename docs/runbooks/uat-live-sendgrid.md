@@ -310,3 +310,125 @@ after those checks pass continue the capture/replay procedure below.
     ```
 
     This file is what makes plan 16-05 autonomous — without it, that plan cannot run.
+
+## 14. UAT-05 — live 429 and ambiguous-timeout recovery
+
+This procedure temporarily routes **tenant** `mail/send` calls through the internal Phase 16 proxy. Platform system mail and SendGrid key-check/webhook-provisioning calls do not use `SENDGRID_BASE_URL` and remain on their normal paths. The proxy has no published port and faults only requests whose `custom_args.workspace_id` equals `UAT_FAULT_PROXY_WORKSPACE_ID`; sibling workspaces pass through without consuming the armed one-shot mode.
+
+### 14.1 Prepare two isolated sends and their stable ids
+
+Create two fresh one-recipient campaigns in the retained UAT workspace, both addressed only to the operator mailbox from §2. Reuse the UAT Dynamic Template but give the messages unmistakable values such as `UAT05-429` and `UAT05-TIMEOUT`. Do not launch either campaign yet. Record the UAT contact id and both campaign ids, then derive the two stable send ids before fault injection starts:
+
+```bash
+docker compose -f docker/docker-compose.prod.yml run --rm --no-deps api \
+  node -e "import('@mega-crm/delivery-core').then(({deriveCampaignSendId}) => console.log(deriveCampaignSendId(process.argv[1], process.argv[2], process.argv[3])))" \
+  <UAT_WORKSPACE_ID> <UAT05_429_CAMPAIGN_ID> <UAT_CONTACT_ID>
+
+docker compose -f docker/docker-compose.prod.yml run --rm --no-deps api \
+  node -e "import('@mega-crm/delivery-core').then(({deriveCampaignSendId}) => console.log(deriveCampaignSendId(process.argv[1], process.argv[2], process.argv[3])))" \
+  <UAT_WORKSPACE_ID> <UAT05_TIMEOUT_CAMPAIGN_ID> <UAT_CONTACT_ID>
+```
+
+Record the outputs as `UAT05_429_SEND_ID` and `UAT05_TIMEOUT_SEND_ID`. The ids are deterministic, so they remain the same when the 429 branch releases its first dispatch claim and the retry creates the row again.
+
+Use this report command for every state observation below:
+
+```bash
+docker compose \
+  -f docker/docker-compose.prod.yml \
+  -f docker/docker-compose.uat-proxy.yml \
+  run --rm --no-deps \
+  -v "$(pwd)/scripts/uat-verify.mjs:/app/scripts/uat-verify.mjs:ro" \
+  api node scripts/uat-verify.mjs uat05-state \
+    --workspace <UAT_WORKSPACE_ID> \
+    --send-id <SEND_ID> \
+    --expect-status <deferred|dispatching|reconciling|sent>
+```
+
+`deferred` is a UAT report state, not a Postgres enum value: after a provider 429 the production path deliberately deletes the temporary `dispatching` claim while the retained BullMQ job waits for retry. The report proves this transition from the queue job, including its state and `attemptsMade`, instead of treating the temporarily absent ledger row as a missing send.
+
+### 14.2 Start the internal proxy and activate the endpoint override
+
+1. Edit `MEGA_CRM_ENV_FILE` and add exactly these two non-secret session values:
+
+   ```dotenv
+   UAT_FAULT_PROXY_WORKSPACE_ID=<UAT_WORKSPACE_ID>
+   SENDGRID_BASE_URL=http://uat-fault-proxy:4180/v3/mail/send
+   ```
+
+   Proxy configuration comes only from this env file. Do not add these values to `docker/docker-compose.prod.yml`, the invoking shell, or a committed file.
+2. Start only the session-scoped proxy, using the separate override:
+
+   ```bash
+   docker compose \
+     -f docker/docker-compose.prod.yml \
+     -f docker/docker-compose.uat-proxy.yml \
+     up -d uat-fault-proxy
+   ```
+
+3. Restart the worker stop-old-then-start-new so the module-level endpoint constant is re-evaluated from the edited env file:
+
+   ```bash
+   docker compose -f docker/docker-compose.prod.yml stop worker
+   docker compose -f docker/docker-compose.prod.yml rm -f worker
+   docker compose -f docker/docker-compose.prod.yml up -d worker
+   ```
+
+4. Wait for the worker to become healthy. Its boot log **must** contain the warning `SENDGRID_BASE_URL override is active`. If the warning is absent, stop: neither fault leg is valid evidence.
+5. Confirm both sides of the network boundary before arming anything:
+
+   ```bash
+   docker compose \
+     -f docker/docker-compose.prod.yml \
+     -f docker/docker-compose.uat-proxy.yml \
+     port uat-fault-proxy 4180
+   ```
+
+   This must print nothing. From a machine outside the VPS, a connection to `<VPS_PUBLIC_IP>:4180` must also fail. The control endpoint is intentionally unauthenticated and is safe only while it remains internal and session-scoped.
+
+### 14.3 Rate-limit leg — zero upstream calls, one retry, one mailbox copy
+
+1. Arm the one-shot 429 response from inside the proxy container:
+
+   ```bash
+   docker compose \
+     -f docker/docker-compose.prod.yml \
+     -f docker/docker-compose.uat-proxy.yml \
+     exec -T uat-fault-proxy node -e \
+     "fetch('http://127.0.0.1:4180/__control',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({mode:'rate-limit-once'})}).then(async r=>{console.log(r.status,await r.text());process.exit(r.ok?0:1)})"
+   ```
+
+   Expect `200` and `{"mode":"rate-limit-once"}`.
+2. Launch only the prepared `UAT05-429` campaign. The matching request receives 429 without any upstream SendGrid request; the mode immediately resets to pass-through. A sibling workspace request cannot consume this mode.
+3. Immediately run the §14.1 report with `UAT05_429_SEND_ID` and `--expect-status deferred`. The proxy supplies a ten-second `Retry-After` specifically so this transition can be observed. The report must show no current ledger row plus a retained waiting/delayed queue job — never `failed`.
+4. After the retry window, run the same report with `--expect-status sent`. It must show the terminal row, queue state/attempt count, dispatch timestamps, and attributed SendGrid events as they arrive.
+5. In the real operator mailbox, search for the distinctive `UAT05-429` value and count copies. The count must be **exactly 1**. A count of 2 means the rate-limit branch forwarded upstream and UAT-05 has failed.
+
+### 14.4 Timeout leg — one upstream call, ambiguous row, webhook-backed resolution
+
+1. Arm timeout mode through the same internal control command, replacing the JSON mode with `timeout-once`; expect `200` and `{"mode":"timeout-once"}`.
+2. Launch only the prepared `UAT05-TIMEOUT` campaign. The proxy forwards exactly one request to real SendGrid, waits for its response, and delays only its own response beyond the production `SENDGRID_TIMEOUT_MS` boundary. The next matching request is pass-through.
+3. After the worker's 20-second abort boundary, run the §14.1 report with `UAT05_TIMEOUT_SEND_ID` and `--expect-status reconciling`. It must show `reconciling_since` and must not show `failed` or `sent` yet.
+4. Wait through the reconciler cadence (normally up to five minutes), then run the report with `--expect-status sent`. The report must include at least one real `send_events` row for this send; that webhook evidence is what permits `reconciling -> sent`. A terminal row without event evidence is not a pass for this leg.
+5. In the real operator mailbox, search for the distinctive `UAT05-TIMEOUT` value and count copies. The count must be **exactly 1**. Zero means the timeout branch failed to forward; two means some path retried an ambiguous send. Either result fails UAT-05.
+
+Record both send ids, every observed status/queue transition with UTC timestamps, both mailbox counts, and the timeout leg's event types for plan 16-07.
+
+### 14.5 Mandatory teardown
+
+1. Remove both `SENDGRID_BASE_URL` and `UAT_FAULT_PROXY_WORKSPACE_ID` from `MEGA_CRM_ENV_FILE` — do not leave either key present with a blank value.
+2. Restart the worker stop-old-then-start-new using the three base-compose commands from §14.2 step 3. Wait for healthy and inspect the fresh boot logs: the `SENDGRID_BASE_URL override is active` warning must be absent.
+3. Stop and remove only the UAT proxy service — never run `compose down` against the production stack:
+
+   ```bash
+   docker compose \
+     -f docker/docker-compose.prod.yml \
+     -f docker/docker-compose.uat-proxy.yml \
+     stop uat-fault-proxy
+   docker compose \
+     -f docker/docker-compose.prod.yml \
+     -f docker/docker-compose.uat-proxy.yml \
+     rm -f uat-fault-proxy
+   ```
+
+4. Confirm `docker compose -f docker/docker-compose.prod.yml ps` contains no `uat-fault-proxy`, the worker is healthy, and the public `/readyz` returns 200. Plan 16-07's teardown checkpoint repeats these checks; completing them here is still mandatory.

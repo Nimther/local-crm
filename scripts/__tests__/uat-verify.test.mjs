@@ -27,9 +27,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   assertExpectations,
+  assertUat05State,
   compareDedupSnapshot,
   formatEventCoverageReport,
   formatReport,
+  formatUat05StateReport,
   parseArgs,
   parseCapturedRawBatch,
   summariseEventCoverage,
@@ -198,6 +200,36 @@ describe("parseArgs", () => {
       json: true,
     });
   });
+
+  it("lists uat05-state among the accepted subcommands", () => {
+    expect(() => parseArgs([])).toThrowError(/uat05-state/);
+  });
+
+  it("rejects uat05-state when --workspace or --send-id is missing", () => {
+    expect(() => parseArgs(["uat05-state", "--send-id", "send-1"])).toThrowError(/--workspace/);
+    expect(() => parseArgs(["uat05-state", "--workspace", "ws-1"])).toThrowError(/--send-id/);
+  });
+
+  it("parses every uat05-state flag without consuming --json", () => {
+    expect(
+      parseArgs([
+        "uat05-state",
+        "--workspace",
+        "ws-1",
+        "--send-id",
+        "send-1",
+        "--expect-status",
+        "reconciling",
+        "--json",
+      ]),
+    ).toEqual({
+      subcommand: "uat05-state",
+      workspace: "ws-1",
+      sendId: "send-1",
+      expectStatus: "reconciling",
+      json: true,
+    });
+  });
 });
 
 describe("parseCapturedRawBatch", () => {
@@ -322,6 +354,75 @@ describe("formatReport", () => {
     expect(parsed.sgMessageId).toBe("sg-1");
     expect(parsed.status).toBe("sent");
     expect(parsed.events[0].eventType).toBe("delivered");
+  });
+});
+
+describe("UAT-05 state report", () => {
+  const observed = {
+    sendId: "send-uat-05",
+    status: "reconciling",
+    send: {
+      status: "reconciling",
+      queuedAt: "2026-08-18T10:00:00.000Z",
+      dispatchedAt: "2026-08-18T10:00:01.000Z",
+      reconcilingSince: "2026-08-18T10:00:21.000Z",
+      sentAt: null,
+    },
+    queue: {
+      name: "email-broadcast",
+      jobId: "ws-campaign-contact",
+      state: "completed",
+      attemptCount: 1,
+    },
+    events: [
+      {
+        eventType: "delivered",
+        occurredAt: "2026-08-18T10:00:04.000Z",
+        sgEventId: "sg-event-1",
+      },
+    ],
+  };
+
+  it("formats status, attempt count, queue state, all lifecycle timestamps, and events", () => {
+    const text = formatUat05StateReport(observed);
+    expect(text).toContain("reconciling");
+    expect(text).toContain("attempt count: 1");
+    expect(text).toContain("queue state: completed");
+    expect(text).toContain("2026-08-18T10:00:00.000Z");
+    expect(text).toContain("2026-08-18T10:00:01.000Z");
+    expect(text).toContain("2026-08-18T10:00:21.000Z");
+    expect(text).toContain("delivered");
+  });
+
+  it("emits the same fields as one parseable JSON report", () => {
+    const parsed = JSON.parse(formatUat05StateReport(observed, { json: true }));
+    expect(parsed).toMatchObject({
+      sendId: "send-uat-05",
+      ledgerRowFound: true,
+      status: "reconciling",
+      attemptCount: 1,
+      queueState: "completed",
+      queuedAt: "2026-08-18T10:00:00.000Z",
+      dispatchedAt: "2026-08-18T10:00:01.000Z",
+      reconcilingSince: "2026-08-18T10:00:21.000Z",
+      sentAt: null,
+    });
+    expect(parsed.events).toHaveLength(1);
+  });
+
+  it("accepts the queue-only deferred observation but rejects a vacuous or mismatched observation", () => {
+    const deferred = {
+      sendId: "send-uat-05",
+      send: null,
+      queue: { state: "delayed", attemptCount: 0 },
+      status: "deferred",
+      events: [],
+    };
+    expect(assertUat05State(deferred, { status: "deferred" }).passed).toBe(true);
+    expect(
+      assertUat05State({ ...deferred, queue: null, status: null }, { status: "deferred" }).passed,
+    ).toBe(false);
+    expect(assertUat05State(observed, { status: "sent" }).reasons.join(" ")).toMatch(/status/);
   });
 });
 

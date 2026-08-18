@@ -41,6 +41,7 @@ describe("UAT SendGrid fault proxy", () => {
   let upstreamServer;
   let proxyServer;
   let proxyBaseUrl;
+  let upstreamBaseUrl;
 
   beforeEach(async () => {
     upstreamRequests = [];
@@ -57,7 +58,7 @@ describe("UAT SendGrid fault proxy", () => {
       });
       response.end('{"accepted":true}');
     });
-    const upstreamBaseUrl = await listen(upstreamServer);
+    upstreamBaseUrl = await listen(upstreamServer);
 
     proxyServer = createFaultProxy({
       upstreamUrl: `${upstreamBaseUrl}/v3/mail/send`,
@@ -111,7 +112,7 @@ describe("UAT SendGrid fault proxy", () => {
     const response = await send();
 
     expect(response.status).toBe(429);
-    expect(response.headers.get("retry-after")).toBe("1");
+    expect(response.headers.get("retry-after")).toBe("10");
     expect(upstreamRequests).toHaveLength(0);
   });
 
@@ -175,5 +176,31 @@ describe("UAT SendGrid fault proxy", () => {
       contentType: "application/json",
       body: Buffer.from(body),
     });
+  });
+
+  it("leaves an armed mode untouched until a request from the target UAT workspace arrives", async () => {
+    await close(proxyServer);
+    proxyServer = createFaultProxy({
+      upstreamUrl: `${upstreamBaseUrl}/v3/mail/send`,
+      responseDelayMs: RESPONSE_DELAY_MS,
+      targetWorkspaceId: "uat-workspace",
+    });
+    proxyBaseUrl = await listen(proxyServer);
+    await arm("rate-limit-once");
+
+    const siblingResponse = await send(
+      JSON.stringify({
+        personalizations: [{ custom_args: { workspace_id: "sibling-workspace" } }],
+      }),
+    );
+    const targetResponse = await send(
+      JSON.stringify({
+        personalizations: [{ custom_args: { workspace_id: "uat-workspace" } }],
+      }),
+    );
+
+    expect(siblingResponse.status).toBe(202);
+    expect(targetResponse.status).toBe(429);
+    expect(upstreamRequests).toHaveLength(1);
   });
 });
