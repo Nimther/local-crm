@@ -282,12 +282,12 @@ after those checks pass continue the capture/replay procedure below.
    1. Edit `WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS` in `MEGA_CRM_ENV_FILE` to a larger value (e.g. `3600`).
    2. Restart the `api` container — required, because `apps/api/src/env.ts` parses this value once at process start into a frozen `env` object (`export const env = parsed.data`), not per-request; a running process never observes an edited env file until it restarts:
       ```bash
-      docker compose -f docker/docker-compose.prod.yml up -d --force-recreate api
+      docker compose -f docker/docker-compose.prod.yml up -d --force-recreate --no-deps api
       ```
    3. Re-run steps 1-6 above.
    4. **Restore the original tolerance value in `MEGA_CRM_ENV_FILE` and restart the `api` container again** — this is a required numbered step, not a closing remark:
       ```bash
-      docker compose -f docker/docker-compose.prod.yml up -d --force-recreate api
+      docker compose -f docker/docker-compose.prod.yml up -d --force-recreate --no-deps api
       ```
    5. Confirm the restore took effect by reading the value back — e.g. `docker compose -f docker/docker-compose.prod.yml exec api node -e "console.log(process.env.WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS)"` should print the original value (or nothing, if it was unset before), never the widened one.
 8. **Decode and read the captured batch before saving it anywhere in the repository.** Confirm it contains only events belonging to the UAT workspace's own sends, addressed to the designated throwaway UAT recipient (§2/§6) — no sibling-workspace event, no platform system-mail event, no third party's address (this SendGrid account is shared and fans events out across every connected tenant, RESEARCH.md Pitfall 6 — this inspection is a real gate, not a formality). If the batch contains anything else, discard it and capture an isolated batch during a quiet window instead — do not proceed to step 10 with an uninspected or mixed-tenant capture.
@@ -435,3 +435,37 @@ Record both send ids, every observed status/queue transition with UTC timestamps
    ```
 
 5. Confirm `docker compose -f docker/docker-compose.prod.yml ps` contains no `uat-fault-proxy`, the worker is healthy, and the public `/readyz` returns 200. Plan 16-07's teardown checkpoint repeats these checks; completing them here is still mandatory.
+
+## 15. Standing canary post-deploy smoke test (D-15)
+
+Run this after every risky deploy, immediately after the normal post-deploy checks in `docs/runbooks/deploy-and-rollback.md`. The standing canary is the retained UAT workspace `fe8fbbc6-6b25-490b-b3f5-7c739e325c9a` (confirm its current display name/slug directly in the workspace UI rather than assuming one here). Its BYO SendGrid key, Dynamic Template, operator-owned contact, retained campaigns and flows, and active webhook subscription are deliberate production canary assets: **do not delete or anonymise them**. (A specific retained draft flow id was recorded by an earlier, interrupted session and is not re-asserted here without confirmation — see `16-UAT-REPORT.md`'s "Unverified claims" section; confirm the actual retained flow/campaign ids directly in the workspace at Task 3.)
+
+1. Confirm `https://<hostname>/readyz` returns `200`. In the UAT workspace, confirm the retained contact is still subscribed and the SendGrid connection/webhook subscription show active.
+2. Check the contact's 24-hour sent count against the workspace frequency cap. If there is no free slot, record the current UAT-only cap, raise it just enough for one message, and restore/read it back immediately after step 5.
+3. Duplicate or create a uniquely named one-recipient canary campaign using the retained Dynamic Template and the retained operator-owned contact. Launch exactly one send; never reuse a customer or third-party contact.
+4. Confirm exactly one new message arrives in the operator mailbox with the template substitutions rendered. Record the campaign id, send id, provider message id, and UTC time.
+5. Run the scripted assertion and require both terminal dispatch and a real delivered event:
+
+   ```bash
+   docker compose -f docker/docker-compose.prod.yml run --rm --no-deps \
+     -v "$(pwd)/scripts/uat-verify.mjs:/app/scripts/uat-verify.mjs:ro" \
+     api node scripts/uat-verify.mjs send-attribution \
+       --workspace fe8fbbc6-6b25-490b-b3f5-7c739e325c9a \
+       --send-id <CANARY_SEND_ID> \
+       --expect-status sent \
+       --expect-events delivered
+   ```
+
+   Pass only on exit `0` with a non-zero delivered-event row count. If the frequency cap was changed, restore its recorded value and read it back before declaring the smoke complete.
+
+## 16. Phase 16 teardown verification checklist
+
+Verify each item by observing the current state, not by remembering that a cleanup command was run.
+
+1. **Endpoint override:** `SENDGRID_BASE_URL` and `UAT_FAULT_PROXY_WORKSPACE_ID` are absent from the production env (not present with blank values); the effective worker environment has no override; a fresh worker boot has no `SENDGRID_BASE_URL override is active` warning. Expected observation: tenant mail uses `https://api.sendgrid.com/v3/mail/send`.
+2. **Raw capture:** `WEBHOOK_RAW_CAPTURE_WORKSPACE_ID` is absent from the production env and the effective API process environment. After a fresh canary delivery, `docker compose -f docker/docker-compose.prod.yml logs --no-color --since <canary-start-utc> api | grep 'UAT16_WEBHOOK_RAW_CAPTURE'` prints nothing. Expected observation: no signed payload is copied into logs.
+3. **Fault proxy:** base-compose `ps` contains no `uat-fault-proxy`; no container for it is running; `docker compose -f docker/docker-compose.prod.yml -f docker/docker-compose.uat-proxy.yml port uat-fault-proxy 4180` prints nothing; `<VPS_PUBLIC_IP>:4180` refuses an off-host connection. Expected observation: no public or internal test proxy remains in the live stack. The override file is session-only and must never be added to `scripts/deploy.sh`, `docker/docker-compose.prod.yml`, or any routine deploy command.
+4. **Webhook freshness:** read `WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS` from the effective API environment. Expected observation: the original production value is restored; for this deployment the variable is absent, so `apps/api/src/env.ts` applies the default `600` seconds.
+5. **Production compose:** compare the host's `docker/docker-compose.prod.yml` with the deployed Git SHA and inspect the deploy scripts for UAT override references. Expected observation: the file is unchanged, no Phase 16 environment value is embedded, and `docker/docker-compose.uat-proxy.yml` is absent from every deploy path.
+
+Finally confirm the standing canary workspace still contains its operator-owned contact, at least one retained campaign, at least one retained flow, and an active webhook subscription — recording the actual ids observed. This integrity confirmation retains evidence; it is not permission to send another message.
