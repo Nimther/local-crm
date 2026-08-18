@@ -118,8 +118,13 @@ const required = [...baseRequired];
 const kmsProvider = values.KMS_PROVIDER || "local";
 if (kmsProvider === "aws") {
   required.push("KMS_KEK_ID");
-} else {
+} else if (kmsProvider === "file") {
+  required.push("KMS_FILE_KEK_PATH");
+} else if (kmsProvider === "local") {
   required.push("KMS_LOCAL_KEK");
+} else {
+  console.error(`Env check failed: KMS_PROVIDER must be one of local, aws, file (received ${JSON.stringify(kmsProvider)})`);
+  process.exit(1);
 }
 
 const missing = required.filter(isMissing);

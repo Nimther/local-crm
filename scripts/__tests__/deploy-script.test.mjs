@@ -129,6 +129,7 @@ function baseRealEnv(scratch, overrides = {}) {
     MEGA_CRM_ENV_FILE: scratch.envFile,
     MEGA_CRM_DEPLOY_STATE_FILE: scratch.recordFile,
     DEPLOY_SCRIPT_TEST_STOP_GRACE_PERIOD_SECONDS: "5",
+    DEPLOY_SCRIPT_TEST_SKIP_KEK_VALIDATION: "1",
     API_READYZ_TIMEOUT_SECONDS: "2",
     API_READYZ_POLL_INTERVAL_SECONDS: "1",
     WEB_READY_TIMEOUT_SECONDS: "2",
@@ -285,6 +286,19 @@ describe("real invocation: migrate failure aborts before any replacement", () =>
     // even on this failure path (T-14-56)
     expect(existsSync(scratch.recordFile)).toBe(true);
     expect(run.stdout).toMatch(/roll ?back/i);
+  });
+});
+
+describe("real invocation: KEK preflight fails before any mutation", () => {
+  it("attempts no docker operation when the host file is unsafe", () => {
+    const scratch = makeScratch();
+    const run = runCli([VALID_SHA], {
+      env: baseRealEnv(scratch, { DEPLOY_SCRIPT_TEST_SKIP_KEK_VALIDATION: "0" }),
+    });
+    expect(run.exitCode).not.toBe(0);
+    expect(run.stdout + run.stderr).toMatch(/KEK preflight/);
+    expect(callLines(scratch.logFile)).toEqual([]);
+    expect(existsSync(scratch.recordFile)).toBe(false);
   });
 });
 

@@ -297,6 +297,9 @@ services:
       # before every `docker compose` invocation, so this one resolves
       # correctly today; it is not part of this fix.
       IMAGE_TAG: ${IMAGE_TAG}
+    group_add: ["1999"]
+    volumes:
+      - /etc/mega-crm/kek:/run/secrets/mega-crm-kek:ro
     mem_limit: ${API_MEM_LIMIT:-512m}
     # Probes /readyz, not just /healthz -- the API's own port is never
     # published (T-14-43), so this container's OWN health status is the
@@ -342,6 +345,9 @@ services:
       # interpolation -- `deploy.sh` DOES export it, so it is unaffected by
       # this fix, same as `api`'s own IMAGE_TAG passthrough.
       IMAGE_TAG: ${IMAGE_TAG}
+    group_add: ["1999"]
+    volumes:
+      - /etc/mega-crm/kek:/run/secrets/mega-crm-kek:ro
     mem_limit: ${WORKER_MEM_LIMIT:-1024m}
     # ARCHITECTURE.md §10 / Pitfall 7: MUST come from the published constant,
     # NEVER a hand-typed literal -- the deploy script (plan 14-09) exports

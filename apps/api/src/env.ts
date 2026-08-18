@@ -36,9 +36,10 @@ export const envSchema = z
     // 01-05 / RESEARCH.md Pattern 3 + Pitfall 3: envelope encryption of the
     // tenant SendGrid key. "local" is a dev-only static-KEK provider;
     // "aws" is the real KMS path for staging/prod (KMS_KEK_ID required).
-    KMS_PROVIDER: z.enum(["local", "aws"]).default("local"),
+    KMS_PROVIDER: z.enum(["local", "aws", "file"]).default("local"),
     KMS_LOCAL_KEK: z.string().optional(),
     KMS_KEK_ID: z.string().optional(),
+    KMS_FILE_KEK_PATH: z.string().min(1).optional(),
     // 04-03/04-16: packages/delivery-core signs/verifies the one-click
     // List-Unsubscribe token (HMAC secret) and builds its public URL from
     // these -- the API also hosts GET/POST /unsubscribe/:token, so it fails
@@ -94,6 +95,13 @@ export const envSchema = z
         code: z.ZodIssueCode.custom,
         message: "KMS_KEK_ID is required when KMS_PROVIDER=aws",
         path: ["KMS_KEK_ID"],
+      });
+    }
+    if (val.KMS_PROVIDER === "file" && !val.KMS_FILE_KEK_PATH) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "KMS_FILE_KEK_PATH is required when KMS_PROVIDER=file",
+        path: ["KMS_FILE_KEK_PATH"],
       });
     }
     // 05-12 gap-closure (defense-in-depth #2): SendGrid rejects a non-https

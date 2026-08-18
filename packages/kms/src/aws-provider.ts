@@ -18,6 +18,11 @@ function requireKekId(): string {
   return env.KMS_KEK_ID;
 }
 
+/** Configuration-only readiness; no data key is generated during boot. */
+export function assertReady(): void {
+  requireKekId();
+}
+
 export async function generateDataKey(
   workspaceId: string
 ): Promise<{ plaintextDek: Buffer; wrappedDek: string }> {

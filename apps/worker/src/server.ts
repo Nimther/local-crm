@@ -6,6 +6,7 @@ import { attachSharedErrorListeners, buildRedisConnectionOptions, createRedisCon
 import { pool } from "@mega-crm/tenant-context";
 import { assertMigrationsCurrent } from "@mega-crm/db";
 import { markWorkerDraining, startWorkerHealthServer, type WorkerHealthServer } from "./health-server.js";
+import { assertKmsReady } from "@mega-crm/kms";
 import { logger } from "./logger.js";
 import { mountBullBoard } from "./bull-board.js";
 import { closeTrackedQueues } from "./queues/queue-registry.js";
@@ -178,6 +179,7 @@ export function logSendgridBaseUrlOverrideIfActive(log: Pick<typeof logger, "war
 // so the require-await disable this function needed before that change is
 // stale -- removed rather than left as a now-inert directive.
 export async function buildWorker(): Promise<WorkerRuntime> {
+  await assertKmsReady();
   // Phase 15 plan 10 (OPS-08): initialized once at boot, before anything
   // else -- a missing SENTRY_DSN_WORKER is a no-op (initSentry logs once and
   // returns false), so this never blocks/slows boot. The reporter is

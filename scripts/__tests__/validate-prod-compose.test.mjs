@@ -118,6 +118,25 @@ describe("the committed production compose file passes with a non-zero invariant
   });
 });
 
+describe("file-backed KEK compose isolation", () => {
+  const env = { GHCR_IMAGE_BASE: "ghcr.io/example/repo", IMAGE_TAG: "0123456789abcdef0123456789abcdef01234567", MEGA_CRM_ENV_FILE: "/tmp/env", WORKER_STOP_GRACE_PERIOD_SECONDS: "60" };
+  function violationsAfter(rewrite) {
+    const source = readFileSync(path.join(REPO_ROOT, "docker/docker-compose.prod.yml"), "utf8");
+    const model = resolveViaYamlFallback(rewrite(source), env);
+    return evaluateInvariants(model, { poolSumFloor: POOL_SUM_FLOOR, expectedStopGraceSeconds: 60 }).violations;
+  }
+  it.each([
+    ["missing mount", (s) => s.replace("      - /etc/mega-crm/kek:/run/secrets/mega-crm-kek:ro\n", "")],
+    ["writable mount", (s) => s.replace("/etc/mega-crm/kek:/run/secrets/mega-crm-kek:ro", "/etc/mega-crm/kek:/run/secrets/mega-crm-kek:rw")],
+    ["wrong target", (s) => s.replace("/run/secrets/mega-crm-kek:ro", "/run/secrets/wrong:ro")],
+    ["missing group", (s) => s.replace('    group_add: ["1999"]\n', "")],
+    ["wrong group", (s) => s.replace('group_add: ["1999"]', 'group_add: ["2000"]')],
+    ["leak to migrate", (s) => s.replace("  migrate:\n", '  migrate:\n    group_add: ["1999"]\n    volumes:\n      - /etc/mega-crm/kek:/run/secrets/mega-crm-kek:ro\n')],
+  ])("rejects %s", (_name, rewrite) => {
+    expect(violationsAfter(rewrite).some((v) => v.rule.startsWith("kek-"))).toBe(true);
+  });
+});
+
 describe("each fixture trips exactly the invariant it targets", () => {
   const cases = [
     { fixture: "missing-mem-limit.yml", rule: "missing-mem-limit", service: "api" },

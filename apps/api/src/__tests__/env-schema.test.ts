@@ -78,6 +78,26 @@ describe("envSchema PUBLIC_APP_URL https enforcement", () => {
   });
 });
 
+describe("envSchema KMS provider selection", () => {
+  it("accepts file provider in production when its path is present", () => {
+    const result = envSchema.safeParse({
+      ...baseValidEnv(), NODE_ENV: "production", BETTER_AUTH_SECRET: "01234567890123456789012345678901",
+      KMS_PROVIDER: "file", KMS_FILE_KEK_PATH: "/run/secrets/mega-crm-kek",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects file provider without its path", () => {
+    const result = envSchema.safeParse({ ...baseValidEnv(), KMS_PROVIDER: "file" });
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.issues.some((i) => i.path.includes("KMS_FILE_KEK_PATH"))).toBe(true);
+  });
+
+  it("rejects an unknown provider instead of falling back", () => {
+    expect(envSchema.safeParse({ ...baseValidEnv(), KMS_PROVIDER: "typo" }).success).toBe(false);
+  });
+});
+
 /**
  * OPERATOR_ALERT_EMAIL (09-02, DB-02, D-01): the partition watchdog's only
  * push channel. A missing or malformed value must fail boot -- a disarmed
