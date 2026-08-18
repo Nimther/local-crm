@@ -265,6 +265,38 @@ export function findVolumeSources(lines, indent = 4) {
   return sources;
 }
 
+export function findVolumeEntries(lines, indent = 4) {
+  const idx = lines.findIndex((l) => new RegExp(`^ {${indent}}volumes:\\s*$`).test(l));
+  if (idx === -1) return [];
+  const entries = [];
+  for (let i = idx + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.trim() === "") continue;
+    if (indentOf(line) <= indent) break;
+    const m = line.match(new RegExp(`^ {${indent + 2}}-\\s*(.+?)\\s*$`));
+    if (!m) continue;
+    const parts = m[1].replace(/^["']|["']$/g, "").split(":");
+    entries.push({ source: parts[0], target: parts[1], readOnly: parts[2] === "ro" });
+  }
+  return entries;
+}
+
+export function findBlockList(lines, key, indent = 4) {
+  const inline = findScalarField(lines, key, indent);
+  if (inline) return parseInlineStringArray(inline);
+  const idx = lines.findIndex((l) => new RegExp(`^ {${indent}}${key}:\\s*$`).test(l));
+  if (idx === -1) return [];
+  const values = [];
+  for (let i = idx + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.trim() === "") continue;
+    if (indentOf(line) <= indent) break;
+    const m = line.match(new RegExp(`^ {${indent + 2}}-\\s*(.+?)\\s*$`));
+    if (m) values.push(m[1].replace(/^["']|["']$/g, ""));
+  }
+  return values;
+}
+
 /**
  * Builds the normalized model `{ services: { [name]: {...} } }` from the raw
  * compose text + a resolved env map, entirely via text substitution and the
@@ -286,6 +318,8 @@ export function resolveViaYamlFallback(composeText, envMap) {
       ports: findPortsList(svcLines),
       environment: findEnvironmentMap(svcLines),
       volumeSources: findVolumeSources(svcLines),
+      volumeEntries: findVolumeEntries(svcLines),
+      groupAdd: findBlockList(svcLines, "group_add"),
     };
   }
   return { services, source: "yaml-fallback" };
@@ -349,6 +383,8 @@ export function resolveViaDockerCompose(composeFile, envFile) {
       ports: svc.ports ? svc.ports.map((p) => `${p.published ?? ""}:${p.target ?? ""}`) : null,
       environment: svc.environment ?? {},
       volumeSources: (svc.volumes ?? []).map((v) => v.source),
+      volumeEntries: (svc.volumes ?? []).map((v) => ({ source: v.source, target: v.target, readOnly: Boolean(v.read_only) })),
+      groupAdd: (svc.group_add ?? []).map(String),
     };
   }
   return { services, source: "docker-compose" };
@@ -571,6 +607,26 @@ export function evaluateInvariants(model, opts) {
       "pgbackrest",
       `pgbackrest does not mount the "${DB_DATA_VOLUME_NAME}" volume db itself uses -- it would have no access to the cluster directory it exists to back up`,
     );
+  }
+
+  // File-backed KEK isolation: only api/worker get the exact read-only bind
+  // and supplemental numeric group. Every other service must get neither.
+  const kekSource = "/etc/mega-crm/kek";
+  const kekTarget = "/run/secrets/mega-crm-kek";
+  for (const [name, svc] of Object.entries(services)) {
+    const entries = Array.isArray(svc.volumeEntries) ? svc.volumeEntries : [];
+    const exact = entries.filter((v) => v.source === kekSource && v.target === kekTarget && v.readOnly);
+    const anyKek = entries.filter((v) => v.source === kekSource || v.target === kekTarget);
+    const groups = Array.isArray(svc.groupAdd) ? svc.groupAdd.map(String) : [];
+    if (name === "api" || name === "worker") {
+      check(exact.length === 1 && anyKek.length === 1, "kek-mount-invalid", name,
+        `${name} must mount ${kekSource}:${kekTarget}:ro exactly once`);
+      check(groups.length === 1 && groups[0] === "1999", "kek-group-invalid", name,
+        `${name} must receive only supplemental group 1999 for the KEK mount`);
+    } else {
+      check(anyKek.length === 0, "kek-mount-leaked", name, `${name} must not receive the KEK mount`);
+      check(!groups.includes("1999"), "kek-group-leaked", name, `${name} must not receive KEK group 1999`);
+    }
   }
 
   return { violations, checkedCount };

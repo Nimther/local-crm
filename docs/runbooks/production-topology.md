@@ -299,3 +299,18 @@ mechanism) is the correct, safe sequencing.
   references, their build mechanism, and the SHA tag scheme.
 - Plan 14-09's own runbook (deploy/rollback procedures) — not yet written at
   the time this file was authored; cross-reference forward once it exists.
+
+## File-backed production KEK boundary
+
+The DigitalOcean single-VPS deployment uses `KMS_PROVIDER=file`. The
+base64-encoded 32-byte KEK lives at `/etc/mega-crm/kek` as a root-owned
+regular file with numeric group `1999` and exact mode `0440`. Compose binds
+it read-only at `/run/secrets/mega-crm-kek` and adds group 1999 to **api and
+worker only**. Both images remain `USER node`; `migrate`, db, redis, web,
+pgBackRest, and Alloy receive neither the mount nor the group.
+
+This protects tenant SendGrid keys from a **database-only compromise**:
+the database contains ciphertext and a wrapped DEK, not the KEK. It does
+not protect against full VPS/root compromise or compromise of an api/worker
+process, all of which can read the mounted KEK. That residual risk is an
+explicit property of this single-host design.

@@ -213,6 +213,16 @@ Ordered procedure — complete every step before running the final verification 
 
 Ordered procedure — complete every step in sequence, without a long pause between steps 3 and 6:
 
+Before resuming Phase 16 after the file-KEK cutover, record only these
+non-secret facts: the pre-cutover `workspace_sendgrid_keys` row count was
+zero, the host validator exited 0, api and worker are healthy, and there are
+no AWS-credential errors in their logs. Through the product UI, the operator
+then enters the Mail-Send-only UAT key (never chat or an environment
+variable). Connect/recheck must succeed without the former HTTP 500; verify
+the database row contains only encrypted fields/key mask, then run one
+worker-driven test send to prove the worker can decrypt the same key. Only
+after those checks pass continue the capture/replay procedure below.
+
 1. **Take the dedup snapshot BEFORE the replay.** Identify the send/event this session will replay (its `send_id`, `event_type`, `occurred_at` — from §12 step 1's trigger, or from a `send-attribution`/`event-coverage` lookup against it) and run:
 
    ```bash

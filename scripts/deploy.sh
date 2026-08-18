@@ -290,6 +290,7 @@ EOF
 
   cat <<EOF
 printf '%s' "\$PREV_SHA" > "$RECORD_FILE"
+node scripts/validate-kek-file.mjs /etc/mega-crm/kek
 docker compose -f $COMPOSE_FILE pull api worker web
 npm run build -w apps/worker && node scripts/print-stop-grace-period.mjs
 docker compose -f $COMPOSE_FILE run --rm migrate
@@ -316,10 +317,18 @@ check_required_env() {
   fi
 }
 
+validate_host_kek() {
+  if [[ "${DEPLOY_SCRIPT_TEST_SKIP_KEK_VALIDATION:-0}" == "1" ]]; then
+    return 0
+  fi
+  node scripts/validate-kek-file.mjs /etc/mega-crm/kek
+}
+
 run_real_deploy() {
   local target="$1"
 
   check_required_env
+  validate_host_kek
 
   mkdir -p "$(dirname "$RECORD_FILE")"
   local prev_sha

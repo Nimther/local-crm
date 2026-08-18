@@ -191,6 +191,49 @@ it for you.
 
 ## Pre-deploy checklist
 
+### One-time file KEK provisioning and provider cutover
+
+Before changing an existing deployment from AWS to file, run this count
+against production:
+
+```sql
+SELECT count(*) AS existing_sendgrid_key_rows FROM workspace_sendgrid_keys;
+```
+
+Proceed only when it returns `0`. Any nonzero value means an AWS-wrapped DEK
+may exist and cannot be recovered without AWS: stop and obtain a separately
+approved re-enrollment or rewrap decision. Do not silently overwrite rows.
+
+On a zero-row deployment, create the dedicated numeric group and file without
+ever placing key bytes in an argument, environment variable, repository, or
+shell history:
+
+```bash
+sudo groupadd --gid 1999 mega-crm-kek
+sudo install -o root -g 1999 -m 0440 /dev/null /etc/mega-crm/kek
+openssl rand -base64 32 | sudo tee /etc/mega-crm/kek >/dev/null
+sudo chown root:1999 /etc/mega-crm/kek
+sudo chmod 0440 /etc/mega-crm/kek
+node scripts/validate-kek-file.mjs /etc/mega-crm/kek
+```
+
+Set only `KMS_PROVIDER=file` and
+`KMS_FILE_KEK_PATH=/run/secrets/mega-crm-kek` in the external production env
+file; AWS credentials are not required. Store an encrypted offline escrow
+copy under the operator's existing secret-backup process. Never print or
+copy the value into tickets, chat, logs, or deployment output.
+
+**Never rotate or regenerate this file in place while encrypted rows exist.**
+Every file-provider row depends on it. Loss without a recoverable escrow copy
+requires tenant key re-enrollment; restoring an older app image does not
+restore the lost KEK. Rollback between file-provider versions must preserve
+the same file. A deliberate rotation requires a separately reviewed,
+versioned rewrap migration and verified backup.
+
+`scripts/deploy.sh` validates the file before pull, migration, or container
+replacement. A missing file, symlink, wrong uid/gid/mode, malformed base64,
+or wrong decoded length aborts the deploy without displaying contents.
+
 - The domain resolves to this VPS, with 80 and 443 open (plan 14-08's
   topology).
 - `MEGA_CRM_ENV_FILE` (see `scripts/env-path.mjs`'s convention) is set **in
