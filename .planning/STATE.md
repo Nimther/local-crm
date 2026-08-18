@@ -5,15 +5,15 @@ milestone_name: Production Hardening
 current_phase: 16
 current_phase_name: Live SendGrid Verification
 status: executing
-stopped_at: Completed 16-04-PLAN.md
-last_updated: "2026-08-18T08:52:16.487Z"
+stopped_at: Completed 16-05-PLAN.md
+last_updated: "2026-08-18T09:08:15.671Z"
 last_activity: 2026-08-17
 last_activity_desc: Phase 16 execution started
 progress:
   total_phases: 9
   completed_phases: 8
   total_plans: 122
-  completed_plans: 119
+  completed_plans: 120
   percent: 89
 ---
 
@@ -292,6 +292,8 @@ Full decision log for v1.0 lives in PROJECT.md (Key Decisions) and the archived 
 - [Phase 16]: Scope live webhook journal evidence to the captured raw_batch digest; keep migration 0057's four-column key for send_events. — Concurrent SendGrid fan-out can change workspace-wide journal totals and create false replay failures.
 - [Phase 16]: Treat fe8fbbc6-6b25-490b-b3f5-7c739e325c9a as the current dedicated Phase 16 UAT workspace. — The effective production capture configuration, endpoint public-key hash, tenant-scoped send/contact ownership and decoded capture agree; earlier 16-01/16-02 references are stale.
 - [Phase 16]: Commit live signed fixtures only after decode-and-inspect plus tenant ownership and endpoint-key verification; never edit or re-sign signed material. — A fixture enters permanent git history and must contain no third-party data while retaining byte-exact signature evidence.
+- [Phase 16]: Freeze Date at the fixture timestamp for real-signature CI; never widen the webhook freshness tolerance. — This preserves both the signed bytes and the security gate indefinitely.
+- [Phase 16]: Prove HTTP replay dedup by processing the two emitted queue payloads with the exported production webhook processor. — The API route stops at enqueue; querying send_events without the worker would be vacuous, while a test-local processor would duplicate production behavior.
 
 ### Pending Todos
 
@@ -348,8 +350,8 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-18T08:51:42.782Z
-Stopped at: Completed 16-04-PLAN.md
+Last session: 2026-08-18T09:08:14.776Z
+Stopped at: Completed 16-05-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
