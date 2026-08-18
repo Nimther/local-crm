@@ -33,7 +33,18 @@ async function loadProvider(): Promise<KmsProvider> {
   if (env.KMS_PROVIDER === "aws") {
     return import("./aws-provider.js");
   }
+  if (env.KMS_PROVIDER === "file") {
+    return import("./file-provider.js");
+  }
   return import("./local-provider.js");
+}
+
+/** Fails process startup before readiness if the selected provider cannot safely operate. */
+export async function assertKmsReady(): Promise<void> {
+  const provider = await loadProvider();
+  if ("assertReady" in provider && typeof provider.assertReady === "function") {
+    await provider.assertReady();
+  }
 }
 
 /**

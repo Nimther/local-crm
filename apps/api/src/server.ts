@@ -16,6 +16,7 @@ import {
   type ZodTypeProvider,
 } from "@fastify/type-provider-zod";
 import { withCorrelation } from "@mega-crm/tenant-context";
+import { assertKmsReady } from "@mega-crm/kms";
 import { logger } from "./logger.js";
 import { env } from "./env.js";
 import { pool } from "./db.js";
@@ -506,6 +507,7 @@ async function sendFailedSendShareAlert(message: FailedSendShareAlertMessage): P
 }
 
 async function main(): Promise<void> {
+  await assertKmsReady();
   const app = await buildServer();
   await app.listen({ port: env.API_PORT, host: "0.0.0.0" });
 

@@ -25,14 +25,33 @@
  */
 interface KmsEnv {
   NODE_ENV: string;
-  KMS_PROVIDER: "local" | "aws";
+  KMS_PROVIDER: "local" | "aws" | "file";
   KMS_LOCAL_KEK: string | undefined;
   KMS_KEK_ID: string | undefined;
+  KMS_FILE_KEK_PATH: string | undefined;
 }
 
-export const env: KmsEnv = {
-  NODE_ENV: process.env.NODE_ENV ?? "development",
-  KMS_PROVIDER: process.env.KMS_PROVIDER === "aws" ? "aws" : "local",
-  KMS_LOCAL_KEK: process.env.KMS_LOCAL_KEK,
-  KMS_KEK_ID: process.env.KMS_KEK_ID,
-};
+export function loadKmsEnv(source: NodeJS.ProcessEnv = process.env): KmsEnv {
+  const rawProvider = source.KMS_PROVIDER ?? "local";
+  if (rawProvider !== "local" && rawProvider !== "aws" && rawProvider !== "file") {
+    throw new Error(`KMS_PROVIDER must be one of local, aws, file (received ${JSON.stringify(rawProvider)})`);
+  }
+  if (source.NODE_ENV === "production" && rawProvider === "local") {
+    throw new Error("KMS_PROVIDER=local must never be imported or used when NODE_ENV=production");
+  }
+  if (rawProvider === "aws" && !source.KMS_KEK_ID) {
+    throw new Error("KMS_KEK_ID must be set when KMS_PROVIDER=aws");
+  }
+  if (rawProvider === "file" && !source.KMS_FILE_KEK_PATH) {
+    throw new Error("KMS_FILE_KEK_PATH must be set when KMS_PROVIDER=file");
+  }
+  return {
+    NODE_ENV: source.NODE_ENV ?? "development",
+    KMS_PROVIDER: rawProvider,
+    KMS_LOCAL_KEK: source.KMS_LOCAL_KEK,
+    KMS_KEK_ID: source.KMS_KEK_ID,
+    KMS_FILE_KEK_PATH: source.KMS_FILE_KEK_PATH,
+  };
+}
+
+export const env: KmsEnv = loadKmsEnv();

@@ -34,6 +34,11 @@ function getLocalKek(): Buffer {
   return kek;
 }
 
+export function assertReady(): void {
+  const kek = getLocalKek();
+  kek.fill(0);
+}
+
 /**
  * Dev-only analog of KMS `GenerateDataKey`: generates a fresh 32-byte DEK
  * and wraps ("encrypts") it with the static local KEK via aes-256-gcm,
