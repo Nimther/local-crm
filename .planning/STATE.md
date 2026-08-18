@@ -5,15 +5,15 @@ milestone_name: Production Hardening
 current_phase: 16
 current_phase_name: Live SendGrid Verification
 status: executing
-stopped_at: Completed 16-05-PLAN.md
-last_updated: "2026-08-18T09:08:15.671Z"
-last_activity: 2026-08-17
-last_activity_desc: Phase 16 execution started
+stopped_at: Completed 16-06-PLAN.md
+last_updated: "2026-08-18T15:26:15+05:00"
+last_activity: 2026-08-18
+last_activity_desc: Completed Phase 16 plan 06 live 429/timeout recovery UAT
 progress:
   total_phases: 9
   completed_phases: 8
   total_plans: 122
-  completed_plans: 120
+  completed_plans: 121
   percent: 89
 ---
 
@@ -30,10 +30,10 @@ See: .planning/PROJECT.md (updated 2026-08-17)
 
 Milestone: v1.1 Production Hardening (Phases 8-16, 95 requirements)
 Phase: 16 (Live SendGrid Verification) — EXECUTING
-Plan: 1 of 7
+Plan: 6 of 7
 Status: Executing Phase 16
-Last activity: 2026-08-17 — Phase 16 execution started
-Progress: [████████████████████] 115/115 plans (100%) — 8/9 v1.1 phases complete (8–15), 90/95 requirements (remaining: UAT-01..05, Phase 16)
+Last activity: 2026-08-18 — Completed 16-06 live 429/timeout recovery UAT
+Progress: [████████████████████] 121/122 plans (99%) — 8/9 v1.1 phases complete (8–15), final UAT report pending in 16-07
 
 ✓ **Deadline closed (2026-08-07):** Phase 9 (DB-01/DB-02 partition automation) completed ahead of the hard **2026-09-01** deadline — 20 attached monthly partitions (2026-09…2027-06) confirmed by catalog query against a migrated database.
 
@@ -294,6 +294,9 @@ Full decision log for v1.0 lives in PROJECT.md (Key Decisions) and the archived 
 - [Phase 16]: Commit live signed fixtures only after decode-and-inspect plus tenant ownership and endpoint-key verification; never edit or re-sign signed material. — A fixture enters permanent git history and must contain no third-party data while retaining byte-exact signature evidence.
 - [Phase 16]: Freeze Date at the fixture timestamp for real-signature CI; never widen the webhook freshness tolerance. — This preserves both the signed bytes and the security gate indefinitely.
 - [Phase 16]: Prove HTTP replay dedup by processing the two emitted queue payloads with the exported production webhook processor. — The API route stops at enqueue; querying send_events without the worker would be vacuous, while a test-local processor would duplicate production behavior.
+- [Phase 16]: Keep the UAT fault proxy one-shot, workspace-targeted and internal-only; 429 never forwards while timeout always forwards once before delaying the response. — Reversing either branch creates the duplicate/lost-mail defect UAT-05 exists to detect.
+- [Phase 16]: Preflight frequency-cap headroom for every live fault leg and restore any UAT-only temporary change. — The pre-send gate runs before the proxy, so an excluded campaign cannot exercise the armed fault.
+- [Phase 16]: Start temporary proxy/worker services with compose --no-deps. — A UAT-only worker restart must not recreate production DB or Redis dependencies.
 
 ### Pending Todos
 
@@ -351,12 +354,12 @@ Items acknowledged and carried forward from previous milestone close:
 ## Session Continuity
 
 Last session: 2026-08-18T09:08:14.776Z
-Stopped at: Completed 16-05-PLAN.md
+Stopped at: Completed 16-06-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
 
 - Phase 15 complete (2026-08-17): 22/22 plans (18 scoped + 4 gap-closure), UAT 5/5 passed (G-15-4 alloy-config gap closed by plan 15-22, live redeploy of the committed config confirmed), verification passed, security verified (threats_open: 0)
 - Known operational item carried from Phase 12: `npm run db:migrate` (drizzle-kit CLI) hangs in the dev sandbox under Node v26 — migrations proven via test:migrations but not applied to the dev DB
-- Next: `/gsd-plan-phase 16` — Live SendGrid Verification (UAT-01..05, the milestone's final release barrier; requires the deployed env + verified sender from Phase 14)
+- Next: execute `16-07-PLAN.md` — final UAT report, standing-canary procedure and teardown re-verification
 - Branch note: per convention Phase 16 starts a new `gsd/phase-16-{slug}` branch (Phase 15 branch: `gsd/phase-15-observability-alerting-frontend-resilience`)

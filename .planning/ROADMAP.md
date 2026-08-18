@@ -670,7 +670,7 @@ Plans:
   3. A genuinely signed SendGrid webhook payload passes signature verification through the full HTTP stack, and a redelivery of that same payload is counted exactly once.
   4. A real SendGrid 429 or transient error defers only the affected tenant's sends and resolves without duplicate or lost mail.
 
-**Plans**: 5/7 plans executed
+**Plans**: 6/7 plans executed
 
 Plans:
 **Wave 1**
@@ -689,7 +689,7 @@ Plans:
 **Wave 4** *(blocked on Wave 3 completion)*
 
 - [x] 16-05-PLAN.md — Committed CI fixture + full-HTTP-stack replay test, closing the Phase 5 gap (UAT-03, UAT-04)
-- [ ] 16-06-PLAN.md — Fault proxy + live 429 and timeout, defer/resolve/exactly-once (UAT-05)
+- [x] 16-06-PLAN.md — Fault proxy + live 429 and timeout, defer/resolve/exactly-once (UAT-05)
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
