@@ -46,6 +46,18 @@ const capturedDedupKey = readCapturedDedupKey();
 const WRONG_PUBLIC_KEY =
   "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE83T4O/n84iotIvIW4mdBgQ/7dAfSmpqIM8kF9mN1flpVKS3GRqe62gw+2fNNRaINXvVpiglSI8eNEc6wEA3F+g==";
 
+// Kept as a dynamic, test-only cross-workspace import so apps/api's build
+// does not pull apps/worker source under its rootDir. At runtime Vitest loads
+// the exact production processor rather than a test-local approximation.
+const WEBHOOK_PROCESSOR_MODULE_PATH = new URL(
+  "../../../../../worker/src/queues/webhook-events.worker.ts",
+  import.meta.url
+).href;
+
+interface WebhookProcessorModule {
+  processWebhookEventBatch: (data: unknown) => Promise<{ inserted: number }>;
+}
+
 /**
  * Phase 16 (UAT-03/UAT-04): this import is deliberately unconditional.
  * The captured SendGrid signature is a permanent CI input; deleting or
@@ -229,6 +241,37 @@ describe("POST /webhooks/sendgrid/:pathToken real signed replay", () => {
     );
   }
 
+  async function processQueuedBatches(workspaceId: string): Promise<number[]> {
+    const loaded: unknown = await import(WEBHOOK_PROCESSOR_MODULE_PATH);
+    const { processWebhookEventBatch } = loaded as WebhookProcessorModule;
+    if (typeof processWebhookEventBatch !== "function") {
+      throw new Error("production webhook processor module did not export processWebhookEventBatch");
+    }
+
+    const waitingJobs = await webhookEventsQueue.getJobs(["waiting"]);
+    const workspaceJobs = waitingJobs.filter(
+      (job) => (job.data as { workspaceId?: string }).workspaceId === workspaceId
+    );
+    expect(workspaceJobs).toHaveLength(2);
+
+    // The worker independently applies classifyOccurredAt's seven-day event
+    // bound. Freeze Date for processing too, without changing the route's
+    // freshness tolerance or any signed byte, so this permanent fixture does
+    // not decay into an out-of-window quarantine years from now.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Number(fixture.timestamp) * 1000);
+    try {
+      const inserted: number[] = [];
+      for (const job of workspaceJobs) {
+        const result = await processWebhookEventBatch(job.data);
+        inserted.push(result.inserted);
+      }
+      return inserted;
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+
   function enqueueCallsForWorkspace(
     calls: ReadonlyArray<readonly [string, { workspaceId?: string }, ...unknown[]]>,
     workspaceId: string
@@ -289,9 +332,8 @@ describe("POST /webhooks/sendgrid/:pathToken real signed replay", () => {
       expect(enqueueCallsForWorkspace(addSpy.mock.calls, workspace.id)).toBe(2);
       expect(await countIngressJournal(workspace.id)).toBe(2);
 
-      // RED assertion: the HTTP route correctly stops at enqueue. The GREEN
-      // step will drive these two real queue payloads through the production
-      // webhook processor before asserting the downstream unique index.
+      const inserted = await processQueuedBatches(workspace.id);
+      expect(inserted.sort()).toEqual([0, 1]);
       expect(await countCapturedSendEvents(workspace.id)).toBe(1);
     } finally {
       addSpy.mockRestore();
