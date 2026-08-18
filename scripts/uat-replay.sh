@@ -149,7 +149,29 @@ if (typeof capture.rawBodyBase64 !== "string" || capture.rawBodyBase64.length ==
   process.exit(1);
 }
 
+for (const field of ["signature", "timestamp", "publicKey"]) {
+  if (typeof capture[field] !== "string" || capture[field].trim().length === 0) {
+    console.error(`uat-replay.sh: capture file "${capturePath}" is missing a non-empty "${field}" field`);
+    process.exit(1);
+  }
+}
+
+// Buffer.from(..., "base64") is intentionally permissive: it silently
+// ignores invalid characters and accepts several non-canonical encodings.
+// That behaviour is dangerous here because it would POST bytes other than
+// the captured wire body and turn a malformed capture into an opaque 400.
+// Require the exact canonical form emitted by Buffer#toString("base64")
+// before any dry-run or network request is allowed.
+if (!/^[A-Za-z0-9+/]+={0,2}$/.test(capture.rawBodyBase64) || capture.rawBodyBase64.length % 4 !== 0) {
+  console.error(`uat-replay.sh: capture file "${capturePath}" has a non-canonical "rawBodyBase64" field`);
+  process.exit(1);
+}
+
 const buf = Buffer.from(capture.rawBodyBase64, "base64");
+if (buf.length === 0 || buf.toString("base64") !== capture.rawBodyBase64) {
+  console.error(`uat-replay.sh: capture file "${capturePath}" has an invalid "rawBodyBase64" field`);
+  process.exit(1);
+}
 
 let flippedIndex = null;
 let byteBefore = null;
@@ -176,8 +198,8 @@ fs.writeFileSync(
   metaOutPath,
   JSON.stringify({
     byteLength: buf.length,
-    signature: typeof capture.signature === "string" ? capture.signature : "",
-    timestamp: typeof capture.timestamp === "string" ? capture.timestamp : "",
+    signature: capture.signature,
+    timestamp: capture.timestamp,
     flippedIndex,
     byteBefore,
     byteAfter,
