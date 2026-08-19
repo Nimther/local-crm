@@ -139,3 +139,15 @@ These are live-environment UAT walkthroughs deferred per `human_verify_mode=end-
 | Escalated | 0 |
 
 Gap detail: 13-06-03 (CMP-08) — operator replay CLI behavior tests were run as throwaway self-verification during execution but never committed (13-06-SUMMARY deviation D6). Resolved by `packages/db/src/__tests__/replay-webhook-journal-cli.test.ts` (11 tests: fail-closed arg validation, dry-run makes no writes, tombstone skip, range bounds, keyset pagination, ingested-row re-enqueue intent).
+
+---
+
+## Validation Re-Audit 2026-08-19 (second pass)
+
+| Metric | Count |
+|--------|-------|
+| Gaps found | 0 |
+| Resolved | 0 |
+| Escalated | 0 |
+
+Re-audit checks: all 28 mapped test files/dirs exist on disk; all 3 referenced failure-injection scripts (`failure:unsubscribe-atomic`, `failure:erasure-scrub-resume`, `failure:erasure-enqueue-crash`) defined in root `package.json`; task-ID diff against all 16 SUMMARYs found no unmapped tasks (8 near-misses were `T-13-XX-YY` threat refs); spot re-run of `replay-webhook-journal-cli.test.ts` green (11/11, 20.5s); prior gap-fill test committed (`cd6548f`, lint-fixed in `20683cb`). Map, statuses, and `nyquist_compliant: true` unchanged.
