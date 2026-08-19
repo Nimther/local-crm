@@ -10,6 +10,8 @@ Multi-tenant SaaS-платформа marketing automation для B2C-компа�
 
 ## Current State
 
+**Phase 16 complete (2026-08-19):** live SendGrid verification (UAT-01..UAT-05) — милстоун v1.1 полностью выполнен (122/122 планов, фазы 8–16). Все пять UAT-требований подтверждены live против реального SendGrid и реального inbox (5/5 blocking-чекпоинтов одобрены оператором), verification passed 4/4 критериев. Итоговый evidence-артефакт: `.planning/phases/16-live-sendgrid-verification/16-UAT-REPORT.md`. Teardown production верифицирован наблюдением 5/5 (оба seam-переключателя сняты, fault proxy удалён, webhook tolerance восстановлен); UAT-воркспейс сохранён как standing canary с проверенной smoke-процедурой (runbook §15). Открыто: security review фазы 16 ещё не выполнен (`/gsd-secure-phase 16`); code review нашёл 1 critical (CR-01: `docker-compose.uat-proxy.yml` передаёт весь env-файл session-only прокси — вне deploy-пути, исправить до переиспользования файла).
+
 **Phase 15 complete (2026-08-17):** observability, alerting & frontend resilience (OPS-06..OPS-19) — см. запись в Current Milestone ниже. UAT 5/5 (blocker G-15-4 закрыт планом 15-22, live redeploy подтверждён), verification passed 5/5, security verified (threats_open: 0). Система впервые наблюдаема в production: сквозная корреляция request→job→Postgres, Sentry в трёх процессах с доказанным scrubbing'ом, логи в Grafana Cloud Loki с backstop-алертами, девять in-app watchdog'ов с runbook'ами, честные error/empty/stale-состояния во frontend'е.
 
 **Phase 14 complete (2026-08-14):** deployment & database durability (OPS-01..05, DB-05..07, DB-09..14) — см. запись в Current Milestone ниже. UAT 42/42, verification passed 5/5, security 94/97 closed + 3 medium ниже порога (threats_open: 0). Платформа впервые задеплоена на production VPS: реальный deploy+rollback, реальный PITR-бэкап в off-host репозиторий и restore drill выполнены и подтверждены оператором.
@@ -187,4 +189,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-17 after Phase 15*
+*Last updated: 2026-08-19 after Phase 16 (v1.1 milestone fully executed)*
