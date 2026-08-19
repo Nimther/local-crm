@@ -549,4 +549,38 @@ describe("real invocation: required environment is enforced before touching anyt
     expect(run.exitCode).not.toBe(0);
     expect(run.stderr).toMatch(/POSTGRES_PASSWORD/);
   });
+
+  // T-17-19: as of Phase 17 the drill launches the same CI-built GHCR image
+  // production runs, with no `:-local` fallback -- a missing tag must fail
+  // loudly before any container is created, not silently resurrect a stale
+  // host-built image.
+  it("fails loudly when POSTGRES_IMAGE_TAG is absent from MEGA_CRM_ENV_FILE, before any docker run", () => {
+    const scratch = makeScratch();
+    writeFileSync(
+      scratch.envFile,
+      "NODE_ENV=production\nPOSTGRES_PASSWORD=drill-test-password\nPOSTGRES_DB=mega_crm\nGHCR_IMAGE_BASE=ghcr.io/example-org\n",
+    );
+    const run = runCli([VALID_TARGET], { env: baseRealEnv(scratch) });
+
+    expect(run.exitCode).not.toBe(0);
+    expect(run.stderr).toMatch(/POSTGRES_IMAGE_TAG/);
+
+    const calls = callLines(scratch.logFile);
+    expect(calls.some((l) => l.startsWith("run -d"))).toBe(false);
+  });
+
+  it("fails loudly when GHCR_IMAGE_BASE is absent from MEGA_CRM_ENV_FILE, before any docker run", () => {
+    const scratch = makeScratch();
+    writeFileSync(
+      scratch.envFile,
+      "NODE_ENV=production\nPOSTGRES_PASSWORD=drill-test-password\nPOSTGRES_DB=mega_crm\nPOSTGRES_IMAGE_TAG=0000000000000000000000000000000000000000\n",
+    );
+    const run = runCli([VALID_TARGET], { env: baseRealEnv(scratch) });
+
+    expect(run.exitCode).not.toBe(0);
+    expect(run.stderr).toMatch(/GHCR_IMAGE_BASE/);
+
+    const calls = callLines(scratch.logFile);
+    expect(calls.some((l) => l.startsWith("run -d"))).toBe(false);
+  });
 });

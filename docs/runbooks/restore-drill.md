@@ -29,8 +29,8 @@ first.
 
 ## Prerequisites
 
-Confirm both of these **before** running the drill for real — the script
-does not (cannot, from the host) verify either one itself:
+Confirm all three of these **before** running the drill for real — the
+script does not (cannot, from the host) verify any of them itself:
 
 1. **At least one full backup and a span of WAL exist in the repository:**
    ```bash
@@ -50,6 +50,14 @@ does not (cannot, from the host) verify either one itself:
    `<TO BE RECORDED BY THE OPERATOR AT DRILL TIME>` — see this plan's own
    SUMMARY.md for the number actually observed during the drill that closed
    DB-10.
+3. **`GHCR_IMAGE_BASE` and `POSTGRES_IMAGE_TAG` are set** (normally via
+   `MEGA_CRM_ENV_FILE`, the same two variables `scripts/deploy.sh` and
+   production compose already use) **and the tag names a SHA whose
+   `<ghcr-base>/postgres:<sha>` image CI has actually published.** As of
+   Phase 17 the drill pulls the exact same CI-built image production runs,
+   not a host-built one, and there is no fallback: an unset variable makes
+   the script refuse to start, before creating any scratch container,
+   rather than silently falling back to a stale local image.
 
 ## How to run it
 
@@ -83,9 +91,16 @@ dry run is the operator's own independent confirmation.
 **Environment required for a real run:** `MEGA_CRM_ENV_FILE` (same file
 `scripts/deploy.sh` uses — the operator's real secrets, including
 `POSTGRES_PASSWORD`, which the restored cluster's own physical backup
-already carries, and the six `PGBACKREST_*` repository credentials
-`docs/runbooks/backups.md` documents). Nothing else needs to be exported by
-hand.
+already carries, the six `PGBACKREST_*` repository credentials
+`docs/runbooks/backups.md` documents, and `GHCR_IMAGE_BASE` /
+`POSTGRES_IMAGE_TAG` per prerequisite 3 above). Nothing else needs to be
+exported by hand.
+
+**`RESTORE_DRILL_METRICS_FILE`** (optional override, outside the repo working
+tree by the same `XDG_STATE_HOME`-under-`$HOME` convention the script's own
+row-count baseline file already uses): where the script appends its own
+self-recorded duration/disk-high-water history. Defaults to
+`${XDG_STATE_HOME:-$HOME/.local/state}/mega-crm/restore-drill-history.ndjson`.
 
 The verifier subprocess explicitly runs with `NODE_ENV=test` only while it
 connects to `127.0.0.1:${RESTORE_DRILL_SCRATCH_PORT:-55611}`. That is not a
@@ -118,9 +133,14 @@ checkpoint runs:
    is still there, production is still serving.
 7. Confirm the scratch container and volume were destroyed after the
    successful run (`docker ps -a`, `docker volume ls` should show neither).
-8. Record the wall-clock duration (the script's own `docker run`-to-ready
-   timing, printed inline) and the disk high-water mark observed during the
-   restore.
+8. As of Phase 17, the script records this step's figures itself: it prints
+   the restore-to-ready wall-clock duration and the scratch-PGDATA disk
+   high-water mark inline on stdout, and appends one JSON record per run to
+   `RESTORE_DRILL_METRICS_FILE` (default
+   `${XDG_STATE_HOME:-$HOME/.local/state}/mega-crm/restore-drill-history.ndjson`).
+   This happens on a successful run AND on a readiness-timeout run — the
+   operator's job is copying the printed figures into the drill record
+   below, not observing and writing them down live.
 9. Run the drill once more with a target **after** the marker and confirm
    the marker **IS** present — demonstrating both directions of target
    selection, not just one.
@@ -219,9 +239,14 @@ monthly cadence is deliberately more frequent than the two-week retention
 window backs up (`docs/runbooks/backups.md`): a drill against a target near
 the edge of that window is also an implicit check that the window itself
 is wide enough to be useful. Record each run's outcome (pass/fail, restore
-duration, disk high-water mark) somewhere durable — this plan's own
-SUMMARY.md is the record for the run that closed DB-10; later runs belong
-in an operational log, not a new planning document each time.
+duration, disk high-water mark) — as of Phase 17 the durable operational log
+this paragraph asks for already exists: every run's figures land
+automatically in `RESTORE_DRILL_METRICS_FILE`
+(`${XDG_STATE_HOME:-$HOME/.local/state}/mega-crm/restore-drill-history.ndjson`
+by default), including runs that time out. This plan's own SUMMARY.md is the
+record for the run that closed DB-10; later runs' pass/fail outcome still
+belongs in an operational log (now the history file itself, not a new
+planning document each time), not restated here.
 
 ## What this is not: the fresh-VPS disaster rehearsal (D-07's stretch variant)
 
@@ -296,7 +321,12 @@ independent of Docker — was rehearsed directly against a real pgBackRest
   flat JSON object for every real table.
 - **What was NOT verified locally, and remains this plan's own checkpoint
   task:** restoring against the REAL off-host S3 repository (rather than a
-  local filesystem one), the `docker run`-based scratch-container mechanism
-  `scripts/restore-drill.sh` itself uses (no Docker daemon in this
-  sandbox), the exact restore duration against the real production data
-  volume, and the real disk high-water mark on the real VPS.
+  local filesystem one), and the `docker run`-based scratch-container
+  mechanism `scripts/restore-drill.sh` itself uses (no Docker daemon in this
+  sandbox). The exact restore duration against the real production data
+  volume and the real disk high-water mark on the real VPS are still only
+  produced by a live run — as of Phase 17 the script records both figures
+  itself on every run (see "How to run it" and step 8 above), so they no
+  longer depend on an operator noticing and writing them down. As of Phase
+  17 the image under test is also the same CI-built, GHCR-published
+  `megacrm-postgres` image production runs, not a host-built one.

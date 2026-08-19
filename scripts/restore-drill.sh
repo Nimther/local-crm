@@ -332,7 +332,7 @@ print_dry_run() {
   echo "# Scratch container: $SCRATCH_CONTAINER_NAME -- Scratch volume: $SCRATCH_VOLUME_NAME (both distinct from every production service/volume name read from $COMPOSE_FILE)"
   echo "docker volume create $SCRATCH_VOLUME_NAME"
   echo "docker compose -f $COMPOSE_FILE exec -T db psql -U postgres -d \${POSTGRES_DB:-mega_crm} -tAc \"<row-count baseline query -- see restore-drill.sh's own baseline_query()>\" > $BASELINE_FILE"
-  echo "docker run -d --name $SCRATCH_CONTAINER_NAME -v $SCRATCH_VOLUME_NAME:/var/lib/postgresql/data -v $REPO_ROOT/$PGBACKREST_CONF:/etc/pgbackrest/pgbackrest.conf:ro --env-file \"\$MEGA_CRM_ENV_FILE\" -p 127.0.0.1:$SCRATCH_PORT:5432 --entrypoint /bin/bash megacrm-postgres:\${POSTGRES_IMAGE_TAG:-local} -c \"$restore_cmd\""
+  echo "docker run -d --name $SCRATCH_CONTAINER_NAME -v $SCRATCH_VOLUME_NAME:/var/lib/postgresql/data -v $REPO_ROOT/$PGBACKREST_CONF:/etc/pgbackrest/pgbackrest.conf:ro --env-file \"\$MEGA_CRM_ENV_FILE\" -p 127.0.0.1:$SCRATCH_PORT:5432 --entrypoint /bin/bash \${GHCR_IMAGE_BASE}/postgres:\${POSTGRES_IMAGE_TAG} -c \"$restore_cmd\""
   echo "docker exec $SCRATCH_CONTAINER_NAME pg_isready -U postgres   # polled, bounded by RESTORE_DRILL_READY_TIMEOUT_SECONDS (default 120s)"
   echo "docker exec $SCRATCH_CONTAINER_NAME du -sk /var/lib/postgresql/data   # polled alongside the readiness check; tracks the disk high-water mark"
   echo "NODE_ENV=test VERIFY_RESTORED_DATABASE_URL=postgresql://postgres:***@127.0.0.1:$SCRATCH_PORT/\${POSTGRES_DB:-mega_crm} npm run db:verify-restored --workspace=packages/db -- --baseline=$BASELINE_FILE --as-of=\"$target\""
@@ -378,6 +378,15 @@ run_real_drill() {
   # No apostrophe here either -- see check_required_env's own comment above.
   : "${POSTGRES_PASSWORD:?restore-drill.sh: POSTGRES_PASSWORD must be set in MEGA_CRM_ENV_FILE -- the restored clusters real postgres superuser password came back with the physical backup, and this is how the verifier authenticates as it.}"
 
+  # As of Phase 17 (T-17-19) the drill launches the same CI-built GHCR image
+  # production runs, not a host-built one -- a missing tag/base must fail
+  # loudly here rather than falling back to a stale local image, which would
+  # both invalidate the drills own result and reopen the T-14-88 surface
+  # Phase 17 closed. No apostrophe in either message -- same bash 3.2 rule as
+  # the two guards above.
+  : "${GHCR_IMAGE_BASE:?restore-drill.sh: GHCR_IMAGE_BASE must be set in MEGA_CRM_ENV_FILE -- as of Phase 17 the postgres image is pulled from GHCR rather than built on the host, see docker/prod.env.example.}"
+  : "${POSTGRES_IMAGE_TAG:?restore-drill.sh: POSTGRES_IMAGE_TAG must be set in MEGA_CRM_ENV_FILE -- as of Phase 17 the postgres image is pulled from GHCR rather than built on the host, see docker/prod.env.example.}"
+
   mkdir -p "$(dirname "$BASELINE_FILE")"
 
   echo "restore-drill.sh: creating scratch volume $SCRATCH_VOLUME_NAME"
@@ -402,7 +411,7 @@ run_real_drill() {
         --env-file "$MEGA_CRM_ENV_FILE" \
         -p "127.0.0.1:${SCRATCH_PORT}:5432" \
         --entrypoint /bin/bash \
-        "megacrm-postgres:${POSTGRES_IMAGE_TAG:-local}" \
+        "${GHCR_IMAGE_BASE}/postgres:${POSTGRES_IMAGE_TAG}" \
         -c "$restore_cmd" >/dev/null; then
     echo "restore-drill.sh: RESTORE FAILED to start -- scratch resources left in place for inspection." >&2
     print_cleanup_command >&2
