@@ -58,6 +58,16 @@ export default defineConfig({
             { name: "charts-vendor", test: /node_modules[\\/]recharts/ },
           ],
         },
+        // REQUIRED with `includeDependenciesRecursively: false` above: without
+        // it Rolldown emits vendor/route chunk pairs that statically import
+        // EACH OTHER (charts-vendor <-> WorkspaceDashboard, canvas-vendor <->
+        // FlowDetailPage), and whichever body executes first reads an
+        // uninitialized binding from the other -- both routes then crash at
+        // module evaluation ("TypeError: P is not a function"). Rolldown's own
+        // docs recommend this flag when includeDependenciesRecursively is
+        // disabled. Removing it re-breaks both routes; the cycle gate in
+        // scripts/check-web-chunks.mjs fails the build if that happens.
+        strictExecutionOrder: true,
       },
     },
   },

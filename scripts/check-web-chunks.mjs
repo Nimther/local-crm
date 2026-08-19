@@ -155,6 +155,23 @@ export function evaluateChunkBoundaries(manifest, webDir, { entryKey, entry }) {
  * also holds manifest keys). Returns the first cycle found as an array of
  * keys, closed (first element repeated last), for a readable report.
  */
+/**
+ * True when apps/web/vite.config.ts sets `strictExecutionOrder: true` in its
+ * (uncommented) source. A source-text check, not a build-output check: the
+ * flag's effect (runtime init helpers deferring module bodies) has no stable
+ * machine-readable signature in the emitted chunks, but the config line is
+ * the single point a regression would remove.
+ */
+export function viteConfigHasStrictExecutionOrder(webDir) {
+  const configFile = path.join(webDir, "vite.config.ts");
+  if (!existsSync(configFile)) return false;
+  const source = readFileSync(configFile, "utf8")
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("//"))
+    .join("\n");
+  return /strictExecutionOrder\s*:\s*true/.test(source);
+}
+
 export function findChunkImportCycle(manifest) {
   const WHITE = 0, GRAY = 1, BLACK = 2;
   const color = new Map(Object.keys(manifest).map((k) => [k, WHITE]));
@@ -218,9 +235,9 @@ function main() {
   const { violations, checkedCount } = evaluateChunkBoundaries(manifest, webDir, entryInfo);
 
   const cycle = findChunkImportCycle(manifest);
-  if (cycle) {
+  if (cycle && !viteConfigHasStrictExecutionOrder(webDir)) {
     violations.push(
-      `static chunk-import cycle in the build manifest: ${cycle.join(" -> ")} -- chunks in a cycle execute against uninitialized bindings and crash their route at module evaluation (set rollupOptions.output.strictExecutionOrder: true in apps/web/vite.config.ts).`,
+      `static chunk-import cycle in the build manifest WITHOUT strictExecutionOrder: ${cycle.join(" -> ")} -- chunks in a cycle execute against uninitialized bindings and crash their route at module evaluation (TypeError at module scope; this shipped to production 2026-08-15..19). Cycles are tolerable ONLY under rollupOptions.output.strictExecutionOrder: true in apps/web/vite.config.ts, which defers module bodies with runtime init helpers.`,
     );
   }
 
