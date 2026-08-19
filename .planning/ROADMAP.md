@@ -777,7 +777,7 @@ Phase 9 has no dependents and may be scheduled in parallel at any point after Ph
 **Requirements**: TBD (none mapped — closes named tech-debt/review findings, not REQUIREMENTS.md rows; scope authority is 17-CONTEXT.md's decisions D-01…D-12)
 **Depends on:** Phase 16
 **UI hint**: no
-**Plans:** 5/6 plans executed
+**Plans:** 6/6 plans executed
 
 Plans:
 **Wave 1**
@@ -796,7 +796,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 17-06-PLAN.md — SPECIFICATION.md as-built trail + register evidence staged for the auditor pass (D-10, D-12)
+- [x] 17-06-PLAN.md — SPECIFICATION.md as-built trail + register evidence staged for the auditor pass (D-10, D-12)
 
 ---
 *Roadmap for v1.1 created: 2026-07-27*
