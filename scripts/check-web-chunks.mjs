@@ -137,6 +137,57 @@ export function evaluateChunkBoundaries(manifest, webDir, { entryKey, entry }) {
   return { violations, checkedCount };
 }
 
+/**
+ * Finds a static chunk-import cycle in the build manifest, or returns null.
+ *
+ * Why this gate exists: with `advancedChunks.includeDependenciesRecursively:
+ * false` (vite.config.ts), Rolldown can emit a vendor chunk and a route chunk
+ * that statically import EACH OTHER (charts-vendor <-> WorkspaceDashboard,
+ * canvas-vendor <-> FlowDetailPage). The chunk whose body runs first then
+ * reads a binding the other chunk has not initialized yet, and the route
+ * crashes at module evaluation ("TypeError: P is not a function") -- a
+ * failure mode the boundary checks above cannot see, because the boundaries
+ * themselves all hold. Production shipped exactly this for four days
+ * (2026-08-15..19); a cycle in the manifest graph is the machine-checkable
+ * signature.
+ *
+ * Nodes are manifest keys; edges are each record's `imports` array (which
+ * also holds manifest keys). Returns the first cycle found as an array of
+ * keys, closed (first element repeated last), for a readable report.
+ */
+export function findChunkImportCycle(manifest) {
+  const WHITE = 0, GRAY = 1, BLACK = 2;
+  const color = new Map(Object.keys(manifest).map((k) => [k, WHITE]));
+  const stack = [];
+
+  function visit(key) {
+    color.set(key, GRAY);
+    stack.push(key);
+    for (const dep of manifest[key]?.imports ?? []) {
+      if (!(dep in manifest)) continue;
+      const c = color.get(dep);
+      if (c === GRAY) {
+        return [...stack.slice(stack.indexOf(dep)), dep];
+      }
+      if (c === WHITE) {
+        const cycle = visit(dep);
+        if (cycle) return cycle;
+      }
+    }
+    stack.pop();
+    color.set(key, BLACK);
+    return null;
+  }
+
+  for (const key of Object.keys(manifest)) {
+    if (color.get(key) === WHITE) {
+      const cycle = visit(key);
+      if (cycle) return cycle;
+    }
+  }
+  return null;
+}
+
 function isDirectInvocation() {
   const entryArg = process.argv[1];
   if (!entryArg) return false;
@@ -165,6 +216,13 @@ function main() {
   }
 
   const { violations, checkedCount } = evaluateChunkBoundaries(manifest, webDir, entryInfo);
+
+  const cycle = findChunkImportCycle(manifest);
+  if (cycle) {
+    violations.push(
+      `static chunk-import cycle in the build manifest: ${cycle.join(" -> ")} -- chunks in a cycle execute against uninitialized bindings and crash their route at module evaluation (set rollupOptions.output.strictExecutionOrder: true in apps/web/vite.config.ts).`,
+    );
+  }
 
   if (violations.length > 0) {
     console.error(`check:web-chunks -- ${checkedCount} boundary(ies) checked, ${violations.length} violation(s):`);
