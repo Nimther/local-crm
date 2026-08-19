@@ -134,11 +134,11 @@
 
 Выпускной барьер milestone. Аккаунт и verified sender доступны — это не отложенный tech debt.
 
-- [ ] **UAT-01**: Live-отправка с BYO key через Dynamic Template подтверждена
-- [ ] **UAT-02**: Live-события delivered / opened / clicked / bounced подтверждены
-- [ ] **UAT-03**: Проверка подписи webhook подтверждена на реальном подписанном payload через полный HTTP-стек
-- [ ] **UAT-04**: Дедупликация повторно доставленных событий подтверждена live
-- [ ] **UAT-05**: Поведение при 429 и временных ошибках SendGrid подтверждено live
+- [x] **UAT-01**: Live-отправка с BYO key через Dynamic Template подтверждена
+- [x] **UAT-02**: Live-события delivered / opened / clicked / bounced подтверждены
+- [x] **UAT-03**: Проверка подписи webhook подтверждена на реальном подписанном payload через полный HTTP-стек
+- [x] **UAT-04**: Дедупликация повторно доставленных событий подтверждена live
+- [x] **UAT-05**: Поведение при 429 и временных ошибках SendGrid подтверждено live
 
 ## Future Requirements
 
@@ -262,11 +262,11 @@
 | OPS-17 | Phase 15 | Complete |
 | OPS-18 | Phase 15 | Complete |
 | OPS-19 | Phase 15 | Complete |
-| UAT-01 | Phase 16 | Pending |
-| UAT-02 | Phase 16 | Pending |
-| UAT-03 | Phase 16 | Pending |
-| UAT-04 | Phase 16 | Pending |
-| UAT-05 | Phase 16 | Pending |
+| UAT-01 | Phase 16 | Complete |
+| UAT-02 | Phase 16 | Complete |
+| UAT-03 | Phase 16 | Complete |
+| UAT-04 | Phase 16 | Complete |
+| UAT-05 | Phase 16 | Complete |
 
 ### Phase Summary
 

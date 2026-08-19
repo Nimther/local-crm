@@ -4,17 +4,17 @@ milestone: v1.1
 milestone_name: Production Hardening
 current_phase: 16
 current_phase_name: Live SendGrid Verification
-status: executing
-stopped_at: Completed 16-06-PLAN.md
-last_updated: "2026-08-18T15:26:15+05:00"
-last_activity: 2026-08-18
-last_activity_desc: Completed Phase 16 plan 06 live 429/timeout recovery UAT
+status: complete
+stopped_at: Completed 16-07-PLAN.md — Phase 16 complete, milestone v1.1 fully executed
+last_updated: "2026-08-19T05:26:58.238Z"
+last_activity: 2026-08-19
+last_activity_desc: Phase 16 Task 3 checkpoint approved — Phase 16 complete, milestone v1.1 fully executed
 progress:
   total_phases: 9
-  completed_phases: 8
+  completed_phases: 9
   total_plans: 122
-  completed_plans: 121
-  percent: 89
+  completed_plans: 122
+  percent: 100
 ---
 
 # Project State
@@ -28,12 +28,12 @@ See: .planning/PROJECT.md (updated 2026-08-17)
 
 ## Current Position
 
-Milestone: v1.1 Production Hardening (Phases 8-16, 95 requirements)
-Phase: 16 (Live SendGrid Verification) — EXECUTING
-Plan: 6 of 7
-Status: Executing Phase 16
-Last activity: 2026-08-18 — Completed 16-06 live 429/timeout recovery UAT
-Progress: [████████████████████] 121/122 plans (99%) — 8/9 v1.1 phases complete (8–15), final UAT report pending in 16-07
+Milestone: v1.1 Production Hardening (Phases 8-16, 95 requirements) — COMPLETE
+Phase: 16 (Live SendGrid Verification) — COMPLETE
+Plan: 7 of 7
+Status: Phase 16 complete; milestone v1.1 fully executed
+Last activity: 2026-08-19 — Phase 16 Task 3 checkpoint approved (teardown 5/5, canary smoke 1/1); Phase 16 closed at five-of-five live UAT passes
+Progress: [██████████] 122/122 plans (100%) — 9/9 v1.1 phases complete (8–16)
 
 ✓ **Deadline closed (2026-08-07):** Phase 9 (DB-01/DB-02 partition automation) completed ahead of the hard **2026-09-01** deadline — 20 attached monthly partitions (2026-09…2027-06) confirmed by catalog query against a migrated database.
 
@@ -194,6 +194,7 @@ All 14 phase-14 plans now have committed SUMMARYs (14-01 through 14-14, includin
 | Phase 11 P09 | 75min | 3 tasks | 9 files |
 | Phase 11-delivery-correctness P10 | ~70min | 3 tasks | 11 files |
 | Phase 11 P11 | 50min | 3 tasks | 10 files |
+| Phase 16 P07 | 4min | 3 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -297,6 +298,7 @@ Full decision log for v1.0 lives in PROJECT.md (Key Decisions) and the archived 
 - [Phase 16]: Keep the UAT fault proxy one-shot, workspace-targeted and internal-only; 429 never forwards while timeout always forwards once before delaying the response. — Reversing either branch creates the duplicate/lost-mail defect UAT-05 exists to detect.
 - [Phase 16]: Preflight frequency-cap headroom for every live fault leg and restore any UAT-only temporary change. — The pre-send gate runs before the proxy, so an excluded campaign cannot exercise the armed fault.
 - [Phase 16]: Start temporary proxy/worker services with compose --no-deps. — A UAT-only worker restart must not recreate production DB or Redis dependencies.
+- [Phase ?]: Phase 16 Task 3 blocking checkpoint approved 2026-08-19: teardown 5/5 verified by observation, standing-canary smoke 1/1 delivered (send 6fadec0b, provider oIDnKGNTSO). Phase 16 closed at five-of-five live UAT passes (D-16); milestone v1.1 fully executed.
 
 ### Pending Todos
 
@@ -353,13 +355,15 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-18T09:08:14.776Z
-Stopped at: Completed 16-06-PLAN.md
+Last session: 2026-08-19T05:26:58.170Z
+Stopped at: Completed 16-07-PLAN.md — Phase 16 complete, milestone v1.1 fully executed
 Resume file: None
 
 ## Operator Next Steps
 
+- **Phase 16 complete (2026-08-19): 7/7 plans, UAT 5/5 live passes (UAT-01..05), Task 3 blocking checkpoint approved** — teardown 5/5 verified by observation, standing-canary smoke 1/1 delivered, production carries no residue of the UAT session. See 16-UAT-REPORT.md and 16-07-SUMMARY.md.
+- **Milestone v1.1 Production Hardening (Phases 8-16) is now fully executed** (122/122 plans, 9/9 phases complete). Next step is milestone-level closeout (e.g. `/gsd-complete-milestone`), not further Phase 16 work.
 - Phase 15 complete (2026-08-17): 22/22 plans (18 scoped + 4 gap-closure), UAT 5/5 passed (G-15-4 alloy-config gap closed by plan 15-22, live redeploy of the committed config confirmed), verification passed, security verified (threats_open: 0)
 - Known operational item carried from Phase 12: `npm run db:migrate` (drizzle-kit CLI) hangs in the dev sandbox under Node v26 — migrations proven via test:migrations but not applied to the dev DB
-- Next: execute `16-07-PLAN.md` — final UAT report, standing-canary procedure and teardown re-verification
-- Branch note: per convention Phase 16 starts a new `gsd/phase-16-{slug}` branch (Phase 15 branch: `gsd/phase-15-observability-alerting-frontend-resilience`)
+- Residual items carried past Phase 16 close (not blockers): historical 16-01/16-02 workspace's continued existence not independently checked; an unconfirmed flow-editor UI error-boundary observation from an earlier interrupted session has no evidence artifact and is out of Phase 16's evidence-only scope.
+- Branch note: per convention Phase 16 used branch `gsd/phase-16-live-sendgrid-verification` (Phase 15 branch: `gsd/phase-15-observability-alerting-frontend-resilience`)

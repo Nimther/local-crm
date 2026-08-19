@@ -38,7 +38,7 @@ Full phase details: [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md)
 - [x] **Phase 13: Compliance & Analytics Integrity** - Consent and delivery numbers mean exactly what they claim (completed 2026-08-12)
 - [x] **Phase 14: Deployment & Database Durability** - Reproducible deploy, gated migrations, rehearsed restore, enforced constraints (completed 2026-08-14)
 - [x] **Phase 15: Observability, Alerting & Frontend Resilience** - The system reports its true state to operators and to users (completed 2026-08-17)
-- [ ] **Phase 16: Live SendGrid Verification** - Every delivery guarantee confirmed against the real provider (release barrier)
+- [x] **Phase 16: Live SendGrid Verification** - Every delivery guarantee confirmed against the real provider (release barrier) (completed 2026-08-19)
 
 ## Phase Details
 
@@ -670,7 +670,7 @@ Plans:
   3. A genuinely signed SendGrid webhook payload passes signature verification through the full HTTP stack, and a redelivery of that same payload is counted exactly once.
   4. A real SendGrid 429 or transient error defers only the affected tenant's sends and resolves without duplicate or lost mail.
 
-**Plans**: 6/7 plans executed
+**Plans**: 7/7 plans executed
 
 Plans:
 **Wave 1**
@@ -693,7 +693,7 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 16-07-PLAN.md — UAT report, standing-canary procedure, teardown verification (UAT-01..05)
+- [x] 16-07-PLAN.md — UAT report, standing-canary procedure, teardown verification (UAT-01..05)
 
 **Why UAT is its own final phase (deliberate decision):**
 
@@ -769,7 +769,7 @@ Phase 9 has no dependents and may be scheduled in parallel at any point after Ph
 | 13. Compliance & Analytics Integrity | v1.1 | 16/16 | Complete    | 2026-08-12 |
 | 14. Deployment & Database Durability | v1.1 | 14/14 | Complete    | 2026-08-14 |
 | 15. Observability, Alerting & Frontend Resilience | v1.1 | 22/22 | Complete    | 2026-08-17 |
-| 16. Live SendGrid Verification | v1.1 | 5/7 | In Progress|  |
+| 16. Live SendGrid Verification | v1.1 | 7/7 | In Progress|  |
 
 ---
 *Roadmap for v1.1 created: 2026-07-27*
