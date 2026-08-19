@@ -777,14 +777,14 @@ Phase 9 has no dependents and may be scheduled in parallel at any point after Ph
 **Requirements**: TBD (none mapped — closes named tech-debt/review findings, not REQUIREMENTS.md rows; scope authority is 17-CONTEXT.md's decisions D-01…D-12)
 **Depends on:** Phase 16
 **UI hint**: no
-**Plans:** 6 plans
+**Plans:** 3/6 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 17-01-PLAN.md — Pin `TimeZone=UTC` in the mandatory pool factory, proven against an America/New_York database (D-01, D-02)
-- [ ] 17-02-PLAN.md — Double-hop UTC anchor on the dashboard growth query + D-03 sweep audit (D-01, D-03, D-04)
-- [ ] 17-03-PLAN.md — CI-build and GHCR-publish the postgres image; bring `db`/`pgbackrest` inside the immutable-tag gate (D-05, D-06)
+- [x] 17-01-PLAN.md — Pin `TimeZone=UTC` in the mandatory pool factory, proven against an America/New_York database (D-01, D-02)
+- [x] 17-02-PLAN.md — Double-hop UTC anchor on the dashboard growth query + D-03 sweep audit (D-01, D-03, D-04)
+- [x] 17-03-PLAN.md — CI-build and GHCR-publish the postgres image; bring `db`/`pgbackrest` inside the immutable-tag gate (D-05, D-06)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
