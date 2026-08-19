@@ -777,7 +777,7 @@ Phase 9 has no dependents and may be scheduled in parallel at any point after Ph
 **Requirements**: TBD (none mapped — closes named tech-debt/review findings, not REQUIREMENTS.md rows; scope authority is 17-CONTEXT.md's decisions D-01…D-12)
 **Depends on:** Phase 16
 **UI hint**: no
-**Plans:** 3/6 plans executed
+**Plans:** 4/6 plans executed
 
 Plans:
 **Wave 1**
@@ -788,7 +788,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 17-04-PLAN.md — Restore-drill self-records duration + disk high-water; drill launches the CI-built image (D-09)
+- [x] 17-04-PLAN.md — Restore-drill self-records duration + disk high-water; drill launches the CI-built image (D-09)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
