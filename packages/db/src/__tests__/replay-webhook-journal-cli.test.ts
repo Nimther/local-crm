@@ -1,3 +1,4 @@
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
@@ -29,7 +30,7 @@ import { writeIngressJournal, markIngestionComplete } from "../webhooks/ingress-
 const MIGRATIONS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../migrations");
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
 const SCRIPT_PATH = path.resolve(PROJECT_ROOT, "packages/db/scripts/replay-webhook-journal.ts");
-const SCRATCHPAD = "/private/tmp/claude-501/-Users-primeropanther-Projects-mega-crm/0c8bf52d-9c86-49b1-bfe6-708fab645d4e/scratchpad";
+const SCRATCHPAD = fs.mkdtempSync(path.join(os.tmpdir(), "replay-webhook-journal-cli-"));
 
 function adminDsnForDatabase(adminDsn: string, databaseName: string): string {
   const url = new URL(adminDsn);
@@ -61,20 +62,13 @@ describe("replay-webhook-journal.ts CLI (CMP-08, D-06, plan 13-06)", () => {
     // Create an empty .env file in scratchpad to avoid loading the real env
     emptyEnvFile = path.join(SCRATCHPAD, `.env.replay-test.${Date.now()}`);
     fs.writeFileSync(emptyEnvFile, "");
-
-    // Ensure scratchpad directory exists
-    if (!fs.existsSync(SCRATCHPAD)) {
-      fs.mkdirSync(SCRATCHPAD, { recursive: true });
-    }
   }, 60_000);
 
   afterAll(async () => {
     await pool?.end();
     await adminPool?.end();
     if (databaseName) await dropEphemeralDatabase(databaseName, adminDsn);
-    if (emptyEnvFile && fs.existsSync(emptyEnvFile)) {
-      fs.unlinkSync(emptyEnvFile);
-    }
+    fs.rmSync(SCRATCHPAD, { recursive: true, force: true });
   });
 
   async function freshWorkspaceId(nameSeed: string): Promise<string> {
