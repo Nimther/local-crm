@@ -1,8 +1,12 @@
 # Fixture for scripts/validate-prod-compose.mjs's test suite: `pgbackrest`
 # publishes a port -- only `web` may (T-14-43).
+#
+# Phase 17 plan 03: image tag is a literal SHA-shaped placeholder, never a
+# compose variable reference -- see pgbackrest-missing-data-volume.yml's
+# own comment for why.
 services:
   pgbackrest:
-    image: megacrm-postgres:local
+    image: ghcr.io/example/repo/postgres:0000000000000000000000000000000000000000
     mem_limit: 256m
     ports:
       - "8432:8432"

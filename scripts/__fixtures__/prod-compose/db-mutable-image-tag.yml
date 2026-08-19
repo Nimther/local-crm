@@ -1,0 +1,11 @@
+# Fixture: `db`'s image carries the mutable `:latest` tag instead of the
+# CI-published immutable SHA tag (Phase 17 plan 03, D-05, closing
+# T-14-58/T-14-88) -- the executable form of T-14-88. Before "db" joins
+# FIRST_PARTY_IMAGE_SERVICES the gate never inspects db's tag at all, so
+# this fixture is expected to trip nothing until that set membership change
+# lands (see the RED step recorded in 17-03-SUMMARY.md).
+services:
+  db:
+    image: ghcr.io/example/repo/postgres:latest
+    mem_limit: 2048m
+    oom_score_adj: -500

@@ -269,21 +269,36 @@ a follow-up for a future phase if the risk profile changes.
 
 ## Forward flags for later plans
 
-- **`docker/postgres/Dockerfile`/`docker/pgbackrest/pgbackrest.conf` are NOT
-  built by `.github/workflows/images.yml`** — `db`/`pgbackrest` build the
-  custom `megacrm-postgres` image locally (`docker compose build db
-  pgbackrest`), not from a GHCR-published, SHA-tagged image the way
-  `api`/`worker`/`web` are. This was a deliberate choice (the image changes
-  rarely — an OS package layer, not application code — and extending the CI
-  matrix plus `scripts/validate-prod-compose.mjs`'s
-  `FIRST_PARTY_IMAGE_SERVICES` immutable-tag check was judged out of this
-  plan's own declared file scope), not an oversight. Operator consequence:
-  `scripts/deploy.sh`'s own `docker compose pull api worker web` never
-  rebuilds this image — run `docker compose -f docker/docker-compose.prod.yml
-  build db pgbackrest` by hand after any change to
-  `docker/postgres/Dockerfile` or `docker/pgbackrest/pgbackrest.conf`,
-  BEFORE the next deploy. Revisit if this image starts changing often enough
-  for that manual step to become a real operational risk.
+- **SUPERSEDED by Phase 17 plan 03 (D-05, D-06, closing T-14-58/T-14-88).**
+  The bullet below described the model from Phase 14 plan 10 through Phase
+  16; it no longer applies and is kept only as a decision-trail record, not
+  as current operator guidance:
+  > ~~`docker/postgres/Dockerfile`/`docker/pgbackrest/pgbackrest.conf` are
+  > NOT built by `.github/workflows/images.yml`~~ — `db`/`pgbackrest` build
+  > the custom `megacrm-postgres` image locally (`docker compose build db
+  > pgbackrest`), not from a GHCR-published, SHA-tagged image the way
+  > `api`/`worker`/`web` are. This was a deliberate choice (the image
+  > changes rarely — an OS package layer, not application code — and
+  > extending the CI matrix plus `scripts/validate-prod-compose.mjs`'s
+  > `FIRST_PARTY_IMAGE_SERVICES` immutable-tag check was judged out of that
+  > plan's own declared file scope), not an oversight.
+
+  As of Phase 17 plan 03, the image **is** built and pushed by
+  `.github/workflows/images.yml`'s `build-and-push-postgres` job on every
+  push to master, tagged with the same git SHA as the application images
+  (`api`/`worker`/`web`). `docker/docker-compose.prod.yml`'s `db` and
+  `pgbackrest` services now reference
+  `${GHCR_IMAGE_BASE}/postgres:${POSTGRES_IMAGE_TAG}` with no `build:`
+  section and no mutable-tag fallback; production pulls the image and never
+  builds it. `db` and `pgbackrest` are inside
+  `scripts/validate-prod-compose.mjs`'s `FIRST_PARTY_IMAGE_SERVICES`
+  immutable-tag gate (proven by the `db-mutable-image-tag.yml` fixture).
+  Operator consequence: after a `docker/postgres/Dockerfile` change, merge
+  to master, wait for CI's `build-and-push-postgres` job to publish the new
+  image, then set `POSTGRES_IMAGE_TAG` to that commit's SHA and run the
+  `db`/`pgbackrest` cutover sequence — a deliberate, human-gated event, NOT
+  part of `scripts/deploy.sh`'s routine `pull api worker web` / `up -d web
+  api` / `up -d worker` sequence, which is unchanged by this plan.
 - **Plan 14-11 (DB-10)** owns the restore drill and its own runbook —
   cross-reference from here once it exists, do not duplicate.
 - **Plan 14-12** consumes the retention window recorded above as the

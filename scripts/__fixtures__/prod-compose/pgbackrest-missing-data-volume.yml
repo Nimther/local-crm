@@ -1,9 +1,15 @@
 # Fixture for scripts/validate-prod-compose.mjs's test suite: `pgbackrest`
 # does not mount db's own data volume -- it would have no access to the
 # cluster directory it exists to back up (T-14-62).
+#
+# Phase 17 plan 03: image tag is a literal SHA-shaped placeholder, never a
+# compose variable reference -- fixtures resolve with an empty env map, so
+# an unresolved variable becomes the empty tag, which is itself in
+# MUTABLE_TAG_NAMES and would conflate this fixture's own targeted
+# violation with an unrelated mutable-image-tag one.
 services:
   pgbackrest:
-    image: megacrm-postgres:local
+    image: ghcr.io/example/repo/postgres:0000000000000000000000000000000000000000
     mem_limit: 256m
     volumes:
       - some_other_volume:/var/lib/postgresql/data:ro
