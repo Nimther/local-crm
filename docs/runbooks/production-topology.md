@@ -263,7 +263,7 @@ service declares that profile, so a plain `docker compose up` never starts
 it. The deploy script (plan 14-09) invokes it explicitly:
 
 ```bash
-docker compose -f docker/docker-compose.prod.yml run --rm migrate
+docker compose -f docker/docker-compose.prod.yml run --rm --no-deps migrate
 ```
 
 `docker compose run` targets a named service **regardless of its profile

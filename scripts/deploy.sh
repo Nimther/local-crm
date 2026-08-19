@@ -293,13 +293,13 @@ printf '%s' "\$PREV_SHA" > "$RECORD_FILE"
 node scripts/validate-kek-file.mjs /etc/mega-crm/kek
 docker compose -f $COMPOSE_FILE pull api worker web
 npm run build -w apps/worker && node scripts/print-stop-grace-period.mjs
-docker compose -f $COMPOSE_FILE run --rm migrate
-docker compose -f $COMPOSE_FILE up -d web api
+docker compose -f $COMPOSE_FILE run --rm --no-deps migrate
+docker compose -f $COMPOSE_FILE up -d --no-deps web api
 docker compose -f $COMPOSE_FILE exec -T api node -e "$READYZ_PROBE_JS"
 docker compose -f $COMPOSE_FILE exec -T web ${WEB_READY_PROBE_CMD[@]}
 docker compose -f $COMPOSE_FILE stop --timeout \$WORKER_STOP_GRACE_PERIOD_SECONDS worker
 docker compose -f $COMPOSE_FILE ps -q --status=running worker
-docker compose -f $COMPOSE_FILE up -d worker
+docker compose -f $COMPOSE_FILE up -d --no-deps worker
 docker inspect --format '{{.State.Health.Status}}' \$(docker compose -f $COMPOSE_FILE ps -q worker)
 printf '%s' "$target" > "$RECORD_FILE"
 EOF
@@ -363,14 +363,14 @@ run_real_deploy() {
   export WORKER_STOP_GRACE_PERIOD_SECONDS="$worker_stop_grace_period_seconds"
 
   echo "deploy.sh: running the one-shot migrate step"
-  if ! compose run --rm migrate; then
+  if ! compose run --rm --no-deps migrate; then
     echo "deploy.sh: MIGRATE FAILED -- aborting before any application container is replaced. The previous version ($prev_sha) is still serving." >&2
     print_rollback_command "$prev_sha"
     exit 1
   fi
 
   echo "deploy.sh: bringing up web and api"
-  compose up -d web api
+  compose up -d --no-deps web api
 
   echo "deploy.sh: waiting for api readiness (/readyz)"
   if ! wait_for_api_ready; then
@@ -396,7 +396,7 @@ run_real_deploy() {
       exit 1
     fi
 
-    compose up -d worker
+    compose up -d --no-deps worker
 
     if ! wait_for_worker_healthy; then
       echo "deploy.sh: READINESS TIMEOUT waiting for service 'worker' (new container) to report healthy after $(( WORKER_STOP_GRACE_PERIOD_SECONDS + WORKER_READY_MARGIN_SECONDS ))s -- investigate; api is already serving $target." >&2
