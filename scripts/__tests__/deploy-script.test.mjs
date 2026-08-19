@@ -443,3 +443,45 @@ describe("distinct SHAs are treated as genuinely different deploys", () => {
     expect(readFileSync(scratch.recordFile, "utf8")).toBe(OTHER_SHA);
   });
 });
+
+describe("leg isolation: deploying apps never recreates db/redis", () => {
+  // Found live during phase 17-05 attempt 3 (2026-08-19): with the checked-out
+  // compose file describing `db` with a NEW image, `compose up -d web api`
+  // WITHOUT --no-deps recreates db and redis as dependency convergence -- an
+  // implicit, ungated database cutover buried inside an app deploy. deploy.sh's
+  // documented compose surface is api/worker/web only (by design); --no-deps on
+  // every mutating invocation is what actually enforces that contract.
+  it("every mutating compose invocation carries --no-deps in the real deploy", () => {
+    const scratch = makeScratch();
+    const run = runCli([VALID_SHA], { env: baseRealEnv(scratch) });
+    expect(run.exitCode).toBe(0);
+
+    const calls = callLines(scratch.logFile);
+    expect(calls.some((l) => l.includes("run --rm --no-deps migrate"))).toBe(true);
+    expect(calls.some((l) => l.includes("up -d --no-deps web api"))).toBe(true);
+    expect(calls.some((l) => l.trim().endsWith("up -d --no-deps worker"))).toBe(true);
+    // no bare form may remain anywhere -- a single one reintroduces the hazard
+    expect(calls.some((l) => l.includes("run --rm migrate"))).toBe(false);
+    expect(calls.some((l) => l.includes("up -d web api"))).toBe(false);
+    expect(calls.some((l) => l.trim().endsWith("up -d worker"))).toBe(false);
+  });
+
+  it("the printed --dry-run plan tells the operator the same --no-deps truth", () => {
+    const scratch = makeScratch();
+    const run = runCli(["--dry-run", VALID_SHA], {
+      env: { MEGA_CRM_DEPLOY_STATE_FILE: scratch.recordFile },
+    });
+    expect(run.exitCode).toBe(0);
+
+    const lines = run.stdout
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0 && !l.startsWith("#"));
+    expect(lines.some((l) => l.includes("run --rm --no-deps migrate"))).toBe(true);
+    expect(lines.some((l) => l.includes("up -d --no-deps web api"))).toBe(true);
+    expect(lines.some((l) => l.trim().endsWith("up -d --no-deps worker"))).toBe(true);
+    expect(lines.some((l) => l.includes("run --rm migrate"))).toBe(false);
+    expect(lines.some((l) => l.includes("up -d web api"))).toBe(false);
+    expect(lines.some((l) => l.trim().endsWith("up -d worker"))).toBe(false);
+  });
+});
