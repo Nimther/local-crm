@@ -69,6 +69,17 @@ SCRATCH_PORT="${RESTORE_DRILL_SCRATCH_PORT:-55611}"
 # lying around in the repo.
 BASELINE_FILE="${RESTORE_DRILL_BASELINE_FILE:-${XDG_STATE_HOME:-$HOME/.local/state}/mega-crm/restore-drill-baseline.json}"
 
+# Same XDG_STATE_HOME-under-$HOME convention as BASELINE_FILE above -- one
+# NDJSON line appended per run (T-17-18, closes T-14-73's root cause: the
+# duration/disk figures no longer depend on an operator noticing and
+# recording them).
+METRICS_FILE="${RESTORE_DRILL_METRICS_FILE:-${XDG_STATE_HOME:-$HOME/.local/state}/mega-crm/restore-drill-history.ndjson}"
+
+# Script-level accumulator, declared at top level (NOT `local`) so its value
+# survives wait_for_scratch_ready returning. Reset implicitly per invocation
+# -- each run of this script performs exactly one drill.
+DRILL_DISK_HIGH_WATER_KB=0
+
 READY_TIMEOUT_SECONDS="${RESTORE_DRILL_READY_TIMEOUT_SECONDS:-120}"
 READY_POLL_INTERVAL_SECONDS="${RESTORE_DRILL_READY_POLL_INTERVAL_SECONDS:-3}"
 
@@ -246,15 +257,54 @@ print_cleanup_command() {
   echo "restore-drill.sh: clean up the scratch resources by hand with: docker rm -f $SCRATCH_CONTAINER_NAME; docker volume rm $SCRATCH_VOLUME_NAME"
 }
 
+# Samples the scratch container's own PGDATA disk usage IN-CONTAINER (never
+# via the volume's host-side mountpoint -- RESEARCH.md Pitfall 5, same reason
+# wait_for_scratch_ready already uses `docker exec ... pg_isready` rather
+# than a host-level check) and updates the script-level high-water
+# accumulator when the sample is larger. Guarded so a sampling failure can
+# NEVER abort the drill: `set -Eeuo pipefail` is active and this is a
+# pipeline inside a command substitution, so the substitution's own exit
+# status is neutralised with a trailing `|| true` on the assignment itself
+# (not merely inside the substitution) -- an empty or non-numeric result is
+# treated as "no sample", never as an error.
+record_disk_sample() {
+  local sample_kb
+  sample_kb=""
+  sample_kb="$(docker exec "$SCRATCH_CONTAINER_NAME" du -sk /var/lib/postgresql/data 2>/dev/null | cut -f1)" || true
+  if [[ "$sample_kb" =~ ^[0-9]+$ ]] && (( sample_kb > DRILL_DISK_HIGH_WATER_KB )); then
+    DRILL_DISK_HIGH_WATER_KB="$sample_kb"
+  fi
+  return 0
+}
+
+# Appends one single-line JSON record to $METRICS_FILE and echoes a
+# human-readable line naming both figures -- called on BOTH the
+# readiness-timeout branch and the success branch of run_real_drill (T-17-18):
+# a drill's resource envelope is most interesting exactly when it fails.
+write_drill_metrics() {
+  local target="$1"
+  local outcome="$2"
+  local duration_seconds="$3"
+
+  mkdir -p "$(dirname "$METRICS_FILE")"
+  printf '{"target":"%s","outcome":"%s","durationSeconds":%d,"diskHighWaterKb":%d,"recordedAt":"%s"}\n' \
+    "$target" "$outcome" "$duration_seconds" "$DRILL_DISK_HIGH_WATER_KB" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    >> "$METRICS_FILE"
+  echo "restore-drill.sh: recorded drill metrics -- duration: ${duration_seconds}s, disk high-water (scratch PGDATA): ${DRILL_DISK_HIGH_WATER_KB}KB (target=$target, outcome=$outcome, history=$METRICS_FILE)."
+}
+
 wait_for_scratch_ready() {
   local waited=0
   while (( waited < READY_TIMEOUT_SECONDS )); do
+    record_disk_sample
     if docker exec "$SCRATCH_CONTAINER_NAME" pg_isready -U postgres >/dev/null 2>&1; then
+      record_disk_sample
       return 0
     fi
     sleep "$READY_POLL_INTERVAL_SECONDS"
     waited=$(( waited + READY_POLL_INTERVAL_SECONDS ))
   done
+  record_disk_sample
   return 1
 }
 
@@ -284,7 +334,9 @@ print_dry_run() {
   echo "docker compose -f $COMPOSE_FILE exec -T db psql -U postgres -d \${POSTGRES_DB:-mega_crm} -tAc \"<row-count baseline query -- see restore-drill.sh's own baseline_query()>\" > $BASELINE_FILE"
   echo "docker run -d --name $SCRATCH_CONTAINER_NAME -v $SCRATCH_VOLUME_NAME:/var/lib/postgresql/data -v $REPO_ROOT/$PGBACKREST_CONF:/etc/pgbackrest/pgbackrest.conf:ro --env-file \"\$MEGA_CRM_ENV_FILE\" -p 127.0.0.1:$SCRATCH_PORT:5432 --entrypoint /bin/bash megacrm-postgres:\${POSTGRES_IMAGE_TAG:-local} -c \"$restore_cmd\""
   echo "docker exec $SCRATCH_CONTAINER_NAME pg_isready -U postgres   # polled, bounded by RESTORE_DRILL_READY_TIMEOUT_SECONDS (default 120s)"
+  echo "docker exec $SCRATCH_CONTAINER_NAME du -sk /var/lib/postgresql/data   # polled alongside the readiness check; tracks the disk high-water mark"
   echo "NODE_ENV=test VERIFY_RESTORED_DATABASE_URL=postgresql://postgres:***@127.0.0.1:$SCRATCH_PORT/\${POSTGRES_DB:-mega_crm} npm run db:verify-restored --workspace=packages/db -- --baseline=$BASELINE_FILE --as-of=\"$target\""
+  echo "printf '{\"target\":...,\"outcome\":...,\"durationSeconds\":...,\"diskHighWaterKb\":...,\"recordedAt\":...}' >> \${RESTORE_DRILL_METRICS_FILE:-\$XDG_STATE_HOME/mega-crm/restore-drill-history.ndjson}   # self-recorded duration + disk high-water"
   echo "docker rm -f $SCRATCH_CONTAINER_NAME"
   echo "docker volume rm $SCRATCH_VOLUME_NAME"
 }
@@ -340,6 +392,10 @@ run_real_drill() {
   echo "restore-drill.sh: restoring backup set with PITR target $target into scratch container $SCRATCH_CONTAINER_NAME"
   local restore_cmd
   restore_cmd="$(restore_and_start_script "$target")"
+
+  local restore_start
+  restore_start="$(date +%s)"
+
   if ! docker run -d --name "$SCRATCH_CONTAINER_NAME" \
         -v "$SCRATCH_VOLUME_NAME":/var/lib/postgresql/data \
         -v "$REPO_ROOT/$PGBACKREST_CONF":/etc/pgbackrest/pgbackrest.conf:ro \
@@ -355,6 +411,10 @@ run_real_drill() {
 
   echo "restore-drill.sh: waiting for the scratch container to become ready"
   if ! wait_for_scratch_ready; then
+    local timeout_end timeout_duration_seconds
+    timeout_end="$(date +%s)"
+    timeout_duration_seconds=$(( timeout_end - restore_start ))
+    write_drill_metrics "$target" "readiness_timeout" "$timeout_duration_seconds"
     echo "restore-drill.sh: READINESS TIMEOUT after ${READY_TIMEOUT_SECONDS}s -- scratch resources left in place for inspection." >&2
     print_cleanup_command >&2
     exit 1
@@ -385,6 +445,11 @@ run_real_drill() {
     print_cleanup_command >&2
     exit 1
   fi
+
+  local success_end success_duration_seconds
+  success_end="$(date +%s)"
+  success_duration_seconds=$(( success_end - restore_start ))
+  write_drill_metrics "$target" "verified" "$success_duration_seconds"
 
   echo "restore-drill.sh: verification passed -- destroying scratch resources"
   docker rm -f "$SCRATCH_CONTAINER_NAME" >/dev/null
