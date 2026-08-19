@@ -42,9 +42,9 @@ function dateHourBucket(timestampText: string): string {
   // Both "2026-08-19T16:24:05.123Z" (JS toISOString) and
   // "2026-08-19 16:24:05.123456" (Postgres naive `timestamp::text`) put the
   // date at [0,10) and the hour at [11,13) -- only the separator character at
-  // index 10 differs (T vs space), so slicing to 13 chars yields a
-  // comparable "YYYY-MM-DD HH"-shaped bucket for both formats.
-  return timestampText.slice(0, 13);
+  // index 10 differs (T vs space). Normalize that one character so the two
+  // formats produce an identical, comparable "YYYY-MM-DD_HH"-shaped bucket.
+  return `${timestampText.slice(0, 10)}_${timestampText.slice(11, 13)}`;
 }
 
 /** Interpret a Postgres naive-timestamp text value AS IF its digits were UTC. */

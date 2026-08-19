@@ -89,6 +89,37 @@ import { scrubbedConsole } from "@mega-crm/redaction";
  * impersonate Postgres (T-14-12, accepted risk with a recorded revisit
  * trigger). `verify-full` plus real CA management is deferred until
  * Postgres has a real network path worth authenticating (plan 14-08+).
+ *
+ * -- TimeZone: pinned at handshake, not by a post-connect SET (WR-06, D-01) --
+ * `now()` is a `timestamptz`; coercing it into a naive `timestamp` column
+ * (`contacts.created_at` and siblings) uses the **session's** `TimeZone` GUC.
+ * With no pin, a Postgres server or database whose own default timezone is
+ * ever non-UTC silently stores local wall-clock values into those naive
+ * columns, and every day-bucketed metric derived from them shifts. Two
+ * mechanisms were considered:
+ *
+ *   - `options: '-c TimeZone=UTC'` on `new Pool({...})` -- node-postgres
+ *     forwards this string verbatim in the Postgres startup packet, so the
+ *     GUC is negotiated during the connection handshake itself, before any
+ *     query can run on that connection. CHOSEN.
+ *   - `pool.on("connect", client => client.query("SET TIME ZONE 'UTC'"))` --
+ *     REJECTED. A documented race in node-postgres
+ *     (brianc/node-postgres#3265, "Timezone not set on pool event
+ *     'connect'"): the `SET` fires asynchronously and a query can reach the
+ *     connection before it completes, so the timezone silently fails to
+ *     apply on some fraction of connections.
+ *
+ * `packages/db/src/partitions/relocate-default.ts` already establishes the
+ * companion read-site idiom for naive-timestamp columns (the double-hop
+ * `AT TIME ZONE 'UTC'` cast); plan 17-02 applies that idiom to the
+ * growth-chart query this pin's write-path fix pairs with.
+ *
+ * Revisit trigger: there is no external connection pooler (PgBouncer or
+ * similar) anywhere in this topology today (DB-14 deferred to SCALE-02).
+ * Transaction-mode pooling can restrict or drop non-default startup
+ * parameters via its own `ignore_startup_parameters` setting -- if SCALE-02
+ * ever introduces a pooler, this pin must be re-verified against a real
+ * backend connection under that topology before it can be trusted there.
  */
 
 export interface CreatePgPoolOptions {
@@ -218,7 +249,13 @@ export function createPgPool(options: CreatePgPoolOptions): Pool {
 
   // Deliberately no `ssl` key here -- see this module's header comment
   // ("TLS: exactly one mechanism").
-  const pool = new Pool({ connectionString, max });
+  //
+  // WR-06/D-01: every physical connection this pool ever opens negotiates
+  // TimeZone=UTC during the Postgres startup handshake itself -- before any
+  // query can run on it, unlike a `pool.on("connect", ...)` SET, which is a
+  // documented race in node-postgres (see this module's header comment,
+  // "TimeZone: pinned at handshake", citing brianc/node-postgres#3265).
+  const pool = new Pool({ connectionString, max, options: "-c TimeZone=UTC" });
 
   // CR-03, made unskippable: without this listener an idle-connection
   // termination surfaces as an uncaught 'error' event and crashes the whole
