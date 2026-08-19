@@ -207,13 +207,13 @@
 | SEC-14 | Phase 10 | Complete |
 | SEC-15 | Phase 10 | Complete |
 | SEC-16 | Phase 10 | Complete |
-| CMP-01 | Phase 13 | Gaps Found |
+| CMP-01 | Phase 13 | Complete |
 | CMP-02 | Phase 13 | Complete |
-| CMP-03 | Phase 13 | Gaps Found |
-| CMP-04 | Phase 13 | Gaps Found |
-| CMP-05 | Phase 13 | Gaps Found |
+| CMP-03 | Phase 13 | Complete |
+| CMP-04 | Phase 13 | Complete |
+| CMP-05 | Phase 13 | Complete |
 | CMP-06 | Phase 13 | Complete |
-| CMP-07 | Phase 13 | Gaps Found |
+| CMP-07 | Phase 13 | Complete |
 | CMP-08 | Phase 13 | Complete |
 | CMP-09 | Phase 13 | Complete |
 | WRK-01 | Phase 12 | Complete |
@@ -295,4 +295,4 @@
 
 ---
 *Requirements defined: 2026-07-27*
-*Last updated: 2026-07-27 after roadmap creation (Phases 8-16, 95/95 requirements mapped)*
+*Last updated: 2026-08-19 during v1.1 milestone audit (CMP-01/03/04/05/07 traceability rows synced to Complete per 13-VERIFICATION.md re-verification)*
