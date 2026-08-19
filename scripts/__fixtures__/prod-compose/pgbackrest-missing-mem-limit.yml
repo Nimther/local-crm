@@ -3,6 +3,10 @@
 # service under test; the "missing-service" checks for the other six will
 # also fire, and the test only asserts the specific rule this fixture
 # targets is present.
+#
+# Phase 17 plan 03: image tag is a literal SHA-shaped placeholder, never a
+# compose variable reference -- see pgbackrest-missing-data-volume.yml's
+# own comment for why.
 services:
   pgbackrest:
-    image: megacrm-postgres:local
+    image: ghcr.io/example/repo/postgres:0000000000000000000000000000000000000000

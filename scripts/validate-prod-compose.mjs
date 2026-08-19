@@ -77,18 +77,36 @@ const PGBACKREST_CONFIG_REL = path.join("docker", "pgbackrest", "pgbackrest.conf
 
 /** Services whose `image:` must resolve to an immutable (non-mutable) tag --
  * built by THIS repo's own CI (.github/workflows/images.yml), unlike
- * `db`/`redis`'s official base images, whose floating minor-version tags
- * (`postgres:17`, `redis:7`) are a pre-existing, deliberate project decision
- * unrelated to OPS-01/OPS-02's "no unreviewed local tree" concern.
+ * `redis`'s official base image, whose floating minor-version tag
+ * (`redis:7`) is a pre-existing, deliberate project decision unrelated to
+ * OPS-01/OPS-02's "no unreviewed local tree" concern.
  *
- * Phase 15 plan 17 (OPS-10) adds `alloy`: unlike `db`/`redis`, this
- * service's own must_haves truth requires "an explicitly pinned image tag
- * rather than a mutable one" as a first-class, gate-enforced invariant
- * (not merely authored correctly once) -- so it joins this set even though
- * it is a third-party vendor image, not a repo-built one. */
-const FIRST_PARTY_IMAGE_SERVICES = new Set(["api", "worker", "web", "migrate", "alloy"]);
+ * Phase 15 plan 17 (OPS-10) added `alloy`: unlike `db`/`redis` at the time,
+ * this service's own must_haves truth required "an explicitly pinned image
+ * tag rather than a mutable one" as a first-class, gate-enforced invariant
+ * (not merely authored correctly once) -- so it joined this set even though
+ * it is a third-party vendor image, not a repo-built one.
+ *
+ * Phase 17 plan 03 (D-05, closing T-14-58/T-14-88) adds `db` and
+ * `pgbackrest`: as of this plan they share one first-party, CI-built image
+ * (`<ghcr-base>/postgres:<sha>`, one Dockerfile, two entrypoints,
+ * .github/workflows/images.yml's `build-and-push-postgres` job) instead of
+ * the previous `build:` section on a mutable `POSTGRES_IMAGE_TAG` default.
+ * The old exclusion reasoning above ("db's official base image has a
+ * floating minor tag") applied to `postgres:17` directly; it no longer
+ * holds once `db`/`pgbackrest` reference a first-party GHCR image this
+ * repo's own CI publishes. `redis` remains outside this set because it
+ * really is an unmodified official image on a deliberate floating minor
+ * tag -- the one member of EXPECTED_SERVICES for which that reasoning still
+ * applies. */
+const FIRST_PARTY_IMAGE_SERVICES = new Set(["api", "worker", "web", "migrate", "alloy", "db", "pgbackrest"]);
 
-const MUTABLE_TAG_NAMES = new Set(["latest", "main", "master", "develop", "dev", "staging", ""]);
+// Phase 17 plan 03 (D-05): "local" joins this set because it was the exact
+// tag value the removed compose `:-local` fallback used -- a gate that does
+// not reject it by name would leave that original footgun reachable by an
+// operator's env file even after docker-compose.prod.yml's own `build:`
+// section and default were removed.
+const MUTABLE_TAG_NAMES = new Set(["latest", "main", "master", "develop", "dev", "staging", "local", ""]);
 
 /** The on-disk TLS entrypoint script the `db` service execs -- read
  * directly rather than resolved through the compose volume mapping, since

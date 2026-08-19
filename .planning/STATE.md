@@ -2,19 +2,19 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Production Hardening
-current_phase: 16
-current_phase_name: Live SendGrid Verification
+current_phase: 17
+current_phase_name: address-tech-debt-wr-06-medium-security-follow-ups
 status: executing
-stopped_at: Phase 16 context gathered
-last_updated: "2026-08-17T06:33:58.507Z"
-last_activity: 2026-08-17
-last_activity_desc: Phase 16 execution started
+stopped_at: Phase 17 planned (6 plans, 4 waves)
+last_updated: "2026-08-19T11:17:15.250Z"
+last_activity: 2026-08-19
+last_activity_desc: Phase 17 execution started
 progress:
-  total_phases: 9
-  completed_phases: 8
-  total_plans: 122
-  completed_plans: 115
-  percent: 89
+  total_phases: 10
+  completed_phases: 9
+  total_plans: 128
+  completed_plans: 122
+  percent: 90
 ---
 
 # Project State
@@ -24,16 +24,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-17)
 
 **Core value:** Маркетолог настраивает триггерную цепочку или кампанию — и письма надёжно и вовремя доходят до нужных контактов, со сквозным отслеживанием статусов (delivered/opened/clicked/bounced).
-**Current focus:** Phase 16 — Live SendGrid Verification
+**Current focus:** Phase 17 — address-tech-debt-wr-06-medium-security-follow-ups
 
 ## Current Position
 
-Milestone: v1.1 Production Hardening (Phases 8-16, 95 requirements)
-Phase: 16 (Live SendGrid Verification) — EXECUTING
-Plan: 1 of 7
-Status: Executing Phase 16
-Last activity: 2026-08-17 — Phase 16 execution started
-Progress: [████████████████████] 115/115 plans (100%) — 8/9 v1.1 phases complete (8–15), 90/95 requirements (remaining: UAT-01..05, Phase 16)
+Milestone: v1.1 Production Hardening (Phases 8-16, 95 requirements) — COMPLETE
+Phase: 17 (address-tech-debt-wr-06-medium-security-follow-ups) — EXECUTING
+Plan: 1 of 6
+Status: Executing Phase 17
+Last activity: 2026-08-19 — Phase 17 execution started
+Progress: [██████████] 122/122 plans (100%) — 9/9 v1.1 phases complete (8–16)
 
 ✓ **Deadline closed (2026-08-07):** Phase 9 (DB-01/DB-02 partition automation) completed ahead of the hard **2026-09-01** deadline — 20 attached monthly partitions (2026-09…2027-06) confirmed by catalog query against a migrated database.
 
@@ -53,7 +53,7 @@ All 14 phase-14 plans now have committed SUMMARYs (14-01 through 14-14, includin
 
 **Velocity:**
 
-- Total plans completed: 211
+- Total plans completed: 218
 - Average duration: — min
 - Total execution time: 0 hours
 
@@ -76,6 +76,7 @@ All 14 phase-14 plans now have committed SUMMARYs (14-01 through 14-14, includin
 | 13 | 16 | - | - |
 | 14 | 14 | - | - |
 | 15 | 22 | - | - |
+| 16 | 7 | - | - |
 
 **Recent Trend:**
 
@@ -194,6 +195,7 @@ All 14 phase-14 plans now have committed SUMMARYs (14-01 through 14-14, includin
 | Phase 11 P09 | 75min | 3 tasks | 9 files |
 | Phase 11-delivery-correctness P10 | ~70min | 3 tasks | 11 files |
 | Phase 11 P11 | 50min | 3 tasks | 10 files |
+| Phase 16 P07 | 4min | 3 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -289,6 +291,15 @@ Full decision log for v1.0 lives in PROJECT.md (Key Decisions) and the archived 
 - [Phase ?]: 14-11: PITR restore drill performed twice against the real off-host repository (marker absent before target, present after — both directions demonstrated); verification passed (partitions, RLS enabled-and-forced, row counts vs baseline); production untouched; scratch resources destroyed. DB-10 closed; satisfies the restore-drill precondition (D-08) for 14-12's retention deletion — the operator pre-enable checklist in data-retention.md (widen pgBackRest retention, flip PARTITION_RETENTION_ENABLED) still applies.
 - [Phase ?]: 14-11: restore duration and disk high-water mark not reported at checkpoint approval — recorded as an open item to capture at the next scheduled drill, not invented.
 - [Phase ?]: 14-11: post-checkpoint real-host iteration (8d31abe) — drill script's verification step needed to target the scratch database explicitly in local mode.
+- [Phase 16]: Scope live webhook journal evidence to the captured raw_batch digest; keep migration 0057's four-column key for send_events. — Concurrent SendGrid fan-out can change workspace-wide journal totals and create false replay failures.
+- [Phase 16]: Treat fe8fbbc6-6b25-490b-b3f5-7c739e325c9a as the current dedicated Phase 16 UAT workspace. — The effective production capture configuration, endpoint public-key hash, tenant-scoped send/contact ownership and decoded capture agree; earlier 16-01/16-02 references are stale.
+- [Phase 16]: Commit live signed fixtures only after decode-and-inspect plus tenant ownership and endpoint-key verification; never edit or re-sign signed material. — A fixture enters permanent git history and must contain no third-party data while retaining byte-exact signature evidence.
+- [Phase 16]: Freeze Date at the fixture timestamp for real-signature CI; never widen the webhook freshness tolerance. — This preserves both the signed bytes and the security gate indefinitely.
+- [Phase 16]: Prove HTTP replay dedup by processing the two emitted queue payloads with the exported production webhook processor. — The API route stops at enqueue; querying send_events without the worker would be vacuous, while a test-local processor would duplicate production behavior.
+- [Phase 16]: Keep the UAT fault proxy one-shot, workspace-targeted and internal-only; 429 never forwards while timeout always forwards once before delaying the response. — Reversing either branch creates the duplicate/lost-mail defect UAT-05 exists to detect.
+- [Phase 16]: Preflight frequency-cap headroom for every live fault leg and restore any UAT-only temporary change. — The pre-send gate runs before the proxy, so an excluded campaign cannot exercise the armed fault.
+- [Phase 16]: Start temporary proxy/worker services with compose --no-deps. — A UAT-only worker restart must not recreate production DB or Redis dependencies.
+- [Phase ?]: Phase 16 Task 3 blocking checkpoint approved 2026-08-19: teardown 5/5 verified by observation, standing-canary smoke 1/1 delivered (send 6fadec0b, provider oIDnKGNTSO). Phase 16 closed at five-of-five live UAT passes (D-16); milestone v1.1 fully executed.
 
 ### Pending Todos
 
@@ -335,6 +346,10 @@ Research flags carried from v1.0:
 | 260809-eqr | Close Phase 10 residual review findings WR-06/WR-07 + sync STATE.md to Phase 11 | 2026-08-09 | ebc754c | Complete | [260809-eqr-close-phase-10-residual-review-findings-](./quick/260809-eqr-close-phase-10-residual-review-findings-/) |
 | 260811-qit | Append Codex follow-up review section to Phase 13 REVIEWS.md | 2026-08-11 | b37e7bd | Verified | [260811-qit-append-codex-follow-up-review-section-to](./quick/260811-qit-append-codex-follow-up-review-section-to/) |
 
+### Roadmap Evolution
+
+- Phase 17 added: Address tech debt: WR-06 + medium security follow-ups
+
 ## Deferred Items
 
 Items acknowledged and carried forward from previous milestone close:
@@ -345,13 +360,15 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-08-17T04:21:12.943Z
-Stopped at: Phase 16 context gathered
-Resume file: .planning/phases/16-live-sendgrid-verification/16-CONTEXT.md
+Last session: 2026-08-19T08:22:35.889Z
+Stopped at: Phase 17 context gathered
+Resume file: .planning/phases/17-address-tech-debt-wr-06-medium-security-follow-ups/17-CONTEXT.md
 
 ## Operator Next Steps
 
+- **Phase 16 complete (2026-08-19): 7/7 plans, UAT 5/5 live passes (UAT-01..05), Task 3 blocking checkpoint approved** — teardown 5/5 verified by observation, standing-canary smoke 1/1 delivered, production carries no residue of the UAT session. See 16-UAT-REPORT.md and 16-07-SUMMARY.md.
+- **Milestone v1.1 Production Hardening (Phases 8-16) is now fully executed** (122/122 plans, 9/9 phases complete). Next step is milestone-level closeout (e.g. `/gsd-complete-milestone`), not further Phase 16 work.
 - Phase 15 complete (2026-08-17): 22/22 plans (18 scoped + 4 gap-closure), UAT 5/5 passed (G-15-4 alloy-config gap closed by plan 15-22, live redeploy of the committed config confirmed), verification passed, security verified (threats_open: 0)
 - Known operational item carried from Phase 12: `npm run db:migrate` (drizzle-kit CLI) hangs in the dev sandbox under Node v26 — migrations proven via test:migrations but not applied to the dev DB
-- Next: `/gsd-plan-phase 16` — Live SendGrid Verification (UAT-01..05, the milestone's final release barrier; requires the deployed env + verified sender from Phase 14)
-- Branch note: per convention Phase 16 starts a new `gsd/phase-16-{slug}` branch (Phase 15 branch: `gsd/phase-15-observability-alerting-frontend-resilience`)
+- Residual items carried past Phase 16 close (not blockers): historical 16-01/16-02 workspace's continued existence not independently checked; an unconfirmed flow-editor UI error-boundary observation from an earlier interrupted session has no evidence artifact and is out of Phase 16's evidence-only scope.
+- Branch note: per convention Phase 16 used branch `gsd/phase-16-live-sendgrid-verification` (Phase 15 branch: `gsd/phase-15-observability-alerting-frontend-resilience`)

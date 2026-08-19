@@ -50,7 +50,7 @@ import path from "node:path";
 import { resolveEnvPath } from "./env-path.mjs";
 
 /** Subcommands this CLI accepts today. Later plans append to this list. */
-const ACCEPTED_SUBCOMMANDS = ["send-attribution", "event-coverage", "dedup"];
+const ACCEPTED_SUBCOMMANDS = ["send-attribution", "event-coverage", "dedup", "uat05-state"];
 
 /**
  * Boolean (value-less) flags across every subcommand's parser below. Any
@@ -164,6 +164,22 @@ export function parseArgs(argv) {
       sendId: flags["send-id"],
       eventType: flags["event-type"],
       occurredAt: flags["occurred-at"],
+      json: Boolean(flags.json),
+    };
+  }
+
+  if (subcommand === "uat05-state") {
+    if (!flags.workspace) {
+      throw new Error("uat-verify uat05-state: --workspace <uuid> is required");
+    }
+    if (!flags["send-id"]) {
+      throw new Error("uat-verify uat05-state: --send-id <uuid> is required");
+    }
+    return {
+      subcommand,
+      workspace: flags.workspace,
+      sendId: flags["send-id"],
+      expectStatus: flags["expect-status"] ?? null,
       json: Boolean(flags.json),
     };
   }
@@ -284,6 +300,75 @@ export function formatReport(observed, { json = false } = {}) {
   lines.push(`observed ${String(events.length)} event(s):`);
   for (const e of events) {
     lines.push(`  ${e.eventType} at ${e.occurredAt}`);
+  }
+  return lines.join("\n");
+}
+
+/**
+ * Phase 16 plan 06 (UAT-05). A provider 429 releases (deletes) the
+ * `dispatching` ledger row before BullMQ delays the same job. That means
+ * "deferred" is an observation composed from a retained queue job plus the
+ * deliberate absence of its claim row; it is not a Postgres send_status.
+ */
+export function assertUat05State(observed, { status = null } = {}) {
+  const reasons = [];
+  if (!observed.send && !observed.queue) {
+    reasons.push("zero send rows and zero matching BullMQ jobs were observed for this send id");
+    return { passed: false, reasons };
+  }
+  if (!observed.queue) {
+    reasons.push("no retained BullMQ job was found, so attempt count and queue state are unavailable");
+  }
+  if (status && observed.status !== status) {
+    reasons.push(`observed UAT-05 status "${observed.status ?? "(none)"}" does not match --expect-status "${status}"`);
+  }
+  return { passed: reasons.length === 0, reasons };
+}
+
+function toIsoOrNull(value) {
+  if (value === null || value === undefined) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toISOString();
+}
+
+/** Pure formatter for the per-send database + BullMQ observation. */
+export function formatUat05StateReport(observed, { json = false } = {}) {
+  const report = {
+    sendId: observed.sendId,
+    ledgerRowFound: Boolean(observed.send),
+    status: observed.status,
+    attemptCount: observed.queue?.attemptCount ?? null,
+    queueState: observed.queue?.state ?? null,
+    queueName: observed.queue?.name ?? null,
+    queueJobId: observed.queue?.jobId ?? null,
+    queuedAt: toIsoOrNull(observed.send?.queuedAt),
+    dispatchedAt: toIsoOrNull(observed.send?.dispatchedAt),
+    reconcilingSince: toIsoOrNull(observed.send?.reconcilingSince),
+    sentAt: toIsoOrNull(observed.send?.sentAt),
+    events: observed.events.map((event) => ({
+      eventType: event.eventType,
+      occurredAt: toIsoOrNull(event.occurredAt),
+      sgEventId: event.sgEventId ?? null,
+    })),
+  };
+
+  if (json) return JSON.stringify(report);
+
+  const lines = [
+    `send id: ${report.sendId}`,
+    `ledger row: ${report.ledgerRowFound ? "found" : "not present (expected while a 429 retry is deferred)"}`,
+    `status: ${report.status ?? "(none)"}`,
+    `attempt count: ${report.attemptCount ?? "(unavailable)"}`,
+    `queue state: ${report.queueState ?? "(unavailable)"}`,
+    `queue: ${report.queueName ?? "(unavailable)"} / job ${report.queueJobId ?? "(unavailable)"}`,
+    `queued_at: ${report.queuedAt ?? "(none)"}`,
+    `dispatched_at: ${report.dispatchedAt ?? "(none)"}`,
+    `reconciling_since: ${report.reconcilingSince ?? "(none)"}`,
+    `sent_at: ${report.sentAt ?? "(none)"}`,
+    `observed ${String(report.events.length)} event(s):`,
+  ];
+  for (const event of report.events) {
+    lines.push(`  ${event.eventType} at ${event.occurredAt}`);
   }
   return lines.join("\n");
 }
@@ -948,6 +1033,204 @@ async function runDedup(parsed) {
   return 0;
 }
 
+function deriveUat05Status(send, queue) {
+  if (send) return send.status;
+  if (!queue) return null;
+  if (queue.state === "delayed" || (queue.state === "waiting" && queue.processedOn !== null)) {
+    return "deferred";
+  }
+  return "pending";
+}
+
+function jobMatchesSendId(job, parsed, deriveCampaignSendId, deriveFlowSendId) {
+  const data = job?.data;
+  if (!data || data.workspaceId !== parsed.workspace) return false;
+  try {
+    if (data.kind === "flow" && data.flowRunId && data.nodeId) {
+      return deriveFlowSendId(data.workspaceId, data.flowRunId, data.nodeId) === parsed.sendId;
+    }
+    if (data.kind === "campaign" && data.campaignId && data.contactId) {
+      return deriveCampaignSendId(data.workspaceId, data.campaignId, data.contactId) === parsed.sendId;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+async function observeQueueJob(queue, job) {
+  return {
+    name: queue.name,
+    jobId: String(job.id),
+    state: await job.getState(),
+    attemptCount: job.attemptsMade,
+    processedOn: job.processedOn ?? null,
+    finishedOn: job.finishedOn ?? null,
+  };
+}
+
+async function findUat05QueueJob({ queues, send, parsed, deriveCampaignSendId, deriveFlowSendId }) {
+  if (send) {
+    const descriptor =
+      send.kind === "flow" && send.flowRunId && send.nodeId
+        ? { queueName: "email-triggered", jobId: `${send.flowRunId}-${send.nodeId}` }
+        : send.campaignId && send.contactId
+          ? {
+              queueName: "email-broadcast",
+              jobId: `${parsed.workspace}-${send.campaignId}-${send.contactId}`,
+            }
+          : null;
+    if (descriptor) {
+      const queue = queues.find((candidate) => candidate.name === descriptor.queueName);
+      const job = await queue?.getJob(descriptor.jobId);
+      if (job && jobMatchesSendId(job, parsed, deriveCampaignSendId, deriveFlowSendId)) {
+        return observeQueueJob(queue, job);
+      }
+    }
+  }
+
+  // During a provider-429 deferral the claim row is deliberately deleted,
+  // so there is no campaign/contact tuple to reconstruct the deterministic
+  // BullMQ job id from. Search a bounded recent window and derive each
+  // candidate's stable send id from its job payload. This remains bounded
+  // even if another workspace has a large retained completed-job history.
+  const states = ["active", "waiting", "delayed", "prioritized", "completed", "failed", "waiting-children"];
+  for (const queue of queues) {
+    const jobs = await queue.getJobs(states, 0, 1_999, false);
+    const job = jobs.find((candidate) =>
+      jobMatchesSendId(candidate, parsed, deriveCampaignSendId, deriveFlowSendId),
+    );
+    if (job) return observeQueueJob(queue, job);
+  }
+  return null;
+}
+
+/**
+ * Phase 16 plan 06 (UAT-05): join the tenant-scoped send/event facts to the
+ * retained BullMQ job that owns the attempt count and queue state.
+ */
+async function runUat05State(parsed) {
+  if (!process.env.DATABASE_URL || !process.env.REDIS_URL) {
+    try {
+      process.loadEnvFile(resolveEnvPath());
+    } catch {
+      // No configuration file -- rely on already-exported container/CI env.
+    }
+  }
+  if (!process.env.DATABASE_URL || !process.env.REDIS_URL) {
+    console.error(
+      "uat-verify uat05-state: DATABASE_URL and REDIS_URL are required -- set them in the resolved env file or export them directly",
+    );
+    return 2;
+  }
+
+  // All workspace packages stay dynamically loaded for the plain-node usage
+  // error contract documented at this file's top. The deployed api image
+  // contains these compiled packages; local real invocations use tsx.
+  // eslint-disable-next-line import-x/no-extraneous-dependencies
+  const { withTenant, withTenantTransaction, pool } = await import("@mega-crm/tenant-context");
+  // eslint-disable-next-line import-x/no-extraneous-dependencies
+  const { buildRedisConnectionOptions } = await import("@mega-crm/queue-core");
+  const { deriveCampaignSendId, deriveFlowSendId } = await import("@mega-crm/delivery-core");
+  // eslint-disable-next-line import-x/no-extraneous-dependencies
+  const { EMAIL_BROADCAST_QUEUE, EMAIL_TRIGGERED_QUEUE } = await import("@mega-crm/shared-schemas");
+  // eslint-disable-next-line import-x/no-extraneous-dependencies
+  const { Queue } = await import("bullmq");
+
+  const connection = buildRedisConnectionOptions(process.env.REDIS_URL);
+  const queues = [
+    new Queue(EMAIL_BROADCAST_QUEUE, { connection }),
+    new Queue(EMAIL_TRIGGERED_QUEUE, { connection }),
+  ];
+  for (const queue of queues) {
+    // BullMQ forwards ioredis failures as EventEmitter `error` events. The
+    // awaited getter still rejects with the actionable failure; this no-op
+    // listener prevents EventEmitter from crashing before the CLI can print it.
+    queue.on("error", () => {});
+  }
+
+  let send;
+  let events;
+  let queue;
+  try {
+    ({ send, events } = await withTenant(parsed.workspace, () =>
+      withTenantTransaction(async (client) => {
+        const { rows: sendRows } = await client.query(
+          `SELECT id, kind, status, campaign_id, contact_id, flow_run_id, node_id,
+                  provider_message_id, queued_at, dispatched_at, reconciling_since,
+                  sent_at, dispatch_duration_ms
+             FROM sends
+            WHERE id = $1`,
+          [parsed.sendId],
+        );
+        const row = sendRows[0] ?? null;
+        const { rows: eventRows } = await client.query(
+          `SELECT event_type, occurred_at, sg_event_id
+             FROM send_events
+            WHERE send_id = $1
+            ORDER BY occurred_at ASC`,
+          [parsed.sendId],
+        );
+        return {
+          send: row
+            ? {
+                id: row.id,
+                kind: row.kind,
+                status: row.status,
+                campaignId: row.campaign_id,
+                contactId: row.contact_id,
+                flowRunId: row.flow_run_id,
+                nodeId: row.node_id,
+                providerMessageId: row.provider_message_id,
+                queuedAt: row.queued_at,
+                dispatchedAt: row.dispatched_at,
+                reconcilingSince: row.reconciling_since,
+                sentAt: row.sent_at,
+                dispatchDurationMs: row.dispatch_duration_ms,
+              }
+            : null,
+          events: eventRows.map((event) => ({
+            eventType: event.event_type,
+            occurredAt: event.occurred_at,
+            sgEventId: event.sg_event_id,
+          })),
+        };
+      }),
+    ));
+
+    queue = await findUat05QueueJob({
+      queues,
+      send,
+      parsed,
+      deriveCampaignSendId,
+      deriveFlowSendId,
+    });
+  } finally {
+    await Promise.allSettled([...queues.map((entry) => entry.close()), pool.end()]);
+  }
+
+  const observed = {
+    sendId: parsed.sendId,
+    send,
+    queue,
+    status: deriveUat05Status(send, queue),
+    events,
+  };
+  console.log(formatUat05StateReport(observed, { json: parsed.json }));
+  if (!parsed.json) {
+    console.log(
+      `observed ${String(events.length)} send_events row(s); send row ${send ? "found" : "not present"}; queue job ${queue ? "found" : "NOT found"}.`,
+    );
+  }
+
+  const result = assertUat05State(observed, { status: parsed.expectStatus });
+  if (!result.passed) {
+    for (const reason of result.reasons) console.error(`FAIL: ${reason}`);
+    return 1;
+  }
+  return 0;
+}
+
 // ---------------------------------------------------------------------------
 // CLI -- guarded so importing this module for tests does not execute it.
 // ---------------------------------------------------------------------------
@@ -1010,6 +1293,17 @@ async function main() {
     let exitCode;
     try {
       exitCode = await runDedup(parsed);
+    } catch (err) {
+      console.error("uat-verify: FAILED --", describeError(err));
+      exitCode = 1;
+    }
+    process.exit(exitCode);
+  }
+
+  if (parsed.subcommand === "uat05-state") {
+    let exitCode;
+    try {
+      exitCode = await runUat05State(parsed);
     } catch (err) {
       console.error("uat-verify: FAILED --", describeError(err));
       exitCode = 1;

@@ -282,12 +282,12 @@ after those checks pass continue the capture/replay procedure below.
    1. Edit `WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS` in `MEGA_CRM_ENV_FILE` to a larger value (e.g. `3600`).
    2. Restart the `api` container — required, because `apps/api/src/env.ts` parses this value once at process start into a frozen `env` object (`export const env = parsed.data`), not per-request; a running process never observes an edited env file until it restarts:
       ```bash
-      docker compose -f docker/docker-compose.prod.yml up -d --force-recreate api
+      docker compose -f docker/docker-compose.prod.yml up -d --force-recreate --no-deps api
       ```
    3. Re-run steps 1-6 above.
    4. **Restore the original tolerance value in `MEGA_CRM_ENV_FILE` and restart the `api` container again** — this is a required numbered step, not a closing remark:
       ```bash
-      docker compose -f docker/docker-compose.prod.yml up -d --force-recreate api
+      docker compose -f docker/docker-compose.prod.yml up -d --force-recreate --no-deps api
       ```
    5. Confirm the restore took effect by reading the value back — e.g. `docker compose -f docker/docker-compose.prod.yml exec api node -e "console.log(process.env.WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS)"` should print the original value (or nothing, if it was unset before), never the widened one.
 8. **Decode and read the captured batch before saving it anywhere in the repository.** Confirm it contains only events belonging to the UAT workspace's own sends, addressed to the designated throwaway UAT recipient (§2/§6) — no sibling-workspace event, no platform system-mail event, no third party's address (this SendGrid account is shared and fans events out across every connected tenant, RESEARCH.md Pitfall 6 — this inspection is a real gate, not a formality). If the batch contains anything else, discard it and capture an isolated batch during a quiet window instead — do not proceed to step 10 with an uninspected or mixed-tenant capture.
@@ -310,3 +310,162 @@ after those checks pass continue the capture/replay procedure below.
     ```
 
     This file is what makes plan 16-05 autonomous — without it, that plan cannot run.
+
+## 14. UAT-05 — live 429 and ambiguous-timeout recovery
+
+This procedure temporarily routes **tenant** `mail/send` calls through the internal Phase 16 proxy. Platform system mail and SendGrid key-check/webhook-provisioning calls do not use `SENDGRID_BASE_URL` and remain on their normal paths. The proxy has no published port and faults only requests whose `custom_args.workspace_id` equals `UAT_FAULT_PROXY_WORKSPACE_ID`; sibling workspaces pass through without consuming the armed one-shot mode.
+
+### 14.1 Prepare two isolated sends and their stable ids
+
+Create two fresh one-recipient campaigns in the retained UAT workspace, both addressed only to the operator mailbox from §2. Reuse the UAT Dynamic Template but give the messages unmistakable values such as `UAT05-429` and `UAT05-TIMEOUT`. Do not launch either campaign yet. Record the UAT contact id and both campaign ids, then derive the two stable send ids before fault injection starts:
+
+Before creating them, record the workspace's effective frequency cap and the UAT contact's current `sent` count inside that window. There must be room for **both** real messages. If not, raise the cap only in the dedicated UAT workspace, record the original value, and add its restoration to §14.5. The kickoff gate runs before the proxy: a frequency-capped campaign is recorded as `excluded` and never exercises the armed fault.
+
+```bash
+docker compose -f docker/docker-compose.prod.yml run --rm --no-deps api \
+  node -e "import('@mega-crm/delivery-core').then(({deriveCampaignSendId}) => console.log(deriveCampaignSendId(process.argv[1], process.argv[2], process.argv[3])))" \
+  <UAT_WORKSPACE_ID> <UAT05_429_CAMPAIGN_ID> <UAT_CONTACT_ID>
+
+docker compose -f docker/docker-compose.prod.yml run --rm --no-deps api \
+  node -e "import('@mega-crm/delivery-core').then(({deriveCampaignSendId}) => console.log(deriveCampaignSendId(process.argv[1], process.argv[2], process.argv[3])))" \
+  <UAT_WORKSPACE_ID> <UAT05_TIMEOUT_CAMPAIGN_ID> <UAT_CONTACT_ID>
+```
+
+Record the outputs as `UAT05_429_SEND_ID` and `UAT05_TIMEOUT_SEND_ID`. The ids are deterministic, so they remain the same when the 429 branch releases its first dispatch claim and the retry creates the row again.
+
+Use this report command for every state observation below:
+
+```bash
+docker compose \
+  -f docker/docker-compose.prod.yml \
+  -f docker/docker-compose.uat-proxy.yml \
+  run --rm --no-deps \
+  -v "$(pwd)/scripts/uat-verify.mjs:/app/scripts/uat-verify.mjs:ro" \
+  api node scripts/uat-verify.mjs uat05-state \
+    --workspace <UAT_WORKSPACE_ID> \
+    --send-id <SEND_ID> \
+    --expect-status <deferred|dispatching|reconciling|sent>
+```
+
+`deferred` is a UAT report state, not a Postgres enum value: after a provider 429 the production path deliberately deletes the temporary `dispatching` claim while the retained BullMQ job waits for retry. The report proves this transition from the queue job, including its state and `attemptsMade`, instead of treating the temporarily absent ledger row as a missing send.
+
+### 14.2 Start the internal proxy and activate the endpoint override
+
+1. Edit `MEGA_CRM_ENV_FILE` and add exactly these two non-secret session values:
+
+   ```dotenv
+   UAT_FAULT_PROXY_WORKSPACE_ID=<UAT_WORKSPACE_ID>
+   SENDGRID_BASE_URL=http://uat-fault-proxy:4180/v3/mail/send
+   ```
+
+   Proxy configuration comes only from this env file. Do not add these values to `docker/docker-compose.prod.yml`, the invoking shell, or a committed file.
+2. Start only the session-scoped proxy, using the separate override:
+
+   ```bash
+   docker compose \
+     -f docker/docker-compose.prod.yml \
+     -f docker/docker-compose.uat-proxy.yml \
+     up -d --no-deps uat-fault-proxy
+   ```
+
+3. Restart the worker stop-old-then-start-new so the module-level endpoint constant is re-evaluated from the edited env file:
+
+   ```bash
+   docker compose -f docker/docker-compose.prod.yml stop worker
+   docker compose -f docker/docker-compose.prod.yml rm -f worker
+   docker compose -f docker/docker-compose.prod.yml up -d --no-deps worker
+   ```
+
+4. Wait for the worker to become healthy. Its boot log **must** contain the warning `SENDGRID_BASE_URL override is active`. If the warning is absent, stop: neither fault leg is valid evidence.
+5. Confirm both sides of the network boundary before arming anything:
+
+   ```bash
+   docker compose \
+     -f docker/docker-compose.prod.yml \
+     -f docker/docker-compose.uat-proxy.yml \
+     port uat-fault-proxy 4180
+   ```
+
+   This must print nothing. From a machine outside the VPS, a connection to `<VPS_PUBLIC_IP>:4180` must also fail. The control endpoint is intentionally unauthenticated and is safe only while it remains internal and session-scoped.
+
+### 14.3 Rate-limit leg — zero upstream calls, one retry, one mailbox copy
+
+1. Arm the one-shot 429 response from inside the proxy container:
+
+   ```bash
+   docker compose \
+     -f docker/docker-compose.prod.yml \
+     -f docker/docker-compose.uat-proxy.yml \
+     exec -T uat-fault-proxy node -e \
+     "fetch('http://127.0.0.1:4180/__control',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({mode:'rate-limit-once'})}).then(async r=>{console.log(r.status,await r.text());process.exit(r.ok?0:1)})"
+   ```
+
+   Expect `200` and `{"mode":"rate-limit-once"}`.
+2. Launch only the prepared `UAT05-429` campaign. The matching request receives 429 without any upstream SendGrid request; the mode immediately resets to pass-through. A sibling workspace request cannot consume this mode.
+3. Immediately run the §14.1 report with `UAT05_429_SEND_ID` and `--expect-status deferred`. The report should show no current ledger row plus a retained waiting/delayed queue job — never `failed`. `Retry-After: 10` is recorded as provider guidance, but the production provider-backoff branch deliberately uses BullMQ's bounded exponential retry schedule (currently starting at two seconds), so a cold one-shot diagnostic process can miss this short window. If it does, preserve the worker's first-attempt `provider backoff` failure log and require the terminal report to show `attemptCount: 2`; together they are the durable proof that the 429 was consumed and retried rather than silently passed through.
+4. After the retry window, run the same report with `--expect-status sent`. It must show the terminal row, queue state/attempt count, dispatch timestamps, and attributed SendGrid events as they arrive.
+5. In the real operator mailbox, search for the distinctive `UAT05-429` value and count copies. The count must be **exactly 1**. A count of 2 means the rate-limit branch forwarded upstream and UAT-05 has failed.
+
+### 14.4 Timeout leg — one upstream call, ambiguous row, webhook-backed resolution
+
+1. Arm timeout mode through the same internal control command, replacing the JSON mode with `timeout-once`; expect `200` and `{"mode":"timeout-once"}`.
+2. Launch only the prepared `UAT05-TIMEOUT` campaign. The proxy forwards exactly one request to real SendGrid, waits for its response, and delays only its own response beyond the production `SENDGRID_TIMEOUT_MS` boundary. The next matching request is pass-through.
+3. After the worker's 20-second abort boundary, run the §14.1 report with `UAT05_TIMEOUT_SEND_ID` and `--expect-status reconciling`. It must show `reconciling_since` and must not show `failed` or `sent` yet.
+4. Wait through the reconciler cadence (normally up to five minutes), then run the report with `--expect-status sent`. The report must include at least one real `send_events` row for this send; that webhook evidence is what permits `reconciling -> sent`. A terminal row without event evidence is not a pass for this leg.
+5. In the real operator mailbox, search for the distinctive `UAT05-TIMEOUT` value and count copies. The count must be **exactly 1**. Zero means the timeout branch failed to forward; two means some path retried an ambiguous send. Either result fails UAT-05.
+
+Record both send ids, every observed status/queue transition with UTC timestamps, both mailbox counts, and the timeout leg's event types for plan 16-07.
+
+### 14.5 Mandatory teardown
+
+1. If §14.1 temporarily raised the dedicated workspace's frequency cap, restore the exact recorded value and confirm the settings UI/API reads it back.
+2. Remove both `SENDGRID_BASE_URL` and `UAT_FAULT_PROXY_WORKSPACE_ID` from `MEGA_CRM_ENV_FILE` — do not leave either key present with a blank value.
+3. Restart the worker stop-old-then-start-new using the three base-compose commands from §14.2 step 3. Wait for healthy and inspect the fresh boot logs: the `SENDGRID_BASE_URL override is active` warning must be absent.
+4. Stop and remove only the UAT proxy service — never run `compose down` against the production stack:
+
+   ```bash
+   docker compose \
+     -f docker/docker-compose.prod.yml \
+     -f docker/docker-compose.uat-proxy.yml \
+     stop uat-fault-proxy
+   docker compose \
+     -f docker/docker-compose.prod.yml \
+     -f docker/docker-compose.uat-proxy.yml \
+     rm -f uat-fault-proxy
+   ```
+
+5. Confirm `docker compose -f docker/docker-compose.prod.yml ps` contains no `uat-fault-proxy`, the worker is healthy, and the public `/readyz` returns 200. Plan 16-07's teardown checkpoint repeats these checks; completing them here is still mandatory.
+
+## 15. Standing canary post-deploy smoke test (D-15)
+
+Run this after every risky deploy, immediately after the normal post-deploy checks in `docs/runbooks/deploy-and-rollback.md`. The standing canary is the retained UAT workspace `fe8fbbc6-6b25-490b-b3f5-7c739e325c9a` (confirm its current display name/slug directly in the workspace UI rather than assuming one here). Its BYO SendGrid key, Dynamic Template, operator-owned contact, retained campaigns and flows, and active webhook subscription are deliberate production canary assets: **do not delete or anonymise them**. (A specific retained draft flow id was recorded by an earlier, interrupted session and is not re-asserted here without confirmation — see `16-UAT-REPORT.md`'s "Unverified claims" section; confirm the actual retained flow/campaign ids directly in the workspace at Task 3.)
+
+1. Confirm `https://<hostname>/readyz` returns `200`. In the UAT workspace, confirm the retained contact is still subscribed and the SendGrid connection/webhook subscription show active.
+2. Check the contact's 24-hour sent count against the workspace frequency cap. If there is no free slot, record the current UAT-only cap, raise it just enough for one message, and restore/read it back immediately after step 5.
+3. Duplicate or create a uniquely named one-recipient canary campaign using the retained Dynamic Template and the retained operator-owned contact. Launch exactly one send; never reuse a customer or third-party contact.
+4. Confirm exactly one new message arrives in the operator mailbox with the template substitutions rendered. Record the campaign id, send id, provider message id, and UTC time.
+5. Run the scripted assertion and require both terminal dispatch and a real delivered event:
+
+   ```bash
+   docker compose -f docker/docker-compose.prod.yml run --rm --no-deps \
+     -v "$(pwd)/scripts/uat-verify.mjs:/app/scripts/uat-verify.mjs:ro" \
+     api node scripts/uat-verify.mjs send-attribution \
+       --workspace fe8fbbc6-6b25-490b-b3f5-7c739e325c9a \
+       --send-id <CANARY_SEND_ID> \
+       --expect-status sent \
+       --expect-events delivered
+   ```
+
+   Pass only on exit `0` with a non-zero delivered-event row count. If the frequency cap was changed, restore its recorded value and read it back before declaring the smoke complete.
+
+## 16. Phase 16 teardown verification checklist
+
+Verify each item by observing the current state, not by remembering that a cleanup command was run.
+
+1. **Endpoint override:** `SENDGRID_BASE_URL` and `UAT_FAULT_PROXY_WORKSPACE_ID` are absent from the production env (not present with blank values); the effective worker environment has no override; a fresh worker boot has no `SENDGRID_BASE_URL override is active` warning. Expected observation: tenant mail uses `https://api.sendgrid.com/v3/mail/send`.
+2. **Raw capture:** `WEBHOOK_RAW_CAPTURE_WORKSPACE_ID` is absent from the production env and the effective API process environment. After a fresh canary delivery, `docker compose -f docker/docker-compose.prod.yml logs --no-color --since <canary-start-utc> api | grep 'UAT16_WEBHOOK_RAW_CAPTURE'` prints nothing. Expected observation: no signed payload is copied into logs.
+3. **Fault proxy:** base-compose `ps` contains no `uat-fault-proxy`; no container for it is running; `docker compose -f docker/docker-compose.prod.yml -f docker/docker-compose.uat-proxy.yml port uat-fault-proxy 4180` prints nothing; `<VPS_PUBLIC_IP>:4180` refuses an off-host connection. Expected observation: no public or internal test proxy remains in the live stack. The override file is session-only and must never be added to `scripts/deploy.sh`, `docker/docker-compose.prod.yml`, or any routine deploy command.
+4. **Webhook freshness:** read `WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS` from the effective API environment. Expected observation: the original production value is restored; for this deployment the variable is absent, so `apps/api/src/env.ts` applies the default `600` seconds.
+5. **Production compose:** compare the host's `docker/docker-compose.prod.yml` with the deployed Git SHA and inspect the deploy scripts for UAT override references. Expected observation: the file is unchanged, no Phase 16 environment value is embedded, and `docker/docker-compose.uat-proxy.yml` is absent from every deploy path.
+
+Finally confirm the standing canary workspace still contains its operator-owned contact, at least one retained campaign, at least one retained flow, and an active webhook subscription — recording the actual ids observed. This integrity confirmation retains evidence; it is not permission to send another message.

@@ -134,11 +134,11 @@
 
 Выпускной барьер milestone. Аккаунт и verified sender доступны — это не отложенный tech debt.
 
-- [ ] **UAT-01**: Live-отправка с BYO key через Dynamic Template подтверждена
-- [ ] **UAT-02**: Live-события delivered / opened / clicked / bounced подтверждены
-- [ ] **UAT-03**: Проверка подписи webhook подтверждена на реальном подписанном payload через полный HTTP-стек
-- [ ] **UAT-04**: Дедупликация повторно доставленных событий подтверждена live
-- [ ] **UAT-05**: Поведение при 429 и временных ошибках SendGrid подтверждено live
+- [x] **UAT-01**: Live-отправка с BYO key через Dynamic Template подтверждена
+- [x] **UAT-02**: Live-события delivered / opened / clicked / bounced подтверждены
+- [x] **UAT-03**: Проверка подписи webhook подтверждена на реальном подписанном payload через полный HTTP-стек
+- [x] **UAT-04**: Дедупликация повторно доставленных событий подтверждена live
+- [x] **UAT-05**: Поведение при 429 и временных ошибках SendGrid подтверждено live
 
 ## Future Requirements
 
@@ -207,13 +207,13 @@
 | SEC-14 | Phase 10 | Complete |
 | SEC-15 | Phase 10 | Complete |
 | SEC-16 | Phase 10 | Complete |
-| CMP-01 | Phase 13 | Gaps Found |
+| CMP-01 | Phase 13 | Complete |
 | CMP-02 | Phase 13 | Complete |
-| CMP-03 | Phase 13 | Gaps Found |
-| CMP-04 | Phase 13 | Gaps Found |
-| CMP-05 | Phase 13 | Gaps Found |
+| CMP-03 | Phase 13 | Complete |
+| CMP-04 | Phase 13 | Complete |
+| CMP-05 | Phase 13 | Complete |
 | CMP-06 | Phase 13 | Complete |
-| CMP-07 | Phase 13 | Gaps Found |
+| CMP-07 | Phase 13 | Complete |
 | CMP-08 | Phase 13 | Complete |
 | CMP-09 | Phase 13 | Complete |
 | WRK-01 | Phase 12 | Complete |
@@ -262,11 +262,11 @@
 | OPS-17 | Phase 15 | Complete |
 | OPS-18 | Phase 15 | Complete |
 | OPS-19 | Phase 15 | Complete |
-| UAT-01 | Phase 16 | Pending |
-| UAT-02 | Phase 16 | Pending |
-| UAT-03 | Phase 16 | Pending |
-| UAT-04 | Phase 16 | Pending |
-| UAT-05 | Phase 16 | Pending |
+| UAT-01 | Phase 16 | Complete |
+| UAT-02 | Phase 16 | Complete |
+| UAT-03 | Phase 16 | Complete |
+| UAT-04 | Phase 16 | Complete |
+| UAT-05 | Phase 16 | Complete |
 
 ### Phase Summary
 
@@ -295,4 +295,4 @@
 
 ---
 *Requirements defined: 2026-07-27*
-*Last updated: 2026-07-27 after roadmap creation (Phases 8-16, 95/95 requirements mapped)*
+*Last updated: 2026-08-19 during v1.1 milestone audit (CMP-01/03/04/05/07 traceability rows synced to Complete per 13-VERIFICATION.md re-verification)*

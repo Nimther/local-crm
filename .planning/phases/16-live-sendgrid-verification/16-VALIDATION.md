@@ -3,10 +3,11 @@ phase: 16
 slug: live-sendgrid-verification
 # status lifecycle: draft (seeded by plan-phase) → validated (set by validate-phase §6)
 # audit-milestone §5.5 distinguishes NOT-VALIDATED (draft) from PARTIAL (validated + nyquist_compliant: false) (#2117)
-status: draft
-nyquist_compliant: false
-wave_0_complete: false
+status: validated
+nyquist_compliant: true
+wave_0_complete: true
 created: 2026-08-17
+validated: 2026-08-19
 ---
 
 # Phase 16 — Validation Strategy
@@ -40,26 +41,26 @@ created: 2026-08-17
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 16-01-01 | 01 | 1 | UAT-01, UAT-02 | T-16-01 | Every read is tenant-scoped through `withTenant`; no new grant | unit | `npx vitest run --root scripts __tests__/uat-verify.test.mjs` | ❌ W0 | ⬜ pending |
-| 16-01-02 | 01 | 1 | UAT-01 | T-16-02 | Runbook carries no credential value | gate | `npm run check:runbook-coverage` | ✅ | ⬜ pending |
-| 16-01-03 | 01 | 1 | UAT-01, UAT-02 | T-16-05 | Verdict is a query exit code, not an impression | manual (blocking checkpoint) | — (human-verify) | N/A | ⬜ pending |
-| 16-02-01 | 02 | 2 | UAT-02 | T-16-09 | Partial event coverage cannot render as a pass | unit | `npx vitest run --root scripts __tests__/uat-verify.test.mjs` | ❌ W0 | ⬜ pending |
-| 16-02-02 | 02 | 2 | UAT-02 | T-16-07 | Bounce target is operator-controlled, no catch-all | gate | `npm run check:runbook-coverage` | ✅ | ⬜ pending |
-| 16-02-03 | 02 | 2 | UAT-02 | T-16-06 | Sibling-workspace events cannot be counted as evidence | manual (blocking checkpoint) | — (human-verify) | N/A | ⬜ pending |
-| 16-03-01 | 03 | 2 | UAT-05 | T-16-10, T-16-14 | Absent override is byte-identical; present override warns loudly at boot | unit | `npx vitest run --root packages/delivery-core src/__tests__/send-mail.test.ts` | ❌ W0 | ⬜ pending |
-| 16-03-02 | 03 | 2 | UAT-03 | T-16-11, T-16-12, T-16-13 | Capture strictly after verification, strictly before parse; one workspace only | integration | `npx vitest run --root apps/api src/modules/webhooks/__tests__/webhooks-raw-capture.test.ts` | ❌ W0 | ⬜ pending |
-| 16-03-03 | 03 | 2 | UAT-03, UAT-05 | T-16-10 | Both env vars filed in the same change | gate | `npm run check:spec-env-coverage` | ✅ | ⬜ pending |
-| 16-04-01 | 04 | 3 | UAT-04 | T-16-18 | Journal growth expected; send_events fixed at one; counters unchanged | unit | `npx vitest run --root scripts __tests__/uat-verify.test.mjs` | ❌ W0 | ⬜ pending |
-| 16-04-02 | 04 | 3 | UAT-03, UAT-04 | T-16-17 | Byte-exact replay; tolerance restore is a numbered step | unit | `npx vitest run --root scripts __tests__/uat-replay-script.test.mjs` | ❌ W0 | ⬜ pending |
-| 16-04-03 | 04 | 3 | UAT-03, UAT-04 | T-16-15, T-16-16 | Decode-and-inspect gate before the fixture is saved | manual (blocking checkpoint) | — (human-verify) | N/A | ⬜ pending |
-| 16-05-01 | 05 | 4 | UAT-03 | T-16-20, T-16-22 | Absent fixture turns the suite red, never green | integration | `npx vitest run --root apps/api src/modules/webhooks/__tests__/webhooks-signature-replay.test.ts` | ❌ W0 | ⬜ pending |
-| 16-05-02 | 05 | 4 | UAT-03, UAT-04 | T-16-21, T-16-23 | Frozen clock, not a widened tolerance; two negative cases mandatory | integration | `npx vitest run --root apps/api src/modules/webhooks/__tests__/webhooks-signature-replay.test.ts` | ❌ W0 | ⬜ pending |
-| 16-06-01 | 06 | 4 | UAT-05 | T-16-24, T-16-25 | Rate-limit mode: zero upstream requests. Timeout mode: exactly one, delayed response | unit | `npx vitest run --root scripts __tests__/uat-fault-proxy.test.mjs` | ❌ W0 | ⬜ pending |
-| 16-06-02 | 06 | 4 | UAT-05 | T-16-26, T-16-28 | Proxy publishes no port and is absent from the production compose file | gate | `npm run verify:prod-compose` | ✅ | ⬜ pending |
-| 16-06-03 | 06 | 4 | UAT-05 | T-16-24, T-16-25, T-16-27 | Exactly one mailbox copy per leg; override removed | manual (blocking checkpoint) | — (human-verify) | N/A | ⬜ pending |
-| 16-07-01 | 07 | 5 | UAT-01..05 | T-16-34 | Every claim cites a query output or an observed artifact | gate | `grep -c 'UAT-0' .planning/phases/16-live-sendgrid-verification/16-UAT-REPORT.md` | ❌ W0 | ⬜ pending |
-| 16-07-02 | 07 | 5 | UAT-01..05 | T-16-30..33 | Teardown verified by observation, not by intention | gate | `npm run check:spec-env-coverage && npm run verify:prod-compose` | ✅ | ⬜ pending |
-| 16-07-03 | 07 | 5 | UAT-01..05 | T-16-30, T-16-31, T-16-32, T-16-33 | No seam, proxy or widened tolerance survives the phase | manual (blocking checkpoint) | — (human-verify) | N/A | ⬜ pending |
+| 16-01-01 | 01 | 1 | UAT-01, UAT-02 | T-16-01 | Every read is tenant-scoped through `withTenant`; no new grant | unit | `npx vitest run --root scripts __tests__/uat-verify.test.mjs` | ✅ | ✅ green |
+| 16-01-02 | 01 | 1 | UAT-01 | T-16-02 | Runbook carries no credential value | gate | `npm run check:runbook-coverage` | ✅ | ✅ green |
+| 16-01-03 | 01 | 1 | UAT-01, UAT-02 | T-16-05 | Verdict is a query exit code, not an impression | manual (blocking checkpoint) | — (human-verify) | N/A | ✅ green (checkpoint approved) |
+| 16-02-01 | 02 | 2 | UAT-02 | T-16-09 | Partial event coverage cannot render as a pass | unit | `npx vitest run --root scripts __tests__/uat-verify.test.mjs` | ✅ | ✅ green |
+| 16-02-02 | 02 | 2 | UAT-02 | T-16-07 | Bounce target is operator-controlled, no catch-all | gate | `npm run check:runbook-coverage` | ✅ | ✅ green |
+| 16-02-03 | 02 | 2 | UAT-02 | T-16-06 | Sibling-workspace events cannot be counted as evidence | manual (blocking checkpoint) | — (human-verify) | N/A | ✅ green (checkpoint approved) |
+| 16-03-01 | 03 | 2 | UAT-05 | T-16-10, T-16-14 | Absent override is byte-identical; present override warns loudly at boot | unit | `npx vitest run --root packages/delivery-core src/__tests__/send-mail.test.ts` | ✅ | ✅ green |
+| 16-03-02 | 03 | 2 | UAT-03 | T-16-11, T-16-12, T-16-13 | Capture strictly after verification, strictly before parse; one workspace only | integration | `npx vitest run --root apps/api src/modules/webhooks/__tests__/webhooks-raw-capture.test.ts` | ✅ | ✅ green |
+| 16-03-03 | 03 | 2 | UAT-03, UAT-05 | T-16-10 | Both env vars filed in the same change | gate | `npm run check:spec-env-coverage` | ✅ | ✅ green |
+| 16-04-01 | 04 | 3 | UAT-04 | T-16-18 | Journal growth expected; send_events fixed at one; counters unchanged | unit | `npx vitest run --root scripts __tests__/uat-verify.test.mjs` | ✅ | ✅ green |
+| 16-04-02 | 04 | 3 | UAT-03, UAT-04 | T-16-17 | Byte-exact replay; tolerance restore is a numbered step | unit | `npx vitest run --root scripts __tests__/uat-replay-script.test.mjs` | ✅ | ✅ green |
+| 16-04-03 | 04 | 3 | UAT-03, UAT-04 | T-16-15, T-16-16 | Decode-and-inspect gate before the fixture is saved | manual (blocking checkpoint) | — (human-verify) | N/A | ✅ green (checkpoint approved) |
+| 16-05-01 | 05 | 4 | UAT-03 | T-16-20, T-16-22 | Absent fixture turns the suite red, never green | integration | `npx vitest run --root apps/api src/modules/webhooks/__tests__/webhooks-signature-replay.test.ts` | ✅ | ✅ green |
+| 16-05-02 | 05 | 4 | UAT-03, UAT-04 | T-16-21, T-16-23 | Frozen clock, not a widened tolerance; two negative cases mandatory | integration | `npx vitest run --root apps/api src/modules/webhooks/__tests__/webhooks-signature-replay.test.ts` | ✅ | ✅ green |
+| 16-06-01 | 06 | 4 | UAT-05 | T-16-24, T-16-25 | Rate-limit mode: zero upstream requests. Timeout mode: exactly one, delayed response | unit | `npx vitest run --root scripts __tests__/uat-fault-proxy.test.mjs` | ✅ | ✅ green |
+| 16-06-02 | 06 | 4 | UAT-05 | T-16-26, T-16-28 | Proxy publishes no port and is absent from the production compose file | gate | `npm run verify:prod-compose` | ✅ | ✅ green |
+| 16-06-03 | 06 | 4 | UAT-05 | T-16-24, T-16-25, T-16-27 | Exactly one mailbox copy per leg; override removed | manual (blocking checkpoint) | — (human-verify) | N/A | ✅ green (checkpoint approved) |
+| 16-07-01 | 07 | 5 | UAT-01..05 | T-16-34 | Every claim cites a query output or an observed artifact | gate | `grep -c 'UAT-0' .planning/phases/16-live-sendgrid-verification/16-UAT-REPORT.md` | ✅ | ✅ green |
+| 16-07-02 | 07 | 5 | UAT-01..05 | T-16-30..33 | Teardown verified by observation, not by intention | gate | `npm run check:spec-env-coverage && npm run verify:prod-compose` | ✅ | ✅ green |
+| 16-07-03 | 07 | 5 | UAT-01..05 | T-16-30, T-16-31, T-16-32, T-16-33 | No seam, proxy or widened tolerance survives the phase | manual (blocking checkpoint) | — (human-verify) | N/A | ✅ green (checkpoint approved) |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -69,14 +70,14 @@ created: 2026-08-17
 
 Every automated command above whose file is marked ❌ W0 is created by the task that first names it — there is no separate Wave 0 plan, because each new test file is authored in the same task as the behaviour it covers:
 
-- [ ] `scripts/__tests__/uat-verify.test.mjs` — created in 16-01-01, extended in 16-02-01, 16-04-01, 16-06-02
-- [ ] `scripts/__tests__/uat-replay-script.test.mjs` — created in 16-04-02
-- [ ] `scripts/__tests__/uat-fault-proxy.test.mjs` — created in 16-06-01
-- [ ] `packages/delivery-core/src/__tests__/send-mail.test.ts` — created or extended in 16-03-01
-- [ ] `apps/worker/src/__tests__/sendgrid-base-url-boot-log.test.ts` — created in 16-03-01
-- [ ] `apps/api/src/modules/webhooks/__tests__/webhooks-raw-capture.test.ts` — created in 16-03-02
-- [ ] `apps/api/src/modules/webhooks/__tests__/webhooks-signature-replay.test.ts` — created in 16-05-01, extended in 16-05-02
-- [ ] `apps/api/src/modules/webhooks/__tests__/fixtures/uat-signed-payload.json` — produced by 16-04's blocking checkpoint, not by code
+- [x] `scripts/__tests__/uat-verify.test.mjs` — created in 16-01-01, extended in 16-02-01, 16-04-01, 16-06-02
+- [x] `scripts/__tests__/uat-replay-script.test.mjs` — created in 16-04-02
+- [x] `scripts/__tests__/uat-fault-proxy.test.mjs` — created in 16-06-01
+- [x] `packages/delivery-core/src/__tests__/send-mail.test.ts` — created or extended in 16-03-01
+- [x] `apps/worker/src/__tests__/sendgrid-base-url-boot-log.test.ts` — created in 16-03-01
+- [x] `apps/api/src/modules/webhooks/__tests__/webhooks-raw-capture.test.ts` — created in 16-03-02
+- [x] `apps/api/src/modules/webhooks/__tests__/webhooks-signature-replay.test.ts` — created in 16-05-01, extended in 16-05-02
+- [x] `apps/api/src/modules/webhooks/__tests__/fixtures/uat-signed-payload.json` — produced by 16-04's blocking checkpoint, not by code
 
 Test framework, runners and configs already exist — nothing to install.
 
@@ -98,11 +99,23 @@ Test framework, runners and configs already exist — nothing to install.
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or are declared manual-only above
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references
-- [ ] No watch-mode flags
-- [ ] Feedback latency < 30 s at task level
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] All tasks have `<automated>` verify or are declared manual-only above
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references
+- [x] No watch-mode flags
+- [x] Feedback latency < 30 s at task level
+- [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** pending
+**Approval:** validated 2026-08-19
+
+---
+
+## Validation Audit 2026-08-19
+
+| Metric | Count |
+|--------|-------|
+| Gaps found | 0 |
+| Resolved | 0 |
+| Escalated | 0 |
+
+All 8 Wave 0 artifacts exist. All automated commands run green on 2026-08-19: `uat-verify.test.mjs` (56 passed), `uat-replay-script.test.mjs` (17 passed), `uat-fault-proxy.test.mjs` (10 passed), `send-mail.test.ts` (13 passed), `sendgrid-base-url-boot-log.test.ts` (3 passed), `webhooks-raw-capture.test.ts` (8 passed), `webhooks-signature-replay.test.ts` (8 passed), `check:runbook-coverage` (4/4 alerts covered), `check:spec-env-coverage` (54/54 names), `verify:prod-compose` (59/59 invariants), UAT-report citation grep (9 > 0). All five manual blocking checkpoints (16-01-03, 16-02-03, 16-04-03, 16-06-03, 16-07-03) recorded as approved in plan SUMMARYs; teardown 5/5 and canary smoke 1/1 per 16-07-SUMMARY.

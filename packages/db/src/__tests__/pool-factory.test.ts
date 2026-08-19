@@ -181,3 +181,42 @@ describe("createPgPool -- no ssl config object attached", () => {
     }
   });
 });
+
+/**
+ * Phase 17 plan 01 (WR-06, D-01), Task 2 -- a Docker-less, config-level
+ * guard for the TimeZone pin.
+ *
+ * This block is deliberately NOT the primary proof of WR-06's fix. D-02
+ * rejected a config/`SHOW timezone`-only assertion as insufficient on its
+ * own -- `pg-timezone.test.ts`'s behavioral test (a real non-UTC database,
+ * a real naive-timestamp write, a real stored-value comparison) is the real
+ * bar. This block exists for a different reason: `pg-timezone.test.ts`
+ * needs a reachable Postgres cluster, and this repository's own sandbox has
+ * repeatedly lacked one (see `pg-tls.test.ts`'s environment-gate comment for
+ * the precedent). A pure-JS guard means a future refactor that drops the pin
+ * fails a test that runs everywhere, not only where a database happens to
+ * be available. Neither test file supersedes the other -- see
+ * `pg-timezone.test.ts` for the behavioral counterpart.
+ *
+ * Constructs, asserts, and `end()`s in the same style as the neighbouring
+ * no-ssl-config block: no `connect()` / `query()` call, no I/O at all.
+ */
+describe("createPgPool -- TimeZone startup parameter (WR-06)", () => {
+  it("carries the exact '-c TimeZone=UTC' startup-parameter string on the pool's own resolved options", () => {
+    const pool = createPgPool({ connectionString: UNREACHABLE_DSN, name: "guard" });
+    try {
+      expect(pool.options.options).toBe("-c TimeZone=UTC");
+    } finally {
+      void pool.end().catch(() => undefined);
+    }
+  });
+
+  it("still has no 'ssl' property attached -- the pin did not smuggle in a second TLS mechanism", () => {
+    const pool = createPgPool({ connectionString: UNREACHABLE_DSN, name: "guard" });
+    try {
+      expect(pool.options.ssl).toBeUndefined();
+    } finally {
+      void pool.end().catch(() => undefined);
+    }
+  });
+});

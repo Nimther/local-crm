@@ -1,0 +1,17 @@
+# Phase 16 UAT artifact only: never include this override in a normal deploy.
+# Plan 16-07 teardown removes this service from the running stack.
+services:
+  uat-fault-proxy:
+    image: ${GHCR_IMAGE_BASE}/worker:${IMAGE_TAG}
+    restart: "no"
+    env_file:
+      - path: ${MEGA_CRM_ENV_FILE}
+        required: false
+    command: ["node", "scripts/uat-fault-proxy.mjs"]
+    volumes:
+      - ../scripts/uat-fault-proxy.mjs:/app/scripts/uat-fault-proxy.mjs:ro
+    read_only: true
+    mem_limit: 128m
+    # Deliberately no `ports:` mapping. Compose joins this service to the
+    # production project's default internal network, and only the worker may
+    # route tenant mail through it during the explicitly armed UAT session.

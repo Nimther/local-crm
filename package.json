@@ -24,7 +24,9 @@
     "check:runbook-coverage": "node scripts/check-runbook-coverage.mjs",
     "uat:verify": "tsx scripts/uat-verify.mjs",
     "uat:replay": "bash scripts/uat-replay.sh",
+    "uat:fault-proxy": "node scripts/uat-fault-proxy.mjs",
     "test:uat-replay-script": "vitest run --root scripts __tests__/uat-replay-script.test.mjs",
+    "test:uat-fault-proxy": "vitest run --root scripts __tests__/uat-fault-proxy.test.mjs",
     "check:sentry-redaction": "vitest run --root packages/redaction src/__tests__/sentry-scrub-fixtures.test.ts",
     "verify:redis-config": "node scripts/verify-redis-config.mjs",
     "verify:prod-compose": "node scripts/validate-prod-compose.mjs",
@@ -70,6 +72,7 @@
   },
   "devDependencies": {
     "@mega-crm/db": "0.1.0",
+    "@mega-crm/delivery-core": "0.1.0",
     "@vitest/eslint-plugin": "^1.6.24",
     "concurrently": "10.0.3",
     "drizzle-orm": "0.45.2",

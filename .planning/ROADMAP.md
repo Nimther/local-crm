@@ -38,7 +38,7 @@ Full phase details: [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md)
 - [x] **Phase 13: Compliance & Analytics Integrity** - Consent and delivery numbers mean exactly what they claim (completed 2026-08-12)
 - [x] **Phase 14: Deployment & Database Durability** - Reproducible deploy, gated migrations, rehearsed restore, enforced constraints (completed 2026-08-14)
 - [x] **Phase 15: Observability, Alerting & Frontend Resilience** - The system reports its true state to operators and to users (completed 2026-08-17)
-- [ ] **Phase 16: Live SendGrid Verification** - Every delivery guarantee confirmed against the real provider (release barrier)
+- [x] **Phase 16: Live SendGrid Verification** - Every delivery guarantee confirmed against the real provider (release barrier) (completed 2026-08-19)
 
 ## Phase Details
 
@@ -670,7 +670,7 @@ Plans:
   3. A genuinely signed SendGrid webhook payload passes signature verification through the full HTTP stack, and a redelivery of that same payload is counted exactly once.
   4. A real SendGrid 429 or transient error defers only the affected tenant's sends and resolves without duplicate or lost mail.
 
-**Plans**: 3/7 plans executed
+**Plans**: 7/7 plans executed
 
 Plans:
 **Wave 1**
@@ -684,16 +684,16 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 16-04-PLAN.md — Live signed-payload capture, byte-exact replay, dedup proof, byte-flip rejection (UAT-03, UAT-04)
+- [x] 16-04-PLAN.md — Live signed-payload capture, byte-exact replay, dedup proof, byte-flip rejection (UAT-03, UAT-04)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 16-05-PLAN.md — Committed CI fixture + full-HTTP-stack replay test, closing the Phase 5 gap (UAT-03, UAT-04)
-- [ ] 16-06-PLAN.md — Fault proxy + live 429 and timeout, defer/resolve/exactly-once (UAT-05)
+- [x] 16-05-PLAN.md — Committed CI fixture + full-HTTP-stack replay test, closing the Phase 5 gap (UAT-03, UAT-04)
+- [x] 16-06-PLAN.md — Fault proxy + live 429 and timeout, defer/resolve/exactly-once (UAT-05)
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 16-07-PLAN.md — UAT report, standing-canary procedure, teardown verification (UAT-01..05)
+- [x] 16-07-PLAN.md — UAT report, standing-canary procedure, teardown verification (UAT-01..05)
 
 **Why UAT is its own final phase (deliberate decision):**
 
@@ -769,7 +769,34 @@ Phase 9 has no dependents and may be scheduled in parallel at any point after Ph
 | 13. Compliance & Analytics Integrity | v1.1 | 16/16 | Complete    | 2026-08-12 |
 | 14. Deployment & Database Durability | v1.1 | 14/14 | Complete    | 2026-08-14 |
 | 15. Observability, Alerting & Frontend Resilience | v1.1 | 22/22 | Complete    | 2026-08-17 |
-| 16. Live SendGrid Verification | v1.1 | 3/7 | In Progress|  |
+| 16. Live SendGrid Verification | v1.1 | 7/7 | Complete    | 2026-08-19 |
+
+### Phase 17: Address tech debt: WR-06 + medium security follow-ups
+
+**Goal:** WR-06's UTC day-boundary hazard is closed at both layers and proven by a behavioral test against a deliberately non-UTC Postgres; the custom `megacrm-postgres` `db`/`pgbackrest` image is CI-built, GHCR-pulled on an immutable SHA tag, inside the compose immutability gate, and cut over live in production; and `scripts/restore-drill.sh` self-records restore duration + disk high-water, with real figures captured from an in-phase PITR drill — closing WR-06, T-14-58, T-14-73, T-14-88 and the outstanding Phase 15 alloy/Loki operator confirmation.
+**Requirements**: TBD (none mapped — closes named tech-debt/review findings, not REQUIREMENTS.md rows; scope authority is 17-CONTEXT.md's decisions D-01…D-12)
+**Depends on:** Phase 16
+**UI hint**: no
+**Plans:** 4/6 plans executed
+
+Plans:
+**Wave 1**
+
+- [x] 17-01-PLAN.md — Pin `TimeZone=UTC` in the mandatory pool factory, proven against an America/New_York database (D-01, D-02)
+- [x] 17-02-PLAN.md — Double-hop UTC anchor on the dashboard growth query + D-03 sweep audit (D-01, D-03, D-04)
+- [x] 17-03-PLAN.md — CI-build and GHCR-publish the postgres image; bring `db`/`pgbackrest` inside the immutable-tag gate (D-05, D-06)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [x] 17-04-PLAN.md — Restore-drill self-records duration + disk high-water; drill launches the CI-built image (D-09)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 17-05-PLAN.md — BLOCKING operator session: live image cutover + alloy/Loki confirmation + real PITR drill (D-07, D-08, D-11)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 17-06-PLAN.md — SPECIFICATION.md as-built trail + register evidence staged for the auditor pass (D-10, D-12)
 
 ---
 *Roadmap for v1.1 created: 2026-07-27*
