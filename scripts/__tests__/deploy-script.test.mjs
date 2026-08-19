@@ -74,7 +74,7 @@ if [[ "$args" == *"pull api worker web"* ]]; then
   exit "\${DEPLOY_TEST_PULL_EXIT_CODE:-0}"
 fi
 
-if [[ "$args" == *"run --rm migrate"* ]]; then
+if [[ "$args" == *"run --rm --no-deps migrate"* ]]; then
   exit "\${DEPLOY_TEST_MIGRATE_EXIT_CODE:-0}"
 fi
 
@@ -207,13 +207,13 @@ describe("--dry-run: ordering, machine-readability, no side effects", () => {
 
     const idxPull = lines.findIndex((l) => l.includes("pull api worker web"));
     const idxGracePeriod = lines.findIndex((l) => l.includes("print-stop-grace-period.mjs"));
-    const idxMigrate = lines.findIndex((l) => l.includes("run --rm migrate"));
-    const idxUpWebApi = lines.findIndex((l) => l.includes("up -d web api"));
+    const idxMigrate = lines.findIndex((l) => l.includes("run --rm --no-deps migrate"));
+    const idxUpWebApi = lines.findIndex((l) => l.includes("up -d --no-deps web api"));
     const idxReadyzPoll = lines.findIndex((l) => l.includes("readyz"));
     const idxWebReadyPoll = lines.findIndex((l) => l.includes("exec -T web"));
     const idxStopWorker = lines.findIndex((l) => l.includes("stop --timeout"));
     const idxConfirmGone = lines.findIndex((l) => l.includes("ps -q --status=running worker"));
-    const idxUpWorker = lines.findIndex((l) => l.trim().endsWith("up -d worker"));
+    const idxUpWorker = lines.findIndex((l) => l.trim().endsWith("up -d --no-deps worker"));
 
     for (const idx of [
       idxPull,
@@ -277,10 +277,10 @@ describe("real invocation: migrate failure aborts before any replacement", () =>
     expect(run.stdout + run.stderr).toMatch(/MIGRATE FAILED/);
 
     const calls = callLines(scratch.logFile);
-    expect(calls.some((l) => l.includes("run --rm migrate"))).toBe(true);
-    expect(calls.some((l) => l.includes("up -d web api"))).toBe(false);
+    expect(calls.some((l) => l.includes("run --rm --no-deps migrate"))).toBe(true);
+    expect(calls.some((l) => l.includes("up -d --no-deps web api"))).toBe(false);
     expect(calls.some((l) => l.includes("stop --timeout"))).toBe(false);
-    expect(calls.some((l) => l.trim().endsWith("up -d worker"))).toBe(false);
+    expect(calls.some((l) => l.trim().endsWith("up -d --no-deps worker"))).toBe(false);
 
     // the previous-SHA record exists and the rollback command was printed,
     // even on this failure path (T-14-56)
@@ -317,7 +317,7 @@ describe("real invocation: unbounded /readyz never returns 200", () => {
     const calls = callLines(scratch.logFile);
     expect(calls.some((l) => l.includes("exec -T api"))).toBe(true);
     expect(calls.some((l) => l.includes("stop --timeout"))).toBe(false);
-    expect(calls.some((l) => l.trim().endsWith("up -d worker"))).toBe(false);
+    expect(calls.some((l) => l.trim().endsWith("up -d --no-deps worker"))).toBe(false);
   });
 });
 
@@ -337,7 +337,7 @@ describe("real invocation: unbounded web admin-API probe never succeeds", () => 
     expect(calls.some((l) => l.includes("exec -T api"))).toBe(true);
     expect(calls.some((l) => l.includes("exec -T web"))).toBe(true);
     expect(calls.some((l) => l.includes("stop --timeout"))).toBe(false);
-    expect(calls.some((l) => l.trim().endsWith("up -d worker"))).toBe(false);
+    expect(calls.some((l) => l.trim().endsWith("up -d --no-deps worker"))).toBe(false);
   });
 });
 
@@ -350,13 +350,13 @@ describe("real invocation: full successful deploy", () => {
 
     const calls = callLines(scratch.logFile);
     const idxPull = calls.findIndex((l) => l.includes("pull api worker web"));
-    const idxMigrate = calls.findIndex((l) => l.includes("run --rm migrate"));
-    const idxUpWebApi = calls.findIndex((l) => l.includes("up -d web api"));
+    const idxMigrate = calls.findIndex((l) => l.includes("run --rm --no-deps migrate"));
+    const idxUpWebApi = calls.findIndex((l) => l.includes("up -d --no-deps web api"));
     const idxApiReady = calls.findIndex((l) => l.includes("exec -T api"));
     const idxWebReady = calls.findIndex((l) => l.includes("exec -T web"));
     const idxStop = calls.findIndex((l) => l.includes("stop --timeout"));
     const idxConfirmGone = calls.findIndex((l) => l.includes("ps -q --status=running worker"));
-    const idxUpWorker = calls.findIndex((l) => l.trim().endsWith("up -d worker"));
+    const idxUpWorker = calls.findIndex((l) => l.trim().endsWith("up -d --no-deps worker"));
 
     for (const idx of [idxPull, idxMigrate, idxUpWebApi, idxApiReady, idxWebReady, idxStop, idxConfirmGone, idxUpWorker]) {
       expect(idx).toBeGreaterThanOrEqual(0);
@@ -390,10 +390,10 @@ describe("real invocation: re-running an already-deployed SHA is idempotent", ()
 
     const calls = callLines(scratch.logFile);
     expect(calls.some((l) => l.includes("pull api worker web"))).toBe(true);
-    expect(calls.some((l) => l.includes("run --rm migrate"))).toBe(true);
+    expect(calls.some((l) => l.includes("run --rm --no-deps migrate"))).toBe(true);
     // the disruptive worker replace never runs the second time
     expect(calls.some((l) => l.includes("stop --timeout"))).toBe(false);
-    expect(calls.some((l) => l.trim().endsWith("up -d worker"))).toBe(false);
+    expect(calls.some((l) => l.trim().endsWith("up -d --no-deps worker"))).toBe(false);
     expect(second.stdout).toMatch(/already the recorded deployed SHA/);
   });
 });
@@ -408,7 +408,7 @@ describe("real invocation: an unhandled command failure is never silently contin
     expect(run.exitCode).not.toBe(0);
     const calls = callLines(scratch.logFile);
     expect(calls.some((l) => l.includes("pull api worker web"))).toBe(true);
-    expect(calls.some((l) => l.includes("run --rm migrate"))).toBe(false);
+    expect(calls.some((l) => l.includes("run --rm --no-deps migrate"))).toBe(false);
   });
 });
 
@@ -439,7 +439,49 @@ describe("distinct SHAs are treated as genuinely different deploys", () => {
 
     const calls = callLines(scratch.logFile);
     expect(calls.some((l) => l.includes("stop --timeout"))).toBe(true);
-    expect(calls.some((l) => l.trim().endsWith("up -d worker"))).toBe(true);
+    expect(calls.some((l) => l.trim().endsWith("up -d --no-deps worker"))).toBe(true);
     expect(readFileSync(scratch.recordFile, "utf8")).toBe(OTHER_SHA);
+  });
+});
+
+describe("leg isolation: deploying apps never recreates db/redis", () => {
+  // Found live during phase 17-05 attempt 3 (2026-08-19): with the checked-out
+  // compose file describing `db` with a NEW image, `compose up -d web api`
+  // WITHOUT --no-deps recreates db and redis as dependency convergence -- an
+  // implicit, ungated database cutover buried inside an app deploy. deploy.sh's
+  // documented compose surface is api/worker/web only (by design); --no-deps on
+  // every mutating invocation is what actually enforces that contract.
+  it("every mutating compose invocation carries --no-deps in the real deploy", () => {
+    const scratch = makeScratch();
+    const run = runCli([VALID_SHA], { env: baseRealEnv(scratch) });
+    expect(run.exitCode).toBe(0);
+
+    const calls = callLines(scratch.logFile);
+    expect(calls.some((l) => l.includes("run --rm --no-deps migrate"))).toBe(true);
+    expect(calls.some((l) => l.includes("up -d --no-deps web api"))).toBe(true);
+    expect(calls.some((l) => l.trim().endsWith("up -d --no-deps worker"))).toBe(true);
+    // no bare form may remain anywhere -- a single one reintroduces the hazard
+    expect(calls.some((l) => l.includes("run --rm migrate"))).toBe(false);
+    expect(calls.some((l) => l.includes("up -d web api"))).toBe(false);
+    expect(calls.some((l) => l.trim().endsWith("up -d worker"))).toBe(false);
+  });
+
+  it("the printed --dry-run plan tells the operator the same --no-deps truth", () => {
+    const scratch = makeScratch();
+    const run = runCli(["--dry-run", VALID_SHA], {
+      env: { MEGA_CRM_DEPLOY_STATE_FILE: scratch.recordFile },
+    });
+    expect(run.exitCode).toBe(0);
+
+    const lines = run.stdout
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0 && !l.startsWith("#"));
+    expect(lines.some((l) => l.includes("run --rm --no-deps migrate"))).toBe(true);
+    expect(lines.some((l) => l.includes("up -d --no-deps web api"))).toBe(true);
+    expect(lines.some((l) => l.trim().endsWith("up -d --no-deps worker"))).toBe(true);
+    expect(lines.some((l) => l.includes("run --rm migrate"))).toBe(false);
+    expect(lines.some((l) => l.includes("up -d web api"))).toBe(false);
+    expect(lines.some((l) => l.trim().endsWith("up -d worker"))).toBe(false);
   });
 });

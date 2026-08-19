@@ -58,7 +58,7 @@ duration.
    running `scripts/print-stop-grace-period.mjs` (plan 14-04) — never a
    hand-typed number — and exports it for Compose to interpolate.
 4. **Run the one-shot migrate step**
-   (`docker compose -f docker/docker-compose.prod.yml run --rm migrate`) and
+   (`docker compose -f docker/docker-compose.prod.yml run --rm --no-deps migrate`) and
    check its exit code explicitly.
 5. **Bring up `web` and `api`.**
 6. **Wait for `api`'s `/readyz`** to return 200, polling on a bounded
