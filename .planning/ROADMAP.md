@@ -771,5 +771,22 @@ Phase 9 has no dependents and may be scheduled in parallel at any point after Ph
 | 15. Observability, Alerting & Frontend Resilience | v1.1 | 22/22 | Complete    | 2026-08-17 |
 | 16. Live SendGrid Verification | v1.1 | 7/7 | Complete    | 2026-08-19 |
 
+### Phase 17: Address tech debt: WR-06 + medium security follow-ups
+
+**Goal:** WR-06's UTC day-boundary hazard is closed at both layers and proven by a behavioral test against a deliberately non-UTC Postgres; the custom `megacrm-postgres` `db`/`pgbackrest` image is CI-built, GHCR-pulled on an immutable SHA tag, inside the compose immutability gate, and cut over live in production; and `scripts/restore-drill.sh` self-records restore duration + disk high-water, with real figures captured from an in-phase PITR drill — closing WR-06, T-14-58, T-14-73, T-14-88 and the outstanding Phase 15 alloy/Loki operator confirmation.
+**Requirements**: TBD (none mapped — closes named tech-debt/review findings, not REQUIREMENTS.md rows; scope authority is 17-CONTEXT.md's decisions D-01…D-12)
+**Depends on:** Phase 16
+**UI hint**: no
+**Plans:** 6 plans
+
+Plans:
+
+- [ ] 17-01-PLAN.md — Pin `TimeZone=UTC` in the mandatory pool factory, proven against an America/New_York database (D-01, D-02)
+- [ ] 17-02-PLAN.md — Double-hop UTC anchor on the dashboard growth query + D-03 sweep audit (D-01, D-03, D-04)
+- [ ] 17-03-PLAN.md — CI-build and GHCR-publish the postgres image; bring `db`/`pgbackrest` inside the immutable-tag gate (D-05, D-06)
+- [ ] 17-04-PLAN.md — Restore-drill self-records duration + disk high-water; drill launches the CI-built image (D-09)
+- [ ] 17-05-PLAN.md — BLOCKING operator session: live image cutover + alloy/Loki confirmation + real PITR drill (D-07, D-08, D-11)
+- [ ] 17-06-PLAN.md — SPECIFICATION.md as-built trail + register evidence staged for the auditor pass (D-10, D-12)
+
 ---
 *Roadmap for v1.1 created: 2026-07-27*
