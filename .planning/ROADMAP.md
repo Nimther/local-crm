@@ -777,7 +777,7 @@ Phase 9 has no dependents and may be scheduled in parallel at any point after Ph
 **Requirements**: TBD (none mapped — closes named tech-debt/review findings, not REQUIREMENTS.md rows; scope authority is 17-CONTEXT.md's decisions D-01…D-12)
 **Depends on:** Phase 16
 **UI hint**: no
-**Plans:** 6/6 plans executed
+**Plans:** 6/6 plans complete
 
 Plans:
 **Wave 1**
