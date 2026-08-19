@@ -34,9 +34,18 @@ script does not (cannot, from the host) verify any of them itself:
 
 1. **At least one full backup and a span of WAL exist in the repository:**
    ```bash
-   docker compose -f docker/docker-compose.prod.yml exec -T pgbackrest \
+   docker compose -f docker/docker-compose.prod.yml exec -T -u postgres pgbackrest \
      pgbackrest --config=/etc/pgbackrest/pgbackrest.conf --stanza=mega_crm info
    ```
+   **`-u postgres` is required, not optional:** the `pgbackrest` container's
+   interactive `docker exec` default user is root, and `pgbackrest` refuses
+   to run as root (error `[031]`) — every real invocation in this codebase
+   (`docker/pgbackrest/backup-entrypoint.sh`'s `gosu postgres`,
+   `scripts/restore-drill.sh`'s own restore command) already runs as
+   `postgres`, matching `pgbackrest.conf`'s `pg1-user=postgres`. This
+   prerequisite command was found running as root (and failing) during
+   phase 17's live cutover drill (2026-08-19) — fixed here in the same
+   change that recorded that drill's figures below.
    Read `docs/runbooks/backups.md`'s "Cadence and retention" section for
    what "inside the retention window" means for choosing a target below —
    roughly two weeks behind the newest full backup (`repo1-retention-full=2`,
@@ -248,6 +257,50 @@ record for the run that closed DB-10; later runs' pass/fail outcome still
 belongs in an operational log (now the history file itself, not a new
 planning document each time), not restated here.
 
+## Recorded drill runs
+
+This table is a **curated, human-readable record** of drill runs that closed
+a specific plan/checkpoint. The **machine-written history** — every run,
+including timeouts — lives in `RESTORE_DRILL_METRICS_FILE`
+(`${XDG_STATE_HOME:-$HOME/.local/state}/mega-crm/restore-drill-history.ndjson`
+by default); this table does not replace it, and future runs append a new
+row here only when the run is itself worth citing (e.g. it closes a
+checkpoint or a threat-register row), not for every routine monthly drill.
+
+| Date | PITR target | Duration | Disk high-water | Image under test | Outcome |
+|------|-------------|----------|------------------|-------------------|---------|
+| 2026-08-19 | `2026-08-19 17:00:00+00` | 119s | 170520 KB (~166.5 MB) | `ghcr.io/nimther/local-crm/postgres:1e061016dbf63016ab9aaeff9a3b995f8a55294f` | verified — `db:verify-restored` passed |
+
+**Source:** metrics NDJSON line
+`{"target":"2026-08-19 17:00:00+00","outcome":"verified","durationSeconds":119,"diskHighWaterKb":170520,"recordedAt":"2026-08-19T19:27:46Z"}`,
+recorded by `scripts/restore-drill.sh`'s own self-instrumentation (plan
+17-04) during phase 17's live cutover checkpoint (plan 17-05,
+`17-05-SUMMARY.md`). This run additionally proved a cross-version property
+this codebase had not exercised before: the restored repository's backups
+were **written by pgBackRest 2.59.0** and this run's **restore and
+verification used the 2.59.1 binary** (the version now running in
+production as of the same checkpoint, ratified as expected apt-level patch
+drift — see `docs/runbooks/backups.md`'s "Verifying backup health"
+section) — the restore completing and `db:verify-restored` passing is the
+concrete proof that 2.59.1 correctly reads repositories 2.59.0 wrote.
+
+**Derived free-disk-headroom requirement (T-14-73's mitigation, the reason
+this table exists):** the scratch PGDATA's measured high-water mark of
+170520 KB (~166.5 MB) is, by construction, approximately the production
+data directory's actual on-disk size at drill time (the drill restores a
+full physical copy of it). The pre-flight `df -h` for this run reported
+25G total / 18G used / 6.8G available — comfortably above the measured
+high-water mark, but that headroom comparison is only valid **at the size
+the dataset is now**. Because the scratch copy tracks production's PGDATA
+size 1:1, the operational rule is: **before every drill, confirm free VPS
+disk is at least 2x the CURRENT production PGDATA size** (re-run `df -h`
+and, if needed, `docker compose exec -T db du -sh /var/lib/postgresql/data`
+against the live `db` service), not 2x this table's last-recorded figure —
+the 100k-1M-contact growth target this platform is sized for (PROJECT.md)
+will grow PGDATA well past 166.5 MB, and a headroom check anchored to a
+stale historical number would silently stop protecting against
+disk-exhaustion (T-17-29) as the dataset grows.
+
 ## What this is not: the fresh-VPS disaster rehearsal (D-07's stretch variant)
 
 This baseline drill restores into a **scratch container on the same VPS**
@@ -319,14 +372,16 @@ independent of Docker — was rehearsed directly against a real pgBackRest
   "Reading the verification output" section) was run directly against a
   real local Postgres database and produced a complete, correctly-shaped
   flat JSON object for every real table.
-- **What was NOT verified locally, and remains this plan's own checkpoint
-  task:** restoring against the REAL off-host S3 repository (rather than a
-  local filesystem one), and the `docker run`-based scratch-container
-  mechanism `scripts/restore-drill.sh` itself uses (no Docker daemon in this
-  sandbox). The exact restore duration against the real production data
-  volume and the real disk high-water mark on the real VPS are still only
-  produced by a live run — as of Phase 17 the script records both figures
-  itself on every run (see "How to run it" and step 8 above), so they no
-  longer depend on an operator noticing and writing them down. As of Phase
-  17 the image under test is also the same CI-built, GHCR-published
+- **What was NOT verified locally, and was closed by this plan's own live
+  checkpoint (2026-08-19, see the drill-runs table above):** restoring
+  against the REAL off-host S3 repository (rather than a local filesystem
+  one), and the `docker run`-based scratch-container mechanism
+  `scripts/restore-drill.sh` itself uses (no Docker daemon in this
+  sandbox). The restore duration against the real production data volume
+  and the disk high-water mark on the real VPS are no longer estimates —
+  the script records both figures itself on every run (see "How to run it"
+  and step 8 above) and the 2026-08-19 run's actual measured figures
+  (119s, 170520 KB) are recorded in the drill-runs table above, so they no
+  longer depend on an operator noticing and writing them down. The image
+  under test in that run was also the same CI-built, GHCR-published
   `megacrm-postgres` image production runs, not a host-built one.

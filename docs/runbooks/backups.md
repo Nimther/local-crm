@@ -46,14 +46,47 @@ certificate of the S3-compatible repository. A missing trust store is a loud
 configuration failure; certificate verification must never be disabled to
 work around it.
 
-**Installed pgBackRest version**: **2.59.0**, confirmed by real arm64 and
-amd64 builds on 2026-08-14 after the mutable `postgres:17` base moved to
-Debian trixie. Every configuration key and command this plan uses was also
-verified directly against a real pgBackRest 2.59.0 (Homebrew) against a real
-Postgres 17 cluster and a real filesystem-type repository. A real `docker build -f
+**Installed pgBackRest version**: **2.59.1** as of the phase 17 CI-built
+image production actually runs (`ghcr.io/nimther/local-crm/postgres`,
+digest `sha256:5697782e12c2df655f7798c51eb26851f37b8cfa82d576b64890ffacda6ae519`,
+confirmed live on the VPS 2026-08-19) — a patch-level drift up from the
+**2.59.0** confirmed by the original real arm64/amd64 builds on 2026-08-14
+after the mutable `postgres:17` base moved to Debian trixie. Every
+configuration key and command this plan uses was also verified directly
+against a real pgBackRest 2.59.0 (Homebrew) against a real Postgres 17
+cluster and a real filesystem-type repository. A real `docker build -f
 docker/postgres/Dockerfile -t megacrm-postgres:local .` followed by `docker
 run --rm megacrm-postgres:local pgbackrest version` is the authoritative
 check after any future base-image rebuild.
+
+**This drift is expected and ratified, not a defect to chase out:**
+`docker/postgres/Dockerfile` installs pgBackRest via unpinned
+`apt-get install -y --no-install-recommends pgbackrest` against the pgdg
+repository — there is no version pin, so each image rebuild can legitimately
+pick up whatever patch release pgdg currently ships. T-14-58/T-14-88 (the
+threat rows this image's CI-built/GHCR-pulled/immutable-tag properties
+close) are about **image provenance and tag immutability**, never about
+apt-level build reproducibility, so this drift does not reopen either row.
+The 2.59.1-vs-2.59.0 gap was explicitly ratified during phase 17's live
+cutover checkpoint (`17-05-SUMMARY.md`) on the strength of a concrete
+cross-version proof, not an assumption: the same checkpoint's restore drill
+(see `docs/runbooks/restore-drill.md`'s "Recorded drill runs") restored and
+verified a repository whose backups were **written by 2.59.0** using the
+**2.59.1** binary, which is exactly the compatibility property that matters
+for a repository accumulating backups across image rebuilds.
+
+**Checking whether the GHCR image resolves, on THIS VPS specifically:**
+`docker manifest inspect "$GHCR_IMAGE_BASE/postgres:<sha>"` **false-negatives
+on this host** (`no such manifest`, even for an image that genuinely
+exists) — the VPS runs legacy Docker 20.10.21, whose `manifest inspect`
+client cannot read manifests published in the newer OCI index format CI
+publishes. This was discovered during phase 17's live cutover checkpoint
+when the command failed against an image independently confirmed present
+via the GHCR Registry API. **Use `docker buildx imagetools inspect
+"$GHCR_IMAGE_BASE/postgres:<sha>"` instead** — it exits 0 and prints the
+per-architecture digests correctly on this host; the GHCR Registry API
+(`GET /v2/<owner>/<repo>/postgres/manifests/<sha>`) is the fallback if
+`buildx` itself is ever unavailable.
 
 ## Cadence and retention
 
@@ -117,10 +150,18 @@ verified independently in the checkpoint below.
 
 **`pgbackrest --config=/etc/pgbackrest/pgbackrest.conf --stanza=mega_crm
 check`** — run inside either the `db` or `pgbackrest` container
-(`docker compose exec pgbackrest pgbackrest --stanza=mega_crm check`).
-Validates the archive configuration and confirms the repository is
+(`docker compose exec -T -u postgres pgbackrest pgbackrest --stanza=mega_crm
+check`). **`-u postgres` is required**: the `pgbackrest` container's
+interactive `docker exec` default user is root, and pgBackRest refuses to
+run as root (error `[031]`) — found running (and failing) as root during
+phase 17's live cutover checkpoint (2026-08-19), fixed here in the same
+change. Validates the archive configuration and confirms the repository is
 reachable. This is also what runs automatically every day at 03:30 UTC
-(`docker/pgbackrest/crontab`).
+(`docker/pgbackrest/crontab`) — the scheduled path never hit this defect
+because `backup-entrypoint.sh` already runs every real pgBackRest command
+via `gosu postgres` internally (see "What to do when a scheduled backup
+fails" below); the defect only ever affected an operator running the
+command interactively by hand.
 
 **What a passing `check` does NOT prove**: it means the configuration is
 coherent and the repository is reachable. It does **not** prove a restore
@@ -158,15 +199,21 @@ nightly backup is worse than no backup, because it is believed.
    `/var/log/pgbackrest/cron.log` inside the container) to find the failure
    line and its `exit_code`.
 2. Run the same command by hand
-   (`docker compose exec pgbackrest pgbackrest --config=/etc/pgbackrest/pgbackrest.conf --stanza=mega_crm --type=<type> backup`,
+   (`docker compose exec -T -u postgres pgbackrest pgbackrest --config=/etc/pgbackrest/pgbackrest.conf --stanza=mega_crm --type=<type> backup`,
    or `... check`) to see pgBackRest's own error output directly — the cron
    log line only names the stanza/type/exit code, not pgBackRest's own error
-   text.
+   text. `-u postgres` matters here too: run as the container's default
+   root user this fails with pgBackRest error `[031]` before you even reach
+   the error you were trying to diagnose.
 3. Common causes: the bucket became unreachable (network/DNS/credential
    rotation), the repository ran out of space, or the cipher passphrase in
    `MEGA_CRM_ENV_FILE` doesn't match what the stanza was created with.
 4. Once fixed, re-run the failed job type manually
-   (`docker compose exec pgbackrest /usr/local/bin/backup-entrypoint.sh <type>`)
+   (`docker compose exec pgbackrest /usr/local/bin/backup-entrypoint.sh <type>`
+   — no `-u postgres` needed here: unlike the two hand-run commands above,
+   this invokes the entrypoint script itself, which already `gosu postgres`s
+   internally before running any real pgBackRest command, the same as its
+   own scheduled-cron invocation)
    rather than waiting for the next scheduled run, so the gap in coverage is
    as short as possible.
 
