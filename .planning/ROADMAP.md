@@ -777,7 +777,7 @@ Phase 9 has no dependents and may be scheduled in parallel at any point after Ph
 **Requirements**: TBD (none mapped — closes named tech-debt/review findings, not REQUIREMENTS.md rows; scope authority is 17-CONTEXT.md's decisions D-01…D-12)
 **Depends on:** Phase 16
 **UI hint**: no
-**Plans:** 4/6 plans executed
+**Plans:** 5/6 plans executed
 
 Plans:
 **Wave 1**
@@ -792,7 +792,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 17-05-PLAN.md — BLOCKING operator session: live image cutover + alloy/Loki confirmation + real PITR drill (D-07, D-08, D-11)
+- [x] 17-05-PLAN.md — BLOCKING operator session: live image cutover + alloy/Loki confirmation + real PITR drill (D-07, D-08, D-11)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
