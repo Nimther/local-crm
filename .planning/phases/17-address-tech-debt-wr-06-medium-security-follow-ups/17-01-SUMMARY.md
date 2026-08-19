@@ -201,3 +201,14 @@ Two `node_modules` symlinks (`node_modules`, `scripts/node_modules`) were create
 ---
 *Phase: 17-address-tech-debt-wr-06-medium-security-follow-ups*
 *Completed: 2026-08-19*
+
+## Self-Check: PASSED
+
+- FOUND: `packages/db/src/pool.ts`
+- FOUND: `packages/db/src/__tests__/pg-timezone.test.ts`
+- FOUND: `packages/db/src/__tests__/pool-factory.test.ts`
+- FOUND: `.planning/phases/17-address-tech-debt-wr-06-medium-security-follow-ups/17-01-SUMMARY.md`
+- FOUND commit: `88d1dac` (test — RED)
+- FOUND commit: `8bee5ec` (feat — GREEN)
+- FOUND commit: `ce7d94d` (test — Task 2 guard)
+- FOUND commit: `9c816c9` (docs — this SUMMARY)
