@@ -63,6 +63,22 @@ name: Images
 # written -- never copied from training data or from RESEARCH.md's
 # deliberately-placeholder skeleton. Task 3 reuses these same SHAs verbatim
 # for the new pull_request job -- nothing was re-resolved or substituted.
+#
+# Phase 17 plan 03 (D-05, D-06, closing T-14-58/T-14-88): two additional
+# standalone jobs, `build-and-push-postgres` and `build-only-postgres`,
+# build and (on push only) publish the custom `megacrm-postgres` image used
+# by both the `db` service and the `pgbackrest` sidecar in
+# docker/docker-compose.prod.yml. They are standalone jobs rather than a
+# fourth entry in the api/web/worker matrix above because the
+# matrix hard-codes `file: docker/Dockerfile.${{ matrix.app }}` with the
+# repo root as build context, while this image's Dockerfile lives at
+# `docker/postgres/Dockerfile` with build context `docker/` -- a different
+# file/context pair the matrix's own templated path cannot express. The
+# published tag is deliberately the SAME `${{ github.sha }}` already used
+# for `api`/`web`/`worker`, so `deploy.sh <sha>` keeps its single-SHA
+# operator interface once a later plan wires the postgres image into the
+# cutover flow. Both new jobs reuse the four action SHAs above verbatim --
+# nothing was re-resolved.
 on:
   push:
     branches: [master]
@@ -132,6 +148,79 @@ jobs:
           # `secrets.GITHUB_TOKEN` above, which it does not.
           build-args: |
             ${{ matrix.app == 'web' && format('VITE_SENTRY_DSN={0}', vars.VITE_SENTRY_DSN) || '' }}
+
+  # Phase 17 plan 03 (D-05, D-06, closing T-14-58/T-14-88). Builds and
+  # pushes the custom `megacrm-postgres` image (docker/postgres/Dockerfile)
+  # on every push to master, tagged with the SAME github.sha as the three
+  # application images above. See this file's own header comment for why
+  # this is a standalone job rather than a fourth matrix entry.
+  build-and-push-postgres:
+    name: build-and-push (postgres)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Same lowercase-normalization step as build-and-push above -- GHCR
+      # requires a lowercase image reference and GitHub Actions expressions
+      # have no lowercase function.
+      - name: Compute lowercase image base
+        id: image-base
+        run: echo "base=ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          # docker/postgres/Dockerfile's build context is `docker/`, NOT the
+          # repo root -- it needs no application source, only
+          # docker/postgres/Dockerfile itself and the sibling files it adds
+          # on top of the official postgres:17 base.
+          context: docker
+          file: docker/postgres/Dockerfile
+          push: true
+          # Exactly one tag, the same github.sha the application images use
+          # above -- never `latest`, never a branch name. No `build-args`:
+          # docker/postgres/Dockerfile declares none (the web-only
+          # VITE_SENTRY_DSN argument above is specific to Dockerfile.web).
+          tags: ${{ steps.image-base.outputs.base }}/postgres:${{ github.sha }}
+
+  # Phase 17 plan 03 (D-05, D-06, T-14-14-03 privilege boundary). Builds the
+  # same postgres image on every pull_request targeting master -- BUILD
+  # ONLY, never push, and with NO registry credential at all, mirroring
+  # build-only above.
+  build-only-postgres:
+    name: build-only (postgres)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    # T-14-14-03: this job never authenticates to any registry, even for a
+    # PR opened from a fork -- overrides the workflow-level `packages:
+    # write` down to read-only contents access.
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+
+      # No docker/login-action step, deliberately -- this job never
+      # authenticates to GHCR or any other registry.
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
+        with:
+          context: docker
+          file: docker/postgres/Dockerfile
+          push: false
+          # GHA layer caching scoped to `postgres` specifically, so it
+          # neither shares nor evicts the app images' own per-matrix-entry
+          # caches above.
+          cache-from: type=gha,scope=postgres
+          cache-to: type=gha,mode=max,scope=postgres
 
   # Phase 14 plan 14 (G-14-4 gap closure). Builds all three images on every
   # pull_request targeting master -- BUILD ONLY, never push. See the header
