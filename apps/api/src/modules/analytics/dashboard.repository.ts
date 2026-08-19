@@ -46,6 +46,54 @@ export interface DashboardActiveFlow {
 }
 
 /**
+ * WR-06 / D-01 (Phase 17 plan 02): `contacts.created_at` is a naive
+ * `timestamp without time zone` column (packages/db/src/schema/contacts.ts).
+ * A SINGLE `AT TIME ZONE 'UTC'` hop on a naive column produces a
+ * `timestamptz`, and casting THAT to `::date` converts to the READING
+ * session's own `TimeZone` GUC before truncating -- re-introducing exactly
+ * the session-dependence this fix exists to remove (empirically proven in
+ * RESEARCH.md Pitfall 1; also the literal expression 13-REVIEW.md's WR-06
+ * write-up and CONTEXT.md's D-01 both name, and it is WRONG for this column
+ * type). The DOUBLE-hop form below converts back to a naive UTC wall-clock
+ * value first, so the final `::date` cast is a pure truncation with no
+ * timezone involved at all -- this is the SAME idiom already established in
+ * this repo at `packages/db/src/partitions/relocate-default.ts:112` for a
+ * different naive-column use case (partition month bucketing).
+ *
+ * `sends.*_at` and siblings (apps/worker/src/queues/analytics-reconciliation.worker.ts)
+ * are genuinely `timestamptz` columns and correctly use the OPPOSITE
+ * (single-hop) form -- the two column types need opposite-direction
+ * handling; do not "harmonize" them.
+ *
+ * `dashboard-timezone.test.ts` is the executable guard: it asserts this
+ * exact double-hop form survives a deliberately non-UTC reading session,
+ * AND that the single-hop form named above fails under the same session --
+ * so a future "simplification" back to the single-hop form fails loudly
+ * rather than silently reintroducing the hazard.
+ *
+ * Exported (not inlined in `getWorkspaceDashboard`) so the regression test
+ * imports and executes this EXACT string -- there is no second copy of this
+ * SQL anywhere for the test to drift against.
+ */
+export const GROWTH_BY_DAY_SQL = `SELECT ((created_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')::date::text as day, count(*)::text as "newContacts"
+   FROM contacts
+   WHERE workspace_id = $1 AND created_at >= $2::date AND anonymized_at IS NULL
+   GROUP BY ((created_at AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')::date
+   ORDER BY day`;
+
+/**
+ * D-03 sweep audit (Phase 17 plan 02): left semantically UNCHANGED. This is
+ * a `<` comparison of the naive `created_at` column against a `date`
+ * literal ($2::date) -- the date literal is implicitly promoted to naive
+ * midnight and compared naive-to-naive. No `timestamptz` conversion occurs
+ * at any point, so no timezone anchor is needed here; adding one would be
+ * noise, not safety. `dashboard-timezone.test.ts` Test 4 makes this an
+ * executable assertion (identical count under a UTC and a non-UTC reading
+ * session) rather than leaving it as an unverified claim.
+ */
+export const BASELINE_CONTACT_COUNT_SQL = `SELECT count(*)::text as count FROM contacts WHERE workspace_id = $1 AND created_at < $2::date AND anonymized_at IS NULL`;
+
+/**
  * OPS-18 (D-12, plan 15-12): `dataAsOf`/`lagMinutes` come from
  * `@mega-crm/shared-schemas`'s `WorkspaceDashboardFreshness` -- the ONE
  * shared definition of the freshness signal, so this repository's response
@@ -182,17 +230,13 @@ export async function getWorkspaceDashboard(period: DashboardPeriod): Promise<Wo
     // permanently over-reporting the tenant-visible contact count for a
     // person who exercised their right to erasure.
     const { rows: growthRows } = await client.query<{ day: string; newContacts: string }>(
-      `SELECT created_at::date::text as day, count(*)::text as "newContacts"
-       FROM contacts
-       WHERE workspace_id = $1 AND created_at >= $2::date AND anonymized_at IS NULL
-       GROUP BY created_at::date
-       ORDER BY day`,
+      GROWTH_BY_DAY_SQL,
       [workspaceId, startDay]
     );
     const newContactsByDay = new Map(growthRows.map((row) => [row.day, Number(row.newContacts)]));
 
     const { rows: baselineRows } = await client.query<{ count: string }>(
-      `SELECT count(*)::text as count FROM contacts WHERE workspace_id = $1 AND created_at < $2::date AND anonymized_at IS NULL`,
+      BASELINE_CONTACT_COUNT_SQL,
       [workspaceId, startDay]
     );
     let cumulativeContacts = Number(baselineRows[0]?.count ?? 0);
