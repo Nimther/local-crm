@@ -67,6 +67,52 @@ if [[ "$1" == "run" ]]; then
   exit "\${DRILL_TEST_RUN_EXIT_CODE:-0}"
 fi
 if [[ "$1" == "exec" ]]; then
+  # Disk-sampling branch -- checked BEFORE the generic exec/pg_isready
+  # branches so it does not inherit DRILL_TEST_READY_EXIT_CODE. Echoes the
+  # next value from DRILL_TEST_DISK_KB_SEQUENCE (newline- or
+  # space-separated), repeating the last value once exhausted, tracked via
+  # a counter file living next to the scratch dir's own log file.
+  if [[ "$args" == *"du -sk"* ]]; then
+    counter_file="\${DRILL_TEST_LOG}.disk-idx"
+    if [[ ! -f "$counter_file" ]]; then
+      printf '0' > "$counter_file"
+    fi
+    idx="$(cat "$counter_file")"
+    seq_normalized="$(printf '%s' "\${DRILL_TEST_DISK_KB_SEQUENCE:-0}" | tr '\\n' ' ')"
+    set -- $seq_normalized
+    count=$#
+    if [[ "$count" -eq 0 ]]; then
+      val=0
+    elif [[ "$idx" -ge "$count" ]]; then
+      shift "$(( count - 1 ))"
+      val="$1"
+    else
+      shift "$idx"
+      val="$1"
+    fi
+    disk_exit_code="\${DRILL_TEST_DISK_EXIT_CODE:-0}"
+    if [[ "$disk_exit_code" == "0" ]]; then
+      printf '%d\\t/var/lib/postgresql/data\\n' "$val"
+    fi
+    printf '%s' "$(( idx + 1 ))" > "$counter_file"
+    exit "$disk_exit_code"
+  fi
+  # pg_isready branch -- DRILL_TEST_READY_FAIL_COUNT knob fails the first N
+  # invocations (letting a test drive more than one poll iteration), then
+  # honours DRILL_TEST_READY_EXIT_CODE exactly as before (default 0).
+  if [[ "$args" == *"pg_isready"* ]]; then
+    fail_count="\${DRILL_TEST_READY_FAIL_COUNT:-0}"
+    ready_counter_file="\${DRILL_TEST_LOG}.ready-idx"
+    if [[ ! -f "$ready_counter_file" ]]; then
+      printf '0' > "$ready_counter_file"
+    fi
+    ridx="$(cat "$ready_counter_file")"
+    printf '%s' "$(( ridx + 1 ))" > "$ready_counter_file"
+    if [[ "$ridx" -lt "$fail_count" ]]; then
+      exit 1
+    fi
+    exit "\${DRILL_TEST_READY_EXIT_CODE:-0}"
+  fi
   exit "\${DRILL_TEST_READY_EXIT_CODE:-0}"
 fi
 if [[ "$1" == "rm" ]]; then
@@ -105,9 +151,17 @@ function makeScratch() {
   // The real operator file sets production mode. The scratch verifier must
   // explicitly override that inherited value because it connects only to
   // the loopback-only throwaway Postgres container, not production.
-  writeFileSync(envFile, "NODE_ENV=production\nPOSTGRES_PASSWORD=drill-test-password\nPOSTGRES_DB=mega_crm\n");
+  // GHCR_IMAGE_BASE/POSTGRES_IMAGE_TAG (Task 2, T-17-19): the same env file
+  // sets a SHA-shaped placeholder tag so every pre-existing "real
+  // invocation" test keeps running the drill's happy/failure paths, not the
+  // missing-tag guard; the guard's own dedicated test overrides this file.
+  writeFileSync(
+    envFile,
+    "NODE_ENV=production\nPOSTGRES_PASSWORD=drill-test-password\nPOSTGRES_DB=mega_crm\nGHCR_IMAGE_BASE=ghcr.io/example-org\nPOSTGRES_IMAGE_TAG=0000000000000000000000000000000000000000\n",
+  );
   const baselineFile = path.join(dir, "baseline.json");
-  return { dir, binDir, logFile, envFile, baselineFile };
+  const metricsFile = path.join(dir, "metrics.ndjson");
+  return { dir, binDir, logFile, envFile, baselineFile, metricsFile };
 }
 
 function baseRealEnv(scratch, overrides = {}) {
@@ -115,10 +169,26 @@ function baseRealEnv(scratch, overrides = {}) {
     ...setUpStubs(scratch.binDir, scratch.logFile),
     MEGA_CRM_ENV_FILE: scratch.envFile,
     RESTORE_DRILL_BASELINE_FILE: scratch.baselineFile,
+    RESTORE_DRILL_METRICS_FILE: scratch.metricsFile,
     RESTORE_DRILL_READY_TIMEOUT_SECONDS: "2",
     RESTORE_DRILL_READY_POLL_INTERVAL_SECONDS: "1",
     ...overrides,
   };
+}
+
+/** Reads $scratch.metricsFile and parses every NDJSON line, in order. */
+function readMetricsLines(scratch) {
+  let raw;
+  try {
+    raw = readFileSync(scratch.metricsFile, "utf8");
+  } catch {
+    return [];
+  }
+  return raw
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l) => JSON.parse(l));
 }
 
 function callLines(logFile) {
@@ -369,6 +439,96 @@ describe("real invocation: full successful sequence", () => {
   });
 });
 
+// T-17-18 (closes T-14-73's root cause): the drill records its own
+// restore-to-ready duration and scratch-PGDATA disk high-water mark on every
+// run, on the success path AND the readiness-timeout path, without an
+// operator having to notice and write anything down.
+describe("real invocation: self-recorded duration and disk high-water metrics (T-17-18)", () => {
+  it("Test 1: a full successful drill appends exactly one metrics record", () => {
+    const scratch = makeScratch();
+    const run = runCli([VALID_TARGET], {
+      env: baseRealEnv(scratch, { DRILL_TEST_DISK_KB_SEQUENCE: "500" }),
+    });
+
+    expect(run.exitCode).toBe(0);
+
+    const records = readMetricsLines(scratch);
+    expect(records.length).toBe(1);
+    const record = records[0];
+    expect(record.target).toBe(VALID_TARGET);
+    expect(Number.isInteger(record.durationSeconds)).toBe(true);
+    expect(record.durationSeconds).toBeGreaterThanOrEqual(0);
+    expect(record.diskHighWaterKb).toBe(500);
+    expect(record.recordedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+    expect(record.outcome).toMatch(/verified|complete/i);
+  });
+
+  it("Test 2: the duration and disk high-water figures are printed inline on stdout", () => {
+    const scratch = makeScratch();
+    const run = runCli([VALID_TARGET], {
+      env: baseRealEnv(scratch, { DRILL_TEST_DISK_KB_SEQUENCE: "777" }),
+    });
+
+    expect(run.exitCode).toBe(0);
+    expect(run.stdout).toMatch(/duration/i);
+    expect(run.stdout).toMatch(/777/);
+  });
+
+  it("Test 3: the recorded disk high-water is the maximum sample, not the last one", () => {
+    const scratch = makeScratch();
+    const run = runCli([VALID_TARGET], {
+      env: baseRealEnv(scratch, {
+        DRILL_TEST_READY_FAIL_COUNT: "3",
+        DRILL_TEST_DISK_KB_SEQUENCE: "500 300 100 50",
+        RESTORE_DRILL_READY_TIMEOUT_SECONDS: "10",
+        RESTORE_DRILL_READY_POLL_INTERVAL_SECONDS: "1",
+      }),
+    });
+
+    expect(run.exitCode).toBe(0);
+
+    const records = readMetricsLines(scratch);
+    expect(records.length).toBe(1);
+    expect(records[0].diskHighWaterKb).toBe(500);
+  });
+
+  it("Test 4: a readiness timeout still fails correctly AND still records a metrics line", () => {
+    const scratch = makeScratch();
+    const run = runCli([VALID_TARGET], {
+      env: baseRealEnv(scratch, {
+        DRILL_TEST_READY_EXIT_CODE: "1",
+        RESTORE_DRILL_READY_TIMEOUT_SECONDS: "2",
+        RESTORE_DRILL_READY_POLL_INTERVAL_SECONDS: "1",
+      }),
+    });
+
+    expect(run.exitCode).not.toBe(0);
+    expect(run.stderr).toMatch(/READINESS TIMEOUT/);
+    expect(run.stdout + run.stderr).toMatch(/clean up the scratch resources by hand/i);
+
+    const calls = callLines(scratch.logFile);
+    expect(calls.some((l) => l.startsWith("rm -f"))).toBe(false);
+    expect(calls.some((l) => l.startsWith("volume rm"))).toBe(false);
+
+    const records = readMetricsLines(scratch);
+    expect(records.length).toBe(1);
+    expect(records[0].outcome).toMatch(/timeout/i);
+  });
+
+  it("Test 5: a sampling failure is non-fatal -- diskHighWaterKb is recorded as 0, not aborted", () => {
+    const scratch = makeScratch();
+    const run = runCli([VALID_TARGET], {
+      env: baseRealEnv(scratch, { DRILL_TEST_DISK_EXIT_CODE: "1" }),
+    });
+
+    expect(run.exitCode).toBe(0);
+
+    const records = readMetricsLines(scratch);
+    expect(records.length).toBe(1);
+    expect(records[0].diskHighWaterKb).toBe(0);
+  });
+});
+
 describe("real invocation: required environment is enforced before touching anything", () => {
   it("fails loudly when MEGA_CRM_ENV_FILE does not point at a real file", () => {
     const scratch = makeScratch();
@@ -388,5 +548,39 @@ describe("real invocation: required environment is enforced before touching anyt
 
     expect(run.exitCode).not.toBe(0);
     expect(run.stderr).toMatch(/POSTGRES_PASSWORD/);
+  });
+
+  // T-17-19: as of Phase 17 the drill launches the same CI-built GHCR image
+  // production runs, with no `:-local` fallback -- a missing tag must fail
+  // loudly before any container is created, not silently resurrect a stale
+  // host-built image.
+  it("fails loudly when POSTGRES_IMAGE_TAG is absent from MEGA_CRM_ENV_FILE, before any docker run", () => {
+    const scratch = makeScratch();
+    writeFileSync(
+      scratch.envFile,
+      "NODE_ENV=production\nPOSTGRES_PASSWORD=drill-test-password\nPOSTGRES_DB=mega_crm\nGHCR_IMAGE_BASE=ghcr.io/example-org\n",
+    );
+    const run = runCli([VALID_TARGET], { env: baseRealEnv(scratch) });
+
+    expect(run.exitCode).not.toBe(0);
+    expect(run.stderr).toMatch(/POSTGRES_IMAGE_TAG/);
+
+    const calls = callLines(scratch.logFile);
+    expect(calls.some((l) => l.startsWith("run -d"))).toBe(false);
+  });
+
+  it("fails loudly when GHCR_IMAGE_BASE is absent from MEGA_CRM_ENV_FILE, before any docker run", () => {
+    const scratch = makeScratch();
+    writeFileSync(
+      scratch.envFile,
+      "NODE_ENV=production\nPOSTGRES_PASSWORD=drill-test-password\nPOSTGRES_DB=mega_crm\nPOSTGRES_IMAGE_TAG=0000000000000000000000000000000000000000\n",
+    );
+    const run = runCli([VALID_TARGET], { env: baseRealEnv(scratch) });
+
+    expect(run.exitCode).not.toBe(0);
+    expect(run.stderr).toMatch(/GHCR_IMAGE_BASE/);
+
+    const calls = callLines(scratch.logFile);
+    expect(calls.some((l) => l.startsWith("run -d"))).toBe(false);
   });
 });
