@@ -46,32 +46,21 @@
 
 services:
   db:
-    # Phase 14 plan 10 (DB-09, D-05, D-06, T-14-62): a LOCALLY BUILT image,
-    # not the official `postgres:17` directly -- `archive_command` below is
-    # executed by the Postgres server process itself, inside THIS container,
-    # so the pgBackRest binary has to live here (docker/postgres/Dockerfile
-    # adds it on top of the same `postgres:17` base). This plan's own
-    # acceptance criteria explicitly allow "builds or references" a custom
-    # image; `build:` was chosen over a GHCR-published image because this
-    # image changes rarely (an OS package layer, not application code) and
-    # extending .github/workflows/images.yml's matrix + adding `db`/
-    # `pgbackrest` to scripts/validate-prod-compose.mjs's
-    # FIRST_PARTY_IMAGE_SERVICES immutable-tag check was judged out of this
-    # plan's own declared file scope -- recorded as a forward flag in
-    # docs/runbooks/backups.md, not silently decided. NOTE for the operator:
-    # scripts/deploy.sh's own `compose pull api worker web` never rebuilds
-    # this image -- run `docker compose -f docker/docker-compose.prod.yml
-    # build db pgbackrest` by hand after any docker/postgres/Dockerfile or
-    # docker/pgbackrest/pgbackrest.conf change, BEFORE the next deploy.
-    image: megacrm-postgres:${POSTGRES_IMAGE_TAG:-local}
-    # `context: .` is THIS file's own directory (docker/) -- the Dockerfile
-    # has no `COPY` of any repository source (it only adds an apt package to
-    # the official base), so the build context is deliberately narrow rather
-    # than the whole monorepo (which docker/Dockerfile.{api,worker,web}
-    # legitimately need, but this image does not).
-    build:
-      context: .
-      dockerfile: postgres/Dockerfile
+    # Phase 17 plan 03 (D-05, D-06, closing T-14-58/T-14-88): CI-built and
+    # pushed by .github/workflows/images.yml's `build-and-push-postgres` job
+    # on the SAME git SHA as the application images above -- production
+    # pulls it and NEVER builds it. This closes the gap Phase 14 plan 10
+    # recorded as a forward flag: a `build:` section here would let
+    # production run whatever happened to be in an operator's working tree,
+    # outside code review. `db`/`pgbackrest` restarts remain a separate,
+    # human-gated cutover event and are deliberately NOT part of
+    # scripts/deploy.sh's routine `pull api worker web` / `up -d web api` /
+    # `up -d worker` sequence -- see this file's own header and
+    # docs/runbooks/backups.md's "Forward flags" section for the full
+    # rationale. Both `db` and `pgbackrest` are now inside
+    # scripts/validate-prod-compose.mjs's FIRST_PARTY_IMAGE_SERVICES
+    # immutable-tag gate.
+    image: ${GHCR_IMAGE_BASE}/postgres:${POSTGRES_IMAGE_TAG}
     restart: unless-stopped
     # SEPARATE from docker/pg-tls-entrypoint.sh (the dev/CI entrypoint) --
     # see docker/postgres/prod-tls-entrypoint.sh's own header for why this
@@ -183,10 +172,9 @@ services:
   #     socket + PostgreSQL's own `local`-connection `trust` default, not a
   #     TCP role/password, is what makes this work with no new credential)
   pgbackrest:
-    image: megacrm-postgres:${POSTGRES_IMAGE_TAG:-local}
-    build:
-      context: .
-      dockerfile: postgres/Dockerfile
+    # Phase 17 plan 03 (D-05, D-06): shares `db`'s own comment above --
+    # one CI-built, GHCR-published image, one Dockerfile, two entrypoints.
+    image: ${GHCR_IMAGE_BASE}/postgres:${POSTGRES_IMAGE_TAG}
     restart: unless-stopped
     entrypoint: ["/usr/local/bin/backup-entrypoint.sh"]
     depends_on:
