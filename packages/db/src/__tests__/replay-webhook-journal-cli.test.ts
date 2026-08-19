@@ -2,7 +2,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 
 import { Pool, type PoolClient } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -169,11 +168,12 @@ describe("replay-webhook-journal.ts CLI (CMP-08, D-06, plan 13-06)", () => {
     try {
       stdout = execSync(`npx tsx ${SCRIPT_PATH} ${args.join(" ")}`, {
         cwd: path.join(PROJECT_ROOT, "packages/db"),
-        env: finalEnv as NodeJS.ProcessEnv,
+        env: finalEnv,
         encoding: "utf-8",
         timeout: 30_000, // 30s timeout to catch infinite loops
       });
-    } catch (err: any) {
+    } catch (caught) {
+      const err = caught as { status?: number; stdout?: Buffer | string; stderr?: Buffer | string; killed?: boolean };
       if (err.status !== undefined) {
         exitCode = err.status;
         stdout = err.stdout?.toString() || "";
@@ -183,7 +183,7 @@ describe("replay-webhook-journal.ts CLI (CMP-08, D-06, plan 13-06)", () => {
         exitCode = 124; // conventional timeout exit code
         stderr = "Process killed (timeout)";
       } else {
-        throw err;
+        throw caught instanceof Error ? caught : new Error(String(caught));
       }
     }
 
@@ -309,7 +309,7 @@ describe("replay-webhook-journal.ts CLI (CMP-08, D-06, plan 13-06)", () => {
 
     // Seed one row before range, one in range, one after range
     await seedJournalRow(workspaceId, { receivedAt: threeDaysAgo });
-    const inRange = await seedJournalRow(workspaceId, { receivedAt: twoDaysAgo });
+    await seedJournalRow(workspaceId, { receivedAt: twoDaysAgo });
     await seedJournalRow(workspaceId, { receivedAt: oneDayAgo });
 
     // Use a range that only includes the middle row
@@ -376,7 +376,7 @@ describe("replay-webhook-journal.ts CLI (CMP-08, D-06, plan 13-06)", () => {
     const oneHourAgo = new Date(now.getTime() - 1000 * 60 * 60);
 
     // Seed 1 eligible row + 1 tombstoned row
-    const eligible = await seedJournalRow(workspaceId, { receivedAt: oneHourAgo });
+    await seedJournalRow(workspaceId, { receivedAt: oneHourAgo });
     const tombstone = await seedJournalRow(workspaceId, {
       receivedAt: oneHourAgo,
       payloadPurgedAt: new Date(), // This makes it a tombstone
@@ -415,8 +415,8 @@ describe("replay-webhook-journal.ts CLI (CMP-08, D-06, plan 13-06)", () => {
     const oneHourAgo = new Date(now.getTime() - 1000 * 60 * 60);
 
     // Seed 1 incomplete row + 1 completed row
-    const incomplete = await seedJournalRow(workspaceId, { receivedAt: oneHourAgo, completed: false });
-    const completed = await seedJournalRow(workspaceId, { receivedAt: oneHourAgo, completed: true });
+    await seedJournalRow(workspaceId, { receivedAt: oneHourAgo, completed: false });
+    await seedJournalRow(workspaceId, { receivedAt: oneHourAgo, completed: true });
 
     const fromTime = new Date(now.getTime() - 1000 * 60 * 60 * 2).toISOString();
     const toTime = new Date(now.getTime() + 1000).toISOString();
