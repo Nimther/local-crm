@@ -163,6 +163,11 @@ describe("each fixture trips exactly the invariant it targets", () => {
     // sidecar.
     { fixture: "missing-alloy-service.yml", rule: "missing-service", service: "alloy" },
     { fixture: "alloy-mutable-image-tag.yml", rule: "mutable-image-tag", service: "alloy" },
+    // Phase 17 plan 03 (D-05, closing T-14-58/T-14-88): `db` shares one
+    // first-party CI-built image with `pgbackrest` as of this plan, so it
+    // now sits inside the same immutable-tag gate the application images
+    // already do.
+    { fixture: "db-mutable-image-tag.yml", rule: "mutable-image-tag", service: "db" },
   ];
 
   for (const { fixture, rule, service } of cases) {
