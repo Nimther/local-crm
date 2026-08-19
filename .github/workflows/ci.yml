@@ -68,6 +68,15 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # Phase 15 plan 03 (OPS-16/D-14) wrote this gate but never wired it into
+      # CI — discovered 2026-08-19 when a chunk-import cycle the gate class
+      # should catch shipped to production and crashed the dashboard and
+      # flow-editor routes at module evaluation. The Typecheck step above has
+      # already produced apps/web/dist (its build script is `tsc --noEmit &&
+      # vite build`), so the manifest this reads is the real one.
+      - name: Web chunk boundary + cycle gate (OPS-16)
+        run: npm run check:web-chunks
+
       # Phase 15 plan 06 (OPS-09, Pitfall 18): Sentry has no retroactive
       # redaction -- the only remedy for a field that reaches a live DSN is
       # deleting the project's entire event history. This step is the
