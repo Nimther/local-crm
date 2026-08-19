@@ -3,18 +3,18 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Production Hardening
 current_phase: 17
-status: ready_to_execute
+current_phase_name: address-tech-debt-wr-06-medium-security-follow-ups
+status: executing
 stopped_at: Phase 17 planned (6 plans, 4 waves)
-last_updated: "2026-08-19T08:22:35.968Z"
+last_updated: "2026-08-19T11:17:15.250Z"
 last_activity: 2026-08-19
-last_activity_desc: Phase 17 planned — 6 plans ready to execute
+last_activity_desc: Phase 17 execution started
 progress:
   total_phases: 10
   completed_phases: 9
-  total_plans: 122
+  total_plans: 128
   completed_plans: 122
   percent: 90
-current_phase_name: "Address tech debt: WR-06 + medium security follow-ups"
 ---
 
 # Project State
@@ -24,15 +24,15 @@ current_phase_name: "Address tech debt: WR-06 + medium security follow-ups"
 See: .planning/PROJECT.md (updated 2026-08-17)
 
 **Core value:** Маркетолог настраивает триггерную цепочку или кампанию — и письма надёжно и вовремя доходят до нужных контактов, со сквозным отслеживанием статусов (delivered/opened/clicked/bounced).
-**Current focus:** Phase 17 — Address tech debt: WR-06 + medium security follow-ups
+**Current focus:** Phase 17 — address-tech-debt-wr-06-medium-security-follow-ups
 
 ## Current Position
 
 Milestone: v1.1 Production Hardening (Phases 8-16, 95 requirements) — COMPLETE
-Phase: 17 (tech-debt follow-ups)
-Plan: 6 plans in 4 waves, ready to execute
-Status: Ready to execute
-Last activity: 2026-08-19 — Phase 17 planned (6 plans, 4 waves)
+Phase: 17 (address-tech-debt-wr-06-medium-security-follow-ups) — EXECUTING
+Plan: 1 of 6
+Status: Executing Phase 17
+Last activity: 2026-08-19 — Phase 17 execution started
 Progress: [██████████] 122/122 plans (100%) — 9/9 v1.1 phases complete (8–16)
 
 ✓ **Deadline closed (2026-08-07):** Phase 9 (DB-01/DB-02 partition automation) completed ahead of the hard **2026-09-01** deadline — 20 attached monthly partitions (2026-09…2027-06) confirmed by catalog query against a migrated database.
