@@ -146,12 +146,26 @@ jobs:
       # .advisory-accept-list.json. Lives in `static` -- already a required
       # status check under branch protection -- for the same reason the
       # Sentry-redaction and pool-factory-audit gates do: it becomes
-      # blocking immediately with no repository-admin action. A bare
-      # `run:` step with no soft-fail modifier and no conditional -- a
-      # soft-failable supply-chain gate is the exact failure mode DEP-02
-      # exists to prevent.
+      # blocking immediately with no repository-admin action. No soft-fail
+      # modifier and no conditional -- a soft-failable supply-chain gate is
+      # the exact failure mode DEP-02 exists to prevent.
+      #
+      # WR-02 (18-REVIEW.md): output is tee'd to a file so
+      # `.github/workflows/advisory-scan.yml`'s failure-issue step can
+      # report THIS SAME invocation's actual output, rather than re-running
+      # the script a second time against the live registry (which could
+      # report different findings seconds apart) -- this step's `run:` line
+      # is byte-identical to that workflow's gate step and both are changed
+      # in lockstep (enforced by scripts/__tests__/advisory-scan-workflow.
+      # test.mjs's drift test, which derives one from the other rather than
+      # hardcoding either). `shell: bash` is not cosmetic: the implicit
+      # default shell does NOT enable pipefail, so a failing gate piped into
+      # `tee` would report tee's exit code -- 0 -- and this required check
+      # would pass while a real HIGH/CRITICAL finding sat un-caught (same
+      # precedent as this file's own E2E step below).
       - name: Dependency advisory gate (DEP-01/02/03)
-        run: npm run check:dependency-advisories
+        shell: bash
+        run: npm run check:dependency-advisories 2>&1 | tee /tmp/advisory-gate-output.txt
 
       - name: Working-root hygiene
         run: npm run check:root-hygiene

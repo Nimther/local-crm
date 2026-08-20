@@ -92,34 +92,41 @@ jobs:
         run: npm ci
 
       # BYTE-FOR-BYTE IDENTICAL to ci.yml's `static` job step of the same
-      # name -- this exact equality is what the drift test asserts (T-18-20).
-      # No `continue-on-error` here: a gate failure fails this job exactly
-      # the way it fails `static`'s required check, and the two steps below
-      # (guarded by `if: failure()`) run only in that case.
+      # name -- this exact equality is what the drift test asserts
+      # (T-18-20), and the two are changed in lockstep. No
+      # `continue-on-error` here: a gate failure fails this job exactly the
+      # way it fails `static`'s required check.
+      #
+      # WR-02 (18-REVIEW.md): output is tee'd to a file here, on the ONE
+      # real invocation, rather than captured by re-running the script a
+      # second time below -- two separate `npm audit` calls against the
+      # live registry seconds apart are not guaranteed to return
+      # byte-identical output (a transient registry blip could make one
+      # invocation fail closed while the other reports zero findings, or
+      # vice versa), which would let the issue body below contradict why
+      # the job actually failed. `shell: bash` enables pipefail (the
+      # implicit default shell does not), so a failing gate piped into
+      # `tee` still fails this step -- same precedent as ci.yml's own E2E
+      # step.
       - name: Dependency advisory gate (DEP-01/02/03)
         id: gate
-        run: npm run check:dependency-advisories
-
-      # Re-invokes the SAME npm script -- not a second, divergent
-      # implementation, the identical code path executed again inside the
-      # same job, seconds later, against the same unchanged checkout -- so
-      # the exact package/advisory-id findings can be captured to a file for
-      # the issue body below. `check:dependency-advisories` has no
-      # file-output flag (D-01/18-01), so a second invocation with its
-      # stdout redirected is the only way to obtain the report text without
-      # touching the gate step's own `run:` line above (which must stay
-      # byte-identical to ci.yml's). `|| true`: this step's own exit code is
-      # irrelevant, only the captured text matters; the job is already
-      # failing because of the gate step above.
-      - name: Capture advisory gate findings for issue report
-        if: failure()
-        run: npm run check:dependency-advisories > /tmp/advisory-gate-output.txt 2>&1 || true
+        shell: bash
+        run: npm run check:dependency-advisories 2>&1 | tee /tmp/advisory-gate-output.txt
 
       # D-13: exactly one deduplicated, labelled GitHub issue per open
       # finding set -- never a second issue while one is already open, never
       # a silently-swallowed API failure (T-18-19).
+      #
+      # WR-02: gated on the gate step's OWN outcome (not just the job-wide
+      # `failure()`) so an unrelated `actions/checkout`/`actions/setup-node`/
+      # `npm ci` flake never files or comments on this issue with content
+      # that has nothing to do with an advisory finding. `failure()` is kept
+      # in the condition (evaluating a step's `if:` requires it, or the step
+      # would be skipped by GitHub's default "run only if all previous steps
+      # succeeded" behavior once any prior step fails) alongside the
+      # outcome check.
       - name: Open or update advisory gate issue
-        if: failure()
+        if: failure() && steps.gate.outcome == 'failure'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
           script: |
