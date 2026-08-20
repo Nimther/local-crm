@@ -27,10 +27,19 @@ vi.mock("@mega-crm/redaction", () => ({ scrubbedConsole }));
 const {
   createPgPool,
   assertDsnRequestsTls,
+  assertDsnOmitsOptionsParam,
   poolSizeFor,
   PG_POOL_SIZES,
   PG_POOL_DEFAULT_MAX,
 } = await import("../pool.js");
+
+// pg's own resolver, not this module's -- proves the pin survives the real
+// merge `new Pool({...})` performs internally (WR-01 follow-up), not just
+// the pre-merge config object this factory hands to `new Pool()`. No
+// `@types/pg` declarations exist for this internal module (only the public
+// `pg` entry point is typed), so this import is deliberately untyped.
+// @ts-expect-error -- pg's internal connection-parameters module has no type declarations
+const { default: ConnectionParameters } = await import("pg/lib/connection-parameters.js");
 
 const UNREACHABLE_DSN = "postgres://u:p@127.0.0.1:65535/db";
 
@@ -218,5 +227,51 @@ describe("createPgPool -- TimeZone startup parameter (WR-06)", () => {
     } finally {
       void pool.end().catch(() => undefined);
     }
+  });
+
+  it("survives pg's own DSN-merge: the RESOLVED ConnectionParameters (not pool.options) still carries the pin", () => {
+    // Mirrors exactly what a real connection negotiates, unlike the
+    // pre-merge `pool.options.options` assertion above -- proves the pin
+    // is not silently defeated by pg's `Object.assign({}, config,
+    // parse(connectionString))` merge (WR-01 follow-up).
+    const resolved = new ConnectionParameters({
+      connectionString: UNREACHABLE_DSN,
+      options: "-c TimeZone=UTC",
+    });
+    expect(resolved.options).toBe("-c TimeZone=UTC");
+  });
+});
+
+describe("assertDsnOmitsOptionsParam (WR-01 follow-up)", () => {
+  it("returns normally when the DSN has no 'options' query parameter", () => {
+    expect(() => assertDsnOmitsOptionsParam(UNREACHABLE_DSN)).not.toThrow();
+  });
+
+  it("throws when the DSN carries its own 'options' query parameter", () => {
+    expect(() =>
+      assertDsnOmitsOptionsParam("postgres://u:p@h/db?options=-c%20search_path%3Dfoo"),
+    ).toThrow(/options/);
+  });
+});
+
+describe("createPgPool -- rejects a DSN-level 'options' override of the TimeZone pin (WR-01 follow-up)", () => {
+  it("throws instead of silently letting the DSN's own 'options' win", () => {
+    expect(() =>
+      createPgPool({
+        connectionString: "postgres://u:p@h/db?options=-c%20search_path%3Dfoo",
+        name: "test-consumer",
+      }),
+    ).toThrow(/options/);
+  });
+
+  it("proves the hazard this guard closes: without the guard, the DSN's 'options' would silently win", () => {
+    // Same repro as the REVIEW.md finding -- run against pg's own resolver
+    // directly (bypassing this factory's guard) to document exactly what
+    // the guard above prevents.
+    const resolved = new ConnectionParameters({
+      connectionString: "postgres://u:p@h/db?options=-c%20search_path%3Dfoo",
+      options: "-c TimeZone=UTC",
+    });
+    expect(resolved.options).toBe("-c search_path=foo");
   });
 });
