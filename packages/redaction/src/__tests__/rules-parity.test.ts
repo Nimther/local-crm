@@ -124,4 +124,41 @@ describe("rules parity", () => {
     expect(new Set(PINO_REDACT_OPTIONS.paths).size).toBe(PINO_REDACT_OPTIONS.paths.length);
     expect(PINO_REDACT_OPTIONS.paths.length).toBe(REDACTION_RULES.keyRules.length * 5);
   });
+
+  test("Test 13 (ROT-01, D-02): a payload carrying the unsubscribe signing-secret environment-variable field names -- at the root and nested two levels deep -- is censored identically by both compiled forms, a non-secret sibling is untouched, and the lower-cased spelling still matches", () => {
+    const payload = {
+      UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS: "dummy-previous-secret-value,dummy-previous-secret-value-2",
+      UNSUBSCRIBE_TOKEN_SECRET: "dummy-primary-secret-value",
+      // Non-secret sibling: proves the new rules are targeted, not blanket.
+      workspaceId: "b2cd545e-6853-418e-a436-2d4658232825",
+      rotationContext: {
+        details: {
+          UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS: "dummy-previous-secret-value-nested",
+        },
+      },
+      // Lower-cased spelling of the previous-secrets field name.
+      unsubscribe_token_secret_previous: "dummy-previous-secret-value-lowercase",
+    };
+
+    const loggedViaPino = logViaPino(payload);
+    const scrubbed = scrub(payload) as typeof payload;
+
+    expect(loggedViaPino.UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS).toBe(CENSOR);
+    expect(scrubbed.UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS).toBe(CENSOR);
+
+    expect(loggedViaPino.UNSUBSCRIBE_TOKEN_SECRET).toBe(CENSOR);
+    expect(scrubbed.UNSUBSCRIBE_TOKEN_SECRET).toBe(CENSOR);
+
+    const loggedRotationContext = loggedViaPino.rotationContext as Record<string, unknown>;
+    const loggedDetails = loggedRotationContext.details as Record<string, unknown>;
+    expect(loggedDetails.UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS).toBe(CENSOR);
+    expect(scrubbed.rotationContext.details.UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS).toBe(CENSOR);
+
+    expect(loggedViaPino.unsubscribe_token_secret_previous).toBe(CENSOR);
+    expect(scrubbed.unsubscribe_token_secret_previous).toBe(CENSOR);
+
+    // Non-secret sibling: untouched by both forms.
+    expect(loggedViaPino.workspaceId).toBe(payload.workspaceId);
+    expect(scrubbed.workspaceId).toBe(payload.workspaceId);
+  });
 });
