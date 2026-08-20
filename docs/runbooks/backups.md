@@ -181,10 +181,19 @@ to eyeball the schedule is actually producing backups.
 docker compose exec db psql -U postgres -c "SELECT * FROM pg_stat_archiver;"
 ```
 
-`archived_count` should be increasing over time and `failed_count` should
-stay at zero. To force a fresh data point: write some data, then
-`SELECT pg_switch_wal();`, then re-run the query above and confirm
-`last_archived_wal`/`last_archived_time` advanced.
+`archived_count` should be increasing over time; `failed_count` should
+**not increase from its previously observed value** (record a baseline
+reading, then compare against it -- see below). Do **not** treat "stay at
+zero" as the bar: `failed_count` is cumulative since the cluster's own
+`stats_reset`, not since this check, and on this host it has held steady at
+**67** since the 2026-08-14 pgBackRest stanza bring-up (ratified in Phase 17
+plan 05, `17-05-SUMMARY.md`) -- a nonzero `failed_count` alone is not, by
+itself, an incident signal here. What matters is whether the number moves:
+take a baseline read, do the work below, then confirm `failed_count` is
+unchanged and `last_failed_time`/`last_failed_wal` did not advance. To force
+a fresh data point: write some data, then `SELECT pg_switch_wal();`, then
+re-run the query above and confirm `last_archived_wal`/`last_archived_time`
+advanced while `failed_count` held steady.
 
 ## What to do when a scheduled backup fails
 
