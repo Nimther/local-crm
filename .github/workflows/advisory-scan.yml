@@ -1,0 +1,180 @@
+name: Advisory scan
+
+# Phase 18 plan 04 (DEP-02, ROADMAP SC3). Gives the dependency advisory gate a
+# heartbeat: a daily scheduled run on master, executing the IDENTICAL npm
+# script `.github/workflows/ci.yml`'s `static` job runs -- this is what makes
+# it the same reporting path, not a second, divergent gate implementation
+# that could report a finding one way on a PR and another way on master (see
+# this plan's own <threat_model> T-18-20 and this file's own drift test,
+# scripts/__tests__/advisory-scan-workflow.test.mjs, which derives both
+# invocation strings from the two files and asserts equality).
+#
+# D-12: this lives in its OWN workflow rather than a `schedule:` trigger
+# bolted onto ci.yml, deliberately -- a daily tick must not spin ci.yml's
+# full Postgres/Redis/browser matrix (`test`/`failure-injection`/`e2e`) just
+# to re-run one advisory scan. Only the `static` job's gate step is
+# reproduced here.
+#
+# D-14: the daily cadence is load-bearing, not cosmetic. An
+# `.advisory-accept-list.json` entry that lapses (its `expiry` passes) during
+# a period with zero pull-request activity would otherwise sit silently
+# expired -- nothing on master re-runs the gate to notice. This workflow's
+# daily tick is what turns that lapse red within one cadence interval (24h),
+# enforcing D-05's accept-list expiry even with no code change on the
+# branch. This is also the mechanism ROADMAP SC3 depends on: an advisory
+# newly published against an already-installed dependency surfaces here with
+# no PR required.
+#
+# D-13: a failed run opens or updates exactly one GitHub issue labelled
+# `dependency-advisory`, naming the package and advisory id that failed the
+# gate -- NOT an operator-alert email. This repository's existing alerting
+# channels
+# (`apps/api`'s nine in-app watchdogs, SPECIFICATION.md §7) are all
+# product/runtime signals with their own dedup state in Postgres; wiring a
+# CI-only, code-supply-chain signal into that same unobserved application
+# mail path would couple two systems that have nothing to do with each
+# other. A GitHub issue is visible where the engineering team already looks
+# for actionable work.
+#
+# Every third-party action below is pinned to a full 40-character commit SHA
+# with the version in a trailing comment, matching the convention recorded in
+# ci.yml's own header comment -- a floating tag can be re-pointed at
+# attacker-controlled code that would run with this workflow's `issues:
+# write` token. actions/checkout and actions/setup-node reuse the exact SHAs
+# already pinned in ci.yml (resolved once, not re-resolved here);
+# actions/github-script's SHA was resolved fresh at implementation time via
+# `gh api repos/actions/github-script/commits/v9` (this is the ONLY workflow
+# in the repository that needs Issues-write access, so it is the only one
+# that pulls this action in).
+on:
+  schedule:
+    # 03:17 UTC daily -- an off-peak hour with no other scheduled repository
+    # activity. The exact hour is not load-bearing; any once-daily off-peak
+    # time satisfies D-14's cadence requirement. The odd minute avoids
+    # piling onto GitHub's documented top-of-hour scheduling congestion.
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    # No inputs: dispatching this workflow exercises the exact same path the
+    # daily tick takes, against whichever ref is selected in the UI. This is
+    # deliberate -- the surfacing path (gate -> dedup search -> issue
+    # create/comment) needs to be exercisable on demand, not only provable by
+    # waiting for a cron tick.
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# T-18-15: the ONLY two scopes this workflow needs, and nothing else. ci.yml
+# deliberately carries no `permissions:` block and relies on the default
+# token scope -- this workflow must NOT inherit that implicit default,
+# because it is the only workflow in the repository that needs write access
+# to Issues. `scripts/__tests__/advisory-scan-workflow.test.mjs` asserts the
+# key COUNT is exactly two, so a later widening (e.g. adding `packages:
+# write`, or replacing this block with `write-all`) fails that drift test
+# rather than silently passing review.
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  scan:
+    name: scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # BYTE-FOR-BYTE IDENTICAL to ci.yml's `static` job step of the same
+      # name -- this exact equality is what the drift test asserts (T-18-20).
+      # No `continue-on-error` here: a gate failure fails this job exactly
+      # the way it fails `static`'s required check, and the two steps below
+      # (guarded by `if: failure()`) run only in that case.
+      - name: Dependency advisory gate (DEP-01/02/03)
+        id: gate
+        run: npm run check:dependency-advisories
+
+      # Re-invokes the SAME npm script -- not a second, divergent
+      # implementation, the identical code path executed again inside the
+      # same job, seconds later, against the same unchanged checkout -- so
+      # the exact package/advisory-id findings can be captured to a file for
+      # the issue body below. `check:dependency-advisories` has no
+      # file-output flag (D-01/18-01), so a second invocation with its
+      # stdout redirected is the only way to obtain the report text without
+      # touching the gate step's own `run:` line above (which must stay
+      # byte-identical to ci.yml's). `|| true`: this step's own exit code is
+      # irrelevant, only the captured text matters; the job is already
+      # failing because of the gate step above.
+      - name: Capture advisory gate findings for issue report
+        if: failure()
+        run: npm run check:dependency-advisories > /tmp/advisory-gate-output.txt 2>&1 || true
+
+      # D-13: exactly one deduplicated, labelled GitHub issue per open
+      # finding set -- never a second issue while one is already open, never
+      # a silently-swallowed API failure (T-18-19).
+      - name: Open or update advisory gate issue
+        if: failure()
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            const fs = require("fs");
+
+            // Defined once, used by BOTH the search and the creation below --
+            // the two can never drift apart (T-18-17).
+            const label = "dependency-advisory";
+
+            let findings = "(no output captured)";
+            try {
+              findings = fs.readFileSync("/tmp/advisory-gate-output.txt", "utf8").trim();
+            } catch (err) {
+              findings = `(failed to read captured gate output: ${err.message})`;
+            }
+
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = [
+              "The scheduled dependency advisory gate (`npm run check:dependency-advisories`) failed on `master`.",
+              "",
+              "This is the same gate `ci.yml`'s `static` job runs on every pull request -- see this repository's",
+              "`.github/workflows/advisory-scan.yml` for why a daily run also exists (D-12/D-13/D-14).",
+              "",
+              "**Failing run:** " + runUrl,
+              "",
+              "**Gate output:**",
+              "```",
+              findings,
+              "```",
+            ].join("\n");
+
+            // Label-scoped, open-state search -- T-18-17's dedup mechanism.
+            // The label is attached AT CREATION time below, never afterward,
+            // so this search actually matches on every subsequent run.
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open",
+              labels: label,
+            });
+
+            if (existing.data.length === 0) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: "Dependency advisory gate: scheduled scan failure",
+                body,
+                labels: [label],
+              });
+            } else {
+              const issue = existing.data[0];
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body,
+              });
+            }
