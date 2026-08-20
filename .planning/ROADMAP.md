@@ -110,7 +110,7 @@ Plans:
   3. A forged or expired-secret token produces a byte-identical response to a valid one (the no-token-oracle invariant survives rotation), with a timing-safe comparison performed per candidate secret.
   4. The retention window for previous secrets is an explicit, documented decision tied to the real lifetime of already-sent links (5-year token TTL) — not an unstated default, and not an unbounded list.
 
-**Plans**: 1/5 plans executed
+**Plans**: 4/5 plans executed
 
 Plans:
 **Wave 1**
@@ -119,9 +119,9 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 19-02-PLAN.md — Env-validation triple in one plan (zod / worker boot assertion / predev check-env): optional `UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS` with length, empty, duplicate and max-5 rules, D-03 charset tightening on the primary too, plus a three-site parity guard (SC4's code half)
-- [ ] 19-03-PLAN.md — Redaction rules for both signing-secret variable names in the single rule table, spelled as env-var names because the scrub matcher is exact-match (D-02)
-- [ ] 19-04-PLAN.md — ROT-02 closure: GET path + confirm-form POST for previous-secret links, four-way byte-identical POST responses, and executable gates on exhaustive loop evaluation and the D-05 log shape (SC2, SC3)
+- [x] 19-02-PLAN.md — Env-validation triple in one plan (zod / worker boot assertion / predev check-env): optional `UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS` with length, empty, duplicate and max-5 rules, D-03 charset tightening on the primary too, plus a three-site parity guard (SC4's code half)
+- [x] 19-03-PLAN.md — Redaction rules for both signing-secret variable names in the single rule table, spelled as env-var names because the scrub matcher is exact-match (D-02)
+- [x] 19-04-PLAN.md — ROT-02 closure: GET path + confirm-form POST for previous-secret links, four-way byte-identical POST responses, and executable gates on exhaustive loop evaluation and the D-05 log shape (SC2, SC3)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -204,7 +204,7 @@ Plans:
 | 16. Live SendGrid Verification | v1.1 | 7/7 | Complete | 2026-08-19 |
 | 17. Address tech debt: WR-06 + security follow-ups | v1.1 | 6/6 | Complete | 2026-08-20 |
 | 18. Dependency Hygiene & Advisory Gate | v1.2 | 4/4 | Complete    | 2026-08-20 |
-| 19. Unsubscribe Secret Graceful Rotation | v1.2 | 1/5 | In Progress|  |
+| 19. Unsubscribe Secret Graceful Rotation | v1.2 | 4/5 | In Progress|  |
 | 20. Campaign Template Correctness | v1.2 | 0/TBD | Not started | - |
 | 21. Per-Contact DSR Export | v1.2 | 0/TBD | Not started | - |
 | 22. Workspace Quiesce & Physical Purge | v1.2 | 0/TBD | Not started | - |
