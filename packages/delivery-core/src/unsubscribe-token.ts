@@ -93,7 +93,20 @@ export function verifyUnsubscribeToken(token: string): UnsubscribeTokenPayload |
   // candidate matched or whether any did -- this is what keeps the HTTP
   // response byte-identical regardless of which secret (if any) produced
   // the match (T-19-02).
-  const candidates = [getPrimarySecret(), ...getPreviousSecrets()];
+  //
+  // WR-01 fix: getPrimarySecret() throws if UNSUBSCRIBE_TOKEN_SECRET is
+  // unset. Before this phase, that throw was caught inside this function's
+  // own try/catch (it happened inside `sign()`), so an unset primary
+  // degraded to `null` like every other failure mode -- this function's own
+  // doc comment (above) promises it never throws. Wrapping candidate
+  // resolution here restores that guarantee explicitly, independent of
+  // whatever boot-time validation callers happen to run.
+  let candidates: string[];
+  try {
+    candidates = [getPrimarySecret(), ...getPreviousSecrets()];
+  } catch {
+    return null;
+  }
   let matchedIndex = -1;
 
   for (let i = 0; i < candidates.length; i++) {
