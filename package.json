@@ -75,7 +75,7 @@
     "@mega-crm/db": "0.1.0",
     "@mega-crm/delivery-core": "0.1.0",
     "@vitest/eslint-plugin": "^1.6.24",
-    "concurrently": "10.0.3",
+    "concurrently": "10.0.5",
     "drizzle-orm": "0.45.2",
     "eslint": "^10.8.0",
     "eslint-plugin-import-x": "^4.17.1",
