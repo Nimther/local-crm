@@ -133,6 +133,30 @@ export function verifyUnsubscribeToken(token: string): UnsubscribeTokenPayload |
   // D-05: observability for the operator's retention decision -- logs ONLY
   // the matched list position, never any secret value. Server-side only;
   // the HTTP response is unaffected (T-19-03, no oracle).
+  //
+  // WR-02 (accepted risk, code review 2026-08-21): this synchronous Pino
+  // write runs only on the matchedIndex > 0 path, so a previous-secret
+  // match does measurably more synchronous work -- and takes measurably
+  // longer -- than a primary match or a no-match. That is a real,
+  // observable-by-latency asymmetry the exhaustive candidate loop above
+  // does NOT cover (the loop only makes candidate comparison itself
+  // uniform; it says nothing about what happens after). It is accepted
+  // as low-risk rather than fixed: it distinguishes "verified via
+  // previous secret" from "verified via primary, or did not verify," but
+  // primary-valid and invalid tokens still take the identical (faster)
+  // path as each other, so it creates no valid-vs-invalid oracle -- it
+  // cannot help forge or distinguish a valid token from a forged one,
+  // only reveal a rotation-in-progress detail that is not itself secret.
+  // Deferring the log (e.g. `setImmediate`) would remove the asymmetry
+  // but was rejected: it makes the call asynchronous, which breaks the
+  // synchronous `expect(logger.info).toHaveBeenCalledTimes(...)`
+  // assertions in `__tests__/unsubscribe-token-rotation.test.ts`'s D-05
+  // suite (the very tests that pin this line's shape as a phase
+  // deliverable) -- and any restructuring that made every path do
+  // identical logging work is equally incompatible with those tests,
+  // since they assert a 0-vs-1 call-count difference between paths as
+  // the intended, tested behavior. Revisit only if this signal is ever
+  // shown to be exploitable beyond "an operator's own log stream".
   if (matchedIndex > 0) {
     logger.info({ secretPosition: matchedIndex }, "unsubscribe token verified via previous secret");
   }
