@@ -1,207 +1,164 @@
-# Feature Research — Production Hardening Operational Capability Set
+# Feature Research
 
-**Domain:** Operational/reliability capability set for a multi-tenant B2C marketing email platform (Klaviyo-class) sending hundreds of thousands of emails/day via BYO SendGrid keys — v1.1 Production Hardening milestone
-**Researched:** 2026-07-27
-**Confidence:** MEDIUM — WebSearch/WebFetch only (no MCP docs providers configured in this environment); every load-bearing claim below is cross-checked against 2+ independent sources or a first-party doc/GitHub issue. Provider-internal claims about how Klaviyo/Braze/Customer.io implement things internally could not be verified (they don't publish internals) — those platforms are used only as reference points for *what capability class exists*, not *how it's built*. Flagged LOW where a claim rests on a single source.
+**Domain:** B2C email marketing automation platform (Klaviyo-model) — v1.2 "Data Lifecycle & Delivery Trust" milestone
+**Researched:** 2026-08-20
+**Confidence:** MEDIUM (web search only, no first-party API/docs access to Klaviyo/Mailchimp/Braze internals; codebase cross-checked for dependency grounding — see Sources)
 
-This is not a "what to build first" product-features document — v1.0 already shipped the product surface (see `.planning/research/` v1.0 FEATURES.md history / PROJECT.md Validated section). This document answers: **what operational capability separates a functionally-complete MVP from a platform a paying tenant can trust with production sending volume**, mapped onto the audit's 7 target areas.
+## Scope Note
 
----
+Unlike a greenfield-product feature landscape, this milestone adds five narrowly-scoped capabilities to an already-shipped platform (v1.0 + v1.1, 95/95 requirements validated). None of the five are user-facing differentiators — they are **trust/compliance/engineering-hygiene table stakes** that a production email-marketing SaaS is expected to have before it can be trusted with real customer PII and sending reputation. This document evaluates each of the five against how comparable ESPs (Klaviyo, Mailchimp, Braze) and general SaaS/security practice handle the same problem, and flags complexity + dependencies on subsystems already built in v1.0/v1.1.
 
-## GAPS THE AUDIT MISSED (read this section first)
+## Feature Landscape
 
-The audit (`.planning/AUDIT-2026-07-27-production-readiness.md`) is thorough and technically sound, but it is a code-review-driven audit, not an industry-practice audit. Cross-referencing its findings against how mature ESPs and queue-backed systems actually operate surfaces the following gaps — none contradict the audit, but each either weakens a fix the audit already scoped, or is a capability class the audit didn't mention at all. **These should be folded into the relevant phase's requirements, not treated as a separate phase.**
+### Table Stakes (Users/Auditors Expect These)
 
-| # | Gap | Why it matters | Which audit item it affects | Confidence |
-|---|-----|-----------------|------------------------------|------------|
-| 1 | **`sg_event_id` is not reliably stable across SendGrid webhook retries.** SendGrid's own docs say it's safe for dedup; a confirmed GitHub issue against `sendgrid-nodejs` (#1435) reports duplicate webhook deliveries (same email/event/timestamp/message-id) arriving with *different* `sg_event_id` values on retry. | The audit's dedup approach (§ "SendGrid Event Webhook... дедупликация по sg_event_id") and finding 4.5 (replay protection) both implicitly trust `sg_event_id` as a stable dedup key. It isn't, on SendGrid's own admission via the issue thread. Dedup needs a fallback compound key (message send_id + event type + provider timestamp, or a DB unique constraint on a derived tuple), not `sg_event_id` alone. | 3.2 (state machine), 4.5 (webhook replay) | HIGH — first-party GitHub issue, verified via WebFetch |
-| 2 | **Redis `maxmemory-policy` and persistence (AOF) are not mentioned anywhere in the audit.** BullMQ's own "Going to Production" doc calls `maxmemory-policy=noeviction` the *single setting that guarantees correct queue behavior* — any eviction policy that silently deletes keys under memory pressure corrupts BullMQ's internal state (jobs vanish without a trace, not even a failed-job record). | Directly undermines every worker-reliability fix in area 5/6 if Redis itself isn't configured correctly — a queue can be "fixed" in code and still lose jobs at the infra layer. | Not covered by any existing audit item — new | HIGH — first-party BullMQ docs |
-| 3 | **SendGrid `mail/send` has no native idempotency-key support** (unlike Resend, which supports `Idempotency-Key` on `POST /emails`, or Stripe). The audit's fix for 3.2 says "add correlation ID" as if that alone buys safety. | A correlation ID only protects you if *something* — your own DB or the provider — uses it to dedupe. Since SendGrid won't dedupe for you, 100% of resend-safety must be enforced app-side: check local send state (or Activity API) for that correlation ID *before* ever calling SendGrid again, not just log it alongside the call. This is a materially different implementation than "log the ID." | 3.2 (delivery correctness) | HIGH — confirmed across SendGrid docs + Resend's own SendGrid-migration doc |
-| 4 | **Idempotency key must be derived from send *intent*, not a random UUID per attempt.** A `crypto.randomUUID()` generated fresh on each retry doesn't dedupe anything — it must be a deterministic function of (campaign/flow-step id, contact id, send generation) so that retrying the *same logical send* reproduces the *same key*. | The audit's phrasing ("добавить correlation ID") doesn't specify this, and it's the detail that makes or breaks the fix. Cheap to get right, easy to build wrong. | 3.2 | MEDIUM |
-| 5 | **Webhook-endpoint-downtime backfill is the inverse problem the audit didn't address.** The audit's 4.5 covers replay *attacks* (someone resending a captured payload) but not the routine case: SendGrid retries a failed webhook delivery for ~24–72h with backoff, then drops it permanently. Any deploy-window outage on the webhook route creates a silent, permanent gap in delivery status for events landing in that window. | Needs a scheduled reconciliation job (poll SendGrid's Email Activity API for sends with no terminal webhook event after N hours) as a standing capability, not a one-time gap-fill. | Adjacent to 3.2 and 4.5, not explicitly named | MEDIUM |
-| 6 | **Per-tenant *concurrency fairness under backlog* is a different problem than per-tenant *RPS throttling*.** The audit's 3.1 correctly identifies and fixes the global `worker.rateLimit()` bug. But even with a correct per-tenant token bucket, BullMQ (OSS) processes a queue roughly FIFO — if tenant A enqueues 50k jobs, tenant B's much smaller batch can still sit behind A's backlog waiting for worker slots, because rate-limiting throttles *how fast* a job may be sent, not *which tenant's job gets pulled next*. | This is the actual "one tenant can't starve another" guarantee the milestone's Active requirements ask for — RPS throttling alone doesn't fully deliver it under backlog conditions. Needs either weighted job pulling or a bounded per-tenant in-flight cap. | 3.1, and the milestone's "Tenant isolation" Active requirement | MEDIUM — cross-checked against 3 independent noisy-neighbor/fair-queueing sources, none BullMQ-specific (BullMQ has no official fair-queue primitive; this is architecture guidance, not a library feature) |
-| 7 | **Sender-reputation / deliverability monitoring (Gmail & Yahoo bulk-sender rules) is entirely absent from the audit.** Since Feb 2024, any domain sending ≥5,000 msgs/day to Gmail is permanently classified "bulk sender" and must stay under a 0.3% spam-complaint rate (Google's internal target is 0.1%) or risk being blocklisted; Yahoo enforces a similar 0.3% threshold. Both require SPF/DKIM/DMARC alignment and one-click unsubscribe (the platform already has the last one). | At "hundreds of thousands of emails/day" across many independently-configured BYO-key tenants, an under-informed tenant *will* cross this threshold eventually, and the platform currently has no way to notice before the tenant's own domain gets blocklisted and support tickets arrive as "emails aren't sending." The platform already ingests bounce/spam-complaint events via its own webhook — a per-tenant rolling complaint-rate metric with a threshold alert is a small addition on data already flowing in. | Not covered anywhere in the audit | HIGH — cross-checked across 5+ deliverability sources, consistent 0.1–0.3% figures |
-| 8 | **"Metrics reconciliation" is named as a fix item (5.4/end of §5) but not specified as a *recurring scheduled job* with drift alerting** — the audit's phrasing reads as a one-time correction. Mature platforms treat rollup-vs-source-of-truth drift as an ongoing operational signal, not a launch-day fix. | Without a standing reconciliation job, the same class of bug (aggregation using a different timestamp field, a missed webhook, a timezone bug) can silently reintroduce drift after the initial fix ships. | 5.2/5.4 | MEDIUM |
-| 9 | **Expand/contract is the concrete technique behind "migration pipeline with gate/rollback/roll-forward"** — the audit names the goal but not the industry-standard mechanism. Worth naming explicitly in the `ARCHITECTURE.md`/`CONVENTIONS.md` this milestone is already creating, since "the migration must work with both the old and new app version running simultaneously" is the actual rule that makes rolling/VPS-restart deploys safe without dropping in-flight sends. | Turns a vague "have migration tests" requirement into a checkable rule (does this migration break if the old binary is still serving requests against it?). | 7 (Database и миграции) | HIGH — consistent across all migration-safety sources |
+| Feature | Why Expected | Complexity | Notes |
+|---------|--------------|------------|-------|
+| Campaign send uses the confirmed-saved template, never a stale in-flight selection | Baseline reliability expectation for *any* send platform — "what I configured is what goes out" is more fundamental than any compliance feature; a bug here (stale template after dropdown change) is a trust-destroying incident, not a missing nice-to-have | LOW–MEDIUM | Classic UI/state bug pattern (form state not re-synced to the persisted/confirmed value before an async action reads it). Fix belongs at the boundary where launch/schedule/test-send reads `templateId` — read from the last-saved server record, not from unsaved local form state. No ecosystem research needed beyond "read from source of truth, not from stale client state"; this is an internal-correctness fix, not a competitive feature. |
+| Per-contact data export on request (DSAR/GDPR Art. 15 & 20) | Every major ESP operating in the EU (Klaviyo, Mailchimp, Braze) exposes *some* mechanism to pull one data subject's personal data — it is a baseline legal requirement (GDPR right of access + data portability), not a differentiator. Mailchimp formalizes this with a dedicated DSAR intake page; Klaviyo and Braze expose profile-level export via UI/API. | MEDIUM | Klaviyo's actual mechanism is a *workaround*, not a dedicated single-contact button: build a segment-of-one, export that segment to CSV. Mailchimp: per-contact "Export a Contact" CSV. Braze: whole-profile export via REST API/SDK, but explicitly **cannot** selectively export/delete individual behavioral events — only whole-profile. A first-class one-click "Export this contact's data" button on the contact card (as scoped for v1.2) is *more polished self-service UX* than what Klaviyo ships natively — see Differentiators. |
+| Physical purge of a closed tenant's PII + secrets after a retention window | GDPR obligations do not end when a subscription/account is closed — "soft delete forever" is not a compliant end state; every serious SaaS/GDPR guide converges on a two-phase soft-delete → grace-period → hard-delete/anonymize lifecycle. Auditors and DPAs expect a documented, enforced retention default, not an indefinite "we'll get to it." | HIGH | Standard pattern: soft-delete flag + `deletion_scheduled_for` (commonly 30–90 days), then a scheduled job hard-deletes/anonymizes past that date. This project already has `organization.deletedAt` as a project-added soft-delete column (`packages/db/src/schema/auth.ts`) — the *soft*-delete half of the lifecycle likely already exists; v1.2 adds the *hard*-delete/purge half. Highest complexity of the five: must be idempotent, resumable, safe for sibling tenants (i.e., not accidentally touch shared/global tables), and must delete tenant secrets (SendGrid API key DEK) via the existing KMS envelope pattern, not just DB rows. |
+| Graceful rotation of the unsubscribe-link signing secret | Security/compliance hygiene baseline: a secret that can never be rotated is a standing risk (compromise = permanent exposure, no recovery path) — every credential/signing-key rotation guide treats "can rotate without breaking existing users" as the non-negotiable bar, especially for something GDPR/CAN-SPAM requires to keep working (functioning unsubscribe links). | MEDIUM–HIGH | **Codebase-grounded finding, not assumption:** `packages/delivery-core/src/unsubscribe-token.ts` currently uses a single `UNSUBSCRIBE_TOKEN_SECRET`, HMAC-SHA256, no key ID, and `UNSUBSCRIBE_TOKEN_TTL_SECONDS = 5 years` (`apps/worker/src/queues/send-dispatch.ts`, `flow-send.ts`). This is materially different from typical JWT/webhook rotation guides, which assume overlap windows of hours-to-days — a 5-year token lifetime means "previous secrets" must remain valid for verification for up to 5 years after the last email carrying them was sent, not a short transition window. Standard `kid`-style pattern (embed a short key identifier alongside the signature so the verifier picks the right secret) applies directly and avoids O(n) try-every-secret verification. |
+| CI blocks new untriaged HIGH/CRITICAL dependency advisories | Standard engineering hygiene for any production SaaS handling PII and payment-adjacent BYO API keys; "we'll notice eventually" is not an acceptable posture once in production. Every dependency-hygiene guide converges on: gate on severity threshold, allow a documented time-boxed exception, don't let noise force a fully-red pipeline. | LOW–MEDIUM | Policy-as-code pattern: committed allowlist/suppression file with owner + expiry + justification per accepted finding (tools like `audit-ci` implement this natively with module/advisory/path-scoped allowlist records); CI gate reads the allowlist and fails on any advisory ≥ threshold not present in it. This project already has a mature CI quality-gate pattern from Phase 8 (branch protection, admin-enforced red-PR blocking) — the dependency gate slots into that same pipeline rather than requiring new CI infrastructure. |
 
----
+### Differentiators (Competitive Advantage)
 
-## Table Stakes
+| Feature | Value Proposition | Complexity | Notes |
+|---------|--------------------|------------|-------|
+| True one-click, in-UI, per-contact DSR export (not a segment-of-one workaround, not a support-ticket/staff-mediated DSAR process) | Klaviyo's actual mechanism for "export one person's data" is *build a segment containing just them, then export the segment* — a workaround, not a dedicated feature. Mailchimp's DSAR path is a formal intake form processed by Mailchimp staff, not self-service in the tenant's own UI. A marketer-facing "Export this contact's data" button directly on the contact card that produces an immediate downloadable file is meaningfully better self-service UX than either — worth calling out as a genuine (if narrow) advantage for smaller/mid-market tenants who don't want to file a ticket or hand-build a segment every time a customer asks "what do you have on me." | MEDIUM | Already scoped as required for v1.2, so this is "differentiator we get for free by doing table stakes well," not additional scope. |
+| Documented, deterministic, resumable workspace purge (evidence of *when and what* was purged) | Most competitor/industry guidance describes purge only in the abstract ("have a retention policy"); few document a resumable, idempotent, per-tenant-scoped purge job as a first-class engineered capability with proof of completion. Given this platform already has a strong "evidence, not just claims" pattern (erasure_records from Phase 13, dead_letter_jobs, catalog-driven partition retention from Phase 14), extending that same evidence discipline to workspace purge is consistent with the platform's existing compliance posture and differentiates it from ESPs that only describe policy in a DPA without an auditable mechanism. | HIGH | Reuses the Phase 13 erasure evidence pattern (`erasure_records`) and the Phase 14 catalog-driven retention pattern (drop by bounds queried from catalog, not by table-name convention) — both are precedents to extend, not invent from scratch. |
 
-Capabilities a paying, production email-sending SaaS cannot credibly operate without. Missing these isn't "less featured" — it's an outage or a compliance violation waiting to happen.
+### Anti-Features (Commonly Requested, Often Problematic)
 
-| Capability | Why non-negotiable | Complexity | Depends on |
-|---|---|---|---|
-| Delivery state machine with an explicit `unknown`/`reconciling` state (not just `sent`/`failed`) | An ambiguous provider outcome (accepted-then-crash) recorded as `failed` causes either lost mail (no retry) or duplicate mail (blind retry) — both are the two things an email platform must not do | MEDIUM | `send_events`/sends table schema, `apps/worker/src/queues/send-dispatch.ts`, `apps/worker/src/queues/flows/flow-send.ts` |
-| Deterministic, intent-derived idempotency/correlation key on every send attempt | SendGrid has no native idempotency key — dedup is 100% app responsibility; a random key per attempt doesn't dedupe anything | LOW–MEDIUM | Same send pipeline files; needs to be derivable from (campaign/flow-step id, contact id, generation) |
-| Reconciliation job resolving `unknown` sends via SendGrid Email Activity API / webhook cross-check within a bounded SLA, else escalate | Every "provider accepted but we don't know the outcome" case must terminate somewhere other than silence | MEDIUM–HIGH | BYO key decrypt path (`kms` package), webhook ingest pipeline (Phase 5 v1.0) |
-| Explicit, documented at-least-once + idempotent-processing model ("effectively-once"), not a false "exactly-once" claim | Distributed sends over HTTP cannot be exactly-once; claiming otherwise sets an undeliverable expectation. Marketing-email bias should be toward *not losing* mail over *never duplicating* it (duplicate is annoying, lost mail is a support ticket and a trust break) | LOW (decision + doc) | None — pure architecture decision, feeds `ARCHITECTURE.md` |
-| Outbound-call timeout + cancellation (`AbortController`) on every SendGrid call | An unbounded hung request silently consumes a worker slot indefinitely, degrading the whole tenant's (or all tenants', pre-fix) throughput | LOW | `packages/delivery-core/src/send-mail.ts` |
-| Per-tenant rate limiting enforced by deferring/delaying the specific job, never pausing the shared worker | A worker-level pause (current bug per audit 3.1) makes one tenant's SendGrid 429 degrade every other tenant | MEDIUM | `rate-limiter-flexible` token bucket (already present), BullMQ `moveToDelayed` |
-| Per-tenant bounded in-flight/concurrency ceiling, independent of rate limiting | Prevents one tenant's large backlog from occupying all worker concurrency slots even when correctly rate-limited (see Gap #6) | MEDIUM | Worker concurrency config, queue job data (tenant id) |
-| Redis configured `maxmemory-policy=noeviction` + AOF persistence enabled | Any other eviction policy causes BullMQ to silently lose queued/delayed jobs under memory pressure — a queue-reliability fix in code is meaningless if the substrate underneath discards data | LOW | Redis infra config (not app code) — belongs in Database/infra lifecycle deploy checklist |
-| Atomic unsubscribe: one event updates subscription status + consent history + the triggering send record together | Split-write (status updates, send record doesn't) produces analytics that lie about who was unsubscribed when — a compliance and trust problem, not just a cosmetic one | MEDIUM | `subscription_status_history`, send/delivery tables, unsubscribe endpoint (Phase 4/5 v1.0) |
-| Suppression list / consent-history record durability independent of contact row deletion | Deleting a contact must not delete the *proof* the platform honored their unsubscribe — re-contacting them after "erasure" is itself a compliance failure, and losing consent evidence removes the platform's only defense in a dispute | MEDIUM | Fix the `subscription_status_history.contact_id` cascade-delete (audit 5.3); anonymize contact PII, retain minimal suppression identifier + consent timestamps under a legitimate-interest basis |
-| Single canonical "send day" definition (one timestamp field, one timezone convention) used identically by every rollup and dashboard query | Two code paths using `sent_at` vs `created_at`, or mixing local/UTC, produce dashboards that disagree with each other — this is the single fastest way to lose a tenant's trust in the analytics | MEDIUM | Reconciliation queries, dashboard queries (Phase 7 v1.0), needs a data-migration pass on existing rows |
-| `/healthz` (process alive) distinct from `/readyz` (DB + Redis reachable, migrations current) | Load balancer / orchestrator needs to know "restart me" vs "don't route to me yet" — conflating them causes either false-positive kills or false-positive traffic to a broken instance | LOW–MEDIUM | Fastify app bootstrap, DB/Redis clients |
-| Queue-depth AND oldest-job-age alerts, both, not depth alone | Depth alone doesn't distinguish "busy but healthy" from "stuck" — a shallow queue with a 6-hour-old head job is a worse incident than a deep queue draining normally | LOW–MEDIUM | Bull Board / BullMQ queue introspection APIs |
-| Webhook ingest lag alert (time since last processed provider event vs. now) | A silently-stalled webhook consumer looks identical to "quiet tenant" without this signal — and per Gap #5, provider-side retry-then-drop means a stall that isn't caught quickly is unrecoverable data loss | MEDIUM | Webhook processing pipeline |
-| Send failure rate broken down by error class (timeout / 429 / 5xx / terminal 4xx), not one aggregate number | An aggregate failure-rate alert can't tell an on-call engineer whether to look at SendGrid's status page, a tenant's exhausted key, or a code bug — the class *is* the diagnosis | MEDIUM | Send pipeline error handling, needs consistent error taxonomy |
-| Graceful worker shutdown: `worker.close()` semantics (stop pulling new jobs, wait for in-flight, bounded force-exit timeout), wired to SIGTERM | A deploy that kills workers mid-send either loses the outcome (see delivery state machine above) or double-processes on restart | LOW–MEDIUM | BullMQ has native support (`worker.close()`); needs SIGTERM handlers + timeout, applies to all worker processes uniformly (audit 6: "единые worker error listeners") |
-| Expand/contract migrations as the default technique + migration gate (single-runner lock) before app boot | The only reliable way to deploy schema changes without breaking in-flight requests/sends against the currently-running binary | MEDIUM | drizzle-kit migration tooling, deploy pipeline |
-| Failed-job retention policy (bounded, not `removeOnFail: false` forever) + a documented dead-letter re-drive runbook | Unbounded failed-job retention is unbounded Redis growth; no re-drive runbook means a stuck DLQ sits unactioned until someone notices by accident | LOW–MEDIUM | Shared BullMQ queue factory (audit calls for this already — `defaultJobOptions` dedup) |
+| Feature | Why Requested | Why Problematic | Alternative |
+|---------|---------------|------------------|-------------|
+| Full self-service "privacy rights portal" covering every GDPR/CCPA right type (access, erasure, rectification, objection, portability) in one UI flow | Feels like "doing compliance properly once instead of piecemeal" | Massively over-scopes v1.2; erasure already exists (Phase 13, per-contact anonymization), export is being added now — building a generalized multi-right-type request-intake-and-workflow system is a different, much larger product (this is literally what third-party tools like DataGrail/TrustWorks exist to sell as an add-on layer on top of ESPs like Klaviyo/Mailchimp) | Ship the two rights actually in scope (export, erasure — erasure already done) as direct UI actions; do not build a generic "request type" workflow engine |
+| Synchronous/blocking DSR export generation on the request thread | Feels simpler to implement — "just query and return a file" | A contact's data can span profile + custom properties + full consent history + full event history + send-related PII across potentially years of activity; blocking a request thread (or a UI spinner) risks timeouts and doesn't match how every reference implementation (Braze's async export-with-emailed-link, Userpilot/Salesforce/Braze all use async job + notification + expiring download link) actually does bulk-ish per-entity exports | Async job (reuse existing BullMQ queue infrastructure) generates the file, tenant is notified/polled in-UI, download link expires (industry examples range 2 days–7 days; Braze's dashboard exports expire in 4 hours) — but note: for a *single contact's* data (not a bulk workspace export) synchronous generation may in fact be fast enough in practice; validate against actual data volume before defaulting to async complexity |
+| Immediate hard-delete on workspace soft-delete, no grace period | "Just get rid of it, why wait" — feels more thoroughly compliant | No path to undo an accidental or malicious soft-delete (support/ops error, compromised admin account); every SaaS retention guide treats the grace period as the safety mechanism, not an obstacle to compliance — GDPR gives up to 30 days as an accepted norm for erasure fulfillment anyway, so an immediate irreversible hard-delete buys no compliance benefit and adds operational risk | Platform-default grace period (operator-configurable per PROJECT.md scope: "платформенный default, задаёт оператор") between soft-delete and the purge job actually running |
+| Invalidate/expire all previously-sent unsubscribe links immediately on secret rotation (single-secret cutover, no overlap) | Simpler to implement — one secret, no `kid` bookkeeping, no list of previous secrets to carry | Breaks a legally-required mechanism (working unsubscribe link) for every email already sent and sitting in inboxes — directly contradicts "graceful rotation" as scoped, and given the 5-year TTL already baked into this codebase, an immediate cutover would break unsubscribe for years of previously-sent mail simultaneously the moment rotation happens | Primary secret signs new tokens; ordered list of previous secrets is tried during verification (exactly as scoped) — the "previous secrets" list must be retained for as long as issued tokens remain within their TTL, not just a short transition window |
+| Building a custom in-house vulnerability-scanning/SCA dashboard UI | Feels like a natural companion to "dependency hygiene" | Reinventing tooling that already exists and is well-maintained (npm audit, `audit-ci`, Dependabot, optionally Snyk) — a custom scanner/UI is pure maintenance burden with no product value; this is an engineering-process feature, not a customer-facing one | Use `audit-ci`-style CI gate + committed allowlist file (owner, justification, expiry) reviewed on a cadence; Dependabot for automated patch PRs. No new UI, no new service. |
 
-## Differentiators
-
-Not required to be considered production-ready, but meaningfully raise operational trust or reduce toil beyond the audit's baseline fixes. Worth scoping *if* the phase budget allows, but none should block the milestone's Definition of Done.
-
-| Capability | Value | Complexity | Notes |
-|---|---|---|---|
-| Per-tenant rolling spam-complaint / bounce-rate dashboard with a threshold alert | Catches a tenant sliding toward Gmail/Yahoo blocklisting before it becomes a "why isn't email sending" support fire | MEDIUM | Data already flows in via existing bounce/spam webhook events (Phase 5 v1.0) — this is mostly a rollup + alert, not new ingestion |
-| Documented analytics consistency SLA to tenants (e.g., "counts finalized by T+24h, live counts may lag") | Mature ESPs publish this; it turns an inherent eventual-consistency property into an explicit promise instead of a silent surprise | LOW | Pure documentation once the canonical send-day/reconciliation work (table stakes above) exists |
-| SLO-based alert thresholds (e.g., DLQ arrivals >1% of main queue for 10 min, oldest job >5× target SLA) instead of naive "any failure pages" | Prevents alert fatigue / on-call burnout at this send volume, where transient single-job failures are normal and expected | LOW | Depends on the failure-rate-by-class signal above existing first |
-| End-to-end correlation IDs (`request_id`/`tenant_id`/`job_id`/`send_id` + trace) surfaced in logs and Sentry | Turns "grep three log files by hand" into "click through one trace" during an incident — already scoped in the milestone's target features | MEDIUM | Pino structured logging (already in stack), consistent propagation through BullMQ job data |
-| Weighted per-tenant priority tiers in the send queue | Real fairness upgrade over FIFO+cap, but requires a notion of tenant tier/plan | HIGH | Blocked on billing/tarification, which is explicitly out of scope for v1 per PROJECT.md — defer |
-| Automated backup restore drill as a scheduled, not one-off, exercise | Proves the backup is actually restorable on an ongoing basis, not just at the moment someone last checked | MEDIUM | Depends on backup/PITR tooling already scoped in the milestone (area 6) |
-
-## Anti-Features
-
-Things a team at this stage plausibly reaches for that create cost without matching benefit, or that are actively harmful given this product's specific constraints (BYO SendGrid key, self-hosted single VPS, no billing tiers, small team).
-
-| Feature | Why it looks appealing | Why it's a trap here | Do instead |
-|---|---|---|---|
-| Provider-guaranteed exactly-once delivery / 2PC across Postgres and SendGrid | Sounds like the "correct" fix for the ambiguous-outcome problem | Doesn't exist for HTTP APIs; SendGrid has no distributed-transaction protocol. Chasing it burns effort on an unreachable guarantee | At-least-once send + idempotent app-side dedup (effectively-once) — industry-standard, achievable, already scoped in table stakes |
-| Queue-per-tenant BullMQ topology for fairness | Feels like the most direct way to isolate tenants | Doesn't scale past a few hundred tenants (Redis key/queue sprawl, harder global observability) — already flagged as an anti-pattern in `STACK.md`'s Alternatives table; reconfirmed here from the fairness angle too | Shared queues + per-tenant token bucket + per-tenant concurrency cap (table stakes above) |
-| Buying BullMQ Pro for native per-group rate limiting right now | Would solve the fairness problem more elegantly | Premature spend before the OSS app-level approach has even been tried at production load; `STACK.md` already flags this as a "revisit at scale" decision, not a v1.1 one | Ship the app-level token bucket + concurrency cap fix; revisit only if it shows operational friction under real tenant counts |
-| Full domain-reputation monitoring platform (Google Postmaster Tools API + Yahoo Sender Hub integration per tenant) | Directly addresses Gap #7 (deliverability blind spot) in the most complete way | Requires each tenant to grant the platform access to their own Postmaster Tools account — a BYO-key/BYO-domain model doesn't naturally have this access, and building it is a multi-week integration project, not a hardening-milestone item | Start with the cheap version: surface the bounce/spam-complaint data the platform *already receives* via its own webhook as a per-tenant trend + threshold alert (listed under Differentiators) |
-| Real-time strict-consistency dashboards recomputed from raw event tables on every page load, at this volume | Feels more "correct" than precomputed rollups | Wasteful and slow at hundreds-of-thousands-of-sends/day scale, and doesn't actually solve the audit's real complaint (rollups disagree with each other due to inconsistent day-definition, not due to being precomputed) | Precomputed rollups + a canonical send-day definition + a scheduled reconciliation job that alerts on drift (table stakes above) |
-| Kubernetes-grade rolling/canary/blue-green deployment infrastructure | Standard "production-grade" deploy story | The milestone's own Key Decisions already commit to a single self-hosted VPS with Docker for this team's size — building multi-instance rolling-deploy orchestration contradicts that decision and adds ops burden the team explicitly chose to avoid | Expand/contract migrations (table stakes) + documented manual rollback runbook + graceful worker drain on restart — sufficient for a single-VPS deploy target |
-| Alerting on every individual failed job / every DLQ arrival | Feels like "not missing anything" | Alert fatigue at this send volume — transient single-job failures (a momentary SendGrid 5xx) are normal, not incidents | Threshold/rate-based alerts (Differentiators table) — alert on *patterns*, page on drift beyond SLO, not on every occurrence |
-| Postmark-style separate message-stream/IP-pool architecture (transactional vs. broadcast reputation isolation) | This is exactly what mature ESPs do to protect deliverability | Not applicable here — Mega CRM has no platform-owned SendGrid IP pool or domain to protect; each tenant BYOs their own SendGrid account, so IP/domain reputation isolation is already the tenant's own SendGrid account's problem, not the platform's to solve | Confirms the existing BYO-key architectural choice is sound; no action needed here — just don't accidentally try to rebuild this internally |
-
----
-
-## Capability Dependencies
+## Feature Dependencies
 
 ```
-Delivery state machine (unknown/reconciling)
-    └──requires──> Deterministic idempotency/correlation key
-                       └──requires──> Send-day-consistent schema fields already exist (sends/send_events)
+Campaign template correctness
+    └──no new dependency: fix within existing campaign send/launch path (Phase 4)
 
-Reconciliation job (unknown-state resolution)
-    └──requires──> Delivery state machine
-    └──requires──> BYO key decrypt path (existing, Phase 1 v1.0)
-    └──enhances──> Webhook-downtime backfill (Gap #5) — same mechanism, two triggers
+DSR contact export
+    └──requires──> existing tenant-isolated RLS + per-table PII (contacts, custom properties,
+                    consent history, events, send_events) — all already exist (Phases 2–5, 13)
+    └──requires──> existing per-workspace scoping pattern (tenant_id filtering + RLS,
+                    same discipline as every other tenant-scoped read)
+    └──optionally-enhances-with──> existing BullMQ queue infra, IF async generation is chosen
 
-Per-tenant rate limiting (job-level defer)
-    └──requires──> Existing rate-limiter-flexible token bucket (already built, Phase 4 v1.0)
-    └──enhances──> Per-tenant concurrency cap (Gap #6) — separate mechanism, same goal
+Workspace physical purge
+    └──requires──> workspace soft-delete state (organization.deletedAt — already exists)
+    └──requires──> existing KMS envelope-encryption pattern (Phase 1) to delete tenant DEK/secret
+                    material, not just delete rows
+    └──requires──> existing catalog-driven, evidence-producing deletion precedent
+                    (Phase 13 erasure_records anonymization pattern; Phase 14 catalog-driven
+                    partition retention pattern) — extend, don't reinvent
+    └──must-not-break──> RLS isolation for sibling tenants (purge job necessarily operates
+                          with elevated/service-role privilege across the tenant boundary —
+                          same risk class as the existing mega_crm_scan least-privilege role
+                          pattern from Phase 10, not application-level tenant_id filtering alone)
 
-Redis noeviction + AOF
-    └──enables──> Every worker-reliability fix in area 5/6 (queue durability substrate)
+Unsubscribe-secret rotation
+    └──requires──> existing unsubscribe-token HMAC mechanism (packages/delivery-core/
+                    unsubscribe-token.ts) — single secret today, no kid, 5-year TTL
+    └──conflicts-with-naive-approach──> short-overlap-window rotation patterns from generic
+                    JWT/webhook guides (those assume hours-to-days overlap; this system's
+                    5-year token TTL means "previous secrets" retention is effectively
+                    multi-year, not a short cutover window)
+    └──optionally-uses──> existing KMS/secret-storage conventions for where rotated secrets live
 
-Atomic unsubscribe event
-    └──requires──> Fix cascade-delete on subscription_status_history (audit 5.3)
-    └──requires──> Single canonical send-day field (for consistent downstream analytics)
-
-Consent-evidence-preserving erasure
-    └──requires──> Atomic unsubscribe event (shares the same history table)
-    └──conflicts with──> Naive "erasure = delete all rows" interpretation (Anti-Feature)
-
-Canonical send-day definition
-    └──requires──> Data migration pass on existing rows using old mixed definitions
-    └──enables──> Scheduled reconciliation job (Gap #8) — reconciliation needs one ground truth to reconcile against
-
-/readyz endpoint
-    └──requires──> Migration gate (must reflect "migrations current" in readiness, not just DB reachability)
-
-Queue-depth + oldest-job-age alerts
-    └──enhances──> Send-failure-rate-by-class alerting — together these cover the two queue-health failure modes (backlog, error rate)
-
-Expand/contract migrations
-    └──enables──> Graceful worker shutdown being sufficient for zero-dropped-sends deploys (both are required together, neither alone is)
+Dependency hygiene CI gate
+    └──requires──> existing CI quality-gate pipeline + branch protection (Phase 8)
+    └──no dependency on other v1.2 features
 ```
 
 ### Dependency Notes
 
-- **The delivery state machine is the load-bearing dependency for almost everything in area 2.** Reconciliation, idempotency keys, and the webhook-downtime backfill job all assume a schema that can represent "we don't know yet" as a first-class state, not just `sent`/`failed`. Sequence this first within Phase 2 work.
-- **Redis config is infrastructure, not app code, but every worker-reliability fix is void without it.** It should be a deploy-checklist / Docker-compose item in the Database/infra lifecycle area, cross-referenced from the worker-reliability area rather than owned twice.
-- **Consent-evidence-preserving erasure and atomic unsubscribe share a table** (`subscription_status_history`) — fixing the cascade-delete bug and building the atomic-event pattern should land in the same plan, not sequentially, to avoid touching the same migration twice.
-- **Canonical send-day must land before the scheduled reconciliation job** — reconciling against an inconsistently-defined "day" just reconciles two wrong answers against each other.
+- **Workspace purge requires the KMS envelope-encryption pattern, not just row deletion:** tenant SendGrid API keys are stored as KMS-wrapped DEKs (Phase 1 pattern). "Delete tenant secrets" (explicitly named in the v1.2 scope) means destroying/unwrapping-then-discarding that key material, not merely deleting the row that references it, if the DEK or wrapped ciphertext could otherwise be reconstructed from other retained data.
+- **Workspace purge must not break sibling-workspace isolation:** because a purge job necessarily crosses the tenant_id boundary that RLS normally enforces (it needs to find and delete data across all tables scoped to one workspace, likely via a service role), it belongs in the same risk class as the existing `mega_crm_scan`/`mega_crm_auth` least-privilege role pattern from Phase 10 — reuse that discipline (dedicated role, not blanket superuser) rather than the application-level `WHERE tenant_id = ?` pattern that's explicitly called out as *insufficient alone* elsewhere in this project's own stack research.
+- **Unsubscribe-secret rotation's real complexity is the 5-year TTL, not the rotation mechanism itself:** the `kid`-header / "try each previous secret" pattern from the ecosystem research is standard and directly applicable, but standard guides assume short overlap windows; this project's actual token lifetime (`UNSUBSCRIBE_TOKEN_TTL_SECONDS = 60*60*24*365*5` in `send-dispatch.ts`/`flow-send.ts`) means the "previous secrets" list is a long-lived, possibly-growing list across the platform's lifetime, not a two-entry transient state — this has real implications for how many previous secrets need to be retained/configured and for how long, which the roadmap phase should size explicitly rather than copy a generic rotation pattern uncritically.
+- **DSR export and workspace purge are related but must stay decoupled:** export reads a single contact's data without touching or destroying anything; purge destroys an entire workspace's data. Do not let purge's "what data categories count as tenant PII" enumeration silently diverge from export's "what data categories count as this contact's personal data" enumeration — both should derive from one shared inventory of PII-bearing tables/columns (profile, custom properties, consent history, events, send-related PII) to avoid one being more complete than the other.
+- **Campaign template correctness has no cross-feature dependency** — it's a localized fix in the existing campaign launch/schedule/test-send path (`apps/web/src/features/campaigns/*`, Phase 4 origin) and should not be conflated architecturally with the other four (which are all compliance/security-hygiene additions).
 
----
+## MVP Definition (v1.2 Scope)
 
-## MVP Definition (for this hardening milestone)
+### In This Milestone (already scoped as Active requirements)
 
-### Must land in v1.1 (blocks the milestone's own Definition of Done)
+- [ ] Campaign template correctness fix — reliability regression, blocks trust in the send path
+- [ ] Per-contact DSR export (UI button → downloadable file) — closes the GDPR access/portability gap alongside existing erasure
+- [ ] Workspace physical purge after retention — closes the GDPR erasure-past-account-closure gap
+- [ ] Unsubscribe-secret graceful rotation — closes a standing single-point-of-compromise risk on a legally-required mechanism
+- [ ] Dependency hygiene CI gate + triage mechanism — closes an audit-flagged engineering hygiene gap
 
-- [ ] Delivery state machine with `unknown`/`reconciling` — the audit already calls this High/blocking; every reconciliation and idempotency capability depends on it existing first
-- [ ] Deterministic idempotency key (intent-derived, not random) — cheap, and the audit's fix is incomplete without this detail (Gap #4)
-- [ ] Reconciliation job for `unknown` sends AND for webhook-downtime backfill — same mechanism serves both (Gap #5)
-- [ ] `sg_event_id` dedup fallback to a compound key — corrects a false assumption the current implementation may be relying on (Gap #1)
-- [ ] Job-level per-tenant deferral (fix the global `worker.rateLimit()` bug) — already audit 3.1, High/blocking
-- [ ] Per-tenant concurrency cap — completes the fairness guarantee the milestone actually promises (Gap #6), audit's fix alone is necessary but not sufficient
-- [ ] Redis `maxmemory-policy=noeviction` + AOF — cheap, infra-only, prevents silent job loss underneath every other worker fix (Gap #2)
-- [ ] Atomic unsubscribe event + fixed cascade-delete — already audit 5.1/5.3, High
-- [ ] Canonical UTC send-day field — already audit 5.2, Medium-High
-- [ ] `/healthz` + `/readyz` with real readiness semantics — already scoped, cheap
-- [ ] Queue-depth + oldest-job-age + webhook-ingest-lag + failure-rate-by-class alerts — already scoped generally; this document specifies the concrete signal set
-- [ ] Graceful shutdown across all workers + expand/contract migration discipline — already scoped, both needed together for zero-dropped-sends deploys
+### Explicitly Deferred (per PROJECT.md "осознанно НЕ вошедшие в v1.2")
 
-### Should land in v1.1 if phase budget allows (Differentiators)
+- [ ] PgBouncer / connection pooling under real `max_connections` pressure (SCALE-02)
+- [ ] Segmentation benchmark at 100k–1M contacts
+- [ ] Remaining live compliance/operator-alert walkthroughs
+- [ ] Two UI follow-ups from Phase 15 (LaunchConfirmDialog, CsvImportWizard)
+- [ ] KMS quick-task Task 3 (production file-backed KEK provisioning)
 
-- [ ] Per-tenant bounce/spam-complaint rolling rate + threshold alert (Gap #7) — cheap given existing data, high leverage against a real blind spot
-- [ ] Scheduled (not one-time) metrics-reconciliation job with drift alerting (Gap #8)
-- [ ] SLO-based alert thresholds instead of naive per-failure paging
+### Future Consideration (beyond v1.2, not currently scoped)
 
-### Explicitly defer past v1.1
+- [ ] Generalized privacy-rights-request workflow (rectification, objection, multi-right intake) — explicitly an anti-feature for v1.2, see above
+- [ ] Bulk/workspace-wide data export (distinct from single-contact DSR export) — not requested; would need its own async-job design if ever scoped
+- [ ] Commercial SCA tooling (Snyk-style reachability analysis) beyond `npm audit`/Dependabot — worth revisiting only if the free-tooling allowlist becomes noisy at scale
 
-- [ ] Weighted per-tenant priority tiers — blocked on billing, out of scope per PROJECT.md
-- [ ] Full Postmaster Tools / Sender Hub integration — multi-week scope, start with the cheap version above instead
-- [ ] BullMQ Pro purchase — revisit only if the app-level fix shows friction at real tenant counts
-- [ ] Multi-instance rolling/canary deploys — contradicts the milestone's own single-VPS decision
+## Feature Prioritization Matrix
 
----
+| Feature | User/Compliance Value | Implementation Cost | Priority |
+|---------|------------------------|----------------------|----------|
+| Campaign template correctness | HIGH (trust-destroying bug) | LOW | P1 |
+| DSR contact export | HIGH (legal requirement) | MEDIUM | P1 |
+| Workspace physical purge | HIGH (legal requirement, highest engineering risk) | HIGH | P1 |
+| Unsubscribe-secret rotation | MEDIUM (risk-reduction, not user-visible) | MEDIUM–HIGH (5-year TTL implication) | P1 |
+| Dependency hygiene CI gate | MEDIUM (audit/engineering hygiene, not user-visible) | LOW–MEDIUM | P1 |
+
+All five are already committed "Active" requirements for this milestone (per PROJECT.md), so this matrix is descriptive (informs phase ordering/sizing) rather than a scope-selection tool — the workspace purge item, being both HIGH-risk and HIGH-value, likely warrants the most roadmap attention/its own phase given its dependency on the KMS + cross-tenant-boundary risk class described above.
+
+## Competitor Feature Analysis
+
+| Feature | Klaviyo | Mailchimp | Braze | Our Approach (v1.2) |
+|---------|---------|-----------|-------|----------------------|
+| Per-contact data export | Segment-of-one CSV export workaround, no dedicated single-contact button | Per-contact "Export a Contact" CSV; separate formal DSAR intake page for staff-mediated requests | Whole-profile export via REST API/SDK; cannot selectively export individual behavioral events (all-or-nothing at profile level) | Dedicated one-click button on the contact card → immediate downloadable file covering profile, custom properties, consent history, events, and send-related PII — more direct self-service than any of the three references found |
+| Account/tenant data purge after closure | Not documented in public sources found; presumed policy-level, not evidenced | Not documented in public sources found | Customers can self-delete entire user profiles; behavioral events only removable via full-profile deletion — no public documentation found on account-level (not per-profile) purge lifecycle | Idempotent, resumable, evidence-producing platform-level purge job on a policy-defined retention window, extending this project's own existing evidence-producing patterns (erasure_records, catalog-driven retention) |
+| Signing-key/secret rotation for compliance-critical links | Not documented in public sources found | Not documented in public sources found | Not documented in public sources found | Primary/previous-secret HMAC verification with `kid`-style dispatch, sized explicitly for a 5-year token lifetime already present in this codebase — no comparable public documentation found for any reference ESP, likely because this is treated as an internal security practice, not a marketed feature |
+| Dependency/supply-chain hygiene | N/A (not a customer-facing ESP feature for any platform) | N/A | N/A | Not competitive scope — purely internal engineering practice, included here for completeness per milestone scope |
+
+Note: Klaviyo/Mailchimp/Braze purge-lifecycle and key-rotation practices were not publicly documented in the sources found (search access only, no vendor DPA/security-whitepaper review) — treat the "Not documented" cells as a research gap, not evidence of absence. If exact competitive parity on these two matters later, a deeper pass against each vendor's Trust/Security Center and DPA would be needed.
 
 ## Sources
 
-Delivery correctness / idempotency:
-- [Designing Idempotent Email Sending for AI Agents — Mails.ai](https://mails.ai/blog/idempotent-email-sending-for-ai-agents) — MEDIUM, single-source blog but internally consistent with Stripe/AWS idempotency guidance below
-- [Designing robust and predictable APIs with idempotency — Stripe](https://stripe.com/blog/idempotency) — HIGH, first-party
-- [REL04-BP04 Make mutating operations idempotent — AWS Well-Architected](https://docs.aws.amazon.com/wellarchitected/latest/framework/rel_prevent_interaction_failure_idempotent.html) — HIGH, first-party
-- [At‑least‑once vs at‑most‑once vs exactly‑once — DesignGurus](https://www.designgurus.io/answers/detail/atleastonce-vs-atmostonce-vs-exactlyonce-where-to-use-each) — MEDIUM
-- [You Cannot Have Exactly-Once Delivery — Brave New Geek](https://bravenewgeek.com/you-cannot-have-exactly-once-delivery/) — MEDIUM, widely-cited foundational argument, cross-checked against Confluent's own delivery-semantics docs
-- [sg_event_id changes on retries — sendgrid-nodejs #1435](https://github.com/sendgrid/sendgrid-nodejs/issues/1435) — HIGH, first-party GitHub issue, verified via WebFetch
-- [Event Webhook Reference — SendGrid Docs / Twilio](https://www.twilio.com/docs/sendgrid/for-developers/tracking-events/event) — HIGH, first-party
-- [Migrating from SendGrid to Resend](https://resend.com/migrate/sendgrid) — MEDIUM, vendor comparison but factually checkable (idempotency-key support claim)
-- [Mail Send — SendGrid API Reference / Twilio](https://www.twilio.com/docs/sendgrid/api-reference/mail-send/mail-send) — HIGH, first-party
-
-Multi-tenant fairness:
-- [Fixing noisy neighbor problems in multi-tenant queueing systems — Inngest](https://www.inngest.com/blog/fixing-multi-tenant-queueing-concurrency-problems) — MEDIUM
-- [The Noisy Neighbor Problem in Multitenant Architectures — Neon](https://neon.com/blog/noisy-neighbor-multitenant) — MEDIUM
-- [Building resilient multi-tenant systems with Amazon SQS fair queues — AWS](https://aws.amazon.com/blogs/compute/building-resilient-multi-tenant-systems-with-amazon-sqs-fair-queues/) — HIGH, first-party (SQS-specific, used as architecture pattern reference, not a BullMQ feature claim)
-- [Going to production — BullMQ official docs](https://docs.bullmq.io/guide/going-to-production) — HIGH, first-party, verified via WebFetch (Redis noeviction/AOF, retry/backoff, retention guidance)
-- [Graceful shutdown — BullMQ official docs](https://docs.bullmq.io/guide/workers/graceful-shutdown) — HIGH, first-party
-
-Compliance:
-- [Right to erasure — ICO](https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/individual-rights/individual-rights/right-to-erasure/) — HIGH, first-party regulator guidance
-- [Right to object — ICO](https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/individual-rights/individual-rights/right-to-object/) — HIGH, first-party regulator guidance (suppression-list-after-objection endorsement)
-- [When can we rely on legitimate interests? — ICO](https://ico.org.uk/for-organisations/uk-gdpr-guidance-and-resources/lawful-basis/legitimate-interests/when-can-we-rely-on-legitimate-interests/) — HIGH, first-party
-- [Is there a legal requirement to keep unsubscribed email addresses under CAN-SPAM? — Suped](https://www.suped.com/learn/email-deliverability/is-there-a-legal-requirement-to-keep-unsubscribed-email-addresses-for-four-years-under-can-spam) — MEDIUM
-- [CASL Compliance: The Complete Guide — Sendcheckit](https://sendcheckit.com/blog/casl-compliance-guide) — MEDIUM, cross-checked against Mailchimp's CASL guide
-
-Analytics / deliverability:
-- [Gmail Bulk Sender Guidelines 2026 — GMass](https://www.gmass.co/blog/gmail-bulk-sender-guidelines/) — MEDIUM
-- [Email sender guidelines FAQ — Google/Gmail Help](https://support.google.com/a/answer/14229414?hl=en) — HIGH, first-party
-- [Yahoogle: New Bulk Sender Requirements — Mailgun](https://www.mailgun.com/state-of-email-deliverability/chapter/yahoogle-bulk-senders/) — MEDIUM, cross-checked, consistent 0.3% figure across 5+ independent deliverability-vendor sources
-- [What types of messages are a good fit for Postmark? — Postmark Support](https://postmarkapp.com/support/article/1082-what-types-of-messages-are-a-good-fit-for-postmark) — HIGH, first-party (message-stream/reputation-isolation reference, used only to confirm the anti-feature framing)
-
-Operational surface / release safety:
-- [DLQ Operations: Metrics, Alerting, and Triage SLOs — SystemOverflow](https://www.systemoverflow.com/learn/message-queues/dead-letter-queues/dlq-operations-metrics-alerting-and-triage-slos) — MEDIUM
-- [Database Migrations. The Expand-Contract Pattern — Enol Casielles](https://www.enolcasielles.com/en/blog/database-migrations-strategy) — MEDIUM, cross-checked against 5+ independent expand/contract sources with consistent phase definitions
-- [What is a webhook signature? — Svix](https://www.svix.com/resources/glossary/webhook-signature/) — MEDIUM, cross-checked against Stripe's own webhook docs (both converge on 300s/5min tolerance)
-- [Receive Stripe events in your webhook endpoint — Stripe Docs](https://docs.stripe.com/webhooks) — HIGH, first-party (5-minute replay-tolerance standard, confirms the audit's own 4.5 recommendation is industry-aligned)
+- [How to handle GDPR and CCPA requests | Klaviyo Help Center](https://help.klaviyo.com/hc/en-us/articles/360004217631) — MEDIUM confidence
+- [How to export all people in your account | Klaviyo Help Center](https://help.klaviyo.com/hc/en-us/articles/115005246168) — MEDIUM confidence
+- [Export a Contact | Mailchimp](https://mailchimp.com/help/export-contacts/) — MEDIUM confidence
+- [About Data Subject Access Reports | Mailchimp](https://mailchimp.com/legal/dsar-requests/) — MEDIUM confidence
+- [Braze Data Retention Information](https://www.braze.com/docs/api/data_retention) — MEDIUM confidence
+- [Braze Privacy Portal](https://www.braze.com/docs/user_guide/privacy_portal) — MEDIUM confidence
+- [Is Braze GDPR compliant? (PDF FAQ)](https://marketing-assets.braze.com/production/legacy/documents/braze_gdpr_faq_004.pdf) — MEDIUM confidence
+- [The Complete Guide to Data Subject Access Requests (DSAR)](https://complydog.com/blog/data-subject-access-requests-dsar) — MEDIUM confidence
+- [GDPR Data Export Request Handler for SaaS Products | Yaro Labs](https://yaro-labs.com/blog/gdpr-data-export-handler) — MEDIUM confidence
+- [Data Subject Requests for GDPR and CCPA | Microsoft Learn](https://learn.microsoft.com/en-us/compliance/regulatory/gdpr-data-subject-requests) — MEDIUM confidence
+- [Soft delete vs hard delete: choose the right data lifecycle | AppMaster](https://appmaster.io/blog/soft-delete-vs-hard-delete) — MEDIUM confidence
+- [Data Retention Policy for SaaS Startups (2026)](https://www.buildmvpfast.com/blog/data-retention-policy-saas-startup-guide-2026) — MEDIUM confidence
+- [Data Isolation For Multi-Tenant SaaS: GDPR-Compliant Hosting Architectures | DCHost](https://www.dchost.com/blog/en/data-isolation-for-multi-tenant-saas-gdpr-compliant-hosting-architectures/) — MEDIUM confidence
+- [SaaS Data Ownership & Exits | Turley Law](https://turleylaw.com/blog/saas-data-ownership-exit-strategy) — MEDIUM confidence
+- [Token Signing Key Rotation | Curity Identity Server](https://curity.io/resources/learn/token-signing-key-rotation/) — MEDIUM confidence
+- [Zero Downtime Secret Rotation for Webhooks | Svix Blog](https://www.svix.com/blog/zero-downtime-secret-rotation-webhooks/) — MEDIUM confidence
+- [Rotate JWT Secrets Without Downtime | JWTSecrets](https://www.jwtsecretgenerator.com/blog/how-to-rotate-jwt-secrets) — MEDIUM confidence
+- [JWT security: kid, JWKS and key rotation | Breachroad](https://breachroad.com/en/blog/jwt-security-kid-jwks/) — MEDIUM confidence
+- [Secrets Management and Key Rotation: 2026 Reference](https://www.digitalapplied.com/blog/secrets-management-api-key-rotation-2026-engineering-reference) — MEDIUM confidence
+- [GitHub - IBM/audit-ci](https://github.com/IBM/audit-ci) — MEDIUM confidence (first-party tool docs via GitHub)
+- [npm audit: Which Vulnerabilities to Fix vs. Ignore](https://www.decryptiondigest.com/blog/npm-audit-which-vulnerabilities-to-fix-vs-ignore) — MEDIUM confidence
+- [Dependabot vs Snyk vs Trivy vs npm audit comparison guide](https://tomodahinata.com/en/blog/dependabot-vs-snyk-trivy-npm-audit-sca-tools-comparison-guide) — MEDIUM confidence
+- [Vulnerability Remediation: From Scan to Merge in AI Pipelines | Augment Code](https://www.augmentcode.com/guides/vulnerability-remediation-scan-to-merge) — MEDIUM confidence
+- [Triage your Code Security Findings | Mend.io](https://docs.mend.io/platform/latest/triage-your-code-security-findings) — MEDIUM confidence
+- Codebase (this repo, 2026-08-20 state): `packages/db/src/schema/auth.ts` (`organization.deletedAt`), `packages/delivery-core/src/unsubscribe-token.ts`, `apps/worker/src/queues/send-dispatch.ts`, `apps/worker/src/queues/flows/flow-send.ts` (all HIGH confidence — direct code read, primary source)
 
 ---
-*Feature research for: production hardening / operational reliability, Mega CRM v1.1*
-*Researched: 2026-07-27*
+*Feature research for: B2C email marketing automation platform (Klaviyo-model), v1.2 Data Lifecycle & Delivery Trust milestone*
+*Researched: 2026-08-20*
