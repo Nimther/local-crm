@@ -169,6 +169,69 @@ export function logSendgridBaseUrlOverrideIfActive(log: Pick<typeof logger, "war
   );
 }
 
+// 19-02 (ROT-01, D-07, SC4): the previous-secrets list's hard structural
+// bound -- a soft cap, not a date-based purge. Declared independently here;
+// apps/api/src/env.ts and scripts/check-env.mjs each declare their own copy
+// per this codebase's triplication convention (SPECIFICATION.md §3.1), and
+// 19-02 Task 3's parity assertion proves the three agree.
+const MAX_UNSUBSCRIBE_PREVIOUS_SECRETS = 5;
+
+/**
+ * 19-02 (ROT-01, D-02, D-03, D-07): the worker's boot-time gate for both
+ * `UNSUBSCRIBE_TOKEN_SECRET` and `UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS`.
+ * Validates independently of the API's zod schema (apps/api/src/env.ts) --
+ * there is no shared runtime config service (SPECIFICATION.md §3.1), so each
+ * process validates its own env autonomously. Exported for the same
+ * testability reasoning as `logSendgridBaseUrlOverrideIfActive` above: this
+ * can be exercised directly without constructing every production BullMQ
+ * worker. No thrown message ever contains a secret value or a fragment of
+ * one (T-19-08) -- a boot error is written to stderr and may reach a log
+ * shipper.
+ */
+export function assertUnsubscribeTokenSecrets(): void {
+  const unsubscribeTokenSecret = process.env.UNSUBSCRIBE_TOKEN_SECRET;
+  if (!unsubscribeTokenSecret || unsubscribeTokenSecret.length < 32) {
+    throw new Error(
+      "UNSUBSCRIBE_TOKEN_SECRET (>=32 chars) is required for apps/worker to start -- it signs every List-Unsubscribe token"
+    );
+  }
+  if (/[,\s]/.test(unsubscribeTokenSecret)) {
+    throw new Error(
+      "UNSUBSCRIBE_TOKEN_SECRET must not contain a comma or whitespace (D-03)"
+    );
+  }
+
+  const previous = process.env.UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS;
+  if (previous) {
+    if (/\s/.test(previous)) {
+      throw new Error(
+        "UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS entries must not contain whitespace (D-03)"
+      );
+    }
+    const entries = previous.split(",");
+    if (entries.length > MAX_UNSUBSCRIBE_PREVIOUS_SECRETS) {
+      throw new Error(
+        `UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS supports at most ${MAX_UNSUBSCRIBE_PREVIOUS_SECRETS} retired secrets`
+      );
+    }
+    const seen = new Set<string>();
+    for (const entry of entries) {
+      if (entry.length === 0) {
+        throw new Error("UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS must not contain empty entries");
+      }
+      if (entry.length < 32) {
+        throw new Error("each UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS entry must be at least 32 characters");
+      }
+      if (entry === unsubscribeTokenSecret || seen.has(entry)) {
+        throw new Error(
+          "UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS must not duplicate the primary secret or another entry"
+        );
+      }
+      seen.add(entry);
+    }
+  }
+}
+
 /**
  * Assembles the worker runtime: one shared Redis connection plus the
  * events:ingest (EVNT-02/EVNT-03) and imports:csv (CONT-02) BullMQ Workers.
@@ -214,13 +277,10 @@ export async function buildWorker(): Promise<WorkerRuntime> {
   // those throw lazily per-job if unset. Fail fast here, before any Worker
   // is constructed, so a missing/weak secret dies the process at boot
   // instead of exhausting BullMQ retries into the failed set (the observed
-  // UAT Test 4/5 failure mode).
-  const unsubscribeTokenSecret = process.env.UNSUBSCRIBE_TOKEN_SECRET;
-  if (!unsubscribeTokenSecret || unsubscribeTokenSecret.length < 32) {
-    throw new Error(
-      "UNSUBSCRIBE_TOKEN_SECRET (>=32 chars) is required for apps/worker to start -- it signs every List-Unsubscribe token"
-    );
-  }
+  // UAT Test 4/5 failure mode). 19-02 (ROT-01) extends this to also validate
+  // UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS -- see assertUnsubscribeTokenSecrets's
+  // own doc comment above.
+  assertUnsubscribeTokenSecrets();
   const publicAppUrl = process.env.PUBLIC_APP_URL;
   if (!publicAppUrl) {
     throw new Error(
