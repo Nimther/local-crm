@@ -398,7 +398,7 @@ npm ls brace-expansion --all --omit=dev
 
 **If this table is empty:** N/A — two low-risk scheduling/pinning details remain open by design (explicitly deferred to implementation time), not because they weren't researchable.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Does `better-auth`'s optional `drizzle-kit` peerDependency ever get invoked at runtime under ANY code path this app actually uses (e.g., a lazy `require` inside a CLI-only export that isn't imported by the running server)?**
    - What we know: `grep -rl "drizzle-kit" node_modules/better-auth/dist` returns zero matches — no static import anywhere in better-auth's shipped build output.
