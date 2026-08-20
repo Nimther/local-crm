@@ -76,7 +76,7 @@ Full phase details: [milestones/v1.1-ROADMAP.md](milestones/v1.1-ROADMAP.md)
   3. A scheduled full scan surfaces an advisory newly published against an already-installed dependency, with no code change on the branch, through the same reporting path.
   4. An accept-list entry without justification, owner or expiry — or one whose expiry has passed — is rejected by the gate, so an acceptance cannot silently become permanent.
 
-**Plans**: 1/4 plans executed
+**Plans**: 2/4 plans executed
 
 Plans:
 **Wave 1**
@@ -85,7 +85,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 18-02-PLAN.md — Accept-list schema validation: mandatory fields, email owner, minimum justification, inclusive expiry capped at 90 days (SC4)
+- [x] 18-02-PLAN.md — Accept-list schema validation: mandatory fields, email owner, minimum justification, inclusive expiry capped at 90 days (SC4)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -187,7 +187,7 @@ Plans:
 | 15. Observability, Alerting & Frontend Resilience | v1.1 | 22/22 | Complete | 2026-08-17 |
 | 16. Live SendGrid Verification | v1.1 | 7/7 | Complete | 2026-08-19 |
 | 17. Address tech debt: WR-06 + security follow-ups | v1.1 | 6/6 | Complete | 2026-08-20 |
-| 18. Dependency Hygiene & Advisory Gate | v1.2 | 1/4 | In Progress|  |
+| 18. Dependency Hygiene & Advisory Gate | v1.2 | 2/4 | In Progress|  |
 | 19. Unsubscribe Secret Graceful Rotation | v1.2 | 0/TBD | Not started | - |
 | 20. Campaign Template Correctness | v1.2 | 0/TBD | Not started | - |
 | 21. Per-Contact DSR Export | v1.2 | 0/TBD | Not started | - |
