@@ -40,6 +40,16 @@ const SINGLE_HOP_GROWTH_SQL = `SELECT (created_at AT TIME ZONE 'UTC')::date::tex
    GROUP BY (created_at AT TIME ZONE 'UTC')::date
    ORDER BY day`;
 
+// 17-REVIEW.md WR-02: the ORIGINAL expression `GROWTH_BY_DAY_SQL`'s
+// double-hop form REPLACED -- exists ONLY in this test file, to prove Test 5
+// below (the "no functional change" claim in dashboard.repository.ts's own
+// header comment is itself verified, not merely asserted).
+const PLAIN_CAST_GROWTH_SQL = `SELECT created_at::date::text as day, count(*)::text as "newContacts"
+   FROM contacts
+   WHERE workspace_id = $1 AND created_at >= $2::date AND anonymized_at IS NULL
+   GROUP BY created_at::date
+   ORDER BY day`;
+
 describe("dashboard growth query is UTC-day-correct under a non-UTC reading session (WR-06, D-01/D-02)", () => {
   let app: Awaited<ReturnType<typeof buildServer>>;
 
@@ -244,5 +254,43 @@ describe("dashboard growth query is UTC-day-correct under a non-UTC reading sess
     expect(utcCount).toBe(1);
     expect(nyCount).toBe(1);
     expect(nyCount).toBe(utcCount);
+  });
+
+  it("Test 5 (WR-02 follow-up, 17-REVIEW.md): the double-hop form is byte-identical to the ORIGINAL plain-cast form it replaced, under a non-UTC session", async () => {
+    // Proves the "no functional change" claim in dashboard.repository.ts's
+    // own header comment is verified, not merely asserted: the double-hop
+    // GROWTH_BY_DAY_SQL and the plain `created_at::date` cast it replaced
+    // must agree under the SAME non-UTC session where Test 2 shows the
+    // single-hop form disagrees -- this is the one comparison 17-REVIEW.md
+    // found missing (Test 3 only compares double-hop against single-hop,
+    // and only under a UTC session).
+    const { workspace } = await owner("tz-test5");
+    const startDay = utcDayString(30);
+    const correctDay = utcDayString(1);
+    const naiveLiteral = `${correctDay} 01:30:00`;
+
+    await insertContactAtLiteral(workspace.id, `tz5-${Date.now()}@example.com`, naiveLiteral);
+
+    const [doubleHopRows, plainCastRows] = await withSessionTimeZone(
+      workspace.id,
+      "America/New_York",
+      async (client) => {
+        const doubleHop = await client.query<{ day: string; newContacts: string }>(GROWTH_BY_DAY_SQL, [
+          workspace.id,
+          startDay,
+        ]);
+        const plainCast = await client.query<{ day: string; newContacts: string }>(PLAIN_CAST_GROWTH_SQL, [
+          workspace.id,
+          startDay,
+        ]);
+        return [doubleHop.rows, plainCast.rows];
+      }
+    );
+
+    const doubleHopRow = doubleHopRows.find((r) => Number(r.newContacts) > 0);
+    const plainCastRow = plainCastRows.find((r) => Number(r.newContacts) > 0);
+    expect(doubleHopRow?.day).toBe(correctDay);
+    expect(plainCastRow?.day).toBe(correctDay);
+    expect(doubleHopRow?.day).toBe(plainCastRow?.day);
   });
 });
