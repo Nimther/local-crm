@@ -80,10 +80,25 @@ can verify and another cannot.**
 
 ## Step 2 — promote
 
-Move the **current** primary (`UNSUBSCRIBE_TOKEN_SECRET`'s existing value)
-into `UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS` (prepend or append — list order
-does not affect correctness, only which candidate the loop tries first).
-Set the new secret (from Step 1) as the new `UNSUBSCRIBE_TOKEN_SECRET`.
+Edit `UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS` and `UNSUBSCRIBE_TOKEN_SECRET`
+**together, in the same file edit** — do not restart between these three
+changes:
+
+1. **Remove the new secret** (the one appended in Step 1) from
+   `UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS`.
+2. Move the **current** primary (`UNSUBSCRIBE_TOKEN_SECRET`'s existing
+   value) into `UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS`, in the slot the new
+   secret just vacated (prepend or append — list order does not affect
+   correctness, only which candidate the loop tries first).
+3. Set the new secret (from Step 1) as the new `UNSUBSCRIBE_TOKEN_SECRET`.
+
+**A secret must never appear as both the primary and a previous-list entry
+at the same time.** All three boot validators (see Prerequisites, above)
+reject that configuration by design — skipping step 1 above, or doing it
+out of order relative to steps 2–3, leaves the new primary duplicated in
+`UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS` and crash-loops both `api` and `worker`
+on the restart below.
+
 Restart every service again, same two commands as Step 1.
 
 **Do this only after Step 1 has been applied and restarted on every
