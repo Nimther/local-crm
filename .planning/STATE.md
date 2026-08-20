@@ -3,10 +3,10 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Data Lifecycle & Delivery Trust
 status: planning
-last_updated: "2026-08-20T04:49:11.657Z"
+last_updated: "2026-08-20T11:05:00.000Z"
 last_activity: 2026-08-20
 progress:
-  total_phases: 0
+  total_phases: 5
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -20,14 +20,28 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-20 after v1.1 close)
 
 **Core value:** Маркетолог настраивает триггерную цепочку или кампанию — и письма надёжно и вовремя доходят до нужных контактов, со сквозным отслеживанием статусов (delivered/opened/clicked/bounced).
-**Current focus:** Planning next milestone (`/gsd-new-milestone`)
+**Current focus:** Phase 18 — Dependency Hygiene & Advisory Gate (v1.2 roadmap created, phase not yet planned)
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-08-20 — Milestone v1.2 started
+Phase: 18 of 22 (Dependency Hygiene & Advisory Gate) — first phase of milestone v1.2
+Plan: — (no plans yet)
+Status: Ready to plan
+Last activity: 2026-08-20 — v1.2 roadmap created (Phases 18-22), 18/18 requirements mapped
+
+Progress: [░░░░░░░░░░] 0% (0/5 v1.2 phases complete)
+
+### Milestone v1.2 phase map
+
+| Phase | Name | Requirements | Status |
+|-------|------|--------------|--------|
+| 18 | Dependency Hygiene & Advisory Gate | DEP-01..03 | Not started |
+| 19 | Unsubscribe Secret Graceful Rotation | ROT-01..02 | Not started |
+| 20 | Campaign Template Correctness | TMPL-01..03 | Not started |
+| 21 | Per-Contact DSR Export | DSR-01..04 | Not started |
+| 22 | Workspace Quiesce & Physical Purge | PRG-01..06 | Not started |
+
+Execution order: 18 → 19 → 20 → 21 → 22 (dependency gate first protects every later phase's dependency changes; purge last — largest surface, irreversible, two plan-time architectural decisions).
 
 ## Performance Metrics
 
@@ -40,6 +54,18 @@ Last activity: 2026-08-20 — Milestone v1.2 started
 ### Decisions
 
 Full decision log lives in PROJECT.md (Key Decisions) and the archived phase summaries/CONTEXT files in `.planning/milestones/v1.0-phases/` and `.planning/milestones/v1.1-phases/`.
+
+### Open decisions to resolve at plan time (v1.2)
+
+| Phase | Decision | Why it cannot be settled now |
+|-------|----------|------------------------------|
+| 18 | `drizzle-kit` reclassified to devDependencies vs accept-listed | Depends on actual runtime-import evidence gathered while wiring the gate |
+| 19 | Retention window for previous unsubscribe secrets | Compliance/operational decision tied to the real 5-year token TTL — must be a recorded Key Decision, not a code default |
+| 21 | JSONB inclusion/redaction rule for `events.properties` / `send_events.payload` (DSR-03) | Requires analysis of what other-subject data tenant-defined JSON can hold; must be shared with Phase 22's PII inventory so export and purge never diverge |
+| 22 | Privilege model for cross-tenant deletion: grant migration on `organization` vs dedicated elevated DSN | Architectural tradeoff (privilege surface vs code volume); project has precedent for both |
+| 22 | Exact quiesce mechanism closing the `campaigns_scan`/`flows_scan` gap (neither checks `organization.deletedAt` today) | Scope call: part of PRG-06 or separate fix — research demands it be explicit to avoid a half-measure |
+
+Research flag: **Phase 22 needs deeper research at plan time** (multi-table FK ordering, privilege model, PITR-backup caveat for compliance claims). Phases 18/19/21 reuse proven patterns (CI gates, HMAC verification, Fastify file download); Phase 20 is a localized product fix.
 
 ### Open Items Carried Forward (not blockers)
 
@@ -86,12 +112,12 @@ Items acknowledged and deferred at milestone close on 2026-08-20 (open-artifact 
 
 ## Session Continuity
 
-Last session: 2026-08-20 — milestone v1.1 closeout
-Stopped at: v1.1 archived, tagged, REQUIREMENTS.md removed for next milestone
+Last session: 2026-08-20 — v1.2 roadmap creation
+Stopped at: ROADMAP.md written (Phases 18-22), REQUIREMENTS.md traceability filled, 18/18 mapped
 Resume file: —
 
 ## Operator Next Steps
 
-- **Start the next milestone:** `/clear` then `/gsd-new-milestone` (questioning → research → requirements → roadmap). REQUIREMENTS.md was removed at close — the new milestone creates a fresh one.
-- Candidate scope already on record: SCALE-02 (PgBouncer), segmentation benchmark at target volume, remaining live walkthroughs (operator-alert email, Phase 13 compliance), Phase 15 UI follow-ups + threshold tuning, KEK quick-task Task 3.
-- Branch note: milestone closed on `gsd/phase-17-address-tech-debt-wr-06-medium-security-follow-ups` (the planning-history lineage); code was merged to master via PR #17. Tag `v1.1` points at the close commit on this branch, matching the v1.0 precedent.
+- **Plan the first phase:** `/clear` then `/gsd-plan-phase 18` (Dependency Hygiene & Advisory Gate).
+- Deferred candidates explicitly NOT in v1.2 (still tech debt): SCALE-02 (PgBouncer), segmentation benchmark at target volume, remaining live walkthroughs (operator-alert email, Phase 13 compliance), Phase 15 UI follow-ups + threshold tuning, KEK quick-task 260818-aqd Task 3.
+- Branch note: v1.1 closed on `gsd/phase-17-address-tech-debt-wr-06-medium-security-follow-ups` (planning-history lineage); code was merged to master via PR #17, tag `v1.1` points at the close commit on that branch. v1.2 phase branches follow `gsd/phase-{phase}-{slug}` — cut from an up-to-date `origin/master` (the local `master` ref is permanently stale in this repo).

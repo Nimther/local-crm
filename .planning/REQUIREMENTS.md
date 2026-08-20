@@ -75,30 +75,31 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| TMPL-01 | — | Pending |
-| TMPL-02 | — | Pending |
-| TMPL-03 | — | Pending |
-| DSR-01 | — | Pending |
-| DSR-02 | — | Pending |
-| DSR-03 | — | Pending |
-| DSR-04 | — | Pending |
-| PRG-01 | — | Pending |
-| PRG-02 | — | Pending |
-| PRG-03 | — | Pending |
-| PRG-04 | — | Pending |
-| PRG-05 | — | Pending |
-| PRG-06 | — | Pending |
-| ROT-01 | — | Pending |
-| ROT-02 | — | Pending |
-| DEP-01 | — | Pending |
-| DEP-02 | — | Pending |
-| DEP-03 | — | Pending |
+| TMPL-01 | Phase 20 | Pending |
+| TMPL-02 | Phase 20 | Pending |
+| TMPL-03 | Phase 20 | Pending |
+| DSR-01 | Phase 21 | Pending |
+| DSR-02 | Phase 21 | Pending |
+| DSR-03 | Phase 21 | Pending |
+| DSR-04 | Phase 21 | Pending |
+| PRG-01 | Phase 22 | Pending |
+| PRG-02 | Phase 22 | Pending |
+| PRG-03 | Phase 22 | Pending |
+| PRG-04 | Phase 22 | Pending |
+| PRG-05 | Phase 22 | Pending |
+| PRG-06 | Phase 22 | Pending |
+| ROT-01 | Phase 19 | Pending |
+| ROT-02 | Phase 19 | Pending |
+| DEP-01 | Phase 18 | Pending |
+| DEP-02 | Phase 18 | Pending |
+| DEP-03 | Phase 18 | Pending |
 
 **Coverage:**
 - v1.2 requirements: 18 total
-- Mapped to phases: 0 (roadmap pending)
-- Unmapped: 18 ⚠️
+- Mapped to phases: 18 ✓ (Phase 18: 3, Phase 19: 2, Phase 20: 3, Phase 21: 4, Phase 22: 6)
+- Unmapped: 0 ✓
+- No requirement is mapped to more than one phase.
 
 ---
 *Requirements defined: 2026-08-20*
-*Last updated: 2026-08-20 after initial definition*
+*Last updated: 2026-08-20 after roadmap creation (Phases 18-22)*
