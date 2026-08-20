@@ -205,6 +205,144 @@ describe("envSchema BETTER_AUTH_SECRET production floor", () => {
 });
 
 /**
+ * UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS (19-02, ROT-01, D-01/D-02/D-03/D-07):
+ * the API zod schema's boot gate for the previous-secrets rotation list, and
+ * the tightened charset contract on the primary secret itself. See
+ * 19-RESEARCH.md Pattern 2 for the worked superRefine body this mirrors.
+ */
+describe("envSchema UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS rotation validation", () => {
+  it("absent UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS passes -- the normal pre-rotation state (D-01)", () => {
+    const result = envSchema.safeParse(baseValidEnv());
+    expect(result.success).toBe(true);
+  });
+
+  it("a single valid entry passes", () => {
+    const result = envSchema.safeParse({
+      ...baseValidEnv(),
+      UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS: "a".repeat(32),
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("two valid entries separated by a comma pass", () => {
+    const result = envSchema.safeParse({
+      ...baseValidEnv(),
+      UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS: `${"a".repeat(32)},${"b".repeat(32)}`,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("six entries fail, with an issue on path UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS", () => {
+    const entries = Array.from({ length: 6 }, (_, i) => `${String.fromCharCode(97 + i)}`.repeat(32));
+    const result = envSchema.safeParse({
+      ...baseValidEnv(),
+      UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS: entries.join(","),
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(
+        result.error.issues.some((issue) => issue.path.includes("UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS"))
+      ).toBe(true);
+    }
+  });
+
+  it("five entries pass -- the boundary is asserted from both sides", () => {
+    const entries = Array.from({ length: 5 }, (_, i) => `${String.fromCharCode(97 + i)}`.repeat(32));
+    const result = envSchema.safeParse({
+      ...baseValidEnv(),
+      UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS: entries.join(","),
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("a 31-character entry fails, with an issue on the same path", () => {
+    const result = envSchema.safeParse({
+      ...baseValidEnv(),
+      UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS: "a".repeat(31),
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(
+        result.error.issues.some((issue) => issue.path.includes("UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS"))
+      ).toBe(true);
+    }
+  });
+
+  it("a trailing comma producing an empty entry fails", () => {
+    const result = envSchema.safeParse({
+      ...baseValidEnv(),
+      UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS: `${"a".repeat(32)},`,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("two adjacent commas producing an empty entry fail", () => {
+    const result = envSchema.safeParse({
+      ...baseValidEnv(),
+      UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS: `${"a".repeat(32)},,${"b".repeat(32)}`,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("an entry equal to the primary secret fails", () => {
+    const base = baseValidEnv();
+    const result = envSchema.safeParse({
+      ...base,
+      UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS: base.UNSUBSCRIBE_TOKEN_SECRET,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("two identical entries fail", () => {
+    const result = envSchema.safeParse({
+      ...baseValidEnv(),
+      UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS: `${"a".repeat(32)},${"a".repeat(32)}`,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("a value containing a space inside an entry fails", () => {
+    const result = envSchema.safeParse({
+      ...baseValidEnv(),
+      UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS: `${"a".repeat(15)} ${"a".repeat(16)}`,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("a value containing a tab inside an entry fails", () => {
+    const result = envSchema.safeParse({
+      ...baseValidEnv(),
+      UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS: `${"a".repeat(15)}\t${"a".repeat(16)}`,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("primary charset (D-03): a 40-character primary containing a space fails, issue on path UNSUBSCRIBE_TOKEN_SECRET", () => {
+    const result = envSchema.safeParse({
+      ...baseValidEnv(),
+      UNSUBSCRIBE_TOKEN_SECRET: `${"a".repeat(20)} ${"a".repeat(19)}`,
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((issue) => issue.path.includes("UNSUBSCRIBE_TOKEN_SECRET"))).toBe(true);
+    }
+  });
+
+  it("primary charset (D-03): a 40-character primary containing a comma fails", () => {
+    const result = envSchema.safeParse({
+      ...baseValidEnv(),
+      UNSUBSCRIBE_TOKEN_SECRET: `${"a".repeat(20)},${"a".repeat(19)}`,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("the existing baseValidEnv() primary (no comma, no whitespace) still passes -- the tightening is a no-op for correctly-generated secrets", () => {
+    const result = envSchema.safeParse(baseValidEnv());
+    expect(result.success).toBe(true);
+  });
+});
+
+/**
  * Phase 10 (SEC-01/SEC-02, P3, D-01): "the API process holds neither
  * scan-role credentials nor membership" is a STRUCTURAL claim -- it must be
  * true of the source, not just of the runtime-parsed env object (a
