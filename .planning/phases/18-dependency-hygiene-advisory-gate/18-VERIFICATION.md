@@ -1,27 +1,33 @@
 ---
 phase: 18-dependency-hygiene-advisory-gate
 verified: 2026-08-20T11:43:53Z
-status: human_needed
+status: passed
 score: 33/37 must-haves verified
 behavior_unverified: 4 # 18-04's issue-surfacing runtime behaviors: opened-on-first-failure, commented-not-duplicated-on-second-failure, label-attached-at-creation (end-to-end), cron-catches-a-lapsed-entry-within-24h
 overrides_applied: 0
 re_verification: null
 human_verification:
+
   - test: "Prerequisite: create the `dependency-advisory` label in Settings -> Labels (confirmed absent via `gh label list` at verification time — the plan's own note says this is deliberately not something the unattended cron job does)."
     expected: "Label exists before the dispatch exercise below, or the first real failure creates an issue with no label, breaking the next run's dedup search."
     why_human: "GitHub repository configuration; not code."
+
   - test: "18-04's deferred live dispatch (plan's own TIMING note): after this phase's PR merges advisory-scan.yml to master — (1) cut a scratch branch from master, add one .advisory-accept-list.json entry with an already-past expiry (other 4 fields valid) to force the gate red for the expiry reason; (2) in GitHub Actions, open 'Advisory scan', Run workflow against the scratch branch; (3) confirm a new issue opens, carries the dependency-advisory label as a chip (not just body text), and its body names the offending entry and links the failing run; (4) run the workflow a second time against the same branch — confirm NO second issue opens and the existing issue gets a new comment instead; (5) close the issue and delete the scratch branch. Report the issue number and both run URLs."
     expected: "Exactly one labelled issue opens on first failure; the second failure comments on the same issue rather than duplicating; the label is present as a chip at creation, not added after the fact."
     why_human: "GitHub Actions workflow_dispatch can only target a workflow file present on the default branch — dispatching before the phase PR merges returns a 404, confirmed impossible to exercise from this worktree (no PR exists for this branch: `gh pr status` shows none). This is the only path that exercises actions/github-script's real GitHub API calls; the drift test proves the workflow's static text (triggers, permissions, SHA pins, byte-identical gate invocation) but cannot execute issues.create/issues.createComment against the live API."
+
   - test: "SC3's literal scenario: a cron run on master, with no code change on the branch, surfaces an advisory newly published against an already-installed dependency, through the same gate script and the same issue path."
     expected: "The daily 03:17 UTC tick (or a manual dispatch on a day when the npm registry publishes a new advisory against one of this repo's already-installed packages) goes red and opens/updates the labelled issue with no PR involved."
     why_human: "This truth is authored as `verification: backstop` in 18-04-PLAN.md's own must_haves because it requires the npm advisory database to actually publish a new advisory during observation — it cannot be manufactured on demand or proven by static analysis. Every mechanical link in the chain (daily cron trigger, identical gate script, issue-surfacing path) is independently verified below; only the live registry-publishes-something-new event is unprovable without waiting and watching."
+
   - test: "CR-01 fix ratification (18-REVIEW-FIX.md's own request): confirm by inspection that the UTC-day-inclusive expiry semantics `selectBlockingFindings` now shares with `validateAcceptListEntry` genuinely match the intended D-05 contract (an accept-list entry is valid through the end of its expiry date, inclusive, regardless of what time of day UTC midnight has passed)."
     expected: "Reading scripts/check-dependency-advisories.mjs's shared parseExpiryUtcDayMs/toUtcDayMs helpers (used by both validateAcceptListEntry and selectBlockingFindings) confirms one shared UTC-day comparison, no drift between the two call sites."
     why_human: "The phase's own code-fixer flagged this as `fixed: requires human verification` (a logic-correctness fix to a date-comparison boundary, not a syntax change) despite the regression suite passing — this verifier independently reproduced the review's exact repro script against noon-UTC-on-the-expiry-day (see Behavioral Spot-Checks) and confirmed the entry is now suppressed correctly, which is strong supporting evidence, but the fixer's own charter asks for a human read of the shared-helper contract, not just a passing test."
+
   - test: "Ratify two flagged interpretive assumptions carried through all four plans: (a) DEP-01/DEP-02's edge classification against REQUIREMENTS.md is unresolved because the deterministic classifier is English-keyed and REQUIREMENTS.md is Russian (a known, expected project condition, not a defect); (b) DEP-02's literal Russian wording 'PR-diff + scheduled full-scan' is satisfied by D-02's no-diff-by-construction design (the gate fails on ANY blocking finding not accept-listed, with 'new/untriaged' implied by the clean DEP-01 baseline) rather than literal git-diff-against-master machinery."
     expected: "A human with the original Russian requirement text confirms the no-diff-by-construction interpretation satisfies the intent of 'PR-diff', or flags it for a plan revision."
     why_human: "Both are explicitly surfaced, not resolved, in every plan's own <flagged_assumptions> block — by design, per this project's known edge-probe classifier limitation (see project memory: 'Edge-probe English-keyed classifier')."
+
   - test: "Ratify the four judgment-tier prohibitions as resolved, with the evidence gathered below (not a rubber stamp — each has independent mechanical evidence, listed under Anti-Patterns/Prohibitions)."
     expected: "18-01: no continue-on-error/`|| true` in the static job (confirmed: 0 matches). 18-02: accept-list is never used to bridge a reachable finding (confirmed: .advisory-accept-list.json ships {\"entries\": []} and raw npm audit is 0 high/0 critical — nothing needed bridging). 18-03: gate reached green via real upgrades, not a weakened threshold/scope/accept-list (confirmed: raw npm audit metadata shows 0 high/0 critical directly, independent of the gate's own config). 18-04: scheduled scan is not a second gate implementation (confirmed: drift test asserts the two workflows' gate invocation strings are byte-identical, and this verifier read both files and confirmed the `npm run check:dependency-advisories` line is identical)."
     why_human: "Prohibitions are judgment-tier (`verification: judgment` in every plan's frontmatter) — per the escalation-gate protocol, judgment-tier items route through the end-of-phase human checkpoint even when supporting evidence is strong, never a silent pass."

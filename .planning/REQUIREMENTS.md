@@ -36,9 +36,9 @@ Requirements for this milestone. Each maps to roadmap phases (continuing from Ph
 
 ### Dependency Hygiene
 
-- [ ] **DEP-01**: Все применимые HIGH advisories в достижимых production paths исправлены; остальные имеют документированный reachability-анализ и ограниченное по сроку исключение
-- [ ] **DEP-02**: CI блокирует появление новых неразобранных HIGH advisories (PR-diff + scheduled full-scan)
-- [ ] **DEP-03**: Доказанно недостижимые tooling-only findings принимаются через явный accept-list с justification и expiry (без формального zero-HIGH требования)
+- [x] **DEP-01**: Все применимые HIGH advisories в достижимых production paths исправлены; остальные имеют документированный reachability-анализ и ограниченное по сроку исключение
+- [x] **DEP-02**: CI блокирует появление новых неразобранных HIGH advisories (PR-diff + scheduled full-scan)
+- [x] **DEP-03**: Доказанно недостижимые tooling-only findings принимаются через явный accept-list с justification и expiry (без формального zero-HIGH требования)
 
 ## Future Requirements
 
@@ -90,11 +90,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PRG-06 | Phase 22 | Pending |
 | ROT-01 | Phase 19 | Pending |
 | ROT-02 | Phase 19 | Pending |
-| DEP-01 | Phase 18 | Pending |
-| DEP-02 | Phase 18 | Pending |
-| DEP-03 | Phase 18 | Pending |
+| DEP-01 | Phase 18 | Complete |
+| DEP-02 | Phase 18 | Complete |
+| DEP-03 | Phase 18 | Complete |
 
 **Coverage:**
+
 - v1.2 requirements: 18 total
 - Mapped to phases: 18 ✓ (Phase 18: 3, Phase 19: 2, Phase 20: 3, Phase 21: 4, Phase 22: 6)
 - Unmapped: 0 ✓

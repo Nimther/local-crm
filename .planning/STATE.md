@@ -2,44 +2,44 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Data Lifecycle & Delivery Trust
-current_phase: 18
-current_phase_name: dependency-hygiene-advisory-gate
-status: executing
-stopped_at: Phase 18 context gathered
-last_updated: "2026-08-20T09:38:18.771Z"
+current_phase: 19
+current_phase_name: Unsubscribe Secret Graceful Rotation
+status: planning
+stopped_at: Phase 18 complete, ready to plan Phase 19
+last_updated: "2026-08-20T14:37:43.866Z"
 last_activity: 2026-08-20
-last_activity_desc: Phase 18 execution started
+last_activity_desc: Phase 18 complete, transitioned to Phase 19
 progress:
   total_phases: 5
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 4
-  completed_plans: 0
-  percent: 0
+  completed_plans: 4
+  percent: 20
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-08-20 after v1.1 close)
+See: .planning/PROJECT.md (updated 2026-08-20 after Phase 18)
 
 **Core value:** Маркетолог настраивает триггерную цепочку или кампанию — и письма надёжно и вовремя доходят до нужных контактов, со сквозным отслеживанием статусов (delivered/opened/clicked/bounced).
-**Current focus:** Phase 18 — dependency-hygiene-advisory-gate
+**Current focus:** Phase 19 — Unsubscribe Secret Graceful Rotation
 
 ## Current Position
 
-Phase: 18 (dependency-hygiene-advisory-gate) — EXECUTING
-Plan: 1 of 4
-Status: Executing Phase 18
-Last activity: 2026-08-20 — Phase 18 execution started
+Phase: 19 — Unsubscribe Secret Graceful Rotation
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-08-20 — Phase 18 complete, transitioned to Phase 19
 
-Progress: [░░░░░░░░░░] 0% (0/5 v1.2 phases complete)
+Progress: [██░░░░░░░░] 20% (1/5 v1.2 phases complete)
 
 ### Milestone v1.2 phase map
 
 | Phase | Name | Requirements | Status |
 |-------|------|--------------|--------|
-| 18 | Dependency Hygiene & Advisory Gate | DEP-01..03 | Not started |
+| 18 | Dependency Hygiene & Advisory Gate | DEP-01..03 | ✅ Complete (2026-08-20) |
 | 19 | Unsubscribe Secret Graceful Rotation | ROT-01..02 | Not started |
 | 20 | Campaign Template Correctness | TMPL-01..03 | Not started |
 | 21 | Per-Contact DSR Export | DSR-01..04 | Not started |
@@ -63,13 +63,12 @@ Full decision log lives in PROJECT.md (Key Decisions) and the archived phase sum
 
 | Phase | Decision | Why it cannot be settled now |
 |-------|----------|------------------------------|
-| 18 | `drizzle-kit` reclassified to devDependencies vs accept-listed | Depends on actual runtime-import evidence gathered while wiring the gate |
 | 19 | Retention window for previous unsubscribe secrets | Compliance/operational decision tied to the real 5-year token TTL — must be a recorded Key Decision, not a code default |
 | 21 | JSONB inclusion/redaction rule for `events.properties` / `send_events.payload` (DSR-03) | Requires analysis of what other-subject data tenant-defined JSON can hold; must be shared with Phase 22's PII inventory so export and purge never diverge |
 | 22 | Privilege model for cross-tenant deletion: grant migration on `organization` vs dedicated elevated DSN | Architectural tradeoff (privilege surface vs code volume); project has precedent for both |
 | 22 | Exact quiesce mechanism closing the `campaigns_scan`/`flows_scan` gap (neither checks `organization.deletedAt` today) | Scope call: part of PRG-06 or separate fix — research demands it be explicit to avoid a half-measure |
 
-Research flag: **Phase 22 needs deeper research at plan time** (multi-table FK ordering, privilege model, PITR-backup caveat for compliance claims). Phases 18/19/21 reuse proven patterns (CI gates, HMAC verification, Fastify file download); Phase 20 is a localized product fix.
+Research flag: **Phase 22 needs deeper research at plan time** (multi-table FK ordering, privilege model, PITR-backup caveat for compliance claims). Phases 19/21 reuse proven patterns (HMAC verification, Fastify file download); Phase 20 is a localized product fix. (Phase 18 done: drizzle-kit question closed in writing — optional-peer hoisting artifact, runtime-unimported, moderate-only advisory; no reclassification or accept-list entry needed.)
 
 ### Open Items Carried Forward (not blockers)
 
@@ -116,12 +115,12 @@ Items acknowledged and deferred at milestone close on 2026-08-20 (open-artifact 
 
 ## Session Continuity
 
-Last session: 2026-08-20T05:52:17.488Z
-Stopped at: Phase 18 context gathered
-Resume file: .planning/phases/18-dependency-hygiene-advisory-gate/18-CONTEXT.md
+Last session: 2026-08-20T14:40:00Z
+Stopped at: Phase 18 complete (UAT 6/6, security threats_open 0), ready to plan Phase 19
+Resume file: None
 
 ## Operator Next Steps
 
-- **Plan the first phase:** `/clear` then `/gsd-plan-phase 18` (Dependency Hygiene & Advisory Gate).
+- **Plan the next phase:** `/clear` then `/gsd-plan-phase 19` (Unsubscribe Secret Graceful Rotation) — or `/gsd-discuss-phase 19` first to gather context.
 - Deferred candidates explicitly NOT in v1.2 (still tech debt): SCALE-02 (PgBouncer), segmentation benchmark at target volume, remaining live walkthroughs (operator-alert email, Phase 13 compliance), Phase 15 UI follow-ups + threshold tuning, KEK quick-task 260818-aqd Task 3.
 - Branch note: v1.1 closed on `gsd/phase-17-address-tech-debt-wr-06-medium-security-follow-ups` (planning-history lineage); code was merged to master via PR #17, tag `v1.1` points at the close commit on that branch. v1.2 phase branches follow `gsd/phase-{phase}-{slug}` — cut from an up-to-date `origin/master` (the local `master` ref is permanently stale in this repo).
