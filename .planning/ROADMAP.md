@@ -110,8 +110,24 @@ Plans:
   3. A forged or expired-secret token produces a byte-identical response to a valid one (the no-token-oracle invariant survives rotation), with a timing-safe comparison performed per candidate secret.
   4. The retention window for previous secrets is an explicit, documented decision tied to the real lifetime of already-sent links (5-year token TTL) — not an unstated default, and not an unbounded list.
 
-**Plans**: TBD
-**Plan-time decisions**: how long previous secrets are retained (compliance/operational decision, not a code detail — record as a Key Decision before implementation).
+**Plans**: 5 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 19-01-PLAN.md — Tracer: `verifyUnsubscribeToken` extended to an ordered, exhaustively-evaluated `[primary, ...previous]` candidate loop + package-local pino logger for the D-05 match line; both link eras proven end-to-end through the real RFC 8058 one-click POST route (SC1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 19-02-PLAN.md — Env-validation triple in one plan (zod / worker boot assertion / predev check-env): optional `UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS` with length, empty, duplicate and max-5 rules, D-03 charset tightening on the primary too, plus a three-site parity guard (SC4's code half)
+- [ ] 19-03-PLAN.md — Redaction rules for both signing-secret variable names in the single rule table, spelled as env-var names because the scrub matcher is exact-match (D-02)
+- [ ] 19-04-PLAN.md — ROT-02 closure: GET path + confirm-form POST for previous-secret links, four-way byte-identical POST responses, and executable gates on exhaustive loop evaluation and the D-05 log shape (SC2, SC3)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 19-05-PLAN.md — Retention decision filed (SPECIFICATION.md), deployment template + README entries under `check:spec-env-coverage`, and the two-step rotation runbook ending in a both-eras canary smoke (SC4, D-06 through D-09)
+
+**Plan-time decisions**: RESOLVED at planning — a previous secret is retained until **5 years after its last use as primary** (the TTL of the last token it ever signed), the only window that provably breaks zero links (D-06). Recording and enforcement are deliberately split (D-07): the 5-year rule and each secret's retirement date live in SPECIFICATION.md §3 and the rotation runbook's rotation log, while code enforces exactly one structural bound — a maximum of 5 retained previous secrets, rejected at boot at all three validation sites — satisfying SC4's "not an unbounded list" without dates-in-env machinery.
 **UI hint**: no
 
 ### Phase 20: Campaign Template Correctness
