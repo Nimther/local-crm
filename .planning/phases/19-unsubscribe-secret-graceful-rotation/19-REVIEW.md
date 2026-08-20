@@ -306,6 +306,124 @@ inside Step 3's narrative.
 
 ---
 
+## Fix Report
+
+**Fixed at:** 2026-08-21T00:32:00Z
+**Fix scope:** CR-01, WR-01, WR-02 (Info findings IN-01..IN-04 out of scope)
+
+### CR-01: Rotation runbook Step 2 crash-loop — fixed
+
+**File:** `docs/runbooks/unsubscribe-secret-rotation.md`
+**Commit:** `6facaf9`
+
+Step 2 now explicitly instructs the operator to (1) remove the new secret
+from `UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS` in the same edit that (2) moves the
+current primary into the previous list and (3) sets the new secret as
+primary — with an explicit warning that a secret may never appear as both
+primary and a previous-list entry simultaneously, and that skipping/misordering
+step 1 crash-loops both `api` and `worker`.
+
+**Verification evidence:** Walked both restart-producing states the runbook
+now yields, with a full valid base env (`scripts/check-env.mjs`'s
+`baseRequired` set + `KMS_LOCAL_KEK`) plus:
+- State after Step 1 (`UNSUBSCRIBE_TOKEN_SECRET=A`,
+  `UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS=B`) — `node scripts/check-env.mjs` →
+  "Env check passed."
+- State after the OLD (buggy) Step 2 literal instructions
+  (`UNSUBSCRIBE_TOKEN_SECRET=B`, `UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS=B,A`) —
+  reproduces the reported crash: "Env check failed: ... entry 1 duplicates
+  the primary secret or another entry."
+- State after the FIXED Step 2 (`UNSUBSCRIBE_TOKEN_SECRET=B`,
+  `UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS=A`) — "Env check passed."
+
+`apps/api/src/env.ts`'s `superRefine` and `apps/worker/src/server.ts`'s
+`assertUnsubscribeTokenSecrets()` implement the identical `entry === primary`
+rejection rule (confirmed by reading both, lines 197 and 225 respectively),
+so the same buggy-state/fixed-state result holds for all three validators,
+not just `check-env.mjs`.
+`npm run check:runbook-coverage` passes and does not cover this file (as the
+review itself notes — that gate is scoped to ops alert-name constants only).
+
+### WR-01: `verifyUnsubscribeToken` never-throws contract — fixed
+
+**File:** `packages/delivery-core/src/unsubscribe-token.ts`
+**Commit:** `c2a4f3b`
+**Status:** fixed: requires human verification (logic-contract fix — see
+verification-strategy note on logic bugs below)
+
+Candidate resolution (`getPrimarySecret()` + `getPreviousSecrets()`) is now
+wrapped in its own `try { ... } catch { return null; }`, restoring the
+function's documented "never throws" guarantee for an unset
+`UNSUBSCRIBE_TOKEN_SECRET`, independent of boot-time validation in callers.
+The exhaustive, no-early-break candidate loop is unchanged.
+
+**Verification evidence:** `npx tsc --noEmit` on `packages/delivery-core`
+clean; `npm run test -w packages/delivery-core -- unsubscribe` — 19/19
+passed, unmodified; full package suite `npm run test -w packages/delivery-core`
+— 176/176 passed. Direct runtime exercise of the restored no-throw path
+(env var unset → function returns rather than throwing) was attempted via a
+standalone script but blocked by this repo's ESM `.js`-extension resolution
+outside the configured test loader, not by the fix itself — the existing
+unit-test suite (which exercises the missing/invalid-secret paths this catch
+now covers) is the verification of record. Flagged for human confirmation
+per this agent's logic-bug policy since a `try/catch` scope change is a
+control-flow edit, not purely additive.
+
+### WR-02: D-05 log timing asymmetry — skipped (documented as accepted risk)
+
+**File:** `packages/delivery-core/src/unsubscribe-token.ts:133-158`
+**Reason:** Both fix options in the review's own **Fix:** section were
+evaluated and rejected because they alter tested behavior, which the fixer's
+governing constraint for this finding explicitly forbids:
+- **Deferred logging** (`setImmediate(() => logger.info(...))`): the D-05
+  test suite (`unsubscribe-token-rotation.test.ts`, lines 206-252) asserts
+  `logger.info` call count/args synchronously immediately after
+  `verifyUnsubscribeToken(token)` returns, with no `await`/timer-flush.
+  Deferring the call makes those assertions fail deterministically (the log
+  call has not fired by assertion time).
+- **Equalizing per-path work** (making every match/no-match path perform
+  identical logging work): incompatible in principle, not just in
+  implementation — the same tests assert a **0-vs-1 call-count difference**
+  between the primary/no-match paths and the previous-secret-match path as
+  the intended, tested D-05 behavior. Any fix that removes that call-count
+  difference removes the tested behavior itself.
+
+Per the constraint ("mark as skipped with a written rationale ... choose (b)
+if any fix would alter tested behavior"), this is skipped. A comment-only
+change (no behavior change) was added next to the D-05 log line documenting
+the asymmetry as an accepted, low-risk residual signal: it distinguishes
+"verified via previous secret" from "verified via primary, or did not
+verify" through response latency, but creates no valid-vs-invalid oracle
+(primary-valid and invalid tokens share the identical, faster path), matching
+the review's own conclusion.
+
+**Original issue:** The `matchedIndex > 0` conditional synchronous Pino
+write after the exhaustive candidate loop means a previous-secret match does
+measurably more (and slower) synchronous work than a primary match or
+no-match, reintroducing a timing signal on top of a loop that was built
+specifically to eliminate one.
+
+**Verification evidence:** `npm run test -w packages/delivery-core -- unsubscribe`
+— 19/19 passed, unmodified (no test file touched); `npm run test -w apps/api -- unsubscribe`
+— 25/25 passed, unmodified; `npx tsc --noEmit` clean.
+
+### Summary
+
+| Finding | Status | Commit |
+|---|---|---|
+| CR-01 | fixed | `6facaf9` |
+| WR-01 | fixed: requires human verification | `c2a4f3b` |
+| WR-02 | skipped: fix would alter tested behavior — documented as accepted risk | `da72a60` |
+
+**Test results:** `packages/delivery-core` full suite 176/176 passed;
+`apps/api` scoped `unsubscribe` suite 25/25 passed; `npx tsc --noEmit -p
+packages/delivery-core/tsconfig.json` clean; `npm run check:runbook-coverage`
+passed (does not cover this runbook, by design).
+
+---
+
 _Reviewed: 2026-08-21T00:00:00Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
+_Fixed: 2026-08-21T00:32:00Z_
+_Fixer: Claude (gsd-code-fixer)_
