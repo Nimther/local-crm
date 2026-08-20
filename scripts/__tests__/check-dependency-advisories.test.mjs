@@ -541,3 +541,24 @@ describe("Test 21 -- selectBlockingFindings expiry inclusivity matches validateA
     expect(findings).toHaveLength(1);
   });
 });
+
+describe("Test 22 -- BLOCKING_SEVERITIES lookup normalizes severity case (WR-01)", () => {
+  it("treats a differently-cased severity ('High') as blocking, not silently non-blocking", () => {
+    const advisories = [{ package: "postcss", advisoryId: "GHSA-abcd-1234-efgh", severity: "High" }];
+    const findings = selectBlockingFindings(advisories, [], NOW);
+    expect(findings).toHaveLength(1);
+  });
+
+  it("treats an upper-case severity ('CRITICAL') as blocking", () => {
+    const advisories = [{ package: "postcss", advisoryId: "GHSA-abcd-1234-efgh", severity: "CRITICAL" }];
+    const findings = selectBlockingFindings(advisories, [], NOW);
+    expect(findings).toHaveLength(1);
+  });
+
+  it("treats a non-string severity as non-blocking without throwing", () => {
+    const advisories = [{ package: "postcss", advisoryId: "GHSA-abcd-1234-efgh", severity: undefined }];
+    expect(() => selectBlockingFindings(advisories, [], NOW)).not.toThrow();
+    const findings = selectBlockingFindings(advisories, [], NOW);
+    expect(findings).toHaveLength(0);
+  });
+});

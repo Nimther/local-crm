@@ -98,6 +98,21 @@ export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url
 /** D-09: only these severities ever block the gate. */
 export const BLOCKING_SEVERITIES = Object.freeze(new Set(["high", "critical"]));
 
+/**
+ * WR-01: `BLOCKING_SEVERITIES.has(...)` is a case-sensitive, type-sensitive
+ * Set lookup. `severity` is captured verbatim from `npm audit --json`'s
+ * `via[]` objects with no normalization -- a differently-cased value
+ * (`"High"`), or a non-string value from a malformed/future report shape,
+ * must never silently fall through to "non-blocking" and report a clean
+ * gate despite a real HIGH/CRITICAL finding.
+ *
+ * @param {unknown} value
+ * @returns {string}
+ */
+function normalizedSeverity(value) {
+  return typeof value === "string" ? value.toLowerCase() : "";
+}
+
 /** D-04: the accept-list lives at the repo root under this exact name. */
 export const ACCEPT_LIST_FILENAME = ".advisory-accept-list.json";
 
@@ -321,7 +336,7 @@ export function selectBlockingFindings(advisories, acceptList, now) {
     accepted.add(`${entry.package}::${entry.advisoryId}`);
   }
 
-  const blocking = advisories.filter((a) => BLOCKING_SEVERITIES.has(a.severity));
+  const blocking = advisories.filter((a) => BLOCKING_SEVERITIES.has(normalizedSeverity(a.severity)));
   const surviving = blocking.filter((a) => !accepted.has(`${a.package}::${a.advisoryId}`));
 
   return surviving.slice().sort((a, b) => {
