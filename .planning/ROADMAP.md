@@ -110,7 +110,7 @@ Plans:
   3. A forged or expired-secret token produces a byte-identical response to a valid one (the no-token-oracle invariant survives rotation), with a timing-safe comparison performed per candidate secret.
   4. The retention window for previous secrets is an explicit, documented decision tied to the real lifetime of already-sent links (5-year token TTL) — not an unstated default, and not an unbounded list.
 
-**Plans**: 4/5 plans executed
+**Plans**: 5/5 plans executed
 
 Plans:
 **Wave 1**
@@ -125,7 +125,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 19-05-PLAN.md — Retention decision filed (SPECIFICATION.md), deployment template + README entries under `check:spec-env-coverage`, and the two-step rotation runbook ending in a both-eras canary smoke (SC4, D-06 through D-09)
+- [x] 19-05-PLAN.md — Retention decision filed (SPECIFICATION.md), deployment template + README entries under `check:spec-env-coverage`, and the two-step rotation runbook ending in a both-eras canary smoke (SC4, D-06 through D-09)
 
 **Plan-time decisions**: RESOLVED at planning — a previous secret is retained until **5 years after its last use as primary** (the TTL of the last token it ever signed), the only window that provably breaks zero links (D-06). Recording and enforcement are deliberately split (D-07): the 5-year rule and each secret's retirement date live in SPECIFICATION.md §3 and the rotation runbook's rotation log, while code enforces exactly one structural bound — a maximum of 5 retained previous secrets, rejected at boot at all three validation sites — satisfying SC4's "not an unbounded list" without dates-in-env machinery.
 **UI hint**: no
@@ -204,7 +204,7 @@ Plans:
 | 16. Live SendGrid Verification | v1.1 | 7/7 | Complete | 2026-08-19 |
 | 17. Address tech debt: WR-06 + security follow-ups | v1.1 | 6/6 | Complete | 2026-08-20 |
 | 18. Dependency Hygiene & Advisory Gate | v1.2 | 4/4 | Complete    | 2026-08-20 |
-| 19. Unsubscribe Secret Graceful Rotation | v1.2 | 4/5 | In Progress|  |
+| 19. Unsubscribe Secret Graceful Rotation | v1.2 | 5/5 | In Progress|  |
 | 20. Campaign Template Correctness | v1.2 | 0/TBD | Not started | - |
 | 21. Per-Contact DSR Export | v1.2 | 0/TBD | Not started | - |
 | 22. Workspace Quiesce & Physical Purge | v1.2 | 0/TBD | Not started | - |
