@@ -21,6 +21,19 @@ import { defineConfig } from "vitest/config";
  * that steals sibling files' jobs mid-assertion, and the failures look like
  * flakiness rather than a config regression.
  *
+ * By that SAME inheritance, this aggregate does NOT collect apps/worker's two
+ * throughput-RATIO load tests (`failure-injection/tenant-fairness.test.ts` and
+ * `loadtest/**`). The exclusion is stated once in apps/worker/vitest.config.ts
+ * — do not look for it here. Debug session `ci-tenant-fairness-double-run`
+ * (2026-08-20): under v8 instrumentation, atop every sibling worker test's
+ * accumulated Postgres/Redis state, those measurements are not valid, and
+ * tenant-fairness turned the required `test` check red while the dedicated
+ * `failure-injection` job passed the identical assertion on the identical
+ * commit. They now run exactly once per CI run, in that job — which is itself a
+ * required status check, so the gate moved rather than weakened.
+ * scripts/__tests__/aggregate-loadtest-exclusion.test.mjs holds both halves of
+ * that claim to `vitest list`'s real collection output.
+ *
  * 08-11 originally listed `packages/segments-core` and
  * `packages/shared-schemas` as bare directory entries, having verified that
  * Vitest 4.1.9 accepts a directory for a config-less package. That was true of
