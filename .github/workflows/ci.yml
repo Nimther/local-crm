@@ -138,6 +138,21 @@ jobs:
       - name: npm-10 lockfile guard
         run: npm run check:lockfile-npm10
 
+      # Phase 18 plan 01 (DEP-01/02/03): the machine half of "a new
+      # untriaged HIGH advisory cannot reach master unnoticed". Runs
+      # `npm audit --json` against the full tree (including
+      # devDependencies, per D-08) and fails on any HIGH/CRITICAL finding
+      # not covered by a justified, owned, time-limited entry in
+      # .advisory-accept-list.json. Lives in `static` -- already a required
+      # status check under branch protection -- for the same reason the
+      # Sentry-redaction and pool-factory-audit gates do: it becomes
+      # blocking immediately with no repository-admin action. A bare
+      # `run:` step with no soft-fail modifier and no conditional -- a
+      # soft-failable supply-chain gate is the exact failure mode DEP-02
+      # exists to prevent.
+      - name: Dependency advisory gate (DEP-01/02/03)
+        run: npm run check:dependency-advisories
+
       - name: Working-root hygiene
         run: npm run check:root-hygiene
 
