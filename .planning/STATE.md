@@ -1,20 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.1
-milestone_name: Production Hardening
-status: Awaiting next milestone
-stopped_at: Milestone v1.1 completed and archived
-last_updated: "2026-08-20T04:22:05.464Z"
+milestone: v1.2
+milestone_name: Data Lifecycle & Delivery Trust
+status: planning
+last_updated: "2026-08-20T04:49:11.657Z"
 last_activity: 2026-08-20
-last_activity_desc: Milestone v1.1 completed and archived
 progress:
-  total_phases: 10
-  completed_phases: 10
-  total_plans: 128
-  completed_plans: 128
-  percent: 100
-current_phase: 17
-current_phase_name: address-tech-debt-wr-06-medium-security-follow-ups
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -28,15 +24,10 @@ See: .planning/PROJECT.md (updated 2026-08-20 after v1.1 close)
 
 ## Current Position
 
-Milestone: v1.1 Production Hardening — SHIPPED 2026-08-20 (tag v1.1)
-Phase: Milestone v1.1 complete (Phases 8–17, 128/128 plans, 95/95 requirements)
+Phase: Not started (defining requirements)
 Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-08-20 — Milestone v1.1 completed and archived
-
-Closeout: **override_closeout** — all 10 phases `verification: passed` and security registers fully closed; override reasons: (a) init.manager projected Phase 10 verification as `stale` (timestamp artifact — 10-VERIFICATION.md is `passed` and the 2026-08-19 milestone audit re-verified it 21/21), (b) one acknowledged deferred item (see Deferred Items). Details in `.planning/MILESTONES.md`.
-
-Archived at close: `milestones/v1.1-ROADMAP.md`, `milestones/v1.1-REQUIREMENTS.md`, `milestones/v1.1-MILESTONE-AUDIT.md`, `milestones/v1.1-phases/` (10 phase dirs).
+Status: Defining requirements
+Last activity: 2026-08-20 — Milestone v1.2 started
 
 ## Performance Metrics
 
