@@ -112,6 +112,7 @@ Mega CRM — платформа маркетинговой автоматиза�
 | `PLATFORM_SENDGRID_API_KEY` | Да | Ключ SendGrid платформы для системных писем (verify/reset/invite), отдельный от BYO-ключей тенантов |
 | `PLATFORM_MAIL_FROM` | Да | Адрес отправителя системных писем, должен быть валидным email |
 | `UNSUBSCRIBE_TOKEN_SECRET` | Да | HMAC-секрет для one-click unsubscribe-токенов, минимум 32 символа |
+| `UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS` | Нет | Упорядоченный список через запятую отозванных HMAC-секретов, нужен только для верификации уже разосланных ссылок при ротации `UNSUBSCRIBE_TOKEN_SECRET`; см. `docs/runbooks/unsubscribe-secret-rotation.md` |
 | `PUBLIC_APP_URL` | Да | Публичный URL приложения, должен быть валидным URL; при `NODE_ENV=production` обязан использовать https |
 | `KMS_PROVIDER` | Нет (default `local`) | `local` (dev-KEK) или `aws`; `local` запрещён при `NODE_ENV=production` |
 | `KMS_LOCAL_KEK` | Условно | Обязательна, если `KMS_PROVIDER=local` (значение по умолчанию) |
