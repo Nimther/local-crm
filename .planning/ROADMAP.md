@@ -76,24 +76,24 @@ Full phase details: [milestones/v1.1-ROADMAP.md](milestones/v1.1-ROADMAP.md)
   3. A scheduled full scan surfaces an advisory newly published against an already-installed dependency, with no code change on the branch, through the same reporting path.
   4. An accept-list entry without justification, owner or expiry — or one whose expiry has passed — is rejected by the gate, so an acceptance cannot silently become permanent.
 
-**Plans**: 4 plans
+**Plans**: 4/4 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 18-01-PLAN.md — Advisory gate tracer: `scripts/check-dependency-advisories.mjs` + npm script + empty accept-list + ci.yml `static` step, proven RED against the live pre-fix tree (fail-first evidence for SC2)
+- [x] 18-01-PLAN.md — Advisory gate tracer: `scripts/check-dependency-advisories.mjs` + npm script + empty accept-list + ci.yml `static` step, proven RED against the live pre-fix tree (fail-first evidence for SC2)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 18-02-PLAN.md — Accept-list schema validation: mandatory fields, email owner, minimum justification, inclusive expiry capped at 90 days (SC4)
+- [x] 18-02-PLAN.md — Accept-list schema validation: mandatory fields, email owner, minimum justification, inclusive expiry capped at 90 days (SC4)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 18-03-PLAN.md — Upgrade every blocking advisory out of the tree (3 direct pins + `npm audit fix`), gate turns GREEN, SPECIFICATION.md §2/§8 filed (SC1)
+- [x] 18-03-PLAN.md — Upgrade every blocking advisory out of the tree (3 direct pins + `npm audit fix`), gate turns GREEN, SPECIFICATION.md §2/§8 filed (SC1)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 18-04-PLAN.md — Daily `advisory-scan.yml` running the same gate script, deduplicated labelled GitHub issue on failure, SPECIFICATION.md §7 (SC3)
+- [x] 18-04-PLAN.md — Daily `advisory-scan.yml` running the same gate script, deduplicated labelled GitHub issue on failure, SPECIFICATION.md §7 (SC3)
 
 **Plan-time decisions**: RESOLVED at planning — `drizzle-kit` needs neither reclassification nor an accept-list entry. It already sits in `devDependencies` of `packages/db`; its apparent production-tree presence via `better-auth` is an OPTIONAL peerDependency satisfied by workspace hoisting (better-auth's shipped `dist/` never references it), and its own advisory is MODERATE, below the HIGH/CRITICAL blocking threshold. The reachability finding is recorded in the gate script's header comment (D-10); no accept-list entry is manufactured for a non-blocking finding.
 **UI hint**: no
@@ -187,7 +187,7 @@ Plans:
 | 15. Observability, Alerting & Frontend Resilience | v1.1 | 22/22 | Complete | 2026-08-17 |
 | 16. Live SendGrid Verification | v1.1 | 7/7 | Complete | 2026-08-19 |
 | 17. Address tech debt: WR-06 + security follow-ups | v1.1 | 6/6 | Complete | 2026-08-20 |
-| 18. Dependency Hygiene & Advisory Gate | v1.2 | 0/TBD | Not started | - |
+| 18. Dependency Hygiene & Advisory Gate | v1.2 | 4/4 | In Progress|  |
 | 19. Unsubscribe Secret Graceful Rotation | v1.2 | 0/TBD | Not started | - |
 | 20. Campaign Template Correctness | v1.2 | 0/TBD | Not started | - |
 | 21. Per-Contact DSR Export | v1.2 | 0/TBD | Not started | - |

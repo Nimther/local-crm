@@ -120,7 +120,7 @@ CI — **единственное** место, где проверяется к
 
 | Пакет | Версия | Тип |
 |---|---|---|
-| `concurrently` | `10.0.3` | dev |
+| `concurrently` | `10.0.5` | dev — Phase 18, план 18-03 (DEP-01): бамп с `10.0.3`, единственный fix-путь для HIGH-адвизори `GHSA-395f-4hp3-45gv` на вложенном `shell-quote`, который нельзя бампнуть отдельно |
 | `typescript` | `^5.9.3` (установлено 5.9.3) | dev |
 | `eslint` | `^10.8.0` | dev — добавлен в 08-03 |
 | `typescript-eslint` | `^8.65.0` | dev — мета-пакет (`tseslint.config`, `recommendedTypeChecked`) |
@@ -185,7 +185,7 @@ CI — **единственное** место, где проверяется к
 | `@xyflow/react` | `12.11.2` |
 | `@tanstack/react-query` | `5.101.2` |
 | `@tanstack/react-table` | `^8.21.3` |
-| `react-router` | `8.1.0` |
+| `react-router` | `8.3.0` — Phase 18, план 18-03 (DEP-01): бамп с `8.1.0`, закрывает HIGH-адвизори `GHSA-qwww-vcr4-c8h2` |
 | `react-hook-form` | `7.80.0` + `@hookform/resolvers` `5.4.0` |
 | `recharts` | `3.9.2` |
 | `better-auth` | `1.6.23` |
@@ -195,7 +195,7 @@ CI — **единственное** место, где проверяется к
 | `@mega-crm/redaction` | `0.1.0` — **новая runtime-зависимость `apps/web`, план 15-11**: `sentry.ts`'s `beforeSend`/`beforeSendTransaction` — буквально `sentryBeforeSend` (та же ссылка, не обёртка, что `apps/api`/`apps/worker`, план 15-10) |
 | `@radix-ui/*` | 16 пакетов (shadcn/ui-слой в `src/components/ui`) |
 | `lucide-react` `1.23.0`, `sonner` `2.0.7`, `cmdk` `^1.1.1`, `class-variance-authority` `0.7.1`, `clsx` `2.1.1`, `tailwind-merge` `3.6.0` |
-| dev: `@playwright/test` `1.61.1`, `tailwindcss` `3.4.19`, `tailwindcss-animate` `1.0.7`, `postcss` `8.5.16`, `autoprefixer` `10.5.2`, `typescript`, `@types/*`, `vitest` `4.1.9` (объявлен в 08-07 — до того пакет запускал `vitest run`, не объявляя его, и работал только за счёт hoisting'а из корня), `@mega-crm/test-support` `0.1.0` (08-10, провижининг эфемерной БД для E2E), `tsx` `^4.19.2` (SEGM-04-fix: рантайм для `e2e/run-e2e.ts` — обёртки, которая стала скриптом `test:e2e`; диапазон тот же, что в `apps/api` и `apps/worker`. Объявлен явно, а не оставлен на hoisting из корня — та же ошибка, что исправляли для `vitest` в 08-07) |
+| dev: `@playwright/test` `1.61.1`, `tailwindcss` `3.4.19`, `tailwindcss-animate` `1.0.7`, `postcss` `8.5.26` — Phase 18, план 18-03 (DEP-01): бамп с `8.5.16`, закрывает HIGH-адвизори `GHSA-r28c-9q8g-f849`, `autoprefixer` `10.5.2`, `typescript`, `@types/*`, `vitest` `4.1.9` (объявлен в 08-07 — до того пакет запускал `vitest run`, не объявляя его, и работал только за счёт hoisting'а из корня), `@mega-crm/test-support` `0.1.0` (08-10, провижининг эфемерной БД для E2E), `tsx` `^4.19.2` (SEGM-04-fix: рантайм для `e2e/run-e2e.ts` — обёртки, которая стала скриптом `test:e2e`; диапазон тот же, что в `apps/api` и `apps/worker`. Объявлен явно, а не оставлен на hoisting из корня — та же ошибка, что исправляли для `vitest` в 08-07) |
 
 ### 2.5 Пакеты
 
@@ -275,6 +275,18 @@ RESEARCH.md's Package Legitimacy Audit вернул вердикт `SUS` (`too-n
 **Почему это не установка нового пакета (и не требует блокирующего human-verify чекпойнта T-15-SC):** `bullmq` уже объявлен, уже человеком одобрен (человеческая легитимность самого имени пакета не под вопросом — это ядро проекта, используемое в 20+ файлах), и бамп — патч-версия внутри ТОЙ ЖЕ `5.79.x`-линии, которую сам раздел Technology Stack этого файла называет целевой (`bullmq@5.79.x`). Версия `5.79.4` — актуальный (на момент этого плана) последний патч `5.79.x`-линии, подтверждена живым `npm view bullmq versions`. Единственная явная оговорка: план 15-16's собственный threat-register (T-15-SC) декларирует «No installs in this plan» — это утверждение перестало быть верным в буквальном смысле (npm install был выполнен), однако сам install не добавил НИ ОДНОГО нового имени пакета в граф зависимостей — обновил уже одобренный пакет до патч-версии, требуемой уже одобренным пакетом. Зафиксировано здесь явно, а не оставлено на усмотрение будущего security-ревью, чтобы это расхождение с буквальной формулировкой T-15-SC не читалось как незамеченный пропуск.
 
 Бамп применён в lockstep во всех четырёх workspace'ах (`apps/api`, `apps/worker`, `packages/db`, `packages/queue-core`) — не только в `apps/worker`, где обнаружена проблема — иначе несовпадающие точные пины снова помешали бы npm дедуплицировать единственную копию. После бампа: `npm ls bullmq` показывает одну dedup'нутую `bullmq@5.79.4` под корневым `node_modules`, используемую и `@bull-board/api`, и всеми четырьмя workspace'ами; `node -e "require('@bull-board/api/bullMQAdapter')"` резолвится без ошибки; `package-lock.json` регенерирован под npm 10 тем же приёмом, что планы 15-01/15-11 (`scripts/check-lockfile-npm10.mjs`'s собственная remediation-инструкция), и `npm run check:lockfile-npm10` проходит.
+
+### 2.8 Фаза 18 (dependency hygiene & advisory gate), план 18-03: транзитивные адвизори-бампы через `npm audit fix`
+
+Помимо трёх прямых пинов, зафиксированных в их собственных строках выше (`concurrently` §2.1, `react-router`/`postcss` §2.4), план 18-03 прогнал обычный `npm audit fix` (без `--omit=dev`, без `--force`) по всему дереву. Это **не объявленные** зависимости — они не имеют собственной строки в `package.json` ни одного workspace'а, версии читаются из `package-lock.json`, актуальность держит адвизори-гейт фазы 18 (`scripts/check-dependency-advisories.mjs`, `npm run check:dependency-advisories`), а не ручное сопровождение:
+
+| Пакет | Было | Стало | Закрытые адвизори |
+|---|---|---|---|
+| `brace-expansion` | `5.0.8` | `5.0.9` | `GHSA-rgw5-rvv9-x895` |
+| `fast-uri` | `3.1.3` | `3.1.5` | `GHSA-7p8r-x3mc-p8w7`, `GHSA-v2hh-gcrm-f6hx` |
+| `find-my-way` | `9.6.0` | `9.8.0` | `GHSA-c96f-x56v-gq3h` |
+
+`nanoid`'s два HIGH-адвизори (`GHSA-28wg-ghj8-5hjv`, `GHSA-2v37-7h3g-55p8`) закрылись без действия `npm audit fix`: прямые пины из §2.1/§2.4 изменили граф резолюции ровно настолько, что npm дедуплицировал вложенную уязвимую копию `nanoid@3.3.15` в пользу уже присутствующей в дереве безопасной `nanoid@5.1.16` (та же версия, что уже зафиксирована в §2.2 — `apps/api`'s `tenancy/workspaces.ts`). Модерейт-цепочка `drizzle-kit`/`@esbuild-kit`/`esbuild` (единственный оставшийся finding после этого плана) сознательно не тронута: `npm audit fix`'s единственный фикс для неё — `--force`, который даунгрейдит `drizzle-kit` до `0.18.1` (semver-major, ломает `packages/db`'s миграционный тулинг) и находится ниже blocking-порога D-09 (HIGH/CRITICAL). `package-lock.json` дважды регенерирован под npm 10 в рамках этого плана — сперва после прямых пинов, затем после `audit fix` — тем же приёмом, что планы 14-01/15-01/15-11/15-16 (`scripts/check-lockfile-npm10.mjs`'s собственная remediation-инструкция).
 
 ---
 
@@ -1524,6 +1536,16 @@ Cloud, наблюдающих платформу СНАРУЖИ ровно по�
 
 **Оговорка к предыдущему абзацу (Phase 10, debug `aggregate-coverage-run-fails`):** совпадения по `keyRule` действительно нет, но `scrub()` применяет к каждому строковому значению ещё и `valueRules`, независимо от имени поля. `phone`-правило в редакции 10-13 (`/\+?\(?\d(?:[\s().-]*\d){9,14}\b/`) матчилось на **~4% случайных v4 UUID**: `-` входит в набор его собственных разделителей, поэтому hex-группы UUID склеиваются в одну длинную цифровую последовательность, когда достаточно их символов оказываются цифрами (например `b2cd545e-6853-418e-a436-2d4658232825`). Итог — `owningWorkspaceId` примерно раз в 25 прогонов приходил в лог как `[REDACTED]`, то есть drop-сигнал терял ровно ту диагностику, ради которой существует. Правило заякорено границами `(?<![0-9A-Za-z-])`/`(?![0-9A-Za-z-])`: внутри канонического UUID каждая цифровая последовательность начинается либо после hex-буквы, либо после `-`, поэтому легальной стартовой позиции не остаётся вовсе — false positive исключён **по построению**, а не сделан реже. Верхняя граница числа цифр при этом открыта (`{9,}` вместо `{9,14}`): со стартовым якорем паттерн больше не может сдвинуть начало матча вперёд, и `{9,14}` перестал бы ловить последовательности из 16+ цифр (реалистичный случай — номер карты), которые прежняя редакция ловила. Регрессия закрыта `packages/redaction/src/__tests__/scrub-identifier-false-positive.test.ts`.
 
+### Dependency advisory gate: CI-blocking check + daily scheduled scan (Phase 18, планы 18-01/18-04)
+
+- **PR-blocking половина (план 18-01, DEP-01/02/03):** `.github/workflows/ci.yml`'s `static`-джоба, шаг «Dependency advisory gate (DEP-01/02/03)», запускает `npm run check:dependency-advisories` (`scripts/check-dependency-advisories.mjs`) на каждый push/PR в `master`. Скрипт гоняет `npm audit --json` над ПОЛНЫМ деревом (включая devDependencies, D-08) и падает на любой находке `high`/`critical` (D-09), не покрытой оправданной, time-limited записью в `.advisory-accept-list.json` (схема и валидация — план 18-02: `MAX_EXPIRY_DAYS`, `MIN_JUSTIFICATION_LENGTH`). Без soft-fail-модификатора и без условия — уже обязательный статус-чек под branch protection. **(WR-02 fix, 18-REVIEW-FIX.md):** `run:`-строка — `npm run check:dependency-advisories 2>&1 | tee /tmp/advisory-gate-output.txt` с явным `shell: bash` (для pipefail — иначе упавший гейт, перенаправленный в `tee`, вернул бы код `tee`, а не свой) — вывод тиится в файл, чтобы `advisory-scan.yml`'s issue-шаг мог отчитаться о ЭТОМ ЖЕ прогоне, не перезапуская скрипт второй раз.
+- **Scheduled половина (план 18-04, DEP-02 вторая часть, ROADMAP SC3): `.github/workflows/advisory-scan.yml` — «Advisory scan».** Отдельный workflow (D-12), а не `schedule:`-триггер на `ci.yml` — суточный тик не должен поднимать весь Postgres/Redis/browser-матрикс `test`/`failure-injection`/`e2e`. Триггеры: `schedule:` (один ежедневный `cron:`, 03:17 UTC — конкретный час не load-bearing) + `workflow_dispatch:` (surfacing-путь исполним по требованию, не только по тику). `concurrency:`-группа по `${{ github.workflow }}-${{ github.ref }}` с `cancel-in-progress: true`, как у `ci.yml`/`images.yml`.
+  Шаг «Dependency advisory gate (DEP-01/02/03)» этого workflow'а БАЙТ-В-БАЙТ идентичен одноимённому шагу `ci.yml`'s `static`-джобы (`run: npm run check:dependency-advisories 2>&1 | tee /tmp/advisory-gate-output.txt`, оба с `shell: bash`) — это то, что делает суточный прогон ТЕМ ЖЕ reporting path, а не вторым, расходящимся гейтом; проверено drift-тестом `scripts/__tests__/advisory-scan-workflow.test.mjs`, который извлекает обе строки инвокации из двух файлов и утверждает их равенство. Оба файла меняются в связке при любой правке этой строки.
+  **Permissions:** явный блок `contents: read` + `issues: write` — ровно два скоупа, единственный workflow в репозитории с write-доступом к Issues; `ci.yml` намеренно блока `permissions:` не имеет и полагается на дефолтный scope токена — этот workflow на дефолт не полагается.
+  **Surfacing (D-13):** при падении гейта — файл `/tmp/advisory-gate-output.txt`, записанный `tee` в самом шаге гейта (единственный реальный вызов `npm audit`, не второй), читает `actions/github-script`-шаг (`if: failure() && steps.gate.outcome == 'failure'` — **WR-02 fix**: узко про сам гейт-шаг, а не про job-wide `failure()`, чтобы флап `checkout`/`setup-node`/`npm ci` не заводил и не комментировал этот issue содержимым, не имеющим отношения к advisory-находке), который ищет открытый issue с меткой `dependency-advisory` (`issues.listForRepo`, `state: open`) и либо создаёт новый (метка проставлена ПРИ создании — не постфактум, иначе дедуп-поиск следующего прогона её не найдёт) с телом, называющим упавшие package/advisory-id и ссылку на прогон, либо комментирует уже существующий вместо создания дубликата. Ошибка самого GitHub API-вызова не глушится — падает шаг, а не тихо съедается.
+  **Every `uses:` line** (checkout, setup-node, github-script) закреплён на полный 40-символьный commit SHA с версией в комментарии — `actions/checkout`/`actions/setup-node` переиспользуют те же SHA, что уже закреплены в `ci.yml`; `actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9` — единственное новое действие, введённое этим планом, разрешено свежо на момент реализации (`gh api repos/actions/github-script/commits/v9`).
+  **D-14 (self-enforcing expiry):** суточная каденция — не только про новые advisory. Запись `.advisory-accept-list.json`, чей `expiry` истёк в тихий период без единого PR, красит этот суточный прогон в течение одного цикла (24ч) без какой-либо активности в репозитории — единственный механизм, который делает D-05's expiry самодостаточным.
+
 ---
 
 ## 8. Расхождения с разделом Technology Stack в `.claude/CLAUDE.md`
@@ -1550,14 +1572,14 @@ CLAUDE.md описывает **рекомендованный** стек по и
 | **`grafana/alloy`** (Docker-образ, не npm-пакет) | `v1.18.1` (пинned) | Phase 15, план 15-17 (OPS-10): log-shipping sidecar в `docker-compose.prod.yml` — discovery.docker + loki.source.docker + loki.write, см. §7. **Gap closure 15-22 (G-15-4): тот же образ теперь ТАКЖЕ используется гейтом `scripts/validate-alloy-config.mjs`** (`npm run verify:alloy-config`) — не только продовым сайдкаром — для реального парса `docker/alloy/config.alloy` тем же самым закреплённым бинарём перед мерджем. **CLAUDE.md не упоминает Alloy, Loki, ни какой-либо log-shipping-агент вообще** — раздел Technology Stack называет только Sentry для error tracking, ничего для доставки самих логов на хостед-провайдера |
 | `@sendgrid/eventwebhook` | `^8.0.0` | Верификация ECDSA-подписи вебхука |
 | `@sendgrid/mail` | `8.1.6` | Только платформенная почта (тенантские отправки — сырой `fetch`) |
-| `react-router` | `8.1.0` | Роутинг SPA |
+| `react-router` | `8.3.0` | Роутинг SPA. Phase 18, план 18-03 (DEP-01): бамп с `8.1.0`, закрывает HIGH-адвизори `GHSA-qwww-vcr4-c8h2` |
 | `@radix-ui/*` (16 пакетов) + `tailwindcss` `3.4.19` + `class-variance-authority` + `clsx` + `tailwind-merge` + `cmdk` + `sonner` + `lucide-react` + `tailwindcss-animate` | — | Весь UI-слой (shadcn/ui) |
 | `fastify-plugin` | `^5.0.1` | Инкапсуляция плагинов |
 | `nanoid` | `5.1.16` | Только `tenancy/workspaces.ts` |
 | `nock` | `14.0.16` | HTTP-моки в тестах |
-| `concurrently` | `10.0.3` | Оркестрация dev |
+| `concurrently` | `10.0.5` | Оркестрация dev. Phase 18, план 18-03 (DEP-01): бамп с `10.0.3`, единственный fix-путь для HIGH-адвизори `GHSA-395f-4hp3-45gv` на вложенном `shell-quote` |
 | `@hookform/resolvers` | `5.4.0` | Мост react-hook-form ↔ zod |
-| `postcss` / `autoprefixer` | `8.5.16` / `10.5.2` | Сборка стилей |
+| `postcss` / `autoprefixer` | `8.5.26` / `10.5.2` | Сборка стилей. Phase 18, план 18-03 (DEP-01): `postcss` бамп с `8.5.16`, закрывает HIGH-адвизори `GHSA-r28c-9q8g-f849` |
 | `tsx` | `^4.19.2` | Рантайм dev + загрузчик `.env` (`--env-file`) |
 | **GitHub Actions CI** (`.github/workflows/ci.yml`) | — | Гейт качества: тайпчек + тесты на каждый `push` и `pull_request` в `master`, живые Postgres/Redis через `docker compose up -d --wait`. **CLAUDE.md не упоминает CI вообще** — ни GitHub Actions, ни какую-либо другую систему; раздел Technology Stack описывает только рантайм-стек |
 | `execa` | `10.0.0` | Объявлен в `packages/test-support` под spawn/kill дочерних процессов для SIGKILL-сценария; **кодом ещё не используется** |
