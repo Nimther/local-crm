@@ -58,6 +58,26 @@ export const REDACTION_RULES: { keyRules: readonly KeyRule[]; valueRules: readon
     // Added: other secret-shaped field names actually used across apps/api and apps/worker.
     { key: "secret", protects: "generic secret material (API-key secret half, signing secrets)" },
     { key: "apiSecret", protects: "API key secret half (api-key-auth.ts's `mcrm_<id>.<secret>` scheme)" },
+    // ROT-01/D-02: spelled as the environment-variable name, not a camelCase
+    // transformation of it -- scrub.ts lower-cases rule keys into a Set and
+    // matches a field only on exact lower-cased equality, so a camelCase key
+    // would never match a field literally named after the env var. The
+    // generic `secret` rule above does not cover either of these, because it
+    // only matches a field named exactly `secret`, not one containing it.
+    // packages/delivery-core's own package-local logger does NOT route
+    // through this pipeline (same as the packages/contacts-core precedent),
+    // so these two rules are defence in depth for the API and worker
+    // loggers, not the safeguard on D-05's own log call -- that safeguard is
+    // the shape of the call, asserted directly by plan 19-04.
+    {
+      key: "UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS",
+      protects:
+        "retired unsubscribe-token HMAC signing secret(s), comma-separated verification-only list read in packages/delivery-core/src/unsubscribe-token.ts",
+    },
+    {
+      key: "UNSUBSCRIBE_TOKEN_SECRET",
+      protects: "current unsubscribe-token HMAC signing secret, read in packages/delivery-core/src/unsubscribe-token.ts",
+    },
     { key: "clientSecret", protects: "OAuth/provider-style client secret" },
     { key: "refreshToken", protects: "OAuth/session refresh token" },
     { key: "sessionToken", protects: "session token" },
