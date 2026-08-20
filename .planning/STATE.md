@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Data Lifecycle & Delivery Trust
 current_phase: 18
-current_phase_name: Dependency Hygiene & Advisory Gate
+current_phase_name: dependency-hygiene-advisory-gate
 status: executing
 stopped_at: Phase 18 context gathered
-last_updated: "2026-08-20T09:31:37.272Z"
+last_updated: "2026-08-20T09:38:18.771Z"
 last_activity: 2026-08-20
-last_activity_desc: v1.2 roadmap created (Phases 18-22), 18/18 requirements mapped
+last_activity_desc: Phase 18 execution started
 progress:
   total_phases: 5
   completed_phases: 0
@@ -24,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-20 after v1.1 close)
 
 **Core value:** Маркетолог настраивает триггерную цепочку или кампанию — и письма надёжно и вовремя доходят до нужных контактов, со сквозным отслеживанием статусов (delivered/opened/clicked/bounced).
-**Current focus:** Phase 18 — Dependency Hygiene & Advisory Gate (v1.2 roadmap created, phase not yet planned)
+**Current focus:** Phase 18 — dependency-hygiene-advisory-gate
 
 ## Current Position
 
-Phase: 18 of 22 (Dependency Hygiene & Advisory Gate) — first phase of milestone v1.2
-Plan: — (no plans yet)
-Status: Ready to execute
-Last activity: 2026-08-20 — v1.2 roadmap created (Phases 18-22), 18/18 requirements mapped
+Phase: 18 (dependency-hygiene-advisory-gate) — EXECUTING
+Plan: 1 of 4
+Status: Executing Phase 18
+Last activity: 2026-08-20 — Phase 18 execution started
 
 Progress: [░░░░░░░░░░] 0% (0/5 v1.2 phases complete)
 
