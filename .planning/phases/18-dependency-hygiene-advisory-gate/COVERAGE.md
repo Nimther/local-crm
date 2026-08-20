@@ -1,16 +1,6 @@
 # Phase 18 — API Coverage Matrix
 
-External API in scope: **GitHub REST API — Issues** (accessed via `actions/github-script`'s
-pre-authenticated Octokit client inside `.github/workflows/advisory-scan.yml`, D-13).
-
-The deterministic detector reported `detected: false` when run against the ROADMAP section alone.
-This matrix is produced anyway because plan 18-04 genuinely calls the GitHub Issues API, and the
-full-coverage-by-default rule applies to the capability that exists, not to the detector's reading
-of the prose.
-
-Not covered by this matrix (deliberately, not an omission): `npm audit` is a CLI subcommand of an
-already-installed toolchain, not an SDK/API integration — D-01 locks it as the advisory source and
-adds no client library.
+External API in scope: **GitHub REST API — Issues**, called by `actions/github-script` inside `.github/workflows/advisory-scan.yml` (D-13). The detector read `false` on the ROADMAP text alone; the matrix is produced anyway because plan 18-04 genuinely calls this API. `npm audit` is out of scope — a CLI subcommand of the installed toolchain, not an SDK integration (D-01 adds no client library).
 
 | capability | decision | reason |
 |---|---|---|
