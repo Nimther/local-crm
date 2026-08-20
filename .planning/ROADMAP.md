@@ -110,12 +110,12 @@ Plans:
   3. A forged or expired-secret token produces a byte-identical response to a valid one (the no-token-oracle invariant survives rotation), with a timing-safe comparison performed per candidate secret.
   4. The retention window for previous secrets is an explicit, documented decision tied to the real lifetime of already-sent links (5-year token TTL) — not an unstated default, and not an unbounded list.
 
-**Plans**: 5 plans
+**Plans**: 1/5 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 19-01-PLAN.md — Tracer: `verifyUnsubscribeToken` extended to an ordered, exhaustively-evaluated `[primary, ...previous]` candidate loop + package-local pino logger for the D-05 match line; both link eras proven end-to-end through the real RFC 8058 one-click POST route (SC1)
+- [x] 19-01-PLAN.md — Tracer: `verifyUnsubscribeToken` extended to an ordered, exhaustively-evaluated `[primary, ...previous]` candidate loop + package-local pino logger for the D-05 match line; both link eras proven end-to-end through the real RFC 8058 one-click POST route (SC1)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -204,7 +204,7 @@ Plans:
 | 16. Live SendGrid Verification | v1.1 | 7/7 | Complete | 2026-08-19 |
 | 17. Address tech debt: WR-06 + security follow-ups | v1.1 | 6/6 | Complete | 2026-08-20 |
 | 18. Dependency Hygiene & Advisory Gate | v1.2 | 4/4 | Complete    | 2026-08-20 |
-| 19. Unsubscribe Secret Graceful Rotation | v1.2 | 0/TBD | Not started | - |
+| 19. Unsubscribe Secret Graceful Rotation | v1.2 | 1/5 | In Progress|  |
 | 20. Campaign Template Correctness | v1.2 | 0/TBD | Not started | - |
 | 21. Per-Contact DSR Export | v1.2 | 0/TBD | Not started | - |
 | 22. Workspace Quiesce & Physical Purge | v1.2 | 0/TBD | Not started | - |
