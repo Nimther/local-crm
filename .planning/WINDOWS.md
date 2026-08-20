@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 5
+open_count: 10
 waived_count: 0
 fixed_count: 3
-total_count: 8
-last_updated: 2026-08-11T20:30:09.687Z
+total_count: 13
+last_updated: 2026-08-19T19:35:44.077Z
 ---
 
 # Broken Windows Ledger
@@ -23,6 +23,11 @@ last_updated: 2026-08-11T20:30:09.687Z
 | 6 | 12 | lint-warning | apps/worker/src/__tests__/graceful-shutdown.test.ts |  | Pre-existing require-await lint errors from plan 12-08 (4 in graceful-shutdown.test.ts, 7 in shared-error-listener.test.ts); out of scope for 12-10, discovered while running repo-wide lint | fixed |  | 2026-08-10T16:45:27.906Z | 2026-08-10T16:52:08.272Z |
 | 7 | 12 | lint-warning | apps/worker/src/__tests__/graceful-shutdown.test.ts |  | 11 @typescript-eslint/require-await errors from 12-08's test stubs (async () => undefined and awaitless async mockImplementations), flagged by 12-10's executor. Fixed by orchestrator post-wave-6 with explicit Promise.resolve stubs; repo lint exit 0 re-verified. | fixed |  | 2026-08-10T16:52:08.272Z | 2026-08-10T16:52:08.272Z |
 | 8 | 13 | skipped-test | packages/redaction/src/__tests__/scrub-identifier-false-positive.test.ts |  | NOT skipped, but probabilistically flaky (closest allowed kind): Test 3 samples 5000 random v4 UUIDs against the phone valueRule; an all-digit-group UUID (e.g. 17240210-0546-4077-9954-207876832048) still gets redacted despite the 3cd3f0c anchoring fix. Failed once in Phase 13 wave-3 post-merge gate, passed 3/3 on re-run; package untouched by Phase 13 (pre-existing). Fix direction: exclude UUID-shaped values before the phone rule, or seed the sampler. | open |  | 2026-08-11T20:30:09.687Z |  |
+| 9 | 17 | deviation | .planning/phases/17-address-tech-debt-wr-06-medium-security-follow-ups/17-05-PLAN.md |  | Task 1 acceptance text 'failed_count is 0 in both reads' / must_haves truth #2 unsatisfiable against real cumulative pg_stat_archiver history; superseded by ratified corrected WAL criterion (archived_count strictly increases, failed_count unchanged from baseline, last_failed unmoved) -- see 17-05-SUMMARY.md | open |  | 2026-08-19T19:35:29.693Z |  |
+| 10 | 17 | deviation | .planning/phases/17-address-tech-debt-wr-06-medium-security-follow-ups/17-CONTEXT.md |  | D-11 amended from verify-still-running to establish-then-verify: alloy was never durably deployed to production (deploy.sh never issues the compose up -d that would create it; 15-UAT test 5 was a bare unevidenced pass); operator provisioned Loki credentials and started alloy live during this plan's checkpoint -- see 17-05-SUMMARY.md | open |  | 2026-08-19T19:35:43.284Z |  |
+| 11 | 17 | deviation | docker/postgres/Dockerfile |  | pgBackRest patch-level drift (2.59.1 vs docs/runbooks/backups.md's documented 2.59.0) ratified as expected, not a defect -- unpinned apt-get install pgbackrest against pgdg; T-14-58/T-14-88 are provenance/tag-immutability threats, not apt-reproducibility ones; cross-version restore proof landed live -- see 17-05-SUMMARY.md | open |  | 2026-08-19T19:35:43.551Z |  |
+| 12 | 17 | deviation | scripts/deploy.sh |  | Leg-isolation defect discovered by operator dry-run during this plan's live checkpoint: mutating compose calls (up -d web api / run --rm migrate / up -d worker) implicitly recreated db/redis via dependency convergence without --no-deps -- an ungated db cutover hidden inside the routine app-deploy path. Fixed and merged (PR #17, TDD RED 393a004 -> GREEN 3de6771) as a phase-17 orchestrator-side fix, not authored by this plan -- see 17-05-SUMMARY.md | open |  | 2026-08-19T19:35:43.817Z |  |
+| 13 | 17 | deviation | apps/web/vite.config.ts |  | charts-vendor/canvas-vendor static import-cycle crash (advancedChunks.includeDependenciesRecursively: false, phase 15 plan 03) broke the dashboard growth chart and the flow editor in every production build since 2026-08-15; discovered by this plan's Task 1 step 7. Fixed with strictExecutionOrder: true and a wired check-web-chunks CI gate (PR #16, commits bd8a66c/2f77147), a phase-17 orchestrator-side fix, not authored by this plan -- see 17-05-SUMMARY.md | open |  | 2026-08-19T19:35:44.077Z |  |
 
 ````json
 [
@@ -120,6 +125,66 @@ last_updated: 2026-08-11T20:30:09.687Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-08-11T20:30:09.687Z",
+    "resolved_at": null
+  },
+  {
+    "id": 9,
+    "kind": "deviation",
+    "phase": "17",
+    "file": ".planning/phases/17-address-tech-debt-wr-06-medium-security-follow-ups/17-05-PLAN.md",
+    "line": null,
+    "description": "Task 1 acceptance text 'failed_count is 0 in both reads' / must_haves truth #2 unsatisfiable against real cumulative pg_stat_archiver history; superseded by ratified corrected WAL criterion (archived_count strictly increases, failed_count unchanged from baseline, last_failed unmoved) -- see 17-05-SUMMARY.md",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-08-19T19:35:29.693Z",
+    "resolved_at": null
+  },
+  {
+    "id": 10,
+    "kind": "deviation",
+    "phase": "17",
+    "file": ".planning/phases/17-address-tech-debt-wr-06-medium-security-follow-ups/17-CONTEXT.md",
+    "line": null,
+    "description": "D-11 amended from verify-still-running to establish-then-verify: alloy was never durably deployed to production (deploy.sh never issues the compose up -d that would create it; 15-UAT test 5 was a bare unevidenced pass); operator provisioned Loki credentials and started alloy live during this plan's checkpoint -- see 17-05-SUMMARY.md",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-08-19T19:35:43.284Z",
+    "resolved_at": null
+  },
+  {
+    "id": 11,
+    "kind": "deviation",
+    "phase": "17",
+    "file": "docker/postgres/Dockerfile",
+    "line": null,
+    "description": "pgBackRest patch-level drift (2.59.1 vs docs/runbooks/backups.md's documented 2.59.0) ratified as expected, not a defect -- unpinned apt-get install pgbackrest against pgdg; T-14-58/T-14-88 are provenance/tag-immutability threats, not apt-reproducibility ones; cross-version restore proof landed live -- see 17-05-SUMMARY.md",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-08-19T19:35:43.551Z",
+    "resolved_at": null
+  },
+  {
+    "id": 12,
+    "kind": "deviation",
+    "phase": "17",
+    "file": "scripts/deploy.sh",
+    "line": null,
+    "description": "Leg-isolation defect discovered by operator dry-run during this plan's live checkpoint: mutating compose calls (up -d web api / run --rm migrate / up -d worker) implicitly recreated db/redis via dependency convergence without --no-deps -- an ungated db cutover hidden inside the routine app-deploy path. Fixed and merged (PR #17, TDD RED 393a004 -> GREEN 3de6771) as a phase-17 orchestrator-side fix, not authored by this plan -- see 17-05-SUMMARY.md",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-08-19T19:35:43.817Z",
+    "resolved_at": null
+  },
+  {
+    "id": 13,
+    "kind": "deviation",
+    "phase": "17",
+    "file": "apps/web/vite.config.ts",
+    "line": null,
+    "description": "charts-vendor/canvas-vendor static import-cycle crash (advancedChunks.includeDependenciesRecursively: false, phase 15 plan 03) broke the dashboard growth chart and the flow editor in every production build since 2026-08-15; discovered by this plan's Task 1 step 7. Fixed with strictExecutionOrder: true and a wired check-web-chunks CI gate (PR #16, commits bd8a66c/2f77147), a phase-17 orchestrator-side fix, not authored by this plan -- see 17-05-SUMMARY.md",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-08-19T19:35:44.077Z",
     "resolved_at": null
   }
 ]

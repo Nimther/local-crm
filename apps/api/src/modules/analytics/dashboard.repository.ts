@@ -50,25 +50,39 @@ export interface DashboardActiveFlow {
  * `timestamp without time zone` column (packages/db/src/schema/contacts.ts).
  * A SINGLE `AT TIME ZONE 'UTC'` hop on a naive column produces a
  * `timestamptz`, and casting THAT to `::date` converts to the READING
- * session's own `TimeZone` GUC before truncating -- re-introducing exactly
- * the session-dependence this fix exists to remove (empirically proven in
- * RESEARCH.md Pitfall 1; also the literal expression 13-REVIEW.md's WR-06
- * write-up and CONTEXT.md's D-01 both name, and it is WRONG for this column
- * type). The DOUBLE-hop form below converts back to a naive UTC wall-clock
- * value first, so the final `::date` cast is a pure truncation with no
- * timezone involved at all -- this is the SAME idiom already established in
- * this repo at `packages/db/src/partitions/relocate-default.ts:112` for a
- * different naive-column use case (partition month bucketing).
+ * session's own `TimeZone` GUC before truncating -- session-dependent, and
+ * WRONG for this column type (empirically proven in RESEARCH.md Pitfall 1;
+ * also the literal expression 13-REVIEW.md's WR-06 write-up and
+ * CONTEXT.md's D-01 both name). The DOUBLE-hop form below converts back to
+ * a naive UTC wall-clock value first, so the final `::date` cast is a pure
+ * truncation with no timezone involved at all -- this is the SAME idiom
+ * already established in this repo at
+ * `packages/db/src/partitions/relocate-default.ts:112` for a different
+ * naive-column use case (partition month bucketing).
+ *
+ * WR-02 follow-up (17-REVIEW.md): the expression this double-hop form
+ * REPLACED was the plain `created_at::date` cast, not the single-hop form
+ * named above -- and the plain cast was ALREADY session-independent
+ * (casting a naive `timestamp` to `date` never consults the session
+ * `TimeZone` GUC; verified empirically against Postgres 17, see Test 5 in
+ * `dashboard-timezone.test.ts`). So this change is NOT a behavior fix for
+ * an actually-shipped read-path bug -- it is a regression GUARD against a
+ * future simplification toward the single-hop form (the one genuinely
+ * session-dependent, WRONG expression), byte-identical in every session
+ * timezone to the plain cast it replaced.
  *
  * `sends.*_at` and siblings (apps/worker/src/queues/analytics-reconciliation.worker.ts)
  * are genuinely `timestamptz` columns and correctly use the OPPOSITE
  * (single-hop) form -- the two column types need opposite-direction
  * handling; do not "harmonize" them.
  *
- * `dashboard-timezone.test.ts` is the executable guard: it asserts this
- * exact double-hop form survives a deliberately non-UTC reading session,
- * AND that the single-hop form named above fails under the same session --
- * so a future "simplification" back to the single-hop form fails loudly
+ * `dashboard-timezone.test.ts` is the executable guard: Test 1-3 assert
+ * this exact double-hop form survives a deliberately non-UTC reading
+ * session and that the single-hop form named above fails under the same
+ * session; Test 5 asserts the double-hop form is byte-identical to the
+ * ORIGINAL plain-cast form it replaced, under a non-UTC session -- proving
+ * "no functional change" rather than merely asserting it. Together these
+ * mean a future "simplification" back to the single-hop form fails loudly
  * rather than silently reintroducing the hazard.
  *
  * Exported (not inlined in `getWorkspaceDashboard`) so the regression test

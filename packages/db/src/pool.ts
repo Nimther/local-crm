@@ -20,6 +20,22 @@ import { scrubbedConsole } from "@mega-crm/redaction";
  * plus `scripts/lint-pg-pool-factory.mjs` (Task 2) turns it from a
  * convention into an invariant nobody can forget.
  *
+ * -- `options`: exactly one mechanism, guarded (WR-01 follow-up) --
+ * The TimeZone pin below (`options: '-c TimeZone=UTC'` on `new Pool({...})`)
+ * is subject to the EXACT SAME DSN-override hazard documented for `ssl`
+ * immediately below: `pg-connection-string` copies every URL query parameter
+ * verbatim into the parsed config, including an `options=` parameter, and
+ * `pg`'s own `ConnectionParameters` merges the DSN's parsed fields OVER the
+ * rest of `config` (`Object.assign({}, config, parse(connectionString))`) --
+ * so a DSN carrying its own `options=` query parameter would silently
+ * replace this factory's `-c TimeZone=UTC` string with no error. No DSN in
+ * this codebase sets `options=` today, but "latent" is exactly the failure
+ * mode the `ssl` rationale below exists to prevent. `assertDsnOmitsOptionsParam`
+ * closes this the same way `assertDsnRequestsTls` closes the TLS hazard:
+ * fail closed, at `createPgPool` time, unconditionally (not gated on
+ * `NODE_ENV`, unlike the TLS check) -- the TimeZone pin protects correctness
+ * of stored data in every environment, not just production's TLS posture.
+ *
  * -- TLS: exactly one mechanism (RESEARCH.md Pitfall B) --
  * node-postgres resolves TLS from TWO independent inputs that can disagree:
  * a `sslmode` (or `sslcert`/`sslkey`/`sslrootcert`) query parameter on the
@@ -227,10 +243,33 @@ export function assertDsnRequestsTls(dsn: string): void {
 }
 
 /**
+ * Throws if `dsn` carries its own `options` query parameter -- see this
+ * module's header comment ("`options`: exactly one mechanism, guarded").
+ * `pg-connection-string` copies every URL query parameter (including
+ * `options`) into the parsed config, and `pg`'s `ConnectionParameters` then
+ * merges those parsed fields OVER whatever top-level `options` string this
+ * factory passes to `new Pool({...})` -- so a DSN-level `options=` value
+ * would silently defeat the `-c TimeZone=UTC` startup-parameter pin with no
+ * error. Called unconditionally (every environment), unlike
+ * `assertDsnRequestsTls`, because the TimeZone pin protects stored-data
+ * correctness everywhere, not only production's TLS posture.
+ */
+export function assertDsnOmitsOptionsParam(dsn: string): void {
+  if (new URL(dsn).searchParams.has("options")) {
+    throw new Error(
+      `refusing to build a Postgres pool from a DSN that sets its own 'options' query parameter -- ` +
+        `it would silently override this factory's '-c TimeZone=UTC' startup-parameter pin ` +
+        `(see packages/db/src/pool.ts's header comment, "options: exactly one mechanism, guarded")`,
+    );
+  }
+}
+
+/**
  * Builds a `pg.Pool` with an unconditional error listener, a single-source
- * TLS decision (the connection string alone), and an explicit, named size.
- * See this module's header comment for the full rationale behind each of
- * these three properties.
+ * TLS decision (the connection string alone), a guarded single-source
+ * `options` decision (this factory's TimeZone pin alone), and an explicit,
+ * named size. See this module's header comment for the full rationale
+ * behind each of these properties.
  */
 export function createPgPool(options: CreatePgPoolOptions): Pool {
   const { connectionString, name } = options;
@@ -238,6 +277,11 @@ export function createPgPool(options: CreatePgPoolOptions): Pool {
   if (!connectionString || connectionString.trim() === "") {
     throw new Error(`createPgPool("${name}"): a non-empty connection string is required`);
   }
+
+  // WR-01 follow-up: unconditional (every environment) -- a DSN-level
+  // `options=` query parameter would silently override the TimeZone pin
+  // below, and that hazard is not specific to production.
+  assertDsnOmitsOptionsParam(connectionString);
 
   // Read at CALL time, not module load, so NODE_ENV can vary across calls
   // within the same process (and so a test can toggle it around one call).
