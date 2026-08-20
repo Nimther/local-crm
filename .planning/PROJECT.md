@@ -10,6 +10,20 @@ Multi-tenant SaaS-платформа marketing automation для B2C-компа�
 
 ## Current State
 
+**Shipped: v1.1 Production Hardening (2026-08-20)** — 10 фаз (8–17), 128 планов, 95/95 требований, все фазы `verification: passed`, security-регистры полностью закрыты (`threats_open: 0` везде; T-14-58/T-14-73/T-14-88 закрыты re-run'ом gsd-security-auditor 2026-08-20). Closeout: override_closeout — причины и полный список принятого tech debt в `.planning/MILESTONES.md` (Phase 10 stale-проекция init.manager — timestamp-артефакт при passed-верификации; один acknowledged deferred item).
+
+Платформа эксплуатируется в production: деплой одной командой (`scripts/deploy.sh <sha>`, GHCR immutable SHA-теги, включая CI-собранный postgres-образ с Phase 17), advisory-locked миграции с readiness-гейтом, pgBackRest PITR-бэкапы в off-host шифрованный репозиторий (drill выполнен, метрики самозаписываются: 119 s / 170 MB high-water), fail-closed RLS на всех tenant-таблицах, evidence-only reconciler, tenant-fair воркеры, атомарный unsubscribe + GDPR erasure, полная наблюдаемость (корреляция request→job→Postgres, Sentry с CI-доказанным scrubbing'ом, Grafana Cloud Loki + 9 watchdog'ов с runbook'ами) — и все delivery-гарантии подтверждены live против реального SendGrid (UAT 5/5, standing canary workspace со smoke-процедурой).
+
+- **Кодовая база:** ~139k LOC TypeScript (после v1.0 было ~57k); 929 коммитов за milestone (2026-07-27 → 2026-08-20)
+- **Tech debt, принятый при закрытии v1.1** (полные формулировки в `.planning/MILESTONES.md` и `.planning/milestones/v1.1-MILESTONE-AUDIT.md`): live operator-alert email ни разу не наблюдался человеком; оставшиеся live compliance-walkthrough'ы Phase 13; quick task 260818-aqd Task 3 (production-провижининг file-backed KEK, operator-only); пороги алертов Phase 15 — flagged assumptions до реальной нагрузки; API-side Sentry `workspace_id` gap (~10 route-модулей); два UI follow-up'а (LaunchConfirmDialog, CsvImportWizard)
+
+## Next Milestone Goals
+
+Не определены — следующий шаг `/gsd-new-milestone` (questioning → research → requirements → roadmap). Кандидаты, уже зафиксированные в tech debt и прошлых решениях: SCALE-02 (PgBouncer при реальном давлении `max_connections`), бенчмарк сегментации на 100k–1M контактов, оставшиеся live-walkthrough'ы (operator-alert email, compliance), UI follow-up'ы Phase 15, KEK quick-task Task 3.
+
+<details>
+<summary>v1.1 execution history — per-phase notes (archived at milestone close 2026-08-20)</summary>
+
 **Phase 17 complete (2026-08-20):** tech debt — WR-06 + medium security follow-ups (6/6 планов, verification passed 32/32). WR-06 закрыт на обоих слоях: `TimeZone=UTC` пин в pool factory + явный double-hop UTC-якорь в growth-запросе, оба доказаны поведенческими тестами против non-UTC Postgres. Образ `megacrm-postgres` теперь CI-собранный, GHCR-pulled на immutable SHA-теге, внутри compose-гейта иммутабельности, и **вырезан в production live** (3-я попытка катовера оставлена в проде; ratified: pgBackRest 2.59.1, скорректированный WAL-критерий). Restore drill самозаписывает метрики: живой PITR-прогон дал durationSeconds=119, diskHighWaterKb=170520 (T-14-73 закрыт цифрами). Alloy впервые реально установлен на production (D-11 amended: establish-then-verify; фаза-15 UAT test-5 «подтверждение» оказалось без evidence) — 7/7 Loki-лейблов, RestartCount 0. Попутно исправлены: chunk-cycle краш dashboard/flow-editor маршрутов (PR #16, жил в проде с 15.08), deploy.sh без `--no-deps` (PR #17 — implicit db/redis recreate), CI-ломающий hardcoded scratchpad-путь в тесте. Открыто: `/gsd-secure-phase 17` — аудитор должен наградить status-флипы T-14-58/T-14-73/T-14-88 (17-06 приложил evidence, статусы не тронуты по D-12); code review 0 critical / 4 warning (см. 17-REVIEW.md, WR-01 — латентный DSN-override хазард для options; WR-02 — read-path правка была hardening, не bugfix).
 
 **Phase 16 complete (2026-08-19):** live SendGrid verification (UAT-01..UAT-05) — милстоун v1.1 полностью выполнен (122/122 планов, фазы 8–16). Все пять UAT-требований подтверждены live против реального SendGrid и реального inbox (5/5 blocking-чекпоинтов одобрены оператором), verification passed 4/4 критериев. Итоговый evidence-артефакт: `.planning/phases/16-live-sendgrid-verification/16-UAT-REPORT.md`. Teardown production верифицирован наблюдением 5/5 (оба seam-переключателя сняты, fault proxy удалён, webhook tolerance восстановлен); UAT-воркспейс сохранён как standing canary с проверенной smoke-процедурой (runbook §15). Открыто: security review фазы 16 ещё не выполнен (`/gsd-secure-phase 16`); code review нашёл 1 critical (CR-01: `docker-compose.uat-proxy.yml` передаёт весь env-файл session-only прокси — вне deploy-пути, исправить до переиспользования файла).
@@ -60,7 +74,9 @@ Multi-tenant SaaS-платформа marketing automation для B2C-компа�
 
 **Жёсткий дедлайн:** партиции `events`/`send_events` заведены только по август 2026 — автопартиции (область 6) должны закрыться **до 1 сентября 2026**, иначе данные пойдут в DEFAULT partitions. ✓ **Закрыт Phase 9 (2026-08-07):** миграция 0038 + `ensurePartitions` дают 20 attached партиций (2026-09…2027-06), подтверждено catalog-запросом к мигрированной БД.
 
-**Открытое решение внутри milestone:** trust boundary Better Auth (аудит 4.3) — отдельная DB role с минимальными привилегиями против RLS на `organization`/`session`/`account`. Требует архитектурной проработки на discuss-phase.
+**Открытое решение внутри milestone:** trust boundary Better Auth (аудит 4.3) — отдельная DB role с минимальными привилегиями против RLS на `organization`/`session`/`account`. Требует архитектурной проработки на discuss-phase. *(Resolved: dedicated `mega_crm_auth` role, Phase 10 / D-04.)*
+
+</details>
 
 ## Business Context
 
@@ -96,13 +112,13 @@ Multi-tenant SaaS-платформа marketing automation для B2C-компа�
 - [x] Observability, deployment & performance: сервис деплоится в Docker на VPS, сообщает о готовности, ошибки и метрики видны, алерты настроены, есть runbook'и; frontend bundle разделён по маршрутам — Validated in Phases 14+15: deployment-половина в Phase 14 (Docker/GHCR, production compose, deploy/rollback на реальном VPS, `/healthz`+`/readyz`, runbook'и); observability-половина в Phase 15 (2026-08-17): сквозная корреляция request_id/tenant_id/job_id/send_id от HTTP через очередь до Postgres `application_name`, structured Pino в api+worker, Sentry в трёх процессах с CI-доказанным scrubbing'ом (ни ключ, ни email, ни JSONB-payload не доходят), логи в Grafana Cloud Loki через Alloy + два backstop-правила, алерты на queue depth/oldest job age/webhook lag/failed-send share с runbook'ом на каждый, read-only Bull Board за loopback+SSH, route-level code splitting (canvas/charts-чанки лениво), честные error/empty/pagination/stale/unsaved-состояния
 - [x] Database lifecycle: партиции, миграции, бэкапы и retention автоматизированы; restore drill отработан — Validated in Phases 9+14: автопартиции + maintenance watchdog (Phase 9); Phase 14 (2026-08-14) — migration runner с advisory lock и readiness-гейтом applied-vs-shipped, rollback/roll-forward rehearsal в CI, pgBackRest PITR-бэкапы в шифрованный off-host репозиторий (первый реальный бэкап + WAL + unattended scheduled подтверждены), restore drill выполнен дважды на реальном репозитории (PITR доказан в обе стороны от маркера), retention через catalog-driven partition drop (флаг выключен до pre-enable checklist), недостающий constraint (миграция 0062), TLS + `createPgPool` фабрика с CI-гейтом (PgBouncer отложен до SCALE-02 — D-09)
 
+- [x] Delivery correctness: ни одно письмо не теряется, не дублируется и не классифицируется ложно при сбоях SendGrid, таймаутах и падении процесса — Validated in Phase 11 (state machine `reconciling`/`unknown`, evidence-only reconciler под эксклюзивными claim'ами, UUIDv5-идемпотентность, crash-тесты трёх границ в required CI) и подтверждено live в Phase 16 (UAT-05: реальные 429/timeout — defer только своего тенанта, без дублей и потерь)
+- [x] Tenant isolation: один тенант не может затормозить отправку остальных; межтенантный доступ невозможен и доказан отрицательными тестами (включая WR-01) — Validated in Phases 10+12: 22 fail-closed RLS-политики, least-privilege роли `mega_crm_scan`/`mega_crm_auth`, 38 негативных cross-tenant тестов, sibling-workspace webhook-события отбрасываются (WR-01 закрыт); two-tenant fairness ≥90% baseline доказана CI-сценарием
+- [x] Live SendGrid verification (UAT-01..05, Phase 16): live-отправка с BYO key, live-события delivered/opened/clicked/bounced, подпись webhook на реальном payload через полный HTTP-стек, дедупликация redelivery live, поведение при 429/временных ошибках — Validated in Phase 16: 5/5 live UAT против реального SendGrid и реального inbox, выпускной барьер выполнен; standing canary workspace + постоянный CI-регресс (signed-replay suite 8/8)
+
 ### Active
 
-Scope milestone v1.1 Production Hardening. Детализация с REQ-ID — в `.planning/REQUIREMENTS.md`, первоисточник — `.planning/AUDIT-2026-07-27-production-readiness.md`.
-
-- [ ] Delivery correctness: ни одно письмо не теряется, не дублируется и не классифицируется ложно при сбоях SendGrid, таймаутах и падении процесса
-- [ ] Tenant isolation: один тенант не может затормозить отправку остальных; межтенантный доступ невозможен и доказан отрицательными тестами (включая WR-01 — отбрасывание событий чужого workspace при общем BYO-ключе)
-- [ ] Live SendGrid verification (UAT-01..05, Phase 16): live-отправка с BYO key, live-события delivered/opened/clicked/bounced, подпись webhook на реальном payload через полный HTTP-стек, дедупликация redelivery live, поведение при 429/временных ошибках — выпускной барьер milestone
+(пусто — требования следующего milestone определяются через `/gsd-new-milestone`; v1.1 REQUIREMENTS.md заархивирован в `.planning/milestones/v1.1-REQUIREMENTS.md`)
 
 ### Out of Scope
 
@@ -118,7 +134,8 @@ Scope milestone v1.1 Production Hardening. Детализация с REQ-ID — 
 
 ## Context
 
-- Brownfield после v1.0: ~57k LOC TypeScript, 616 коммитов за 13 дней (2026-07-02 → 2026-07-14); стек Fastify + Drizzle/Postgres(RLS) + BullMQ/Redis + React 19/Vite + @xyflow/react подтверждён в бою
+- После v1.1: ~139k LOC TypeScript, платформа задеплоена и эксплуатируется на production VPS (Docker/GHCR, pgBackRest, Grafana Cloud Loki, Sentry); стек Fastify + Drizzle/Postgres(RLS) + BullMQ/Redis + React 19/Vite + @xyflow/react подтверждён в бою двумя milestone'ами
+- v1.0 baseline: ~57k LOC, 616 коммитов за 13 дней (2026-07-02 → 2026-07-14); v1.1: 929 коммитов за 25 дней (2026-07-27 → 2026-08-20), 716 файлов изменено
 - Референс продуктовой модели — Klaviyo (flows, сегментация, событийная модель)
 - Целевой масштаб первого года: 100k–1M контактов суммарно по тенантам, сотни тысяч писем в день — сегментация и отправка спроектированы под этот объём (партиционирование, батчинг, изоляция очередей), но бенчмарк сегментации на реальном объёме ещё не проводился
 - Canvas-редактор цепочек (@xyflow/react) оказался ожидаемо самым дорогим UI-компонентом — Phase 6 заняла 24 плана из 96; ставка на TypeScript/React-экосистему оправдалась
@@ -149,11 +166,13 @@ Scope milestone v1.1 Production Hardening. Детализация с REQ-ID — 
 | Очередь + RPS-троттлинг в MVP | Rate limits SendGrid; broadcast не должен блокировать триггерные письма | ✓ Phase 4: две BullMQ-очереди (email:triggered / email:broadcast) с отдельными воркерами, per-tenant token bucket через rate-limiter-flexible, идемпотентный dispatch без дублей на ретраях |
 | TypeScript full-stack | Один язык, экосистема canvas-библиотек (React Flow и т.п.) | ✓ Phase 1: Fastify + Drizzle + React/Vite стек собран и прошёл полный UAT |
 | Команда + базовые роли (Owner/Admin/Member) в v1 | SaaS для команд маркетинга; права на запуск кампаний и смену SendGrid-ключа | ✓ Phase 1: инвайты, серверная ролевая матрица и role-gated UI подтверждены UAT |
-| v1.1: production hardening отдельным milestone, без переписывания | Аудит 27.07.2026 оценил готовность к production 6/10 при качестве реализации 7,5/10; риски на границах сбоев, а не в CRUD-коде | — Pending (milestone v1.1) |
+| v1.1: production hardening отдельным milestone, без переписывания | Аудит 27.07.2026 оценил готовность к production 6/10 при качестве реализации 7,5/10; риски на границах сбоев, а не в CRUD-коде | ✓ v1.1 shipped 2026-08-20: 95/95 требований, 10 фаз, ни одной переписанной подсистемы — hardening поверх работающего кода подтверждён |
 | v1.1: деплой — Docker на self-hosted VPS | Полный контроль над окружением, приемлемая ops-нагрузка для текущего размера команды | ✓ Phase 14: три образа в GHCR по immutable SHA, production compose с invariant-гейтом, `scripts/deploy.sh <sha>` с rollback; реальный deploy+rollback подтверждены на VPS |
 | v1.1: observability — SaaS (Sentry + hosted logs/metrics) | Быстрый запуск без содержания собственного стека мониторинга; провайдер логов уточняется на ресёрче | ✓ Phase 15: Sentry (3 EU-проекта) + Grafana Cloud Loki через Alloy sidecar; live-события и live log shipping подтверждены UAT (14-дневный free-tier retention зафиксирован в docs) |
-| v1.1: удаление контакта обезличивает данные, compliance evidence сохраняется | Баланс между правом на забвение (GDPR erasure) и доказуемостью законности отправки/suppression в споре | — Pending (milestone v1.1) |
-| v1.1: live SendGrid UAT — обязательный шаг фаз, не отложенный tech debt | Аудит назвал его выпускным барьером; аккаунт и verified sender доступны, блокера больше нет | — Pending (milestone v1.1) |
+| v1.1: удаление контакта обезличивает данные, compliance evidence сохраняется | Баланс между правом на забвение (GDPR erasure) и доказуемостью законности отправки/suppression в споре | ✓ Phase 13: обезличивание + per-workspace HMAC suppression + checkpointed allowlist-scrub + reclaim-воркер; re-import бывшего контакта создаёт нового, suppression продолжает отказывать |
+| v1.1: live SendGrid UAT — обязательный шаг фаз, не отложенный tech debt | Аудит назвал его выпускным барьером; аккаунт и verified sender доступны, блокера больше нет | ✓ Phase 16: UAT-01..05 5/5 live против реального SendGrid; standing canary workspace + smoke-процедура + постоянный CI-регресс подписанного replay |
+| Phase 17: `TimeZone=UTC` пин на каждом pool-соединении + double-hop `AT TIME ZONE 'UTC'` на read-path | WR-06: naive timestamp в growth-запросе давал day-boundary сдвиг при non-UTC session timezone; закрывать надо оба слоя, не один | ✓ Phase 17: оба слоя доказаны поведенческими тестами против America/New_York Postgres; D-03 sweep-аудит всех bare `::date` кастов |
+| Phase 17: postgres-образ (`db`/`pgbackrest`) CI-built и GHCR-published на immutable SHA, внутри compose-гейта | Host-built образ обходил review-путь (T-14-58/T-14-88); production не должен запускать то, что не собрал CI | ✓ Phase 17: live cutover выполнен, register закрыт auditor re-run'ом; restore drill отказывается стартовать на missing tag вместо fallback на stale local image |
 | Эфемерные тестовые БД с fail-closed DSN guard вместо общей dev-БД в тестах | Тесты, пишущие в dev-БД, маскируют баги и портят данные; guard без bypass-поверхности отсекает это классом, а не дисциплиной | ✓ Phase 8: все DB-workspace'ы и Playwright E2E самостоятельно создают/удаляют эфемерную БД; запуск E2E без provisioned БД падает на boot вместо тихого доступа к dev |
 | Failure-injection как воспроизводимые npm-скрипты, SendGrid всегда фейк через `ProcessSendJobDeps.sendMail` seam | Границы сбоев (429/timeout/reset/SIGKILL/Redis restart) — главный риск аудита; сценарии должны быть детерминированными и запускаемыми в CI | ✓ Phase 8: пять audit-named сценариев зелёные и детерминированные; ни один не достигает реального SendGrid; настраиваемый base URL осознанно отложен до Phase 16 |
 | Coverage-гейт по неокруглённой дроби с записанным порогом и provenance | Округление и смена deominator'а — типовые пути тихой деградации гейта; порог = измерение + осознанный инкремент | ✓ Phase 8: один агрегированный отчёт с одним знаменателем; 0.84996 не проходит порог 0.85; понижение порога — красная проверка |
@@ -191,4 +210,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-20 after Phase 17 (tech debt closure; production on CI-built postgres image)*
+*Last updated: 2026-08-20 after v1.1 Production Hardening milestone close*
