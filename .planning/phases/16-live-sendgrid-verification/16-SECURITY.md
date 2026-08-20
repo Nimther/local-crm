@@ -97,6 +97,7 @@ created: 2026-08-19
 | Audit Date | Threats Total | Closed | Open | Run By |
 |------------|---------------|--------|------|--------|
 | 2026-08-19 | 34 | 34 | 0 | /gsd-secure-phase (L1 grep-depth verification, short-circuit — register authored at plan time, ASVS 1) |
+| 2026-08-20 | 36 | 36 | 0 | /gsd-secure-phase re-audit (L1 short-circuit — register authored at plan time, ASVS 1, no new SUMMARY threat flags; total counts all register rows: T-16-01…T-16-35 + consolidated T-16-SC) |
 
 ---
 
