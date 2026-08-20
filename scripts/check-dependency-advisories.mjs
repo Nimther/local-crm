@@ -146,6 +146,13 @@ export function collectAdvisories(vulnerabilities) {
   return advisories;
 }
 
+/** The real subprocess call `runNpmAuditWithRetries` uses by default -- the
+ * ONE genuine I/O primitive in this module. Never called directly by tests;
+ * they inject a replacement via `runNpmAuditWithRetries`'s `runAudit` seam. */
+function defaultRunAudit(cwd) {
+  return execFileSync("npm", ["audit", "--json"], { cwd, encoding: "utf8" });
+}
+
 /**
  * Runs `npm audit --json` and returns the parsed report. This is the ONE I/O
  * function in this module.
@@ -170,17 +177,26 @@ export function collectAdvisories(vulnerabilities) {
  * transient registry hiccup, and this function must stay synchronous to
  * keep the CLI's control flow linear like every sibling gate script.
  *
+ * The actual subprocess invocation is behind the injectable `runAudit(cwd)`
+ * seam (defaulting to `defaultRunAudit`, a thin wrapper over
+ * `execFileSync`), mirroring `scripts/validate-alloy-config.mjs`'s
+ * `runValidation({dockerAvailable, runFmt})` injectable-defaults
+ * convention -- tests drive the retry/fail-closed/non-zero-exit-parse path
+ * through this seam directly, never by mocking the module or spawning a
+ * real `npm audit` subprocess.
+ *
  * @param {string} cwd
  * @param {number} [maxRetries]
+ * @param {{runAudit?: (cwd: string) => string}} [deps]
  * @returns {{auditReportVersion: number, vulnerabilities: Record<string, unknown>, metadata?: unknown}}
  */
-export function runNpmAuditWithRetries(cwd, maxRetries = DEFAULT_MAX_RETRIES) {
+export function runNpmAuditWithRetries(cwd, maxRetries = DEFAULT_MAX_RETRIES, { runAudit = defaultRunAudit } = {}) {
   let lastError;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     let stdout;
     try {
-      stdout = execFileSync("npm", ["audit", "--json"], { cwd, encoding: "utf8" });
+      stdout = runAudit(cwd);
     } catch (err) {
       // npm exits non-zero whenever it finds ANY vulnerability -- read
       // err.stdout and keep going; only genuinely missing/empty output

@@ -113,7 +113,6 @@ describe("Test 6 -- prototype-pollution-shaped key is inert", () => {
     expect(() => collectAdvisories(malicious)).not.toThrow();
     const advisories = collectAdvisories(malicious);
     expect(advisories.some((a) => a.package === "safe")).toBe(true);
-    // eslint-disable-next-line no-prototype-builtins
     expect(({}).polluted).toBeUndefined();
     expect(Object.prototype.hasOwnProperty.call({}, "name")).toBe(false);
   });
