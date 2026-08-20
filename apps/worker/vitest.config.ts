@@ -3,8 +3,11 @@ import { AGGREGATE_EXCLUDED_LOAD_TESTS, workerTestBase } from "./vitest.base.con
 
 /**
  * apps/worker's ordinary entrypoint: `npm run test -w apps/worker`, every
- * `npm run failure:*` script, and — through the root aggregate's `projects`
- * list — `npm run coverage` (CI job `test`).
+ * `npm run failure:*` script EXCEPT `failure:tenant-fairness`, and — through
+ * the root aggregate's `projects` list — `npm run coverage` (CI job `test`).
+ * `failure:tenant-fairness` is the one exception: it goes through
+ * vitest.loadtest.config.ts, because this config is precisely the one that
+ * excludes its file.
  *
  * Everything except `exclude` lives in ./vitest.base.config.ts and is shared
  * verbatim with vitest.loadtest.config.ts. See that file for why the split
