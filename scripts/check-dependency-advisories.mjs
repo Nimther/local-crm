@@ -288,9 +288,18 @@ export function runNpmAuditWithRetries(cwd, maxRetries = DEFAULT_MAX_RETRIES, { 
  * match -- matched on the LEAF package name `collectAdvisories` attributes
  * each record to. `acceptList` is consumed here as a plain list of
  * already-validated entries (plan 18-02 adds the schema validation that
- * produces it); an entry that also carries a parseable `expiry` in the past
- * relative to `now` is treated as not covering anything, so this function
- * degrades safely even before 18-02's validation exists.
+ * produces it).
+ *
+ * D-05 / CR-01: an entry's `expiry` covers the ENTIRE calendar day it names,
+ * in UTC, inclusive -- computed via the same `parseExpiryUtcDayMs`/
+ * `toUtcDayMs` UTC-day comparison `validateAcceptListEntry` uses, so the two
+ * functions can never disagree on the expiry boundary again (they used to:
+ * this function previously compared millisecond-precision `Date` instants,
+ * which expired an entry as soon as the clock passed UTC midnight on its
+ * expiry day -- i.e. for nearly the entire day the entry was supposed to
+ * still be valid). An unparseable/malformed `expiry` never covers a finding
+ * -- fail closed, matching `validateAcceptListEntry`'s rejection of the same
+ * entry, never "covers forever".
  *
  * Findings are returned sorted by package name, then advisory id, so the
  * report is byte-stable across runs over the same tree.
@@ -304,9 +313,9 @@ export function selectBlockingFindings(advisories, acceptList, now) {
   for (const entry of Array.isArray(acceptList) ? acceptList : []) {
     if (!entry || typeof entry !== "object") continue;
     if (entry.expiry) {
-      const expiryDate = new Date(entry.expiry);
-      if (!Number.isNaN(expiryDate.getTime()) && expiryDate.getTime() < now.getTime()) {
-        continue; // expired entries never cover a finding
+      const expiryUtcDayMs = parseExpiryUtcDayMs(entry.expiry);
+      if (expiryUtcDayMs === undefined || expiryUtcDayMs < toUtcDayMs(now)) {
+        continue; // expired (or unparseable) entries never cover a finding
       }
     }
     accepted.add(`${entry.package}::${entry.advisoryId}`);
@@ -367,6 +376,39 @@ function isRealUtcCalendarDate(year, month, day) {
 }
 
 /**
+ * CR-01: parses an accept-list entry's `expiry` field into UTC-day
+ * milliseconds (midnight UTC on that calendar date), or returns `undefined`
+ * if it is not a real `YYYY-MM-DD` calendar date. Shared by
+ * `validateAcceptListEntry` and `selectBlockingFindings` so the two can
+ * never disagree on the expiry boundary again -- callers must treat
+ * `undefined` as "does not cover"/"invalid", never "covers forever".
+ *
+ * @param {unknown} expiry
+ * @returns {number | undefined}
+ */
+function parseExpiryUtcDayMs(expiry) {
+  if (typeof expiry !== "string") return undefined;
+  const trimmed = expiry.trim();
+  const match = ISO_DATE_PATTERN.exec(trimmed);
+  if (!match) return undefined;
+  const [year, month, day] = trimmed.split("-").map(Number);
+  if (!isRealUtcCalendarDate(year, month, day)) return undefined;
+  return Date.UTC(year, month - 1, day);
+}
+
+/**
+ * UTC-day milliseconds (midnight UTC) for a `Date` -- ignores its
+ * time-of-day, so a comparison against `parseExpiryUtcDayMs`'s result is a
+ * whole-calendar-day comparison regardless of what time of day `date` is.
+ *
+ * @param {Date} date
+ * @returns {number}
+ */
+function toUtcDayMs(date) {
+  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+}
+
+/**
  * Validates one accept-list entry and returns the list of problems found (an
  * empty array means the entry is valid). Checks run in a fixed order so
  * messages are stable: object shape; each of the five mandatory fields
@@ -422,18 +464,14 @@ export function validateAcceptListEntry(entry, now) {
 
   let expiryUtcDayMs;
   if (present.expiry) {
-    const trimmed = entry.expiry.trim();
-    const match = ISO_DATE_PATTERN.exec(trimmed);
-    const [year, month, day] = match ? trimmed.split("-").map(Number) : [];
-    if (!match || !isRealUtcCalendarDate(year, month, day)) {
+    expiryUtcDayMs = parseExpiryUtcDayMs(entry.expiry);
+    if (expiryUtcDayMs === undefined) {
       problems.push(`field "expiry" must be a real calendar date in YYYY-MM-DD form: got "${entry.expiry}"`);
-    } else {
-      expiryUtcDayMs = Date.UTC(year, month - 1, day);
     }
   }
 
   if (expiryUtcDayMs !== undefined) {
-    const nowUtcDayMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    const nowUtcDayMs = toUtcDayMs(now);
     const diffDays = Math.round((expiryUtcDayMs - nowUtcDayMs) / (24 * 60 * 60 * 1000));
     if (diffDays < 0) {
       problems.push(

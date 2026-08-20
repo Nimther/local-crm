@@ -494,3 +494,50 @@ describe("Test 20 -- end-to-end suppression through selectBlockingFindings", () 
     expect(findingsWith).toHaveLength(findingsWithout.length);
   });
 });
+
+// ---------------------------------------------------------------------------
+// CR-01 regression: selectBlockingFindings must apply the same UTC-day-
+// inclusive expiry semantics validateAcceptListEntry does. Every test above
+// this point pins `now` at exact UTC midnight (`NOW = Date.UTC(2026, 0,
+// 15)`), which is the ONE instant where the old millisecond-precision
+// comparison in selectBlockingFindings happened to agree with
+// validateAcceptListEntry's UTC-day comparison -- masking the bug. These
+// tests pin `now` to a non-midnight UTC time so the two can no longer
+// silently diverge.
+// ---------------------------------------------------------------------------
+
+describe("Test 21 -- selectBlockingFindings expiry inclusivity matches validateAcceptListEntry at a non-midnight `now` (D-05, CR-01)", () => {
+  const EXPIRY = "2026-01-15";
+  const advisoriesFor = (severity = "high") => [{ package: "postcss", advisoryId: "GHSA-abcd-1234-efgh", severity }];
+
+  it("suppresses the finding at noon UTC on the expiry day, matching validateAcceptListEntry's own verdict", () => {
+    const nowNoon = new Date(Date.UTC(2026, 0, 15, 12, 0, 0));
+    const entry = baseValidAcceptListEntry({ expiry: EXPIRY });
+    expect(validateAcceptListEntry(entry, nowNoon)).toEqual([]);
+    const findings = selectBlockingFindings(advisoriesFor(), [entry], nowNoon);
+    expect(findings).toHaveLength(0);
+  });
+
+  it("still suppresses the finding one second before UTC midnight on the expiry day -- the bug expired it here", () => {
+    const nowLateOnExpiryDay = new Date(Date.UTC(2026, 0, 15, 23, 59, 59));
+    const entry = baseValidAcceptListEntry({ expiry: EXPIRY });
+    expect(validateAcceptListEntry(entry, nowLateOnExpiryDay)).toEqual([]);
+    const findings = selectBlockingFindings(advisoriesFor(), [entry], nowLateOnExpiryDay);
+    expect(findings).toHaveLength(0);
+  });
+
+  it("expires the finding once `now`'s UTC day is strictly after the expiry day", () => {
+    const nowNextDay = new Date(Date.UTC(2026, 0, 16, 0, 0, 1));
+    const entry = baseValidAcceptListEntry({ expiry: EXPIRY });
+    expect(validateAcceptListEntry(entry, nowNextDay).some((p) => p.includes("expiry"))).toBe(true);
+    const findings = selectBlockingFindings(advisoriesFor(), [entry], nowNextDay);
+    expect(findings).toHaveLength(1);
+  });
+
+  it("an unparseable expiry never covers a finding -- fails closed, not 'covers forever'", () => {
+    const nowNoon = new Date(Date.UTC(2026, 0, 15, 12, 0, 0));
+    const entry = { ...baseValidAcceptListEntry(), expiry: "not-a-real-date" };
+    const findings = selectBlockingFindings(advisoriesFor(), [entry], nowNoon);
+    expect(findings).toHaveLength(1);
+  });
+});
