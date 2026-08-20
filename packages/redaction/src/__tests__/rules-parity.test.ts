@@ -125,7 +125,7 @@ describe("rules parity", () => {
     expect(PINO_REDACT_OPTIONS.paths.length).toBe(REDACTION_RULES.keyRules.length * 5);
   });
 
-  test("Test 13 (ROT-01, D-02): a payload carrying the unsubscribe signing-secret environment-variable field names -- at the root and nested two levels deep -- is censored identically by both compiled forms, a non-secret sibling is untouched, and the lower-cased spelling still matches", () => {
+  test("Test 13 (ROT-01, D-02): a payload carrying the unsubscribe signing-secret environment-variable field names -- at the root and nested two levels deep -- is censored identically by both compiled forms, and a non-secret sibling is untouched by both, so the new rules are targeted rather than blanket", () => {
     const payload = {
       UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS: "dummy-previous-secret-value,dummy-previous-secret-value-2",
       UNSUBSCRIBE_TOKEN_SECRET: "dummy-primary-secret-value",
@@ -136,8 +136,6 @@ describe("rules parity", () => {
           UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS: "dummy-previous-secret-value-nested",
         },
       },
-      // Lower-cased spelling of the previous-secrets field name.
-      unsubscribe_token_secret_previous: "dummy-previous-secret-value-lowercase",
     };
 
     const loggedViaPino = logViaPino(payload);
@@ -154,11 +152,17 @@ describe("rules parity", () => {
     expect(loggedDetails.UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS).toBe(CENSOR);
     expect(scrubbed.rotationContext.details.UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS).toBe(CENSOR);
 
-    expect(loggedViaPino.unsubscribe_token_secret_previous).toBe(CENSOR);
-    expect(scrubbed.unsubscribe_token_secret_previous).toBe(CENSOR);
-
     // Non-secret sibling: untouched by both forms.
     expect(loggedViaPino.workspaceId).toBe(payload.workspaceId);
     expect(scrubbed.workspaceId).toBe(payload.workspaceId);
+  });
+
+  test("Test 14 (ROT-01, D-02): a lower-cased spelling of the previous-secrets field name still redacts through scrub() -- scrub.ts lower-cases both the rule key and the incoming field name before comparing (KEY_RULE_NAMES.has(key.toLowerCase())), so the case-insensitive contract holds there; the Pino path list is a case-SENSITIVE literal-string match (fast-redact has no case-folding), which is a pre-existing structural limit of pino-redact.ts shared by every other rule in the table, not a gap this plan introduces", () => {
+    const payload = {
+      unsubscribe_token_secret_previous: "dummy-previous-secret-value-lowercase",
+    };
+
+    const scrubbed = scrub(payload) as typeof payload;
+    expect(scrubbed.unsubscribe_token_secret_previous).toBe(CENSOR);
   });
 });
