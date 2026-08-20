@@ -101,7 +101,12 @@ const baseRequired = [
   // broadcast/test send signs a List-Unsubscribe token, so a missing value
   // here previously crashed per-job instead of failing loud at boot (the
   // root cause of UAT Tests 4/5). Presence-only check; apps/api/src/env.ts
-  // and apps/worker/src/server.ts enforce the >=32-char strength contract.
+  // and apps/worker/src/server.ts enforce the >=32-char strength contract
+  // and (19-02, D-03) the comma/whitespace charset contract, mirrored below.
+  // 19-02 (ROT-01, D-01): UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS is deliberately
+  // NOT added here -- it is optional, so there is no presence to require.
+  // Its conditional structural validation (D-02/D-03/D-07) lives in the
+  // block below, after the missing-required check.
   "UNSUBSCRIBE_TOKEN_SECRET",
   // For a LIVE SendGrid webhook UAT this must be a publicly reachable https
   // URL (e.g. an ngrok/cloudflared tunnel pointed at this API's port) --
@@ -138,6 +143,69 @@ if (missing.length > 0) {
     ].join("\n")
   );
   process.exit(1);
+}
+
+// 19-02 (ROT-01, D-07, SC4): the previous-secrets list's hard structural
+// bound -- a soft cap, not a date-based purge. Declared independently here;
+// apps/api/src/env.ts and apps/worker/src/server.ts each declare their own
+// copy per this codebase's triplication convention (SPECIFICATION.md §3.1),
+// and __tests__/check-env-unsubscribe-previous.test.mjs's Block B proves the
+// three agree.
+const MAX_UNSUBSCRIBE_PREVIOUS_SECRETS = 5;
+
+// 19-02 (ROT-01, D-01/D-02/D-03/D-07): conditional structural validation of
+// UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS, and the same tightened charset rule on
+// the primary secret. Mirrors apps/api/src/env.ts's superRefine and
+// apps/worker/src/server.ts's assertUnsubscribeTokenSecrets, independently
+// hard-coded here per this codebase's triplication convention. Only runs
+// when the previous-secrets value is present and non-empty -- its absence
+// is the normal pre-rotation state (D-01). Violation lines name the
+// variable, the rule and (for count/length rules) the offending 1-based
+// position -- never the value, never a fragment of it (T-19-08).
+{
+  const violations = [];
+  const primary = values.UNSUBSCRIBE_TOKEN_SECRET || "";
+  if (/[,\s]/.test(primary)) {
+    violations.push("UNSUBSCRIBE_TOKEN_SECRET must not contain a comma or whitespace (D-03)");
+  }
+  const previous = values.UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS;
+  if (previous) {
+    if (/\s/.test(previous)) {
+      violations.push("UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS entries must not contain whitespace (D-03)");
+    }
+    const entries = previous.split(",");
+    if (entries.length > MAX_UNSUBSCRIBE_PREVIOUS_SECRETS) {
+      violations.push(
+        `UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS supports at most ${MAX_UNSUBSCRIBE_PREVIOUS_SECRETS} retired secrets (found ${entries.length})`
+      );
+    }
+    const seen = new Set();
+    entries.forEach((entry, index) => {
+      const position = index + 1;
+      if (entry.length === 0) {
+        violations.push(`UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS entry ${position} must not be empty`);
+      } else if (entry.length < 32) {
+        violations.push(`UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS entry ${position} must be at least 32 characters`);
+      }
+      if (entry === primary || seen.has(entry)) {
+        violations.push(
+          `UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS entry ${position} duplicates the primary secret or another entry`
+        );
+      }
+      seen.add(entry);
+    });
+  }
+
+  if (violations.length > 0) {
+    console.error(
+      [
+        `Env check failed: UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS validation failed in ${targetPath}:`,
+        ...violations.map((v) => `  - ${v}`),
+        "See .env.example in the repository for the full template.",
+      ].join("\n")
+    );
+    process.exit(1);
+  }
 }
 
 // Non-fatal heads-up: a localhost PUBLIC_APP_URL is fine for local dev of
