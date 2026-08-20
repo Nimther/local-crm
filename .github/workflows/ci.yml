@@ -162,7 +162,7 @@ jobs:
       # default shell does NOT enable pipefail, so a failing gate piped into
       # `tee` would report tee's exit code -- 0 -- and this required check
       # would pass while a real HIGH/CRITICAL finding sat un-caught (same
-      # precedent as this file's own E2E step below).
+      # precedent as this file's own E2E step, `e2e` job, uses).
       - name: Dependency advisory gate (DEP-01/02/03)
         shell: bash
         run: npm run check:dependency-advisories 2>&1 | tee /tmp/advisory-gate-output.txt
