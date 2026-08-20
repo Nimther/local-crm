@@ -205,6 +205,24 @@ export function findChunkImportCycle(manifest) {
   return null;
 }
 
+/**
+ * WR-03 follow-up (17-REVIEW.md): extracted from `main()` into its own pure
+ * (given `manifest` and `webDir` as inputs) exported function so this exact
+ * cycle-suppression decision is directly unit-testable with in-memory
+ * manifest fixtures + a `vite.config.ts` fixture directory, the same
+ * `evaluateInvariants`/`runValidation` split `validate-prod-compose.mjs`
+ * already uses. Returns the violation message string, or `null` if there is
+ * no cycle, or the cycle is tolerated because `strictExecutionOrder: true`
+ * is present.
+ */
+export function evaluateCycleBoundary(manifest, webDir) {
+  const cycle = findChunkImportCycle(manifest);
+  if (cycle && !viteConfigHasStrictExecutionOrder(webDir)) {
+    return `static chunk-import cycle in the build manifest WITHOUT strictExecutionOrder: ${cycle.join(" -> ")} -- chunks in a cycle execute against uninitialized bindings and crash their route at module evaluation (TypeError at module scope; this shipped to production 2026-08-15..19). Cycles are tolerable ONLY under rollupOptions.output.strictExecutionOrder: true in apps/web/vite.config.ts, which defers module bodies with runtime init helpers.`;
+  }
+  return null;
+}
+
 function isDirectInvocation() {
   const entryArg = process.argv[1];
   if (!entryArg) return false;
@@ -234,11 +252,9 @@ function main() {
 
   const { violations, checkedCount } = evaluateChunkBoundaries(manifest, webDir, entryInfo);
 
-  const cycle = findChunkImportCycle(manifest);
-  if (cycle && !viteConfigHasStrictExecutionOrder(webDir)) {
-    violations.push(
-      `static chunk-import cycle in the build manifest WITHOUT strictExecutionOrder: ${cycle.join(" -> ")} -- chunks in a cycle execute against uninitialized bindings and crash their route at module evaluation (TypeError at module scope; this shipped to production 2026-08-15..19). Cycles are tolerable ONLY under rollupOptions.output.strictExecutionOrder: true in apps/web/vite.config.ts, which defers module bodies with runtime init helpers.`,
-    );
+  const cycleViolation = evaluateCycleBoundary(manifest, webDir);
+  if (cycleViolation) {
+    violations.push(cycleViolation);
   }
 
   if (violations.length > 0) {
