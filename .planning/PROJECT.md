@@ -127,6 +127,7 @@ Multi-tenant SaaS-платформа marketing automation для B2C-компа�
 - [x] Delivery correctness: ни одно письмо не теряется, не дублируется и не классифицируется ложно при сбоях SendGrid, таймаутах и падении процесса — Validated in Phase 11 (state machine `reconciling`/`unknown`, evidence-only reconciler под эксклюзивными claim'ами, UUIDv5-идемпотентность, crash-тесты трёх границ в required CI) и подтверждено live в Phase 16 (UAT-05: реальные 429/timeout — defer только своего тенанта, без дублей и потерь)
 - [x] Tenant isolation: один тенант не может затормозить отправку остальных; межтенантный доступ невозможен и доказан отрицательными тестами (включая WR-01) — Validated in Phases 10+12: 22 fail-closed RLS-политики, least-privilege роли `mega_crm_scan`/`mega_crm_auth`, 38 негативных cross-tenant тестов, sibling-workspace webhook-события отбрасываются (WR-01 закрыт); two-tenant fairness ≥90% baseline доказана CI-сценарием
 - [x] Live SendGrid verification (UAT-01..05, Phase 16): live-отправка с BYO key, live-события delivered/opened/clicked/bounced, подпись webhook на реальном payload через полный HTTP-стек, дедупликация redelivery live, поведение при 429/временных ошибках — Validated in Phase 16: 5/5 live UAT против реального SendGrid и реального inbox, выпускной барьер выполнен; standing canary workspace + постоянный CI-регресс (signed-replay suite 8/8)
+- [x] Dependency hygiene: уязвимые runtime-зависимости обновлены; CI-контроль новых неразобранных HIGH advisories с механизмом принятия недостижимых tooling-only findings — Validated in Phase 18: raw `npm audit` 0 high/0 critical после реальных апгрейдов (DEP-01), required-гейт `check:dependency-advisories` в static-джобе CI (fail-first доказан на 9 GHSA), accept-list с 5 обязательными полями/90-дневным expiry (DEP-03), ежедневный scheduled scan с dedup'нутым labelled issue + drift-тест байт-идентичности вызова (DEP-02); live dispatch-учение подтвердило issue-путь (UAT 6/6)
 
 ### Active
 
@@ -134,7 +135,6 @@ Multi-tenant SaaS-платформа marketing automation для B2C-компа�
 - [ ] DSR-выгрузка персональных данных контакта: tenant-isolated экспорт (профиль, custom properties, consent history, события, send-данные) из UI карточки контакта в machine-readable файл
 - [ ] Физический purge soft-deleted workspace: удаление/обезличивание tenant PII + удаление tenant secrets после платформенного retention; идемпотентный, возобновляемый, безопасный для других workspace
 - [ ] Graceful rotation unsubscribe-secret: primary для новых подписей, previous secrets для проверки старых ссылок
-- [ ] Dependency hygiene: уязвимые runtime-зависимости обновлены; CI-контроль новых неразобранных HIGH advisories с механизмом принятия недостижимых tooling-only findings
 
 ### Out of Scope
 
@@ -207,6 +207,7 @@ Multi-tenant SaaS-платформа marketing automation для B2C-компа�
 | Инфраструктурные конфиги парсятся реальным бинарём в CI, не только линтуются статически (урок G-15-4) | `config.alloy` с `#`-комментариями прошёл все текстовые проверки, но лексер Alloy отверг первый байт — production sidecar restart-loop'ился и доставка логов молча стояла, при этом оба backstop-правила читали пустой стрим | ✓ Phase 15 (план 15-22): `validate-alloy-config.mjs` = static-скан + `alloy fmt` под точным pinned-образом из compose (resolved at run time, не hardcoded), `ALLOY_VALIDATE_REQUIRE_BINARY=1` в CI — недоступный Docker это violation, не skip |
 | Watchdog-состояние — одна keyed-таблица `ops_alert_state`, не таблица-синглтон на алерт | Один атомарный multi-replica-safe claim-примитив для всех watchdog'ов; алерты не могут маскировать друг друга (независимые alert_name) | ✓ Phase 15 (миграция 0064): `INSERT … ON CONFLICT DO UPDATE … WHERE … RETURNING`, first-ever claim без seed-строки, доказан под реальной two-connection гонкой |
 | Cross-workspace чтение для webhook-lag — column-level grant (миграция 0065, human-approved override) | Таблица `workspace_webhook_endpoints` несёт `path_token` (trust anchor) и `public_key` — grant на всю таблицу дал бы scan-роли доступ к секретам при любом будущем запросе | ✓ Phase 15: `GRANT SELECT (last_event_at)` only; survey всех 64 прежних миграций доказал отсутствие другого источника server-set receipt-времени; варианты A/B/C через checkpoint, human выбрал A |
+| Dependency-гейт: один скрипт для PR-блока и scheduled scan, drift-тест байт-идентичности вызова | Две реализации гейта неизбежно расходятся; «PR-diff + full-scan» из DEP-02 удовлетворён no-diff-by-construction дизайном (гейт красный на ЛЮБОЙ не-accept-listed finding при чистом DEP-01 baseline) вместо git-diff-машинерии | ✓ Phase 18: `check-dependency-advisories.mjs` вызывается byte-identical из ci.yml и advisory-scan.yml (strict-equality drift-тест); accept-list — 5 обязательных полей, justification ≥80 символов, expiry ≤90 дней, единая UTC-day семантика в валидации и отборе; live dispatch-учение: issue #21 создан с label, повторный run — комментарий без дубля |
 
 ## Evolution
 
@@ -226,4 +227,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-20 after starting milestone v1.2 Data Lifecycle & Delivery Trust*
+*Last updated: 2026-08-20 after Phase 18*
