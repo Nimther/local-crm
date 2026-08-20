@@ -64,6 +64,24 @@
 // there is no skip path and no env flag that downgrades an unreachable or
 // malformed npm audit run into a pass.
 //
+// Phase 18 plan 02 -- the accept-list contract (.advisory-accept-list.json):
+// the accept-list is the ONLY sanctioned way a blocking advisory stops
+// blocking, and it exists SOLELY for findings PROVEN unreachable -- never as
+// a snooze button for a reachable HIGH (D-11 still requires the upgrade even
+// when the only fix is semver-major). Every entry needs all five fields:
+// D-04: advisoryId, package, justification, owner, expiry are ALL mandatory
+// -- an entry missing, empty, or non-string in any of them fails the gate
+// outright (validateAcceptListEntry), because a malformed accept-list means
+// the gate cannot know what was intentionally accepted. D-06: `justification`
+// IS the reachability analysis itself (>= MIN_JUSTIFICATION_LENGTH chars) --
+// there is deliberately no separate per-advisory analysis document to drift
+// out of sync with it. D-07: `owner` is the accountable person's git author
+// email. D-05: `expiry` (YYYY-MM-DD) is valid through the end of that date
+// (inclusive) and capped at MAX_EXPIRY_DAYS days out; renewal is a reviewed
+// PR that touches the entry, not a silent extension. A stale entry (valid,
+// unexpired, matching no CURRENT advisory) is a printed warning, not a
+// failure -- D-05's cap already bounds how long it can survive.
+//
 // No dependencies -- Node built-ins only. Do not import `zod` even though it
 // resolves via node_modules hoisting from apps/api -- every scripts/*.mjs
 // gate in this repo hand-rolls its own validation for exactly this reason
@@ -81,7 +99,39 @@ export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url
 export const BLOCKING_SEVERITIES = Object.freeze(new Set(["high", "critical"]));
 
 /** D-04: the accept-list lives at the repo root under this exact name. */
-const ACCEPT_LIST_FILENAME = ".advisory-accept-list.json";
+export const ACCEPT_LIST_FILENAME = ".advisory-accept-list.json";
+
+/**
+ * D-05: an accept-list entry's `expiry` is valid at most this many days out
+ * from the moment the gate runs. A longer cap would let an acceptance
+ * outlive the review that granted it; 90 days is one quarter -- long enough
+ * that an owner isn't nagged every sprint, short enough that a forgotten
+ * entry turns the build red (and gets noticed) well within a year.
+ */
+export const MAX_EXPIRY_DAYS = 90;
+
+/**
+ * D-06: the `justification` field IS the reachability analysis -- there is
+ * deliberately no separate per-advisory analysis document to keep in sync.
+ * 80 characters is a low bar (a single real sentence, not a paragraph), but
+ * it is still a bar: it rejects "not reachable", "internal tool only", and
+ * other one-line hand-waves that assert a conclusion without showing the
+ * trace that reached it, while staying cheap enough not to discourage
+ * writing the entry at all.
+ */
+export const MIN_JUSTIFICATION_LENGTH = 80;
+
+/** D-04: GHSA advisory ids are `GHSA-` followed by three dash-separated groups. */
+const GHSA_PATTERN = /^GHSA-[0-9A-Za-z]+-[0-9A-Za-z]+-[0-9A-Za-z]+$/;
+
+/** D-07: owner is a git author email -- a plain, generic email shape. */
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** D-05: expiry is a plain `YYYY-MM-DD` calendar date, never a timestamp. */
+const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+/** D-04: the five mandatory accept-list entry fields, in the fixed order they are checked. */
+const MANDATORY_ACCEPT_LIST_FIELDS = Object.freeze(["advisoryId", "package", "justification", "owner", "expiry"]);
 
 /** D-03: attempts before failing closed on an unreachable/unparseable audit run. */
 const DEFAULT_MAX_RETRIES = 3;
@@ -306,12 +356,159 @@ export function formatFailureReport(findings) {
   return lines.join("\n");
 }
 
-function loadAcceptList(repoRoot) {
-  const file = path.join(repoRoot, ACCEPT_LIST_FILENAME);
-  if (!existsSync(file)) return [];
-  const raw = readFileSync(file, "utf8");
-  const parsed = JSON.parse(raw);
-  return Array.isArray(parsed?.entries) ? parsed.entries : [];
+/**
+ * Returns true if `y-m-d` (1-indexed month) is a real UTC calendar date --
+ * i.e. `Date.UTC` did not silently roll it over (the way `2026-02-30` rolls
+ * into March).
+ */
+function isRealUtcCalendarDate(year, month, day) {
+  const dt = new Date(Date.UTC(year, month - 1, day));
+  return dt.getUTCFullYear() === year && dt.getUTCMonth() === month - 1 && dt.getUTCDate() === day;
+}
+
+/**
+ * Validates one accept-list entry and returns the list of problems found (an
+ * empty array means the entry is valid). Checks run in a fixed order so
+ * messages are stable: object shape; each of the five mandatory fields
+ * present/string/non-empty (D-04); advisoryId GHSA-shaped; owner
+ * email-shaped (D-07); justification length (D-06); expiry format and real
+ * calendar date; then the two date rules against `now`, computed purely in
+ * UTC day units so the result never depends on the runner's timezone
+ * (T-18-10): expired when the expiry day is strictly before `now`'s UTC day
+ * (an entry is valid through the end of its expiry date -- inclusive), and
+ * over-cap when the expiry day is more than MAX_EXPIRY_DAYS days after
+ * `now`'s UTC day (D-05). The two failures carry distinct messages so a
+ * lapsed acceptance is never confused with one requesting too long a window.
+ *
+ * @param {unknown} entry
+ * @param {Date} now
+ * @returns {string[]}
+ */
+export function validateAcceptListEntry(entry, now) {
+  const problems = [];
+
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    problems.push('entry must be an object with fields "advisoryId", "package", "justification", "owner", "expiry"');
+    return problems;
+  }
+
+  const present = {};
+  for (const field of MANDATORY_ACCEPT_LIST_FIELDS) {
+    const value = Object.prototype.hasOwnProperty.call(entry, field) ? entry[field] : undefined;
+    if (typeof value !== "string" || value.trim().length === 0) {
+      problems.push(`field "${field}" is required and must be a non-empty string`);
+      present[field] = false;
+    } else {
+      present[field] = true;
+    }
+  }
+
+  if (present.advisoryId && !GHSA_PATTERN.test(entry.advisoryId.trim())) {
+    problems.push(`field "advisoryId" must be GHSA-shaped (GHSA-xxxx-xxxx-xxxx): got "${entry.advisoryId}"`);
+  }
+
+  if (present.owner && !EMAIL_PATTERN.test(entry.owner.trim())) {
+    problems.push(`field "owner" must be an email-shaped git author address: got "${entry.owner}"`);
+  }
+
+  if (present.justification) {
+    const length = entry.justification.trim().length;
+    if (length < MIN_JUSTIFICATION_LENGTH) {
+      problems.push(
+        `field "justification" must be at least ${MIN_JUSTIFICATION_LENGTH} characters -- it IS the reachability analysis, not a label (got ${length})`,
+      );
+    }
+  }
+
+  let expiryUtcDayMs;
+  if (present.expiry) {
+    const trimmed = entry.expiry.trim();
+    const match = ISO_DATE_PATTERN.exec(trimmed);
+    const [year, month, day] = match ? trimmed.split("-").map(Number) : [];
+    if (!match || !isRealUtcCalendarDate(year, month, day)) {
+      problems.push(`field "expiry" must be a real calendar date in YYYY-MM-DD form: got "${entry.expiry}"`);
+    } else {
+      expiryUtcDayMs = Date.UTC(year, month - 1, day);
+    }
+  }
+
+  if (expiryUtcDayMs !== undefined) {
+    const nowUtcDayMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    const diffDays = Math.round((expiryUtcDayMs - nowUtcDayMs) / (24 * 60 * 60 * 1000));
+    if (diffDays < 0) {
+      problems.push(
+        `field "expiry" (${entry.expiry.trim()}) has passed -- the acceptance has lapsed and must be renewed by a reviewed PR`,
+      );
+    } else if (diffDays > MAX_EXPIRY_DAYS) {
+      problems.push(
+        `field "expiry" (${entry.expiry.trim()}) is ${diffDays} day(s) out, exceeding the ${MAX_EXPIRY_DAYS}-day cap`,
+      );
+    }
+  }
+
+  return problems;
+}
+
+/**
+ * Loads and shape-validates the accept-list file at `filePath`. Returns
+ * `{ fileExisted, entries, problems }`: `fileExisted` is false (never a
+ * throw) when the file is absent -- an absent accept-list is treated as
+ * empty, strictly stricter than any live entry could make the gate, never
+ * more permissive. `problems` covers only FILE-level shape issues --
+ * unparseable JSON, a missing or non-array `entries`, and a duplicate
+ * (advisoryId, package) pair (named by index) -- never individual field
+ * validation, which is `validateAcceptListEntry`'s job against each returned
+ * entry. Reads use own-property access and a `Map` for duplicate tracking
+ * (T-18-07) so a crafted `__proto__`-shaped key in the JSON can never reach
+ * `Object.prototype`.
+ *
+ * @param {string} filePath
+ * @returns {{fileExisted: boolean, entries: unknown[], problems: string[]}}
+ */
+export function loadAcceptList(filePath) {
+  if (!existsSync(filePath)) {
+    return { fileExisted: false, entries: [], problems: [] };
+  }
+
+  const raw = readFileSync(filePath, "utf8");
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    return {
+      fileExisted: true,
+      entries: [],
+      problems: [`${ACCEPT_LIST_FILENAME} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`],
+    };
+  }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || !Array.isArray(parsed.entries)) {
+    return {
+      fileExisted: true,
+      entries: [],
+      problems: [`${ACCEPT_LIST_FILENAME} must be an object with an "entries" array`],
+    };
+  }
+
+  const problems = [];
+  const seenPairs = new Map();
+  parsed.entries.forEach((entry, index) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return;
+    const advisoryId = Object.prototype.hasOwnProperty.call(entry, "advisoryId") ? entry.advisoryId : undefined;
+    const pkg = Object.prototype.hasOwnProperty.call(entry, "package") ? entry.package : undefined;
+    if (typeof advisoryId !== "string" || typeof pkg !== "string") return;
+    const key = `${advisoryId}::${pkg}`;
+    if (seenPairs.has(key)) {
+      problems.push(
+        `duplicate accept-list entry for advisoryId "${advisoryId}" and package "${pkg}" at indices ${seenPairs.get(key)} and ${index} -- one acceptance cannot have two owners`,
+      );
+    } else {
+      seenPairs.set(key, index);
+    }
+  });
+
+  return { fileExisted: true, entries: parsed.entries, problems };
 }
 
 function isDirectInvocation() {
@@ -332,8 +529,63 @@ function main() {
   }
 
   const advisories = collectAdvisories(report.vulnerabilities ?? {});
-  const acceptList = loadAcceptList(REPO_ROOT);
-  const findings = selectBlockingFindings(advisories, acceptList, new Date());
+
+  const acceptListPath = path.join(REPO_ROOT, ACCEPT_LIST_FILENAME);
+  const loaded = loadAcceptList(acceptListPath);
+  if (!loaded.fileExisted) {
+    console.log(`check:dependency-advisories -- no ${ACCEPT_LIST_FILENAME} found; treating the accept-list as empty.`);
+  }
+
+  const now = new Date();
+  const entryProblems = [];
+  loaded.entries.forEach((entry, index) => {
+    for (const problem of validateAcceptListEntry(entry, now)) {
+      const advisoryId = entry && typeof entry === "object" ? entry.advisoryId : undefined;
+      const pkg = entry && typeof entry === "object" ? entry.package : undefined;
+      entryProblems.push(
+        `entry ${index} (advisoryId=${JSON.stringify(advisoryId ?? null)}, package=${JSON.stringify(pkg ?? null)}): ${problem}`,
+      );
+    }
+  });
+
+  const acceptListProblems = [...loaded.problems, ...entryProblems];
+  if (acceptListProblems.length > 0) {
+    // D-04: a malformed accept-list fails the gate outright, regardless of
+    // the advisory state -- the gate cannot know what was intentionally
+    // accepted, so it must not silently treat a broken entry as zero
+    // acceptances.
+    console.error(
+      [
+        `check:dependency-advisories FAILED: ${ACCEPT_LIST_FILENAME} is malformed.`,
+        "",
+        "Problems:",
+        ...acceptListProblems.map((p) => `  - ${p}`),
+        "",
+        "Remediation:",
+        `  Fix the offending field(s) in ${ACCEPT_LIST_FILENAME}. Every entry needs advisoryId (GHSA-shaped),`,
+        `  package, justification (>= ${MIN_JUSTIFICATION_LENGTH} chars -- the reachability analysis itself),`,
+        `  owner (an email address), and expiry (YYYY-MM-DD, at most ${MAX_EXPIRY_DAYS} days out).`,
+      ].join("\n"),
+    );
+    process.exit(1);
+    return;
+  }
+
+  const findings = selectBlockingFindings(advisories, loaded.entries, now);
+
+  // D-04/D-06: every entry here has already passed validateAcceptListEntry,
+  // so an entry present in the tree today but matching no CURRENT advisory
+  // is a stale acceptance -- surfaced as a warning (next-review cleanup),
+  // never a failure by itself.
+  const advisoryKeys = new Set(advisories.map((a) => `${a.package}::${a.advisoryId}`));
+  for (const entry of loaded.entries) {
+    const key = `${entry.package}::${entry.advisoryId}`;
+    if (!advisoryKeys.has(key)) {
+      console.warn(
+        `check:dependency-advisories -- stale accept-list entry (advisoryId=${entry.advisoryId}, package=${entry.package}) matches no advisory in the current tree; remove it in its next review.`,
+      );
+    }
+  }
 
   if (findings.length > 0) {
     console.error(formatFailureReport(findings));
@@ -342,7 +594,7 @@ function main() {
   }
 
   console.log(
-    `check:dependency-advisories -- ${advisories.length} advisor${advisories.length === 1 ? "y" : "ies"} examined, ${acceptList.length} accept-list entr${acceptList.length === 1 ? "y" : "ies"} applied, 0 blocking finding(s).`,
+    `check:dependency-advisories -- ${advisories.length} advisor${advisories.length === 1 ? "y" : "ies"} examined, ${loaded.entries.length} accept-list entr${loaded.entries.length === 1 ? "y" : "ies"} applied, 0 blocking finding(s).`,
   );
 }
 
