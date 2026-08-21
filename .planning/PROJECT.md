@@ -10,6 +10,8 @@ Multi-tenant SaaS-платформа marketing automation для B2C-компа�
 
 ## Current State
 
+**v1.2 в работе (3/5 фаз):** Phase 18 (dependency hygiene), Phase 19 (unsubscribe-secret rotation) и Phase 20 (campaign template correctness, завершена 2026-08-21) выполнены. Phase 20: оптимистическая блокировка `campaigns.version` на всех трёх путях отправки (launch/schedule/test-send, проверка внутри `FOR UPDATE`-транзакции), снапшот template/sender в test-send job (воркер честно его исполняет), dirty-state блокировка отправок с баннером несохранённых изменений и типизированный 409-конфликтный UX; верификация 4/4 success criteria, ручной UAT пройден (включая цикл D-09 fix). Известный tracked defect: CR-01 из 20-REVIEW.md (false-dirty при whitespace в сохранённом имени — fail-safe направление). Далее: Phase 21 per-contact DSR export.
+
 **Shipped: v1.1 Production Hardening (2026-08-20)** — 10 фаз (8–17), 128 планов, 95/95 требований, все фазы `verification: passed`, security-регистры полностью закрыты (`threats_open: 0` везде; T-14-58/T-14-73/T-14-88 закрыты re-run'ом gsd-security-auditor 2026-08-20). Closeout: override_closeout — причины и полный список принятого tech debt в `.planning/MILESTONES.md` (Phase 10 stale-проекция init.manager — timestamp-артефакт при passed-верификации; один acknowledged deferred item).
 
 Платформа эксплуатируется в production: деплой одной командой (`scripts/deploy.sh <sha>`, GHCR immutable SHA-теги, включая CI-собранный postgres-образ с Phase 17), advisory-locked миграции с readiness-гейтом, pgBackRest PITR-бэкапы в off-host шифрованный репозиторий (drill выполнен, метрики самозаписываются: 119 s / 170520 KB high-water), fail-closed RLS на всех tenant-таблицах, evidence-only reconciler, tenant-fair воркеры, атомарный unsubscribe + GDPR erasure, полная наблюдаемость (корреляция request→job→Postgres, Sentry с CI-доказанным scrubbing'ом, Grafana Cloud Loki + 9 watchdog'ов с runbook'ами) — и все delivery-гарантии подтверждены live против реального SendGrid (UAT 5/5, standing canary workspace со smoke-процедурой).
@@ -229,4 +231,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-21 after Phase 19*
+*Last updated: 2026-08-21 after Phase 20*
