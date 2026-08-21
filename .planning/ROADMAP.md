@@ -142,7 +142,7 @@ Plans:
   3. Launch and schedule act only on the confirmed-saved campaign version; a concurrent or stale change produces a typed conflict error and no mail is dispatched at all.
   4. After a save, all three send paths agree on the same template id — none of them can fall back to local client form state.
 
-**Plans**: 1/6 plans executed
+**Plans**: 2/6 plans executed
 
 Plans:
 **Wave 1**
@@ -151,7 +151,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 20-02-PLAN.md — Tracer: the launch path end-to-end — required `expectedVersion`, compared inside the existing `FOR UPDATE` transaction, typed 409 `version_conflict` with `currentVersion`, `code` on every campaign-state error body, the launch route's first-ever body parse, and the sender-resolution split that stops the primary `fromSenderId` path self-conflicting (RESEARCH Pitfall #1)
+- [x] 20-02-PLAN.md — Tracer: the launch path end-to-end — required `expectedVersion`, compared inside the existing `FOR UPDATE` transaction, typed 409 `version_conflict` with `currentVersion`, `code` on every campaign-state error body, the launch route's first-ever body parse, and the sender-resolution split that stops the primary `fromSenderId` path self-conflicting (RESEARCH Pitfall #1)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -228,7 +228,7 @@ Plans:
 | 17. Address tech debt: WR-06 + security follow-ups | v1.1 | 6/6 | Complete | 2026-08-20 |
 | 18. Dependency Hygiene & Advisory Gate | v1.2 | 4/4 | Complete    | 2026-08-20 |
 | 19. Unsubscribe Secret Graceful Rotation | v1.2 | 5/5 | Complete    | 2026-08-21 |
-| 20. Campaign Template Correctness | v1.2 | 1/6 | In Progress|  |
+| 20. Campaign Template Correctness | v1.2 | 2/6 | In Progress|  |
 | 21. Per-Contact DSR Export | v1.2 | 0/TBD | Not started | - |
 | 22. Workspace Quiesce & Physical Purge | v1.2 | 0/TBD | Not started | - |
 
