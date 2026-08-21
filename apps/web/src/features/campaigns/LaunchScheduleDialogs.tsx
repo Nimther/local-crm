@@ -139,7 +139,11 @@ export function ScheduleDialog({
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   const scheduleMutation = useMutation({
-    mutationFn: (scheduledAt: string) => scheduleCampaign(slug, campaign.id, { scheduledAt }),
+    // TMPL-02/D-06: echo back the version this dialog is displaying -- the
+    // schedule route now requires it and compares it under lock, the same
+    // uniform precondition contract launchMutation uses.
+    mutationFn: (scheduledAt: string) =>
+      scheduleCampaign(slug, campaign.id, { scheduledAt, expectedVersion: campaign.version }),
     onSuccess: async () => {
       setServerError(null);
       await queryClient.invalidateQueries({ queryKey: campaignsQueryKey(slug) });

@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { buildServer } from "../../../server.js";
 import { ensureTestDbMigrated, getTestDatabaseUrl } from "../../../test/db-fixture.js";
-import { campaignKickoffQueue } from "../campaign-queues.js";
+import { campaignKickoffQueue, emailBroadcastQueue } from "../campaign-queues.js";
 
 /**
  * 08-16 (QG-03) — the campaign HTTP surface that had no test.
@@ -464,6 +464,310 @@ describe("campaign routes (CAMP-01..05)", () => {
         `expected 409, got ${secondLaunch.statusCode}: ${secondLaunch.body}`
       ).toBe(409);
       expect(secondLaunch.json<{ code: string }>().code).toBe("illegal_transition");
+    });
+  });
+
+  /**
+   * TMPL-02/D-06/D-07: schedule now shares launch's uniform expectedVersion
+   * contract (required, compared under the same lock that flips status),
+   * and cancel bumps the version like every other mutation without
+   * demanding a precondition (D-06 enumerates launch/schedule/test-send
+   * only, never cancel).
+   */
+  describe("schedule version precondition (TMPL-02, D-06/D-07)", () => {
+    let cookie: string;
+    let slug: string;
+    let segmentId: string;
+
+    beforeAll(async () => {
+      const ctx = await owner("camp-routes-schedule-version");
+      cookie = ctx.cookie;
+      slug = ctx.workspace.slug;
+      segmentId = await createSegment(cookie, slug);
+    });
+
+    function futureIso(msFromNow = 60 * 60 * 1000) {
+      return new Date(Date.now() + msFromNow).toISOString();
+    }
+
+    it("schedule with the current version succeeds and bumps version by exactly one", async () => {
+      const campaign = await createCampaignViaRoute(cookie, slug, segmentId, "Schedule happy path");
+
+      const res = await app.inject({
+        method: "POST",
+        url: `/api/workspaces/${slug}/campaigns/${campaign.id}/schedule`,
+        headers: { cookie },
+        payload: { scheduledAt: futureIso(), expectedVersion: 1 },
+      });
+      expect(res.statusCode, `schedule failed: ${res.body}`).toBe(200);
+      const body = res.json<{ status: string; version: number; scheduledAt: string | null }>();
+      expect(body.status).toBe("scheduled");
+      expect(body.version).toBe(2);
+      expect(body.scheduledAt).toBeTruthy();
+    });
+
+    it("a stale version is refused with 409 version_conflict, leaves the row draft/unscheduled, and enqueues nothing for a future send", async () => {
+      const campaign = await createCampaignViaRoute(cookie, slug, segmentId, "Schedule stale version");
+
+      const patchRes = await app.inject({
+        method: "PATCH",
+        url: `/api/workspaces/${slug}/campaigns/${campaign.id}`,
+        headers: { cookie },
+        payload: { name: "Renamed" },
+      });
+      expect(patchRes.statusCode).toBe(200);
+      expect(patchRes.json<{ version: number }>().version).toBe(2);
+
+      const res = await app.inject({
+        method: "POST",
+        url: `/api/workspaces/${slug}/campaigns/${campaign.id}/schedule`,
+        headers: { cookie },
+        payload: { scheduledAt: futureIso(), expectedVersion: 1 },
+      });
+      expect(res.statusCode, `expected 409, got ${res.statusCode}: ${res.body}`).toBe(409);
+      const body = res.json<{ code: string; currentVersion: number }>();
+      expect(body.code).toBe("version_conflict");
+      expect(body.currentVersion).toBe(2);
+
+      const after = await app.inject({
+        method: "GET",
+        url: `/api/workspaces/${slug}/campaigns/${campaign.id}`,
+        headers: { cookie },
+      });
+      const afterBody = after.json<{ status: string; scheduledAt: string | null; version: number }>();
+      expect(afterBody.status).toBe("draft");
+      expect(afterBody.scheduledAt).toBeNull();
+      expect(afterBody.version).toBe(2);
+    });
+
+    it("rejects a schedule body with no expectedVersion / a malformed one", async () => {
+      const campaignA = await createCampaignViaRoute(cookie, slug, segmentId, "Schedule missing precondition");
+      const resA = await app.inject({
+        method: "POST",
+        url: `/api/workspaces/${slug}/campaigns/${campaignA.id}/schedule`,
+        headers: { cookie },
+        payload: { scheduledAt: futureIso() },
+      });
+      expect(resA.statusCode).toBe(400);
+
+      const campaignB = await createCampaignViaRoute(cookie, slug, segmentId, "Schedule zero precondition");
+      const resB = await app.inject({
+        method: "POST",
+        url: `/api/workspaces/${slug}/campaigns/${campaignB.id}/schedule`,
+        headers: { cookie },
+        payload: { scheduledAt: futureIso(), expectedVersion: 0 },
+      });
+      expect(resB.statusCode).toBe(400);
+    });
+
+    it("a past scheduledAt with a correct expectedVersion still returns 422 (existing date guard preserved)", async () => {
+      const campaign = await createCampaignViaRoute(cookie, slug, segmentId, "Schedule past date");
+
+      const res = await app.inject({
+        method: "POST",
+        url: `/api/workspaces/${slug}/campaigns/${campaign.id}/schedule`,
+        headers: { cookie },
+        payload: { scheduledAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(), expectedVersion: 1 },
+      });
+      expect(res.statusCode, `expected 422, got ${res.statusCode}: ${res.body}`).toBe(422);
+    });
+
+    it("cancel bumps the version by exactly one and returns to draft", async () => {
+      const campaign = await createCampaignViaRoute(cookie, slug, segmentId, "Cancel bumps version");
+
+      const scheduleRes = await app.inject({
+        method: "POST",
+        url: `/api/workspaces/${slug}/campaigns/${campaign.id}/schedule`,
+        headers: { cookie },
+        payload: { scheduledAt: futureIso(), expectedVersion: 1 },
+      });
+      expect(scheduleRes.statusCode, `schedule failed: ${scheduleRes.body}`).toBe(200);
+      const scheduledVersion = scheduleRes.json<{ version: number }>().version;
+
+      const cancelRes = await app.inject({
+        method: "POST",
+        url: `/api/workspaces/${slug}/campaigns/${campaign.id}/cancel`,
+        headers: { cookie },
+        payload: {},
+      });
+      expect(cancelRes.statusCode, `cancel failed: ${cancelRes.body}`).toBe(200);
+      const body = cancelRes.json<{ status: string; version: number }>();
+      expect(body.status).toBe("draft");
+      expect(body.version).toBe(scheduledVersion + 1);
+    });
+  });
+
+  /**
+   * TMPL-03/D-11/D-12: test-send takes the same uniform expectedVersion
+   * precondition as launch/schedule, and additionally pins the
+   * confirmed-saved template/sender into the queued job payload -- so a
+   * save that happens between enqueue and worker dispatch can never
+   * redirect an already-queued test send.
+   */
+  describe("test-send precondition and template snapshot (TMPL-03, D-11/D-12)", () => {
+    let cookie: string;
+    let slug: string;
+    let segmentId: string;
+
+    beforeAll(async () => {
+      const ctx = await owner("camp-routes-test-send-version");
+      cookie = ctx.cookie;
+      slug = ctx.workspace.slug;
+      segmentId = await createSegment(cookie, slug);
+    });
+
+    async function queuedJobsFor(campaignId: string) {
+      const jobs = await emailBroadcastQueue.getJobs(["waiting", "delayed", "prioritized", "paused"]);
+      return jobs.filter((job) => job.data.campaignId === campaignId);
+    }
+
+    it("a successful test-send snapshots the campaign's saved template and sender into exactly one queued job", async () => {
+      const campaign = await createCampaignViaRoute(cookie, slug, segmentId, "Test-send happy path");
+
+      const res = await app.inject({
+        method: "POST",
+        url: `/api/workspaces/${slug}/campaigns/${campaign.id}/test-send`,
+        headers: { cookie },
+        payload: { expectedVersion: 1 },
+      });
+      expect(res.statusCode, `test-send failed: ${res.body}`).toBe(202);
+      expect(res.json<{ queued: boolean }>().queued).toBe(true);
+
+      const jobs = await queuedJobsFor(campaign.id);
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0]?.data.templateId).toBe("d-template-1");
+      expect(jobs[0]?.data.fromEmail).toBe("marketing@example.com");
+    });
+
+    it("a template change after enqueue does not redirect the already-queued test send (TMPL-03 async-gap proof)", async () => {
+      const campaign = await createCampaignViaRoute(cookie, slug, segmentId, "Test-send async gap");
+
+      const res = await app.inject({
+        method: "POST",
+        url: `/api/workspaces/${slug}/campaigns/${campaign.id}/test-send`,
+        headers: { cookie },
+        payload: { expectedVersion: 1 },
+      });
+      expect(res.statusCode, `test-send failed: ${res.body}`).toBe(202);
+
+      const patchRes = await app.inject({
+        method: "PATCH",
+        url: `/api/workspaces/${slug}/campaigns/${campaign.id}`,
+        headers: { cookie },
+        payload: { templateId: "d-template-CHANGED" },
+      });
+      expect(patchRes.statusCode).toBe(200);
+
+      const jobs = await queuedJobsFor(campaign.id);
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0]?.data.templateId).toBe("d-template-1");
+    });
+
+    it("a stale expectedVersion is refused with 409 version_conflict and enqueues nothing", async () => {
+      const campaign = await createCampaignViaRoute(cookie, slug, segmentId, "Test-send stale version");
+
+      const patchRes = await app.inject({
+        method: "PATCH",
+        url: `/api/workspaces/${slug}/campaigns/${campaign.id}`,
+        headers: { cookie },
+        payload: { name: "Renamed" },
+      });
+      expect(patchRes.statusCode).toBe(200);
+      expect(patchRes.json<{ version: number }>().version).toBe(2);
+
+      const res = await app.inject({
+        method: "POST",
+        url: `/api/workspaces/${slug}/campaigns/${campaign.id}/test-send`,
+        headers: { cookie },
+        payload: { expectedVersion: 1 },
+      });
+      expect(res.statusCode, `expected 409, got ${res.statusCode}: ${res.body}`).toBe(409);
+      const body = res.json<{ code: string; currentVersion: number }>();
+      expect(body.code).toBe("version_conflict");
+      expect(body.currentVersion).toBe(2);
+
+      const jobs = await queuedJobsFor(campaign.id);
+      expect(jobs).toHaveLength(0);
+    });
+
+    it("rejects a test-send body with no expectedVersion / a malformed one", async () => {
+      const campaignA = await createCampaignViaRoute(cookie, slug, segmentId, "Test-send missing precondition");
+      const resA = await app.inject({
+        method: "POST",
+        url: `/api/workspaces/${slug}/campaigns/${campaignA.id}/test-send`,
+        headers: { cookie },
+        payload: {},
+      });
+      expect(resA.statusCode).toBe(400);
+
+      const campaignB = await createCampaignViaRoute(cookie, slug, segmentId, "Test-send zero precondition");
+      const resB = await app.inject({
+        method: "POST",
+        url: `/api/workspaces/${slug}/campaigns/${campaignB.id}/test-send`,
+        headers: { cookie },
+        payload: { expectedVersion: 0 },
+      });
+      expect(resB.statusCode).toBe(400);
+    });
+
+    it("refuses a test-send with 422 incomplete when the campaign has no template, and enqueues nothing", async () => {
+      const createRes = await app.inject({
+        method: "POST",
+        url: `/api/workspaces/${slug}/campaigns`,
+        headers: { cookie },
+        payload: { name: "Test-send no template", segmentId, fromEmail: "marketing@example.com" },
+      });
+      expect(createRes.statusCode, `create failed: ${createRes.body}`).toBe(201);
+      const campaign = createRes.json<{ id: string; version: number }>();
+
+      const res = await app.inject({
+        method: "POST",
+        url: `/api/workspaces/${slug}/campaigns/${campaign.id}/test-send`,
+        headers: { cookie },
+        payload: { expectedVersion: 1 },
+      });
+      expect(res.statusCode, `expected 422, got ${res.statusCode}: ${res.body}`).toBe(422);
+      const body = res.json<{ code: string; fields: Record<string, string> }>();
+      expect(body.code).toBe("incomplete");
+      expect(body.fields.templateId).toBeTruthy();
+
+      const jobs = await queuedJobsFor(campaign.id);
+      expect(jobs).toHaveLength(0);
+    });
+
+    it("an idempotent no-op sender persist bumps the version at most once across two consecutive test sends", async () => {
+      const campaign = await createCampaignViaRoute(cookie, slug, segmentId, "Test-send idempotent persist");
+
+      const firstRes = await app.inject({
+        method: "POST",
+        url: `/api/workspaces/${slug}/campaigns/${campaign.id}/test-send`,
+        headers: { cookie },
+        payload: { expectedVersion: 1 },
+      });
+      expect(firstRes.statusCode, `first test-send failed: ${firstRes.body}`).toBe(202);
+
+      const afterFirst = await app.inject({
+        method: "GET",
+        url: `/api/workspaces/${slug}/campaigns/${campaign.id}`,
+        headers: { cookie },
+      });
+      const versionAfterFirst = afterFirst.json<{ version: number }>().version;
+      expect(versionAfterFirst).toBeLessThanOrEqual(2);
+
+      const secondRes = await app.inject({
+        method: "POST",
+        url: `/api/workspaces/${slug}/campaigns/${campaign.id}/test-send`,
+        headers: { cookie },
+        payload: { expectedVersion: versionAfterFirst },
+      });
+      expect(secondRes.statusCode, `second test-send failed: ${secondRes.body}`).toBe(202);
+
+      const afterSecond = await app.inject({
+        method: "GET",
+        url: `/api/workspaces/${slug}/campaigns/${campaign.id}`,
+        headers: { cookie },
+      });
+      expect(afterSecond.json<{ version: number }>().version).toBe(versionAfterFirst);
     });
   });
 });

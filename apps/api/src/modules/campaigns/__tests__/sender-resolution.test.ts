@@ -223,7 +223,10 @@ describe("Campaign sender resolution (CR-02, CAMP-01/02/04)", () => {
       method: "POST",
       url: `/api/workspaces/${workspace.slug}/campaigns/${campaign.id}/test-send`,
       headers: { cookie },
-      payload: {},
+      // TMPL-03/D-11: test-send now requires the same expectedVersion
+      // precondition as launch -- echoing the campaign's own first-read
+      // version (1), same reasoning as the launch case above.
+      payload: { expectedVersion: 1 },
     });
     expect(testSendRes.statusCode, `test-send failed: ${testSendRes.body}`).toBe(202);
 
@@ -272,7 +275,8 @@ describe("Campaign sender resolution (CR-02, CAMP-01/02/04)", () => {
       method: "POST",
       url: `/api/workspaces/${workspace.slug}/campaigns/${campaign.id}/test-send`,
       headers: { cookie },
-      payload: {},
+      // TMPL-03/D-11: same required precondition as above.
+      payload: { expectedVersion: 1 },
     });
     expect(
       testSendRes.statusCode,
