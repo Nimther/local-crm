@@ -194,3 +194,8 @@ None - no external service configuration required.
 ---
 *Phase: 20-campaign-template-correctness*
 *Completed: 2026-08-21*
+
+## Self-Check: PASSED
+
+- All 5 created files confirmed present on disk (`campaignDirtyState.ts`, `CampaignDirtyStateContext.tsx`, `UnsavedChangesBanner.tsx`, `campaignDirtyState.test.ts`, `campaign-dirty-blocking.test.tsx`).
+- All 4 commit hashes confirmed in `git log`: `3717c1d`, `5d3dcb5`, `bfe717c`, `16a941c`.
