@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { CONFLICT_REFRESH_NOTICE, VERSION_CONFLICT_COPY, classifySendError } from "@/features/campaigns/campaignSendConflict";
 import { useCampaignDirtyState } from "@/features/campaigns/CampaignDirtyStateContext";
 import { getCampaignTestSample, testSendCampaign, type CampaignResponse } from "@/features/campaigns/api";
 
@@ -88,7 +89,22 @@ export function TestSendPanel({ slug, campaign }: { slug: string; campaign: Camp
         description: TEST_SEND_QUEUED_DESCRIPTION,
       });
     },
-    onError: () => setServerError(TEST_SEND_FAILURE),
+    onError: async (err) => {
+      // TMPL-02/D-08/D-11: same classification and uniform copy the launch/
+      // schedule dialogs use. `illegal_transition` is not reachable here --
+      // test-send performs no status transition -- so it falls through to
+      // the existing generic test-send failure copy rather than getting
+      // invented copy. No retry option is added; the marketer's next click
+      // is the only thing that may resend (T-20-06-01).
+      const kind = classifySendError(err);
+      if (kind === "version_conflict") {
+        setServerError(VERSION_CONFLICT_COPY);
+        await queryClient.invalidateQueries({ queryKey: ["workspace", slug, "campaigns"] });
+        toast(CONFLICT_REFRESH_NOTICE);
+        return;
+      }
+      setServerError(TEST_SEND_FAILURE);
+    },
   });
 
   function handleSend() {
