@@ -179,7 +179,7 @@ only.
 
 | Slot | Became primary | Demoted to previous | Earliest prune date (demotion + 5y) | Pruned |
 |------|-----------------|----------------------|---------------------------------------|--------|
-| example — secret-A | 2026-01-15 | 2026-08-21 | 2031-08-21 | — |
+| pre-2026-08-21 primary | unknown (pre-existing) | 2026-08-21 | 2031-08-21 | — |
 
 ## Rollback
 
