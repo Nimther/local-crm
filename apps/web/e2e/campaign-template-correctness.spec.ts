@@ -21,6 +21,15 @@ import { test, expect, type Page } from "@playwright/test";
  *    (bumping its version), clicks «Отправить», and asserts the dialog
  *    stays open, the version-conflict copy renders, exactly one launch
  *    request was made, and the campaign is still a draft.
+ * 3. "an illegal-transition conflict names the real state and the dialog
+ *    survives the refetch that reveals it" (D-09, human-verification
+ *    checkpoint failure fixed by this commit): opens the launch dialog on a
+ *    draft campaign, SCHEDULES the same campaign from outside it (a real
+ *    status change, not just a version bump), clicks «Отправить», and
+ *    asserts the dialog is STILL VISIBLE showing
+ *    «Кампания уже в статусе «Запланирована»…» -- proving
+ *    `CampaignDetailPage`'s status-branched render no longer unmounts an
+ *    open dialog out from under the conflict copy it is about to show.
  *
  * Both tests reach a launchable campaign by PATCHing `templateId` and
  * `fromEmail` directly through `page.request` rather than driving the
@@ -126,6 +135,28 @@ async function getCampaignStatus(page: Page, slug: string, campaignId: string): 
   return body.status;
 }
 
+/**
+ * Schedules the campaign from OUTSIDE the open dialog -- draft -> scheduled,
+ * one minute in the future, using the campaign's OWN current version (a
+ * fresh GET immediately before, not the stale value the open launch dialog
+ * is holding). `campaign.repository.ts`'s `launchCampaign` checks
+ * `existing.status !== "draft"` BEFORE it ever compares a version, so this
+ * is what makes the launch click below hit `illegal_transition` specifically
+ * (not `version_conflict`, which SC3 above already covers) -- a scheduled
+ * campaign is a real state, not a raced version bump.
+ */
+async function scheduleCampaignFromOutside(page: Page, slug: string, campaignId: string): Promise<void> {
+  const getResponse = await page.request.get(`/api/workspaces/${slug}/campaigns/${campaignId}`);
+  expect(getResponse.ok()).toBe(true);
+  const { version } = (await getResponse.json()) as { version: number };
+
+  const scheduledAt = new Date(Date.now() + 60_000).toISOString();
+  const response = await page.request.post(`/api/workspaces/${slug}/campaigns/${campaignId}/schedule`, {
+    data: { scheduledAt, expectedVersion: version },
+  });
+  expect(response.ok()).toBe(true);
+}
+
 test.describe("TMPL-01/TMPL-02: unsaved-changes blocking and conflict recovery", () => {
   test("unsaved changes block launch (both modes) and test-send; saving re-enables them (SC1)", async ({
     page,
@@ -209,5 +240,47 @@ test.describe("TMPL-01/TMPL-02: unsaved-changes blocking and conflict recovery",
     // rather than through the DOM, since the dialog overlay may render on
     // top of (not replace) the underlying draft view.
     expect(await getCampaignStatus(page, slug, campaignId)).toBe("draft");
+  });
+
+  test("an illegal-transition conflict names the real state and keeps the dialog open through the status refetch (D-09)", async ({
+    page,
+  }) => {
+    const slug = await registerAndCreateWorkspace(page);
+    const segmentId = await createSegment(page, slug);
+    const campaignId = await createCampaign(page, slug, segmentId);
+    await makeCampaignLaunchable(page, slug, campaignId);
+
+    await page.goto(`/w/${slug}/campaigns/${campaignId}`);
+    await expect(page.getByRole("heading", { name: "Изменить кампанию" })).toBeVisible();
+
+    let launchRequestCount = 0;
+    await page.route(`**/api/workspaces/${slug}/campaigns/${campaignId}/launch`, async (route) => {
+      launchRequestCount += 1;
+      await route.continue();
+    });
+
+    await page.getByRole("button", { name: "Отправить сейчас" }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+
+    // Real status change from OUTSIDE the open dialog -- draft -> scheduled --
+    // not just a version bump. This is the exact precondition the human
+    // checkpoint's step 4 exercised and the previous composition unmounted
+    // the dialog under: the refetch this conflict triggers below flips
+    // `campaign.status` away from "draft", which used to take the whole
+    // draft branch (and the open dialog inside it) down with it.
+    await scheduleCampaignFromOutside(page, slug, campaignId);
+
+    await page.getByRole("dialog").getByRole("button", { name: "Отправить" }).click();
+
+    // The dialog survives the refetch and names the campaign's REAL current
+    // state using the same label CampaignStatusBadge shows (D-09) -- not the
+    // generic «что-то пошло не так» and not silence.
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await expect(
+      page.getByText("Кампания уже в статусе «Запланирована» — данные обновлены, проверьте и повторите")
+    ).toBeVisible();
+    await expect.poll(() => launchRequestCount).toBe(1);
+
+    expect(await getCampaignStatus(page, slug, campaignId)).toBe("scheduled");
   });
 });
