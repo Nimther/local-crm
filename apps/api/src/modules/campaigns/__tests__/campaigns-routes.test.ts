@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { buildServer } from "../../../server.js";
 import { ensureTestDbMigrated, getTestDatabaseUrl } from "../../../test/db-fixture.js";
+import { campaignKickoffQueue } from "../campaign-queues.js";
 
 /**
  * 08-16 (QG-03) — the campaign HTTP surface that had no test.
@@ -309,6 +310,160 @@ describe("campaign routes (CAMP-01..05)", () => {
         headers: { cookie: a.cookie },
       });
       expect([403, 404]).toContain(res.statusCode);
+    });
+  });
+
+  /**
+   * TMPL-02/D-05/D-06/D-07: launch is refused unless the caller echoes back
+   * the exact `version` it read off the campaign response -- the precondition
+   * is required (400 without it), compared under the same locked transaction
+   * that flips status and bumps version (409 `version_conflict` on
+   * mismatch, dispatching nothing), and status is checked before version so
+   * a launch retried against an already-transitioned campaign reports
+   * `illegal_transition`, not a conflict.
+   */
+  describe("launch version precondition (TMPL-02, D-06/D-07)", () => {
+    // A single shared owner/workspace/segment for every case below (each
+    // case still gets its OWN fresh campaign via createCampaignViaRoute) --
+    // one sign-up here instead of one per case keeps this file's total
+    // /api/auth/* traffic well under the 20-per-minute rate limit
+    // (auth/plugin.ts) that eight more owner() calls in this one file would
+    // otherwise trip.
+    let cookie: string;
+    let slug: string;
+    let segmentId: string;
+
+    beforeAll(async () => {
+      const ctx = await owner("camp-routes-launch-version");
+      cookie = ctx.cookie;
+      slug = ctx.workspace.slug;
+      segmentId = await createSegment(cookie, slug);
+    });
+
+    it("a freshly created draft's GET response carries version 1", async () => {
+      const campaign = await createCampaignViaRoute(cookie, slug, segmentId, "Version check");
+
+      const res = await app.inject({
+        method: "GET",
+        url: `/api/workspaces/${slug}/campaigns/${campaign.id}`,
+        headers: { cookie },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json<{ version: number }>().version).toBe(1);
+    });
+
+    it("launch with the current version succeeds, bumps version by exactly one, and enqueues a kickoff job", async () => {
+      const campaign = await createCampaignViaRoute(cookie, slug, segmentId, "Launch happy path");
+
+      const res = await app.inject({
+        method: "POST",
+        url: `/api/workspaces/${slug}/campaigns/${campaign.id}/launch`,
+        headers: { cookie },
+        payload: { expectedVersion: 1 },
+      });
+      expect(res.statusCode, `launch failed: ${res.body}`).toBe(200);
+      const body = res.json<{ status: string; version: number }>();
+      expect(body.status).toBe("sending");
+      expect(body.version).toBe(2);
+
+      // Positive control the stale-version case below relies on: a
+      // successful launch DOES enqueue a kickoff job keyed by the campaign
+      // id (SEND-03).
+      const job = await campaignKickoffQueue.getJob(campaign.id);
+      expect(job?.data.campaignId).toBe(campaign.id);
+    });
+
+    it("a stale version is refused with 409 version_conflict, leaves the row untouched, and enqueues nothing", async () => {
+      const campaign = await createCampaignViaRoute(cookie, slug, segmentId, "Stale version");
+
+      const patchRes = await app.inject({
+        method: "PATCH",
+        url: `/api/workspaces/${slug}/campaigns/${campaign.id}`,
+        headers: { cookie },
+        payload: { name: "Renamed" },
+      });
+      expect(patchRes.statusCode).toBe(200);
+      expect(patchRes.json<{ version: number }>().version).toBe(2);
+
+      const launchRes = await app.inject({
+        method: "POST",
+        url: `/api/workspaces/${slug}/campaigns/${campaign.id}/launch`,
+        headers: { cookie },
+        payload: { expectedVersion: 1 },
+      });
+      expect(
+        launchRes.statusCode,
+        `expected 409, got ${launchRes.statusCode}: ${launchRes.body}`
+      ).toBe(409);
+      const body = launchRes.json<{ code: string; currentVersion: number }>();
+      expect(body.code).toBe("version_conflict");
+      expect(body.currentVersion).toBe(2);
+
+      const after = await app.inject({
+        method: "GET",
+        url: `/api/workspaces/${slug}/campaigns/${campaign.id}`,
+        headers: { cookie },
+      });
+      expect(after.statusCode).toBe(200);
+      const afterBody = after.json<{ status: string; version: number }>();
+      expect(afterBody.status).toBe("draft");
+      expect(afterBody.version).toBe(2);
+
+      const job = await campaignKickoffQueue.getJob(campaign.id);
+      expect(job).toBeFalsy();
+    });
+
+    it("rejects a launch body with no expectedVersion", async () => {
+      const campaign = await createCampaignViaRoute(cookie, slug, segmentId, "Missing precondition");
+
+      const res = await app.inject({
+        method: "POST",
+        url: `/api/workspaces/${slug}/campaigns/${campaign.id}/launch`,
+        headers: { cookie },
+        payload: {},
+      });
+      expect(res.statusCode).toBe(400);
+    });
+
+    it.each([
+      ["zero", { expectedVersion: 0 }],
+      ["a string", { expectedVersion: "2" }],
+      ["a non-integer", { expectedVersion: 1.5 }],
+    ])("rejects a malformed expectedVersion (%s)", async (_label, payload) => {
+      const campaign = await createCampaignViaRoute(cookie, slug, segmentId, `Malformed ${_label}`);
+
+      const res = await app.inject({
+        method: "POST",
+        url: `/api/workspaces/${slug}/campaigns/${campaign.id}/launch`,
+        headers: { cookie },
+        payload,
+      });
+      expect(res.statusCode, `expected 400, got ${res.statusCode}: ${res.body}`).toBe(400);
+    });
+
+    it("status beats version: launching an already-sending campaign is 409 illegal_transition, not version_conflict", async () => {
+      const campaign = await createCampaignViaRoute(cookie, slug, segmentId, "Status beats version");
+
+      const firstLaunch = await app.inject({
+        method: "POST",
+        url: `/api/workspaces/${slug}/campaigns/${campaign.id}/launch`,
+        headers: { cookie },
+        payload: { expectedVersion: 1 },
+      });
+      expect(firstLaunch.statusCode, `first launch failed: ${firstLaunch.body}`).toBe(200);
+      const freshVersion = firstLaunch.json<{ version: number }>().version;
+
+      const secondLaunch = await app.inject({
+        method: "POST",
+        url: `/api/workspaces/${slug}/campaigns/${campaign.id}/launch`,
+        headers: { cookie },
+        payload: { expectedVersion: freshVersion },
+      });
+      expect(
+        secondLaunch.statusCode,
+        `expected 409, got ${secondLaunch.statusCode}: ${secondLaunch.body}`
+      ).toBe(409);
+      expect(secondLaunch.json<{ code: string }>().code).toBe("illegal_transition");
     });
   });
 });

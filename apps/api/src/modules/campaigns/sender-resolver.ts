@@ -5,12 +5,13 @@ import { validateTenantSendGridKey } from "../tenancy/sendgrid-client.js";
 import type { CampaignRow } from "./campaign.repository.js";
 
 /**
- * CR-02: thrown by `resolveCampaignFromEmail` when a campaign's
- * `fromSenderId` cannot be turned into a concrete verified sender email --
- * `no_key` when the workspace has no connected/valid SendGrid key, or
- * `sender_not_found` when the id isn't present in `/v3/verified_senders`
- * (or both fromSenderId and fromEmail are unset). Mirrors
- * `CampaignStateError`'s shape from campaign.repository.ts.
+ * CR-02: thrown by both `resolveCampaignSenderEmail` and
+ * `resolveCampaignFromEmail` when a campaign's `fromSenderId` cannot be
+ * turned into a concrete verified sender email -- `no_key` when the
+ * workspace has no connected/valid SendGrid key, or `sender_not_found`
+ * when the id isn't present in `/v3/verified_senders` (or both
+ * fromSenderId and fromEmail are unset). Mirrors `CampaignStateError`'s
+ * shape from campaign.repository.ts.
  */
 export class CampaignSenderError extends Error {
   constructor(
@@ -25,26 +26,33 @@ export class CampaignSenderError extends Error {
 export type CampaignSenderInput = Pick<CampaignRow, "id" | "fromSenderId" | "fromEmail">;
 
 /**
- * Resolves a campaign's sender to a concrete verified email BEFORE any
- * dispatch/kickoff job is enqueued (CAMP-02/CAMP-04) -- the dispatch worker
- * (send-dispatch.ts:155) hard-requires `campaigns.from_email` for both
- * `kind='campaign'` and `kind='test'`, but the campaign builder UI only ever
- * writes `fromSenderId` (a stringified numeric SendGrid verified-sender id).
+ * TMPL-02/RESEARCH Pitfall #1: read-only half of sender resolution. Used by
+ * the launch route (plan 20-02), which persists the returned email itself
+ * INSIDE `launchCampaign`'s own locked transaction -- in the SAME `UPDATE`
+ * as the status flip and the version bump. Never writes to
+ * `campaigns.from_email` itself: a write here, executed in its own
+ * transaction ahead of the locked version check (the shape
+ * `resolveCampaignFromEmail` below still has), would bump the version the
+ * caller is about to be compared against, producing a spurious
+ * `version_conflict` on the very first, blameless attempt to launch a
+ * campaign using the primary (non-fallback) fromSenderId sender-selection
+ * path.
  *
  * - `fromSenderId` set: decrypts the tenant's connected SendGrid key, lists
  *   verified senders (T-04-09-01: only an id SendGrid itself vouches for is
- *   ever trusted), matches `String(sender.id) === fromSenderId`, persists
- *   the matched `fromEmail` to `campaigns.from_email` (overwriting any stale
- *   value so a changed sender selection can never leave a mismatched
- *   address), and returns it.
+ *   ever trusted), matches `String(sender.id) === fromSenderId`, and
+ *   returns the matched `fromEmail` -- WITHOUT persisting it.
  * - `fromSenderId` set but no connected/valid key: throws `no_key`.
  * - `fromSenderId` set but absent from `/v3/verified_senders`: throws
  *   `sender_not_found`.
  * - `fromSenderId` unset but `fromEmail` set (manual-entry fallback path):
  *   returns `fromEmail` unchanged, no SendGrid call.
  * - Neither set: throws `sender_not_found`.
+ *
+ * The decrypted key is never logged (T-04-09-02), same as the persisting
+ * variant below.
  */
-export async function resolveCampaignFromEmail(
+export async function resolveCampaignSenderEmail(
   workspaceId: string,
   campaign: CampaignSenderInput
 ): Promise<string> {
@@ -56,9 +64,7 @@ export async function resolveCampaignFromEmail(
   }
 
   // Self-contained tenant context: callers pass workspaceId explicitly
-  // rather than relying on an ambient withTenant() already being active,
-  // matching the plan's literal `resolveCampaignFromEmail(workspaceId, campaign)`
-  // signature.
+  // rather than relying on an ambient withTenant() already being active.
   return withTenant(workspaceId, async () => {
     const row = await getKey();
     if (!row) {
@@ -89,13 +95,47 @@ export async function resolveCampaignFromEmail(
       );
     }
 
+    return matched.fromEmail;
+  });
+}
+
+/**
+ * Resolves a campaign's sender to a concrete verified email AND persists it
+ * to `campaigns.from_email`, BEFORE any dispatch/kickoff job is enqueued
+ * (CAMP-02/CAMP-04) -- the dispatch worker (send-dispatch.ts:155)
+ * hard-requires `campaigns.from_email` for both `kind='campaign'` and
+ * `kind='test'`, but the campaign builder UI only ever writes
+ * `fromSenderId` (a stringified numeric SendGrid verified-sender id).
+ *
+ * Still used by the schedule and test-send routes -- plan 20-03 migrates
+ * them off it. Removing this function now would strip `from_email`
+ * persistence from those two paths mid-phase, and the dispatch worker
+ * hard-requires that column. The launch route (plan 20-02) no longer calls
+ * this function precisely BECAUSE of the persist below: its `UPDATE`
+ * happens in its OWN transaction, ahead of `launchCampaign`'s locked
+ * version check, which would bump the version the caller is about to be
+ * compared against (RESEARCH Pitfall #1) -- see
+ * `resolveCampaignSenderEmail` above for the read-only replacement.
+ *
+ * Delegates the resolution itself to `resolveCampaignSenderEmail`, then
+ * persists the matched `fromEmail` to `campaigns.from_email` (overwriting
+ * any stale value so a changed sender selection can never leave a
+ * mismatched address).
+ */
+export async function resolveCampaignFromEmail(
+  workspaceId: string,
+  campaign: CampaignSenderInput
+): Promise<string> {
+  return withTenant(workspaceId, async () => {
+    const resolvedEmail = await resolveCampaignSenderEmail(workspaceId, campaign);
+
     await withTenantTransaction(async (client) => {
       await client.query(
         `UPDATE campaigns SET from_email = $3, updated_at = now() WHERE id = $1 AND workspace_id = $2`,
-        [campaign.id, workspaceId, matched.fromEmail]
+        [campaign.id, workspaceId, resolvedEmail]
       );
     });
 
-    return matched.fromEmail;
+    return resolvedEmail;
   });
 }
