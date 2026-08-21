@@ -176,6 +176,10 @@ None - no external service configuration required.
 - `campaigns.version` exists in the Drizzle schema, the shipped migration chain, the reversibility registries, and the dev database — plan 20-02 (which adds `expectedVersion` to the launch/schedule/test-send zod schemas and the `version_conflict` repository error) can proceed without any schema prerequisite gaps.
 - No blockers. The worktree `node_modules` resolution quirk documented above is environment-specific to this executor's setup and does not affect the shipped code.
 
+## Self-Check: PASSED
+
+All created/modified files confirmed present on disk (`packages/db/migrations/0066_campaigns_version.sql`, `packages/db/migrations/meta/0066_snapshot.json`, `packages/db/src/schema/campaigns.ts`, `packages/db/src/migration-tiers.ts`, `SPECIFICATION.md`, this SUMMARY). All task commits confirmed present in `git log` (`fbd4b4e`, `6fc82f0`).
+
 ---
 *Phase: 20-campaign-template-correctness*
 *Completed: 2026-08-21*
