@@ -397,15 +397,26 @@ export async function registerCampaignsRoutes(fastify: FastifyInstance): Promise
       }
 
       try {
-        // CR-02: same resolve-before-transition guarantee as launch -- the
-        // 04-06 scheduler worker must find a populated from_email at send
-        // time, never re-resolve at kickoff time itself.
+        // CR-02/TMPL-02/RESEARCH Pitfall #1: resolve the sender WITHOUT
+        // persisting -- persistence now happens inside scheduleCampaign's
+        // own locked transaction, in the SAME statement as the status flip
+        // and the version bump, exactly as the launch route (plan 20-02)
+        // already does. The 04-06 scheduler worker still finds a populated
+        // from_email at send time; it just gets written under the lock now,
+        // not in a separate transaction ahead of it.
         const preSchedule = await withTenant(workspace.id, () => getCampaign(id));
-        if (preSchedule && (preSchedule.fromSenderId || preSchedule.fromEmail)) {
-          await resolveCampaignFromEmail(workspace.id, preSchedule);
-        }
+        const resolvedFromEmail =
+          preSchedule && (preSchedule.fromSenderId || preSchedule.fromEmail)
+            ? await resolveCampaignSenderEmail(workspace.id, preSchedule)
+            : null;
 
-        const scheduled = await withTenant(workspace.id, () => scheduleCampaign(id, scheduledAtDate));
+        const scheduled = await withTenant(workspace.id, () =>
+          scheduleCampaign(id, {
+            scheduledAt: scheduledAtDate,
+            expectedVersion: parsed.data.expectedVersion,
+            resolvedFromEmail,
+          })
+        );
         return reply.send(toCampaignResponse(scheduled));
       } catch (err) {
         const senderMapped = mapCampaignSenderError(err);

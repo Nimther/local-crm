@@ -289,12 +289,36 @@ export async function launchCampaign(
   });
 }
 
+export interface ScheduleCampaignOptions {
+  scheduledAt: Date;
+  /** TMPL-02/D-05/D-06/D-11: same optimistic-lock precondition as launchCampaign -- see LaunchCampaignOptions's own doc comment. */
+  expectedVersion: number;
+  /**
+   * RESEARCH Pitfall #1: the already-resolved sender email (from the
+   * read-only `resolveCampaignSenderEmail`, run OUTSIDE this lock), or
+   * `null` when the campaign has neither `fromSenderId` nor `fromEmail`
+   * set. Persisted here, in the SAME `UPDATE` as the status flip and the
+   * version bump, so a fromSenderId-based schedule bumps `version` exactly
+   * once per marketer click -- same reasoning as launchCampaign's own
+   * `resolvedFromEmail` field.
+   */
+  resolvedFromEmail: string | null;
+}
+
 /**
  * CAMP-02/D-06: draft -> scheduled for a future UTC instant (the 04-06
  * scheduler worker picks up due campaigns and enqueues the kickoff job).
  * Only a draft can be scheduled -- else `illegal_transition`.
+ * TMPL-02/D-05/D-06/D-11 (plan 20-03): `options.expectedVersion` is
+ * compared against the row's real `version` INSIDE this same locked
+ * transaction, mirroring `launchCampaign` exactly -- checked in this order:
+ * not_found -> status (so a concurrent launch/cancel reports the real
+ * state) -> version. Deliberately NO completeness check is added here:
+ * scheduling an incomplete draft is existing, deliberate behaviour (the
+ * launch that eventually fires the scheduled campaign is what enforces
+ * completeness), and this plan does not change that.
  */
-export async function scheduleCampaign(id: string, scheduledAt: Date): Promise<CampaignRow> {
+export async function scheduleCampaign(id: string, options: ScheduleCampaignOptions): Promise<CampaignRow> {
   return withTenantTransaction(async (client) => {
     const workspaceId = getWorkspaceId();
     const { rows } = await client.query<CampaignRow>(
@@ -308,12 +332,24 @@ export async function scheduleCampaign(id: string, scheduledAt: Date): Promise<C
     if (existing.status !== "draft") {
       throw new CampaignStateError("Only a draft campaign can be scheduled", "illegal_transition");
     }
+    if (existing.version !== options.expectedVersion) {
+      throw new CampaignStateError(
+        "Campaign was modified since it was loaded",
+        "version_conflict",
+        existing.version
+      );
+    }
 
     const { rows: updated } = await client.query<CampaignRow>(
-      `UPDATE campaigns SET status = 'scheduled', scheduled_at = $3, updated_at = now()
+      `UPDATE campaigns SET
+         status = 'scheduled',
+         scheduled_at = $3,
+         from_email = COALESCE($4, from_email),
+         version = version + 1,
+         updated_at = now()
        WHERE workspace_id = $1 AND id = $2
        RETURNING ${CAMPAIGN_COLUMNS}`,
-      [workspaceId, id, scheduledAt]
+      [workspaceId, id, options.scheduledAt, options.resolvedFromEmail]
     );
     return updated[0];
   });
@@ -324,6 +360,12 @@ export async function scheduleCampaign(id: string, scheduledAt: Date): Promise<C
  * with no history lost) OR sending -> canceled (terminal, current counters
  * preserved as-is -- already-sent mail is never recalled). Any other source
  * status is `illegal_transition` (draft/sent/canceled are not cancelable).
+ * D-05 (plan 20-03): both branches bump `version` like every other mutation
+ * in this file, keeping the any-write-bumps invariant true for cancel too --
+ * but deliberately takes NO `expectedVersion` parameter. D-06 enumerates
+ * only launch/schedule/test-send as requiring the precondition; cancel is
+ * never listed, and adding one here would break the cancel button against a
+ * decision nobody made.
  */
 export async function cancelCampaign(id: string): Promise<CampaignRow> {
   return withTenantTransaction(async (client) => {
@@ -339,7 +381,7 @@ export async function cancelCampaign(id: string): Promise<CampaignRow> {
 
     if (existing.status === "scheduled") {
       const { rows: updated } = await client.query<CampaignRow>(
-        `UPDATE campaigns SET status = 'draft', scheduled_at = NULL, updated_at = now()
+        `UPDATE campaigns SET status = 'draft', scheduled_at = NULL, version = version + 1, updated_at = now()
          WHERE workspace_id = $1 AND id = $2
          RETURNING ${CAMPAIGN_COLUMNS}`,
         [workspaceId, id]
@@ -349,7 +391,7 @@ export async function cancelCampaign(id: string): Promise<CampaignRow> {
 
     if (existing.status === "sending") {
       const { rows: updated } = await client.query<CampaignRow>(
-        `UPDATE campaigns SET status = 'canceled', terminal_at = now(), updated_at = now()
+        `UPDATE campaigns SET status = 'canceled', terminal_at = now(), version = version + 1, updated_at = now()
          WHERE workspace_id = $1 AND id = $2
          RETURNING ${CAMPAIGN_COLUMNS}`,
         [workspaceId, id]

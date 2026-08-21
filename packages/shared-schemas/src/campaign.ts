@@ -57,10 +57,17 @@ export type LaunchCampaignInput = z.infer<typeof launchCampaignSchema>;
 /**
  * POST /api/workspaces/:slug/campaigns/:id/schedule -- D-06: the picker
  * converts local time to UTC client-side before this ISO datetime string
- * ever reaches the API.
+ * ever reaches the API. TMPL-02/D-06/D-11 (plan 20-03): `expectedVersion`
+ * mirrors `launchCampaignSchema`'s precondition exactly -- one uniform
+ * required-version contract across every send path (launch/schedule/
+ * test-send), so a stale read is refused the same way no matter which path
+ * the marketer takes, and SC4 ("no send path acts on a client-supplied
+ * value it did not itself lock and verify") is provable for all three at
+ * once rather than for launch alone.
  */
 export const scheduleCampaignSchema = z.object({
   scheduledAt: z.string().datetime(),
+  expectedVersion: z.number().int().min(1),
 });
 export type ScheduleCampaignInput = z.infer<typeof scheduleCampaignSchema>;
 
