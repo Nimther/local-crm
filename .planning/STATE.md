@@ -5,8 +5,8 @@ milestone_name: Data Lifecycle & Delivery Trust
 current_phase: 20
 current_phase_name: Campaign Template Correctness
 status: planning
-stopped_at: Phase 19 complete, ready to plan Phase 20
-last_updated: "2026-08-21T04:56:48.501Z"
+stopped_at: Phase 20 context gathered
+last_updated: "2026-08-21T05:50:13.574Z"
 last_activity: 2026-08-21
 last_activity_desc: Phase 19 complete, transitioned to Phase 20
 progress:
@@ -114,9 +114,9 @@ Items acknowledged and deferred at milestone close on 2026-08-20 (open-artifact 
 
 ## Session Continuity
 
-Last session: 2026-08-21
-Stopped at: Phase 19 complete (UAT 1/1 passed, security review 24/24 closed), ready to plan Phase 20
-Resume file: None
+Last session: 2026-08-21T05:50:13.538Z
+Stopped at: Phase 20 context gathered
+Resume file: .planning/phases/20-campaign-template-correctness/20-CONTEXT.md
 
 ## Operator Next Steps
 
