@@ -67,6 +67,10 @@ interface InverseStep {
  *   `workspace_daily_rollup.updated_at`. Reverting means dropping exactly
  *   those two objects -- nothing this migration's inverse touches existed
  *   before this migration ran.
+ * - 0066_campaigns_version (Phase 20 plan 20-01, TMPL-02/D-05): adds exactly
+ *   one column, `campaigns.version`, with a constant default (`1`) and no
+ *   backfill. Dropping it removes only rows' version counters -- data this
+ *   same migration created -- and touches no pre-existing campaign field.
  */
 const MIGRATION_INVERSES: Record<string, InverseStep[]> = {
   "0062_member_unique_org_user": [
@@ -98,6 +102,12 @@ const MIGRATION_INVERSES: Record<string, InverseStep[]> = {
     {
       description: "drop the watermark column this migration added to workspace_daily_rollup (updated_at)",
       sql: `ALTER TABLE workspace_daily_rollup DROP COLUMN updated_at;`,
+    },
+  ],
+  "0066_campaigns_version": [
+    {
+      description: "drop the Phase 20 optimistic-lock token this migration added to campaigns (version)",
+      sql: `ALTER TABLE campaigns DROP COLUMN version;`,
     },
   ],
 };

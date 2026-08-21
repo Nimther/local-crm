@@ -60,16 +60,15 @@ describe("checkEmptyDiff against the real repository (the CI-enforced copy of db
     expect(result.empty).toBe(true);
     expect(result.sqlStatements).toEqual([]);
     // Diagnosable on failure: which snapshot, how many shipped migrations.
-    // 0065 (Phase 15 plan 14, Task 1) is a grants-only migration -- a
-    // column-level GRANT + CREATE POLICY, no packages/db/src/schema/*.ts
-    // change at all -- so it ships no new snapshot (0064_snapshot.json
-    // remains the newest, matching 0055's/0059's/0060's own grants/policy
-    // -only precedent of shipping no snapshot). shippedMigrationCount grows
-    // to 66 (one more shipped tag in the journal); snapshotFileCount stays
-    // 14 (no new snapshot file).
-    expect(result.comparedAgainstSnapshot).toBe("0064_snapshot.json");
-    expect(result.shippedMigrationCount).toBe(66);
-    expect(result.snapshotFileCount).toBe(14);
+    // 0066 (Phase 20 plan 20-01, TMPL-02/D-05) adds `campaigns.version` --
+    // a real packages/db/src/schema/*.ts change, so it DOES ship its own
+    // snapshot (0066_snapshot.json is now the newest, chaining from
+    // 0064_snapshot.json since 0065 was grants-only and shipped none).
+    // shippedMigrationCount grows to 67 (one more shipped tag in the
+    // journal); snapshotFileCount grows to 15 (one more snapshot file).
+    expect(result.comparedAgainstSnapshot).toBe("0066_snapshot.json");
+    expect(result.shippedMigrationCount).toBe(67);
+    expect(result.snapshotFileCount).toBe(15);
 
     // Never touches the repository -- proven, not assumed: the directory
     // listing (every file under packages/db/migrations, recursively) is
@@ -85,15 +84,13 @@ describe("checkEmptyDiff against the real repository (the CI-enforced copy of db
     // preceded it (0034), and its filename must match the newest SCHEMA-
     // CHANGING migration's tag prefix -- a mismatch here would mean
     // db:check-empty-diff is silently comparing against the wrong point in
-    // history. 0065 (Phase 15 plan 14, Task 1) is now the newest SHIPPED
-    // migration overall, but it is grants-only (no packages/db/src/schema/
-    // *.ts change) and therefore ships no snapshot of its own -- 0064's
-    // snapshot (Phase 15 plan 12, OPS-13/OPS-18) remains the one
-    // checkEmptyDiff compares against (asserted separately above via
+    // history. 0066 (Phase 20 plan 20-01, TMPL-02/D-05) is now the newest
+    // SHIPPED migration overall, AND the newest schema-changing one -- it
+    // ships its own snapshot (asserted separately above via
     // `comparedAgainstSnapshot`). This assertion tracks the JOURNAL's newest
-    // tag, which is now 0065.
+    // tag, which is now 0066.
     const newestTag = journal.entries[journal.entries.length - 1]?.tag;
-    expect(newestTag).toBe("0065_webhook_endpoints_scan_grant");
+    expect(newestTag).toBe("0066_campaigns_version");
   });
 });
 
@@ -156,6 +153,6 @@ describe("listSnapshotFiles", () => {
     const files = listSnapshotFiles(path.join(REAL_MIGRATIONS_DIR, "meta"));
     expect(files).not.toContain("_journal.json");
     expect(files).toEqual([...files].sort());
-    expect(files[files.length - 1]).toBe("0064_snapshot.json");
+    expect(files[files.length - 1]).toBe("0066_snapshot.json");
   });
 });
