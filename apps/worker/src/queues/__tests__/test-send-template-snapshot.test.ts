@@ -5,17 +5,38 @@ import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import type { SendGridMailSendRequest, SendTenantMailResult } from "@mega-crm/delivery-core";
 import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool } from "../../test/db-fixture.js";
 import { processSendJob } from "../send-dispatch.js";
-import { connectFixtureSendgridKey, createFixtureCampaign, freshWorkspaceId } from "../../test/failure-fixtures.js";
+import {
+  connectFixtureSendgridKey,
+  createFixtureCampaign,
+  createFixtureContact,
+  freshWorkspaceId,
+} from "../../test/failure-fixtures.js";
 
 /**
- * TMPL-03/D-12: for `kind='test'`, the dispatcher must prefer the job
- * payload's `templateId`/`fromEmail` snapshot -- captured at enqueue time
- * from the version-checked row, plan 20-03 -- over a fresh read of
- * `campaigns` at dispatch time, falling back to the row when either field is
- * absent (rolling-deploy safety). Each assertion below operates at the
- * `sendMail` seam (the payload `buildMailSendRequest` produces), never at
- * the returned outcome alone -- "sent" alone cannot distinguish which
- * template was actually used.
+ * TMPL-03/D-12 three-path template-correctness proof (SC2, plan 20-04):
+ *
+ * - **Test-send** (`kind='test'`): the dispatcher must prefer the job
+ *   payload's `templateId`/`fromEmail` snapshot -- captured at enqueue time
+ *   from the version-checked row, plan 20-03 -- over a fresh read of
+ *   `campaigns` at dispatch time. Covered by the top-level "snapshot wins",
+ *   "the async-gap proof (D-12)", "rolling-deploy fallback", and
+ *   "effective-value prerequisite check" cases. Plan 20-03's own
+ *   route-level assertion (`campaigns-routes.test.ts`) already proves the
+ *   enqueued job CARRIES the saved row's values; this file proves the
+ *   WORKER honours what it carries.
+ * - **Launch and Schedule** (`kind='campaign'`): both fan out through
+ *   `campaign-kickoff.worker.ts` onto `kind='campaign'` jobs, and neither
+ *   can be edited after the `sending`/`scheduled` transition (RESEARCH
+ *   Pattern 3) -- there is no editable window a snapshot would protect, so
+ *   the dispatcher always re-derives from the row via `readSendPrereqs`
+ *   called WITHOUT an override. Covered by the "campaign dispatch path"
+ *   describe block below: "row-derived after a save" (the row's NEW
+ *   template wins after an edit) and "snapshot scoping pin" (a `templateId`
+ *   field on a `kind='campaign'` job is ignored).
+ *
+ * Each assertion below operates at the `sendMail` seam (the payload
+ * `buildMailSendRequest` produces), never at the returned outcome alone --
+ * "sent" alone cannot distinguish which template was actually used.
  */
 describe("test-send-template-snapshot (TMPL-03, D-12)", () => {
   let pool: Pool;
@@ -150,5 +171,52 @@ describe("test-send-template-snapshot (TMPL-03, D-12)", () => {
     const payload = recording.lastPayload();
     expect(payload?.template_id).toBe("d-snapshot-rescue");
     expect(payload?.from.email).toBe("rescue-sender@fixture.test");
+  });
+
+  describe("campaign dispatch path (SC2: launch and schedule converge here, both row-derived)", () => {
+    it("row-derived after a save: a kind='campaign' job sends the campaign's NEW template after an edit", async () => {
+      const { workspaceId, campaignId } = await seedFixtureCampaign("tmpl-campaign-row-derived");
+      const contactId = await createFixtureContact(workspaceId);
+      // The "marketer saved a new template" step of the original bug scenario.
+      await updateCampaignTemplateId(workspaceId, campaignId, "d-fixture-template-NEW");
+      const recording = recordingSendMail();
+
+      const result = await processSendJob(
+        { workspaceId, campaignId, kind: "campaign", contactId },
+        { sendMail: recording.fn, redisClient }
+      );
+
+      expect(result.outcome).toBe("sent");
+      const payload = recording.lastPayload();
+      expect(payload?.template_id, "launch/schedule pick up the saved template with no snapshot involved").toBe(
+        "d-fixture-template-NEW"
+      );
+    });
+
+    it("snapshot scoping pin: a kind='campaign' job carrying a templateId field is ignored -- the ROW's template is sent", async () => {
+      const { workspaceId, campaignId } = await seedFixtureCampaign("tmpl-campaign-scoping-pin");
+      const contactId = await createFixtureContact(workspaceId);
+      const recording = recordingSendMail();
+
+      const result = await processSendJob(
+        {
+          workspaceId,
+          campaignId,
+          kind: "campaign",
+          contactId,
+          // A campaign job schema-permits these fields (they are shared with
+          // kind='test' on the same emailBroadcastJobSchema) but the campaign
+          // branch must never consult them -- T-20-04-01.
+          templateId: "d-should-be-ignored",
+          fromEmail: "should-be-ignored@fixture.test",
+        },
+        { sendMail: recording.fn, redisClient }
+      );
+
+      expect(result.outcome).toBe("sent");
+      const payload = recording.lastPayload();
+      expect(payload?.template_id, "a campaign job can never be redirected by its own payload").toBe("d-fixture-template");
+      expect(payload?.from.email).toBe("sender@fixture.test");
+    });
   });
 });
