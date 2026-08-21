@@ -323,14 +323,29 @@ describe("campaign routes (CAMP-01..05)", () => {
    * `illegal_transition`, not a conflict.
    */
   describe("launch version precondition (TMPL-02, D-06/D-07)", () => {
+    // A single shared owner/workspace/segment for every case below (each
+    // case still gets its OWN fresh campaign via createCampaignViaRoute) --
+    // one sign-up here instead of one per case keeps this file's total
+    // /api/auth/* traffic well under the 20-per-minute rate limit
+    // (auth/plugin.ts) that eight more owner() calls in this one file would
+    // otherwise trip.
+    let cookie: string;
+    let slug: string;
+    let segmentId: string;
+
+    beforeAll(async () => {
+      const ctx = await owner("camp-routes-launch-version");
+      cookie = ctx.cookie;
+      slug = ctx.workspace.slug;
+      segmentId = await createSegment(cookie, slug);
+    });
+
     it("a freshly created draft's GET response carries version 1", async () => {
-      const { cookie, workspace } = await owner("camp-routes-launch-v1");
-      const segmentId = await createSegment(cookie, workspace.slug);
-      const campaign = await createCampaignViaRoute(cookie, workspace.slug, segmentId);
+      const campaign = await createCampaignViaRoute(cookie, slug, segmentId, "Version check");
 
       const res = await app.inject({
         method: "GET",
-        url: `/api/workspaces/${workspace.slug}/campaigns/${campaign.id}`,
+        url: `/api/workspaces/${slug}/campaigns/${campaign.id}`,
         headers: { cookie },
       });
       expect(res.statusCode).toBe(200);
@@ -338,13 +353,11 @@ describe("campaign routes (CAMP-01..05)", () => {
     });
 
     it("launch with the current version succeeds, bumps version by exactly one, and enqueues a kickoff job", async () => {
-      const { cookie, workspace } = await owner("camp-routes-launch-happy");
-      const segmentId = await createSegment(cookie, workspace.slug);
-      const campaign = await createCampaignViaRoute(cookie, workspace.slug, segmentId);
+      const campaign = await createCampaignViaRoute(cookie, slug, segmentId, "Launch happy path");
 
       const res = await app.inject({
         method: "POST",
-        url: `/api/workspaces/${workspace.slug}/campaigns/${campaign.id}/launch`,
+        url: `/api/workspaces/${slug}/campaigns/${campaign.id}/launch`,
         headers: { cookie },
         payload: { expectedVersion: 1 },
       });
@@ -361,13 +374,11 @@ describe("campaign routes (CAMP-01..05)", () => {
     });
 
     it("a stale version is refused with 409 version_conflict, leaves the row untouched, and enqueues nothing", async () => {
-      const { cookie, workspace } = await owner("camp-routes-launch-stale");
-      const segmentId = await createSegment(cookie, workspace.slug);
-      const campaign = await createCampaignViaRoute(cookie, workspace.slug, segmentId);
+      const campaign = await createCampaignViaRoute(cookie, slug, segmentId, "Stale version");
 
       const patchRes = await app.inject({
         method: "PATCH",
-        url: `/api/workspaces/${workspace.slug}/campaigns/${campaign.id}`,
+        url: `/api/workspaces/${slug}/campaigns/${campaign.id}`,
         headers: { cookie },
         payload: { name: "Renamed" },
       });
@@ -376,7 +387,7 @@ describe("campaign routes (CAMP-01..05)", () => {
 
       const launchRes = await app.inject({
         method: "POST",
-        url: `/api/workspaces/${workspace.slug}/campaigns/${campaign.id}/launch`,
+        url: `/api/workspaces/${slug}/campaigns/${campaign.id}/launch`,
         headers: { cookie },
         payload: { expectedVersion: 1 },
       });
@@ -390,7 +401,7 @@ describe("campaign routes (CAMP-01..05)", () => {
 
       const after = await app.inject({
         method: "GET",
-        url: `/api/workspaces/${workspace.slug}/campaigns/${campaign.id}`,
+        url: `/api/workspaces/${slug}/campaigns/${campaign.id}`,
         headers: { cookie },
       });
       expect(after.statusCode).toBe(200);
@@ -403,13 +414,11 @@ describe("campaign routes (CAMP-01..05)", () => {
     });
 
     it("rejects a launch body with no expectedVersion", async () => {
-      const { cookie, workspace } = await owner("camp-routes-launch-missing");
-      const segmentId = await createSegment(cookie, workspace.slug);
-      const campaign = await createCampaignViaRoute(cookie, workspace.slug, segmentId);
+      const campaign = await createCampaignViaRoute(cookie, slug, segmentId, "Missing precondition");
 
       const res = await app.inject({
         method: "POST",
-        url: `/api/workspaces/${workspace.slug}/campaigns/${campaign.id}/launch`,
+        url: `/api/workspaces/${slug}/campaigns/${campaign.id}/launch`,
         headers: { cookie },
         payload: {},
       });
@@ -421,13 +430,11 @@ describe("campaign routes (CAMP-01..05)", () => {
       ["a string", { expectedVersion: "2" }],
       ["a non-integer", { expectedVersion: 1.5 }],
     ])("rejects a malformed expectedVersion (%s)", async (_label, payload) => {
-      const { cookie, workspace } = await owner("camp-routes-launch-malformed");
-      const segmentId = await createSegment(cookie, workspace.slug);
-      const campaign = await createCampaignViaRoute(cookie, workspace.slug, segmentId);
+      const campaign = await createCampaignViaRoute(cookie, slug, segmentId, `Malformed ${_label}`);
 
       const res = await app.inject({
         method: "POST",
-        url: `/api/workspaces/${workspace.slug}/campaigns/${campaign.id}/launch`,
+        url: `/api/workspaces/${slug}/campaigns/${campaign.id}/launch`,
         headers: { cookie },
         payload,
       });
@@ -435,13 +442,11 @@ describe("campaign routes (CAMP-01..05)", () => {
     });
 
     it("status beats version: launching an already-sending campaign is 409 illegal_transition, not version_conflict", async () => {
-      const { cookie, workspace } = await owner("camp-routes-launch-status-order");
-      const segmentId = await createSegment(cookie, workspace.slug);
-      const campaign = await createCampaignViaRoute(cookie, workspace.slug, segmentId);
+      const campaign = await createCampaignViaRoute(cookie, slug, segmentId, "Status beats version");
 
       const firstLaunch = await app.inject({
         method: "POST",
-        url: `/api/workspaces/${workspace.slug}/campaigns/${campaign.id}/launch`,
+        url: `/api/workspaces/${slug}/campaigns/${campaign.id}/launch`,
         headers: { cookie },
         payload: { expectedVersion: 1 },
       });
@@ -450,7 +455,7 @@ describe("campaign routes (CAMP-01..05)", () => {
 
       const secondLaunch = await app.inject({
         method: "POST",
-        url: `/api/workspaces/${workspace.slug}/campaigns/${campaign.id}/launch`,
+        url: `/api/workspaces/${slug}/campaigns/${campaign.id}/launch`,
         headers: { cookie },
         payload: { expectedVersion: freshVersion },
       });

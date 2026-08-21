@@ -41,10 +41,17 @@ export const campaignListQuerySchema = z.object({
 export type CampaignListQuery = z.infer<typeof campaignListQuerySchema>;
 
 /**
- * POST /api/workspaces/:slug/campaigns/:id/launch -- an action, not a
- * resource update; the body carries no data (immediate send).
+ * POST /api/workspaces/:slug/campaigns/:id/launch -- an action, but no
+ * longer an empty body: TMPL-02/D-05/D-06 require an optimistic-lock
+ * precondition. `expectedVersion` is the `version` the client read off the
+ * campaign response it is launching (`toCampaignResponse`'s `version`
+ * field) -- the repository compares it against the row's real version
+ * INSIDE the same locked transaction that flips status and bumps the
+ * version, so it can never be checked outside the lock. A request with no
+ * `expectedVersion`, a non-integer value, or a value below 1 is refused
+ * with 400 -- there is no optional-when-present soft mode (D-06).
  */
-export const launchCampaignSchema = z.object({});
+export const launchCampaignSchema = z.object({ expectedVersion: z.number().int().min(1) });
 export type LaunchCampaignInput = z.infer<typeof launchCampaignSchema>;
 
 /**

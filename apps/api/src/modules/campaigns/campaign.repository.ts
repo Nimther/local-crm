@@ -16,6 +16,8 @@ export interface CampaignRow {
   sendableTotal: number | null;
   sentCount: number;
   failedCount: number;
+  /** TMPL-02/D-05: optimistic-lock token, incremented once per mutating write inside this file's locked transactions. */
+  version: number;
   excludedTotal: number | null;
   snapshotCursor: string | null;
   sendingStartedAt: Date | null;
@@ -44,6 +46,7 @@ const CAMPAIGN_COLUMNS = `
   sendable_total as "sendableTotal",
   sent_count as "sentCount",
   failed_count as "failedCount",
+  version,
   excluded_total as "excludedTotal",
   snapshot_cursor as "snapshotCursor",
   sending_started_at as "sendingStartedAt",
@@ -62,14 +65,18 @@ const CAMPAIGN_COLUMNS = `
  * D-03/D-08: thrown by every state-transition/mutation function below when
  * the requested change is not legal from the campaign's current status
  * (`illegal_transition`), the campaign is missing a required field before
- * launch (`incomplete`), or the campaign id does not resolve within the
- * caller's workspace (`not_found`). Mirrors segment.repository.ts's
+ * launch (`incomplete`), the campaign id does not resolve within the
+ * caller's workspace (`not_found`), or (TMPL-02/D-05/D-06/D-07) the
+ * caller's `expectedVersion` no longer matches the row's real version
+ * (`version_conflict`). Mirrors segment.repository.ts's
  * `SegmentConflictError` shape.
  */
 export class CampaignStateError extends Error {
   constructor(
     message: string,
-    public readonly code: "illegal_transition" | "incomplete" | "not_found"
+    public readonly code: "illegal_transition" | "incomplete" | "not_found" | "version_conflict",
+    /** Set only for the `version_conflict` case -- the row's real version, so the route can build its 409 body without a second read. */
+    public readonly currentVersion?: number
   ) {
     super(message);
     this.name = "CampaignStateError";
@@ -196,6 +203,7 @@ export async function updateCampaign(id: string, patch: UpdateCampaignInput): Pr
          template_id = $5,
          from_sender_id = $6,
          from_email = $7,
+         version = version + 1,
          updated_at = now()
        WHERE workspace_id = $1 AND id = $2
        RETURNING ${CAMPAIGN_COLUMNS}`,
@@ -205,13 +213,40 @@ export async function updateCampaign(id: string, patch: UpdateCampaignInput): Pr
   });
 }
 
+export interface LaunchCampaignOptions {
+  /** TMPL-02/D-05/D-06: the optimistic-lock token the client read off the campaign response it is launching. */
+  expectedVersion: number;
+  /**
+   * RESEARCH Pitfall #1: the already-resolved sender email (from the
+   * read-only `resolveCampaignSenderEmail`, run OUTSIDE this lock), or
+   * `null` when the campaign has neither `fromSenderId` nor `fromEmail`
+   * set. Persisted here, in the SAME `UPDATE` as the status flip and the
+   * version bump, so a fromSenderId-based launch bumps `version` exactly
+   * once per marketer click -- never as a separate write ahead of the
+   * version check, which would make that write itself the cause of a
+   * spurious `version_conflict` on the very next comparison.
+   */
+  resolvedFromEmail: string | null;
+}
+
 /**
  * CAMP-02: draft -> sending, immediate launch. Requires templateId AND
  * (fromEmail OR fromSenderId) AND segmentId all set -- else `incomplete`
  * (CampaignStateError). Any non-draft source status is `illegal_transition`.
- * Locked read-check-write prevents a race against a concurrent edit/cancel.
+ * TMPL-02/D-05/D-06/D-07: `options.expectedVersion` is compared against the
+ * row's real `version` INSIDE this same locked transaction -- never as a
+ * route-level pre-check followed by an unlocked write -- and a mismatch
+ * throws `version_conflict` carrying the row's real version so the client
+ * can refetch and retry. Checked in this order: status (so a concurrent
+ * launch/cancel reports the real state, not a conflict), then version (so
+ * a stale view never produces a misleading per-field `incomplete` error),
+ * then completeness. Locked read-check-write prevents a race against a
+ * concurrent edit/cancel.
  */
-export async function launchCampaign(id: string): Promise<CampaignRow> {
+export async function launchCampaign(
+  id: string,
+  options: LaunchCampaignOptions
+): Promise<CampaignRow> {
   return withTenantTransaction(async (client) => {
     const workspaceId = getWorkspaceId();
     const { rows } = await client.query<CampaignRow>(
@@ -225,6 +260,13 @@ export async function launchCampaign(id: string): Promise<CampaignRow> {
     if (existing.status !== "draft") {
       throw new CampaignStateError("Only a draft campaign can be launched", "illegal_transition");
     }
+    if (existing.version !== options.expectedVersion) {
+      throw new CampaignStateError(
+        "Campaign was modified since it was loaded",
+        "version_conflict",
+        existing.version
+      );
+    }
     if (!existing.templateId || !(existing.fromEmail || existing.fromSenderId) || !existing.segmentId) {
       throw new CampaignStateError(
         "Campaign is missing a required field (template, sender, or segment) before launch",
@@ -233,10 +275,15 @@ export async function launchCampaign(id: string): Promise<CampaignRow> {
     }
 
     const { rows: updated } = await client.query<CampaignRow>(
-      `UPDATE campaigns SET status = 'sending', sending_started_at = now(), updated_at = now()
+      `UPDATE campaigns SET
+         status = 'sending',
+         sending_started_at = now(),
+         from_email = COALESCE($3, from_email),
+         version = version + 1,
+         updated_at = now()
        WHERE workspace_id = $1 AND id = $2
        RETURNING ${CAMPAIGN_COLUMNS}`,
-      [workspaceId, id]
+      [workspaceId, id, options.resolvedFromEmail]
     );
     return updated[0];
   });
