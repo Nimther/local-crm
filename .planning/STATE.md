@@ -5,16 +5,16 @@ milestone_name: Data Lifecycle & Delivery Trust
 current_phase: 21
 current_phase_name: Per-Contact DSR Export
 status: "Phase 20 shipped — PR #26"
-stopped_at: Phase 21 context gathered
-last_updated: "2026-08-21T15:45:15.918Z"
+stopped_at: Phase 21 UI-SPEC approved
+last_updated: "2026-08-21T17:24:06.914Z"
 last_activity: 2026-08-21
+last_activity_desc: Phase 21 planning complete
 progress:
   total_phases: 5
   completed_phases: 3
-  total_plans: 15
+  total_plans: 21
   completed_plans: 15
   percent: 60
-last_activity_desc: Phase 20 complete, transitioned to Phase 21
 ---
 
 # Project State
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-08-21 after Phase 19)
 Phase: 21 — Per-Contact DSR Export
 Plan: Not started
 Status: Phase 20 shipped — PR #26
-Last activity: 2026-08-21
+Last activity: 2026-08-21 — Phase 21 planning complete
 
 Progress: [████░░░░░░] 40% (2/5 v1.2 phases complete)
 
@@ -115,9 +115,9 @@ Items acknowledged and deferred at milestone close on 2026-08-20 (open-artifact 
 
 ## Session Continuity
 
-Last session: 2026-08-21T15:45:15.879Z
-Stopped at: Phase 21 context gathered
-Resume file: .planning/phases/21-per-contact-dsr-export/21-CONTEXT.md
+Last session: 2026-08-21T16:27:09.157Z
+Stopped at: Phase 21 UI-SPEC approved
+Resume file: /Users/primeropanther/Projects/mega-crm/.planning/phases/21-per-contact-dsr-export/21-UI-SPEC.md
 
 ## Operator Next Steps
 
