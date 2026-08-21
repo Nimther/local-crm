@@ -1246,15 +1246,27 @@ Repeatable-скан `flow-segment-sweep` (15 мин, §5.1/§5.2) — перио
 | POST | `.../sendgrid-key/recheck`, `.../webhook-reconnect` | `sendgridKey:update` |
 | GET/POST | `.../api-keys`, POST `.../api-keys/:id/revoke` | `apiKeys:create` / `apiKeys:revoke` |
 | PUT | `.../send-settings` | `campaign:launch` |
-| POST | `.../campaigns/:id/launch` (`campaigns.routes.ts:314-316`) | `campaign:launch` |
-| POST | `.../campaigns/:id/schedule` (`:359-361`) | `campaign:launch` |
-| POST | `.../campaigns/:id/cancel` (`:400-402`) | `campaign:launch` |
-| POST | `.../campaigns/:id/duplicate` (`:421-423`) | `campaign:launch` |
+| POST | `.../campaigns/:id/launch` (`campaigns.routes.ts:319-321`) | `campaign:launch` |
+| POST | `.../campaigns/:id/schedule` (`:379-381`) | `campaign:launch` |
+| POST | `.../campaigns/:id/cancel` (`:420-422`) | `campaign:launch` |
+| POST | `.../campaigns/:id/duplicate` (`:441-443`) | `campaign:launch` |
 | POST | `.../flows/:id/publish` (`flows.routes.ts:266-268`) | `flow:publish` |
 | POST | `.../flows/:id/pause` (`:319-321`) | `flow:publish` |
 | POST | `.../flows/:id/resume` (`:343-345`) | `flow:publish` |
 | POST | `.../flows/:id/runs/eject` (`:426-428`) | `flow:publish` |
 | DELETE | `.../flows/:id` (`:459-461`) | `flow:publish` |
+
+### 6.5.1 `POST .../campaigns/:id/launch` — optimistic-lock precondition (Phase 20, план 20-02, TMPL-02/D-05/D-06/D-07)
+
+Тело запроса теперь валидируется против `launchCampaignSchema` (`@mega-crm/shared-schemas`) и **требует** `expectedVersion` (целое ≥ 1) — запрос без него получает **400**; отсутствие тела, нецелое значение или значение `< 1` также 400 (никакого "optional-when-present" мягкого режима, D-06). Значение сравнивается с `campaigns.version` ВНУТРИ той же `SELECT ... FOR UPDATE`-транзакции репозитория (`campaign.repository.ts`'s `launchCampaign`), которая переводит статус и делает бэкфилл `from_email` — вне блокировки версия не проверяется никогда. Порядок проверок внутри транзакции: `not_found` → статус (`illegal_transition`) → версия (`version_conflict`) → полнота полей (`incomplete`) — статус первым, чтобы конкурентный launch/cancel отвечал реальным статусом, а не конфликтом версии; версия перед полнотой, чтобы устаревшее представление не выдавало обманчивую по-полевую ошибку.
+
+Несовпадение версии возвращает **409** с телом `{ error, code: "version_conflict", currentVersion }` — ни один статус-переход не происходит, ни один kickoff-джоб не enqueue'ится (доказано тестом: `campaignKickoffQueue.getJob(id)` falsy после конфликта). Каждое тело ошибки `CampaignStateError` теперь несёт поле `code` (`not_found` / `illegal_transition` / `incomplete` / `version_conflict`) — это то, что позволяет веб-клиенту различать их, а не парсить `error`-строку (RESEARCH Pitfall #2).
+
+`toCampaignResponse` теперь публикует `version` (см. §4.2's `campaigns.version`, миграция `0066`) — это и есть токен, который клиент вычитывает и эхом отправляет обратно как `expectedVersion`. Веб-клиент (`apps/web/src/features/campaigns/api.ts`'s `launchCampaign`, `LaunchScheduleDialogs.tsx`'s `launchMutation`) отправляет `{ expectedVersion: campaign.version }` — кампанию, которую пользователь видит на экране, а не отдельное чтение.
+
+**Sender-resolution race (RESEARCH Pitfall #1), закрыто в этом плане:** до этого плана `resolveCampaignFromEmail` писала `campaigns.from_email` в СВОЕЙ собственной транзакции ДО вызова `launchCampaign` — при существовании `version` эта запись сама бы бампала версию, из-за чего launch кампании с `fromSenderId` (основной, не fallback, путь выбора отправителя) 409'ил бы на первой же, ничем не спровоцированной попытке. Решение: новая read-only `resolveCampaignSenderEmail` (`sender-resolver.ts`) выполняет тот же SendGrid `verified_senders`-матчинг, но НИЧЕГО не пишет; её результат передаётся в `launchCampaign` и персистится ОДНИМ `UPDATE` вместе со статусом и бампом версии — один клик маркетолога, один бамп версии. HTTP-вызов к SendGrid остаётся СНАРУЖИ блокировки намеренно (держать `FOR UPDATE` через provider round-trip было бы хуже, чем проблема, которая решается). Персистящая `resolveCampaignFromEmail` остаётся живой для schedule/test-send до плана 20-03 — launch-роут её больше не вызывает.
+
+Schedule и test-send половины этого контракта (те же коды ошибок, `expectedVersion` на их путях) — scope плана 20-03, не этого.
 
 ### 6.6 Сессионная аутентификация
 

@@ -27,6 +27,12 @@ export interface CampaignResponse {
   sendableTotal: number | null;
   sentCount: number;
   failedCount: number;
+  /**
+   * TMPL-02: the optimistic-lock token read off this response and echoed
+   * back as `expectedVersion` on the send paths (launch this plan;
+   * schedule/test-send in plan 20-03).
+   */
+  version: number;
   excludedTotal: number | null;
   sendingStartedAt: string | null;
   terminalAt: string | null;
@@ -79,9 +85,19 @@ export function deleteCampaign(slug: string, id: string): Promise<{ deleted: boo
   return apiDelete<{ deleted: boolean }>(`/api/workspaces/${slug}/campaigns/${id}`);
 }
 
-/** POST /api/workspaces/:slug/campaigns/:id/launch (D-19: Owner/Admin-only server-side). */
-export function launchCampaign(slug: string, id: string): Promise<CampaignResponse> {
-  return apiPost<CampaignResponse>(`/api/workspaces/${slug}/campaigns/${id}/launch`, {});
+/**
+ * POST /api/workspaces/:slug/campaigns/:id/launch (D-19: Owner/Admin-only
+ * server-side). TMPL-02/D-06: `body.expectedVersion` is required -- the
+ * caller must echo back the `version` it read off the campaign it is
+ * launching; the route rejects a missing/malformed value with 400 before
+ * this ever reaches the repository's locked version check.
+ */
+export function launchCampaign(
+  slug: string,
+  id: string,
+  body: { expectedVersion: number }
+): Promise<CampaignResponse> {
+  return apiPost<CampaignResponse>(`/api/workspaces/${slug}/campaigns/${id}/launch`, body);
 }
 
 /** POST /api/workspaces/:slug/campaigns/:id/schedule (D-06/D-19). */

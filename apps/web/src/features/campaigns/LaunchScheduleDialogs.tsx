@@ -70,7 +70,9 @@ export function LaunchConfirmDialog({
   });
 
   const launchMutation = useMutation({
-    mutationFn: () => launchCampaign(slug, campaign.id),
+    // TMPL-02/D-06: echo back the version this dialog is displaying -- the
+    // launch route now requires it and compares it under lock.
+    mutationFn: () => launchCampaign(slug, campaign.id, { expectedVersion: campaign.version }),
     onSuccess: async () => {
       setServerError(null);
       await queryClient.invalidateQueries({ queryKey: campaignsQueryKey(slug) });
