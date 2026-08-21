@@ -27,16 +27,13 @@ import {
   getCampaignProgress,
   launchCampaign,
   listCampaigns,
+  prepareCampaignTestSend,
   scheduleCampaign,
   updateCampaign,
   type CampaignRow,
 } from "./campaign.repository.js";
 import { campaignKickoffQueue, emailBroadcastQueue } from "./campaign-queues.js";
-import {
-  CampaignSenderError,
-  resolveCampaignFromEmail,
-  resolveCampaignSenderEmail,
-} from "./sender-resolver.js";
+import { CampaignSenderError, resolveCampaignSenderEmail } from "./sender-resolver.js";
 
 /**
  * WR-03/T-03-04-style DoS-bounding statement_timeout, reused here for the
@@ -500,22 +497,41 @@ export async function registerCampaignsRoutes(fastify: FastifyInstance): Promise
       return reply.code(401).send({ error: "Not authenticated" });
     }
 
-    // CR-02: resolve+persist BEFORE enqueuing -- a test send from a
-    // fromSenderId-only campaign must reach SendGrid with a concrete
-    // verified from.email, never rely on the dispatch worker to resolve it.
-    if (campaign.fromSenderId || campaign.fromEmail) {
-      try {
-        await resolveCampaignFromEmail(workspace.id, campaign);
-      } catch (err) {
-        const senderMapped = mapCampaignSenderError(err);
-        if (senderMapped) return reply.code(senderMapped.code).send(senderMapped.body);
-        throw err;
-      }
-    } else {
+    if (!campaign.fromSenderId && !campaign.fromEmail) {
       return reply.code(422).send({
         error: "Campaign has no sender configured",
         fields: { sender: MISSING_SENDER_COPY },
       });
+    }
+
+    // CR-02/TMPL-03/D-11/D-12: resolve WITHOUT persisting -- persistence
+    // (when it changes anything) now happens inside prepareCampaignTestSend's
+    // own locked transaction, in the SAME statement as the version compare
+    // and bump, exactly as launch/schedule (plans 20-02/20-03) already do.
+    // The returned row is the snapshot source for the job payload below --
+    // never `request.body` (SC4).
+    let prepared: CampaignRow;
+    try {
+      const resolvedFromEmail = await resolveCampaignSenderEmail(workspace.id, campaign);
+      prepared = await withTenant(workspace.id, () =>
+        prepareCampaignTestSend(id, {
+          expectedVersion: parsed.data.expectedVersion,
+          resolvedFromEmail,
+        })
+      );
+    } catch (err) {
+      const senderMapped = mapCampaignSenderError(err);
+      if (senderMapped) return reply.code(senderMapped.code).send(senderMapped.body);
+      if (err instanceof CampaignStateError && err.code === "incomplete") {
+        return reply.code(422).send({
+          error: err.message,
+          code: err.code,
+          fields: launchIncompleteFields(campaign),
+        });
+      }
+      const mapped = mapCampaignStateError(err);
+      if (mapped) return reply.code(mapped.code).send(mapped.body);
+      throw err;
     }
 
     const testTo = parsed.data.to ?? session.user.email;
@@ -534,6 +550,12 @@ export async function registerCampaignsRoutes(fastify: FastifyInstance): Promise
         kind: "test",
         testTo,
         testData: parsed.data.dynamicTemplateData,
+        // TMPL-03/D-12: the template/sender the locked precondition check
+        // above just verified -- captured here, not re-read at dispatch
+        // time, so a save between now and worker pickup can never redirect
+        // this already-queued test send.
+        ...(prepared.templateId !== null ? { templateId: prepared.templateId } : {}),
+        ...(prepared.fromEmail !== null ? { fromEmail: prepared.fromEmail } : {}),
         ...(requestId !== undefined ? { requestId } : {}),
       },
       { jobId }

@@ -75,11 +75,17 @@ export type ScheduleCampaignInput = z.infer<typeof scheduleCampaignSchema>;
  * POST /api/workspaces/:slug/campaigns/:id/test-send -- D-19: `to` defaults
  * to the current user's own email server-side when omitted;
  * `dynamicTemplateData` is editable JSON overriding the template's default
- * dynamic data for this one test send.
+ * dynamic data for this one test send. TMPL-03/D-11/D-12 (plan 20-03):
+ * `expectedVersion` -- the same uniform required-version precondition as
+ * launch/schedule. One strict contract across all three send paths is what
+ * makes SC4 ("no send path acts on a client-supplied value it did not
+ * itself lock and verify") provable, rather than two strict paths and one
+ * soft one.
  */
 export const testSendCampaignSchema = z.object({
   to: z.string().email().optional(),
   dynamicTemplateData: z.record(z.string(), z.unknown()).optional(),
+  expectedVersion: z.number().int().min(1),
 });
 export type TestSendCampaignInput = z.infer<typeof testSendCampaignSchema>;
 

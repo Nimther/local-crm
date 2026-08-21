@@ -165,6 +165,28 @@ export type ImportsCsvJob = z.infer<typeof importsCsvJobSchema>;
  * process -- see `apps/worker/src/queues/email-broadcast.worker.ts`, which
  * treats an absent `requestId` the same as the placeholder `composeApplicationName`
  * already produces for "no requestId bound" (`req=-`).
+ *
+ * Phase 20 plan 03 (TMPL-03, D-12): `templateId` and `fromEmail` are
+ * OPTIONAL and PURELY ADDITIVE, following the exact same convention as
+ * `requestId` above -- no `schemaVersion` is introduced or bumped on this
+ * payload. They carry the confirmed-saved template and sender captured
+ * from the campaign row AT TEST-SEND ENQUEUE TIME, after the route's
+ * locked `expectedVersion` check passed (`prepareCampaignTestSend`,
+ * `campaign.repository.ts`) -- so a save that changes the campaign's
+ * template between enqueue and worker dispatch can never redirect an
+ * already-queued test send (the async-gap the schema alone cannot close).
+ * A job enqueued by pre-Phase-20 code carries NEITHER field and must still
+ * validate and process: the worker falls back to reading `campaigns.
+ * template_id`/`campaigns.from_email` off the row itself (plan 20-04). A
+ * `schemaVersion` bump would be the wrong tool here for the same reason it
+ * would be wrong for `requestId`: an old worker would DEFER every
+ * new-shaped job during a rolling deploy, and for an ALREADY-ENQUEUED test
+ * send there is no safe "try again next tick" -- deferral means silently
+ * dropping a queued send the marketer is waiting on. Populated ONLY for
+ * `kind: "test"`; the `kind: "campaign"` path is safe by construction
+ * without them, because a launched/scheduled campaign is no longer
+ * editable (D-08) and the dispatch worker always re-derives from the
+ * locked row for that kind.
  */
 export const emailBroadcastJobSchema = z.object({
   workspaceId: z.string().uuid(),
@@ -174,6 +196,8 @@ export const emailBroadcastJobSchema = z.object({
   testTo: z.string().email().optional(),
   testData: z.record(z.string(), z.unknown()).optional(),
   requestId: z.string().optional(),
+  templateId: z.string().optional(),
+  fromEmail: z.string().email().optional(),
 });
 export type EmailBroadcastJob = z.infer<typeof emailBroadcastJobSchema>;
 

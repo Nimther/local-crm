@@ -406,6 +406,94 @@ export async function cancelCampaign(id: string): Promise<CampaignRow> {
   });
 }
 
+export interface PrepareCampaignTestSendOptions {
+  /** TMPL-03/D-11: same uniform optimistic-lock precondition as launch/schedule. */
+  expectedVersion: number;
+  /**
+   * RESEARCH Pitfall #1: the already-resolved sender email (from the
+   * read-only `resolveCampaignSenderEmail`, run OUTSIDE this lock), or
+   * `null` when the campaign has neither `fromSenderId` nor `fromEmail`
+   * set.
+   */
+  resolvedFromEmail: string | null;
+}
+
+/**
+ * TMPL-03/D-11/D-12 (plan 20-03): the locked version check for the
+ * test-send path -- mirrors `launchCampaign`'s shape exactly (`SELECT ...
+ * FOR UPDATE`, `not_found` -> `version_conflict` -> `incomplete`), but
+ * deliberately never checks or changes `status`: a test send is not a
+ * state transition and is legal in any status today, and this plan does
+ * not narrow that.
+ *
+ * The persisting `UPDATE` below is CONDITIONAL -- guarded by `from_email
+ * IS DISTINCT FROM` the resolved address -- so the any-write-bumps
+ * invariant never fires on a no-op test send (every test send would
+ * otherwise invalidate the client's cached version for no reason it could
+ * see). The persist is kept at all (not dropped) for two reasons recorded
+ * in this plan's "Resolved research questions": (1) rolling-deploy safety
+ * -- an old worker draining a pre-Phase-20-shaped job ignores the new
+ * `templateId`/`fromEmail` snapshot fields entirely and falls back to
+ * reading `campaigns.from_email`, so a `fromSenderId`-only campaign that
+ * has never launched still needs that column populated; (2)
+ * `launchIncompleteFields`/`computeIncompleteReason` (apps/web) treat the
+ * sender as configured when either `fromSenderId` or `fromEmail` is set,
+ * so persisting keeps that UI semantics unchanged. When the write does not
+ * fire, the caller gets back the locked `existing` row (whose `from_email`
+ * already equals the resolved address, or the caller would have written
+ * it).
+ */
+export async function prepareCampaignTestSend(
+  id: string,
+  options: PrepareCampaignTestSendOptions
+): Promise<CampaignRow> {
+  return withTenantTransaction(async (client) => {
+    const workspaceId = getWorkspaceId();
+    const { rows } = await client.query<CampaignRow>(
+      `SELECT ${CAMPAIGN_COLUMNS} FROM campaigns WHERE workspace_id = $1 AND id = $2 FOR UPDATE`,
+      [workspaceId, id]
+    );
+    const existing = rows[0];
+    if (!existing) {
+      throw new CampaignStateError("Campaign not found", "not_found");
+    }
+    if (existing.version !== options.expectedVersion) {
+      throw new CampaignStateError(
+        "Campaign was modified since it was loaded",
+        "version_conflict",
+        existing.version
+      );
+    }
+
+    // A snapshot cannot be taken of a template/sender that is not chosen --
+    // each check names the specific missing field (TMPL-03).
+    if (!existing.templateId) {
+      throw new CampaignStateError(
+        "Campaign is missing a required field (template) before a test send",
+        "incomplete"
+      );
+    }
+    const effectiveFromEmail = options.resolvedFromEmail ?? existing.fromEmail;
+    if (!effectiveFromEmail) {
+      throw new CampaignStateError(
+        "Campaign is missing a required field (sender) before a test send",
+        "incomplete"
+      );
+    }
+
+    const { rows: updated } = await client.query<CampaignRow>(
+      `UPDATE campaigns SET
+         from_email = $3,
+         version = version + 1,
+         updated_at = now()
+       WHERE workspace_id = $1 AND id = $2 AND from_email IS DISTINCT FROM $3
+       RETURNING ${CAMPAIGN_COLUMNS}`,
+      [workspaceId, id, effectiveFromEmail]
+    );
+    return updated[0] ?? existing;
+  });
+}
+
 /** D-11: copies name/segment/template/sender into a fresh draft. Does not affect the source campaign's state. */
 export async function duplicateCampaign(id: string, createdByUserId: string): Promise<CampaignRow> {
   return withTenantTransaction(async (client) => {

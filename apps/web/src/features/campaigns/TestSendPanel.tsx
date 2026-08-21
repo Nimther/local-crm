@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { useSession } from "@/lib/authClient";
@@ -42,6 +42,7 @@ const TEST_SEND_QUEUED_DESCRIPTION =
  */
 export function TestSendPanel({ slug, campaign }: { slug: string; campaign: CampaignResponse }) {
   const { data: session } = useSession();
+  const queryClient = useQueryClient();
   const [to, setTo] = useState("");
   const [json, setJson] = useState("");
   const [jsonError, setJsonError] = useState<string | null>(null);
@@ -66,9 +67,18 @@ export function TestSendPanel({ slug, campaign }: { slug: string; campaign: Camp
 
   const testSendMutation = useMutation({
     mutationFn: (body: { to?: string; dynamicTemplateData?: Record<string, unknown> }) =>
-      testSendCampaign(slug, campaign.id, body),
+      // TMPL-02/D-06/D-11: echo back the version this panel is displaying --
+      // the route now requires it and compares it under lock, the same
+      // uniform precondition contract launch/schedule use.
+      testSendCampaign(slug, campaign.id, { ...body, expectedVersion: campaign.version }),
     onSuccess: (result) => {
       setServerError(null);
+      // TMPL-02: the route may have persisted a resolved sender under the
+      // lock and bumped the version -- without this the browser would keep
+      // the pre-bump value and the marketer's next launch would 409
+      // through no fault of their own. Safe against clobbering unsaved
+      // edits: a dirty campaign form blocks test-send (plan 20-05).
+      void queryClient.invalidateQueries({ queryKey: ["workspace", slug, "campaigns", campaign.id] });
       toast.success(`Тестовое письмо поставлено в очередь на ${result.to}`, {
         description: TEST_SEND_QUEUED_DESCRIPTION,
       });
