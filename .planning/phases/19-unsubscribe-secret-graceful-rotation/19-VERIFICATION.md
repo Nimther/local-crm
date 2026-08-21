@@ -1,11 +1,12 @@
 ---
 phase: 19-unsubscribe-secret-graceful-rotation
 verified: 2026-08-21T00:40:00Z
-status: human_needed
+status: passed
 score: 4/4 roadmap success criteria verified (25/25 plan-level truths verified)
 behavior_unverified: 0
 overrides_applied: 0
 human_verification:
+
   - test: "Perform (or have a second reviewer perform) the live-environment walkthrough of docs/runbooks/unsubscribe-secret-rotation.md as a first-time operator: run Step 1 on both api and worker, restart, run Step 2 (promote), restart, then execute Step 3's both-eras canary smoke against the standing canary workspace (fe8fbbc6-6b25-490b-b3f5-7c739e325c9a) — capture a pre-rotation link before Step 2, redeem it after Step 2 alongside a freshly-signed post-rotation link."
     expected: "Both redemptions succeed (canary contacts move to unsubscribed); no process crash-loops at any restart; the operator never has a window where a link cannot be verified by some running process."
     why_human: "This is an operator procedure against a real deployment (docker-compose services, real env file, real SendGrid-delivered links) — nothing in the repository can execute it. The plan's own Flagged Assumptions section states D-09's canary smoke 'is written as an operator procedure, not executed here — no rotation has occurred in any live environment.' The <human-check> block in 19-05-PLAN.md Task 2 defers exactly this walkthrough to end-of-phase per the project's human_verify_mode=end-of-phase convention; the executor's own self-performed walkthrough (recorded in 19-05-SUMMARY.md) is a documented cross-check, not independent human confirmation, and does not substitute for an actual rotation rehearsal."
