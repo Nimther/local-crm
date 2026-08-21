@@ -142,7 +142,7 @@ Plans:
   3. Launch and schedule act only on the confirmed-saved campaign version; a concurrent or stale change produces a typed conflict error and no mail is dispatched at all.
   4. After a save, all three send paths agree on the same template id — none of them can fall back to local client form state.
 
-**Plans**: 5/6 plans executed
+**Plans**: 6/6 plans executed
 
 Plans:
 **Wave 1**
@@ -164,7 +164,7 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 20-06-PLAN.md — Typed conflict recovery in both dialogs and the test-send panel (dialog stays open, copy names the real state, refetch, never an auto-retry), the Playwright proof of SC1 and SC3, and the human verification against a real SendGrid template (D-08 through D-10)
+- [x] 20-06-PLAN.md — Typed conflict recovery in both dialogs and the test-send panel (dialog stays open, copy names the real state, refetch, never an auto-retry), the Playwright proof of SC1 and SC3, and the human verification against a real SendGrid template (D-08 through D-10)
 
 **UI hint**: yes
 
@@ -228,7 +228,7 @@ Plans:
 | 17. Address tech debt: WR-06 + security follow-ups | v1.1 | 6/6 | Complete | 2026-08-20 |
 | 18. Dependency Hygiene & Advisory Gate | v1.2 | 4/4 | Complete    | 2026-08-20 |
 | 19. Unsubscribe Secret Graceful Rotation | v1.2 | 5/5 | Complete    | 2026-08-21 |
-| 20. Campaign Template Correctness | v1.2 | 5/6 | In Progress|  |
+| 20. Campaign Template Correctness | v1.2 | 6/6 | In Progress|  |
 | 21. Per-Contact DSR Export | v1.2 | 0/TBD | Not started | - |
 | 22. Workspace Quiesce & Physical Purge | v1.2 | 0/TBD | Not started | - |
 
