@@ -149,7 +149,13 @@ describe("LaunchScheduleActions dirty-blocking", () => {
   it("disables the primary action and shows the dirty reason for a complete campaign while dirty", () => {
     const campaign = baseCampaign();
     const html = renderWithContext(
-      <LaunchScheduleActions slug={SLUG} campaign={campaign} canLaunch={true} />,
+      <LaunchScheduleActions
+        slug={SLUG}
+        campaign={campaign}
+        canLaunch={true}
+        onOpenConfirm={() => {}}
+        onOpenSchedule={() => {}}
+      />,
       dirtyValue()
     );
     const tag = buttonOpenTagFor(html, "Отправить сейчас");
@@ -160,7 +166,13 @@ describe("LaunchScheduleActions dirty-blocking", () => {
   it("does not disable the primary action for a complete campaign while clean", () => {
     const campaign = baseCampaign();
     const html = renderWithContext(
-      <LaunchScheduleActions slug={SLUG} campaign={campaign} canLaunch={true} />,
+      <LaunchScheduleActions
+        slug={SLUG}
+        campaign={campaign}
+        canLaunch={true}
+        onOpenConfirm={() => {}}
+        onOpenSchedule={() => {}}
+      />,
       cleanValue()
     );
     const tag = buttonOpenTagFor(html, "Отправить сейчас");
@@ -171,7 +183,13 @@ describe("LaunchScheduleActions dirty-blocking", () => {
   it("keeps the incomplete reason as the only line when a campaign is both incomplete and dirty", () => {
     const campaign = baseCampaign({ templateId: null });
     const html = renderWithContext(
-      <LaunchScheduleActions slug={SLUG} campaign={campaign} canLaunch={true} />,
+      <LaunchScheduleActions
+        slug={SLUG}
+        campaign={campaign}
+        canLaunch={true}
+        onOpenConfirm={() => {}}
+        onOpenSchedule={() => {}}
+      />,
       dirtyValue()
     );
     expect(html).toContain("Выберите шаблон письма");

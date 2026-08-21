@@ -356,19 +356,34 @@ function computeIncompleteReason(campaign: CampaignResponse): string | null {
  * matching dialog. Disabled with the Owner/Admin tooltip for Members
  * (T-04-08-01 defense-in-depth — the server route is the authoritative gate)
  * and with inline copy when template/sender/audience aren't all chosen yet.
+ *
+ * D-09 fix: this component no longer owns `confirmOpen`/`scheduleOpen` and
+ * no longer mounts `LaunchConfirmDialog`/`ScheduleDialog` itself. It used to
+ * -- and `CampaignDetailPage` only rendered this whole component while
+ * `campaign.status === "draft"`, so an open dialog's onError conflict
+ * handler invalidating the campaign query (to refresh the real status) also
+ * flipped `campaign.status` away from "draft", which unmounted THIS
+ * component and the open dialog with it before the marketer ever saw the
+ * conflict copy. The dialogs are now mounted by `CampaignDetailPage` itself,
+ * unconditionally (regardless of status), so an open dialog survives the
+ * very refetch its own conflict handling triggers. This component keeps
+ * only the trigger row and its own `mode` state; opening either dialog is
+ * delegated to the parent via these two callbacks.
  */
 export function LaunchScheduleActions({
-  slug,
+  slug: _slug,
   campaign,
   canLaunch,
+  onOpenConfirm,
+  onOpenSchedule,
 }: {
   slug: string;
   campaign: CampaignResponse;
   canLaunch: boolean;
+  onOpenConfirm: () => void;
+  onOpenSchedule: () => void;
 }) {
   const [mode, setMode] = useState<"now" | "schedule">("now");
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [scheduleOpen, setScheduleOpen] = useState(false);
 
   // TMPL-01/D-01/D-02: the dirty gate composes with the existing
   // completeness/permission gates (any one disables the action); when both
@@ -406,7 +421,7 @@ export function LaunchScheduleActions({
               <Button
                 type="button"
                 disabled={disabled}
-                onClick={() => (mode === "now" ? setConfirmOpen(true) : setScheduleOpen(true))}
+                onClick={() => (mode === "now" ? onOpenConfirm() : onOpenSchedule())}
               >
                 {mode === "now" ? "Отправить сейчас" : "Запланировать"}
               </Button>
@@ -415,9 +430,6 @@ export function LaunchScheduleActions({
           {!canLaunch ? <TooltipContent>{MEMBER_TOOLTIP}</TooltipContent> : null}
         </Tooltip>
       </TooltipProvider>
-
-      <LaunchConfirmDialog slug={slug} campaign={campaign} open={confirmOpen} onOpenChange={setConfirmOpen} />
-      <ScheduleDialog slug={slug} campaign={campaign} open={scheduleOpen} onOpenChange={setScheduleOpen} />
     </div>
   );
 }
