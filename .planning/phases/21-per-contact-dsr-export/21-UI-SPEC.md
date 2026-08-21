@@ -1,10 +1,11 @@
 ---
 phase: 21
 slug: per-contact-dsr-export
-status: draft
+status: approved
 shadcn_initialized: true
 preset: "new-york + neutral (initialized Phase 1, reused unchanged through Phase 4/11/20)"
 created: 2026-08-21
+reviewed_at: 2026-08-21
 ---
 
 # Phase 21 — UI Design Contract
@@ -48,8 +49,8 @@ Declared values (must be multiples of 4) — identical to Phase 1–4, no change
 
 | Token | Value | Usage |
 |-------|-------|-------|
-| xs | 4px | Icon-to-label gap inside the Export button (`mr-2` on the `Download` icon, matching the CSV-download precedent's `mr-2 h-4 w-4`) |
-| sm | 8px | Gap between the two header-action buttons (Export, Delete) — `gap-2`, matching the existing header row's `gap-4` outer / `gap-2`-scale inner button clusters used elsewhere in this app (e.g. `CsvImportHistory.tsx`'s action cell) |
+| xs | 4px | Unchanged — token available, not used by this phase |
+| sm | 8px | Icon-to-label gap inside the Export button (`mr-2` on the `Download` icon, matching the CSV-download precedent's `mr-2 h-4 w-4`); gap between the two header-action buttons (Export, Delete) — `gap-2`, matching the existing header row's `gap-4` outer / `gap-2`-scale inner button clusters used elsewhere in this app (e.g. `CsvImportHistory.tsx`'s action cell) |
 | md | 16px | Unchanged — no new card padding introduced |
 | lg | 24px | Unchanged — `space-y-6` page container, unaffected |
 | xl | 32px | Unchanged |
@@ -135,18 +136,24 @@ Not applicable — Export is non-destructive (a read, not a mutation of tenant d
 
 ## UI Considerations
 
-Applicable state considerations resolved: 5 covered, 1 backstop, 0 unresolved.
+Probe-derived state coverage (ui-consideration-probe over the three surfaces this phase adds: E1 Export button, E2 inline reason/error slot, E3 success toast). Applicable considerations resolved: 9 covered, 3 backstop, 0 unresolved.
 
-| Category | Element(s) | Status | Resolution / Reason |
-|----------|------------|--------|---------------------|
-| populated | Export action, role variants | ✅ covered | Owner/Admin: button renders enabled (or disabled-if-erased per below). Member: button is not rendered at all — conditional render (`{canExport ? <ExportContactButton/> : null}`, `TeamPage.tsx` precedent), not a disabled/tooltip state (SC3). |
-| loading | Export button, request in flight | ✅ covered | Label swaps to «Скачиваем…», button `disabled`, no double-submit — mirrors `DeleteContactDialog`'s pending-label pattern. |
-| error | Export request fails (generic) | ✅ covered | Reuses the page's existing `GENERIC_ERROR` inline paragraph shape (`text-sm font-medium text-destructive`) — see Copywriting Contract. |
-| error | Typed 410 mid-session erasure race | ✅ covered | Same fixed erased-reason copy, same reserved inline slot, plus a contact-query invalidation so the button state catches up — see Copywriting Contract. |
-| zero-one-many | Erased vs active contact (binary state, not a count) | ✅ covered | Exactly two states — `anonymizedAt` null vs non-null — no partial/intermediate rendering; D-15's fail-closed rule guarantees the binary is decided server-side inside one transaction, so the UI never needs to represent an "in-between" erasure state. |
-| long-text | Erased-reason and generic-error strings | 🧪 backstop | Both are short, fixed, non-interpolated Russian sentences (no contact-supplied or variable-length content is ever inserted into either string) — overflow is structurally unlikely in the button-adjacent single-line slot, held out as backstop rather than "covered" because no explicit line-wrap test exists for either sentence at narrow viewport widths. |
+| Category | Element | Status | Resolution / Reason |
+|----------|---------|--------|---------------------|
+| populated | E1 Export button | ✅ covered | Happy path: `outline` button + `Download` icon in the header actions cluster, left of Delete, Owner/Admin only. Member: button is not rendered at all — conditional render (`{canExport ? <ExportContactButton/> : null}`, `TeamPage.tsx` precedent), not a disabled/tooltip state (SC3). |
+| loading | E1 Export button, request in flight | ✅ covered | Label swaps to «Скачиваем…», button `disabled`, no double-submit — mirrors `DeleteContactDialog`'s pending-label pattern (D-12). |
+| error | E1 Export request fails | ✅ covered | Generic failure reuses the page's existing `GENERIC_ERROR` inline paragraph (`text-sm font-medium text-destructive`); typed 410 mid-session erasure race renders the fixed erased-reason copy in the same reserved slot and invalidates the contact query so the button flips to disabled — see Copywriting Contract. |
+| empty | E1 Export button | ✅ covered | No empty-state UI exists by design: a contact with zero events/sends still produces a valid, complete file (empty arrays, `0` row counts per D-06) — a content fact inside the downloaded artifact, not a page state; see Copywriting Contract "Empty state". |
+| partial | E1 Export button | ✅ covered | No intermediate rendering exists: `anonymizedAt` is a binary decided server-side inside one transaction (D-15 fail-closed), so the UI never represents an "in-between" erasure state; the export file itself is one atomic document (server-side keyset pagination, D-10 — no partial-results UI). |
+| zero-one-many | E1 Export button | ✅ covered | Not a collection — a single action button (the probe's list-collection cue matched the word "card" in "contact card"). The only multiplicity is the binary erased/active contact state, covered under `partial` above; no count-dependent copy or spacing exists. |
+| long-text | E1 button labels | ✅ covered | «Скачать данные контакта» / «Скачиваем…» are fixed, non-interpolated strings — no contact-supplied or variable-length content ever enters the label. |
+| overflow | E1 header actions cluster | 🧪 backstop | { statement: "Header actions row (Export + Delete buttons) wraps gracefully rather than clipping at narrow viewport widths", verification: backstop } — no explicit narrow-viewport test exists; held out as a visual UI-state check. |
+| overflow | E2 inline reason/error slot | 🧪 backstop | { statement: "The erased-reason and generic-error paragraphs wrap to multiple lines rather than clipping in the button-adjacent slot at narrow widths", verification: backstop } — structurally unlikely (short fixed sentences) but no explicit line-wrap test exists. |
+| long-text | E2 inline reason/error strings | 🧪 backstop | { statement: "Both inline strings are fixed, non-interpolated Russian sentences; no variable-length content path into this slot exists", verification: backstop } — held out with the E2 overflow check above rather than "covered" because the same missing wrap test is the evidence for both. |
+| overflow | E3 success toast | ✅ covered | Sonner's own toast container owns width, wrapping and stacking; the fixed copy «Файл с данными контакта скачан» fits the default toast width used by every other mutation toast on this page. |
+| long-text | E3 success toast | ✅ covered | Fixed, non-interpolated string — no contact data or filename is inserted into the toast copy. |
 
-Not applicable to this phase: empty/overflow of a scrollable list or table (no new list/collection surface is introduced — the export action is a single button, not a data grid), partial-load pagination states (the keyset pagination in D-10 is entirely server-side and produces one atomic file; there is no partial-results UI to design).
+Not applicable to this phase: nav/media categories (no navigation or media surface is introduced); empty/overflow of a scrollable list or table (the export action is a single button, not a data grid). Empty-state and error-state **copy** lives in `## Copywriting Contract` — the rows above reference it rather than restating it.
 
 ---
 
@@ -178,11 +185,11 @@ Interaction rules:
 
 ## Checker Sign-Off
 
-- [ ] Dimension 1 Copywriting: PASS
-- [ ] Dimension 2 Visuals: PASS
-- [ ] Dimension 3 Color: PASS
-- [ ] Dimension 4 Typography: PASS
-- [ ] Dimension 5 Spacing: PASS
-- [ ] Dimension 6 Registry Safety: PASS
+- [x] Dimension 1 Copywriting: PASS
+- [x] Dimension 2 Visuals: PASS
+- [x] Dimension 3 Color: PASS
+- [x] Dimension 4 Typography: PASS
+- [x] Dimension 5 Spacing: PASS (checker FLAG — icon-gap usage was listed under `xs`/4px instead of `sm`/8px; spacing-scale table corrected in this revision)
+- [x] Dimension 6 Registry Safety: PASS
 
-**Approval:** pending
+**Approval:** approved (gsd-ui-checker, 2026-08-21 — 0 blocking issues, 1 non-blocking recommendation applied)
