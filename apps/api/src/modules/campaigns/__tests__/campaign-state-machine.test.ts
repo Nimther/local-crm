@@ -105,10 +105,14 @@ describe("Campaign state machine (CAMP-01..05)", () => {
       })
     );
     expect(campaign.status).toBe("draft");
+    expect(campaign.version).toBe(1);
 
-    const launched = await withTenant(workspace.id, () => launchCampaign(campaign.id));
+    const launched = await withTenant(workspace.id, () =>
+      launchCampaign(campaign.id, { expectedVersion: 1, resolvedFromEmail: null })
+    );
     expect(launched.status).toBe("sending");
     expect(launched.sendingStartedAt).not.toBeNull();
+    expect(launched.version).toBe(2);
   });
 
   it("launch is rejected as 'incomplete' when template/sender is missing", async () => {
@@ -119,8 +123,62 @@ describe("Campaign state machine (CAMP-01..05)", () => {
       createCampaign({ name: "No Template", segmentId: segment.id, createdByUserId: TEST_USER_ID })
     );
 
-    await expect(withTenant(workspace.id, () => launchCampaign(campaign.id))).rejects.toMatchObject({
+    await expect(
+      withTenant(workspace.id, () =>
+        launchCampaign(campaign.id, { expectedVersion: 1, resolvedFromEmail: null })
+      )
+    ).rejects.toMatchObject({
       code: "incomplete",
+    });
+  });
+
+  it("updateCampaign increments version by exactly 1 per call", async () => {
+    const { cookie, workspace } = await owner("campaign-version-bump");
+    const segment = await createSegment(cookie, workspace.slug, "All contacts");
+
+    const campaign = await withTenant(workspace.id, () =>
+      createCampaign({ name: "Version bump", segmentId: segment.id, createdByUserId: TEST_USER_ID })
+    );
+    expect(campaign.version).toBe(1);
+
+    const updated = await withTenant(workspace.id, () =>
+      updateCampaign(campaign.id, { name: "Renamed once" })
+    );
+    expect(updated.version).toBe(2);
+
+    const updatedAgain = await withTenant(workspace.id, () =>
+      updateCampaign(campaign.id, { name: "Renamed twice" })
+    );
+    expect(updatedAgain.version).toBe(3);
+  });
+
+  it("launchCampaign called with a stale expectedVersion rejects with version_conflict and the row's real version", async () => {
+    const { cookie, workspace } = await owner("campaign-launch-stale-version");
+    const segment = await createSegment(cookie, workspace.slug, "All contacts");
+
+    const campaign = await withTenant(workspace.id, () =>
+      createCampaign({
+        name: "Stale launch",
+        segmentId: segment.id,
+        templateId: "d-template-1",
+        fromEmail: "marketing@example.com",
+        createdByUserId: TEST_USER_ID,
+      })
+    );
+
+    const bumped = await withTenant(workspace.id, () =>
+      updateCampaign(campaign.id, { name: "Renamed" })
+    );
+    expect(bumped.version).toBe(2);
+
+    await expect(
+      withTenant(workspace.id, () =>
+        launchCampaign(campaign.id, { expectedVersion: 1, resolvedFromEmail: null })
+      )
+    ).rejects.toMatchObject({
+      name: "CampaignStateError",
+      code: "version_conflict",
+      currentVersion: 2,
     });
   });
 
@@ -197,7 +255,9 @@ describe("Campaign state machine (CAMP-01..05)", () => {
         createdByUserId: TEST_USER_ID,
       })
     );
-    await withTenant(workspace.id, () => launchCampaign(campaign.id));
+    await withTenant(workspace.id, () =>
+      launchCampaign(campaign.id, { expectedVersion: 1, resolvedFromEmail: null })
+    );
 
     const canceled = await withTenant(workspace.id, () => cancelCampaign(campaign.id));
     expect(canceled.status).toBe("canceled");
@@ -217,7 +277,9 @@ describe("Campaign state machine (CAMP-01..05)", () => {
         createdByUserId: TEST_USER_ID,
       })
     );
-    await withTenant(workspace.id, () => launchCampaign(campaign.id));
+    await withTenant(workspace.id, () =>
+      launchCampaign(campaign.id, { expectedVersion: 1, resolvedFromEmail: null })
+    );
 
     const duplicated = await withTenant(workspace.id, () => duplicateCampaign(campaign.id, TEST_USER_ID));
     expect(duplicated.id).not.toBe(campaign.id);
