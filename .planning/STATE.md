@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Data Lifecycle & Delivery Trust
 current_phase: 20
-current_phase_name: Campaign Template Correctness
+current_phase_name: campaign-template-correctness
 status: executing
 stopped_at: Phase 20 context gathered
-last_updated: "2026-08-21T07:37:54.293Z"
+last_updated: "2026-08-21T08:04:39.557Z"
 last_activity: 2026-08-21
-last_activity_desc: Phase 19 complete, transitioned to Phase 20
+last_activity_desc: Phase 20 execution started
 progress:
   total_phases: 5
   completed_phases: 2
@@ -24,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-21 after Phase 19)
 
 **Core value:** Маркетолог настраивает триггерную цепочку или кампанию — и письма надёжно и вовремя доходят до нужных контактов, со сквозным отслеживанием статусов (delivered/opened/clicked/bounced).
-**Current focus:** Phase 20 — Campaign Template Correctness
+**Current focus:** Phase 20 — campaign-template-correctness
 
 ## Current Position
 
-Phase: 20 — Campaign Template Correctness
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-08-21 — Phase 19 complete, transitioned to Phase 20
+Phase: 20 (campaign-template-correctness) — EXECUTING
+Plan: 1 of 6
+Status: Executing Phase 20
+Last activity: 2026-08-21 — Phase 20 execution started
 
 Progress: [████░░░░░░] 40% (2/5 v1.2 phases complete)
 
