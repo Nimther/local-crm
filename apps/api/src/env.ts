@@ -1,5 +1,12 @@
 import { z } from "zod";
 
+// 19-02 (ROT-01, D-07, SC4): the previous-secrets list's hard structural
+// bound -- a soft cap, not a date-based purge. Declared independently here;
+// apps/worker/src/server.ts and scripts/check-env.mjs each declare their
+// own copy per this codebase's triplication convention (SPECIFICATION.md
+// §3.1), and 19-02 Task 3's parity assertion proves the three agree.
+const MAX_UNSUBSCRIBE_PREVIOUS_SECRETS = 5;
+
 export const envSchema = z
   .object({
     DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
@@ -44,9 +51,24 @@ export const envSchema = z
     // List-Unsubscribe token (HMAC secret) and builds its public URL from
     // these -- the API also hosts GET/POST /unsubscribe/:token, so it fails
     // fast on the same contract the worker enforces at boot.
+    // 19-02 (ROT-01, D-03): the comma/whitespace refine below is what makes
+    // packages/delivery-core's comma-split of UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS
+    // unambiguous -- a secret containing either character could otherwise
+    // collide with the list delimiter or hide inside a split fragment.
     UNSUBSCRIBE_TOKEN_SECRET: z
       .string()
-      .min(32, "UNSUBSCRIBE_TOKEN_SECRET must be at least 32 characters"),
+      .min(32, "UNSUBSCRIBE_TOKEN_SECRET must be at least 32 characters")
+      .refine(
+        (v) => !/[,\s]/.test(v),
+        "UNSUBSCRIBE_TOKEN_SECRET must not contain a comma or whitespace (D-03)"
+      ),
+    // 19-02 (ROT-01, D-01, D-02): the ordered, comma-separated list of
+    // retired unsubscribe-token secrets the two-step rotation runbook keeps
+    // verification-only for already-issued links. Optional -- its absence
+    // is the normal pre-rotation state and every existing deploy env file
+    // stays valid as-is. Full structural validation lives in the
+    // superRefine below (this field itself is presence-only).
+    UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS: z.string().optional(),
     PUBLIC_APP_URL: z.string().url(),
     // 10-11 (SEC-07): the SendGrid Event Webhook's signature-timestamp
     // replay/staleness window, in seconds -- overridable without a deploy.
@@ -131,6 +153,56 @@ export const envSchema = z
         message: "BETTER_AUTH_SECRET must be at least 32 characters when NODE_ENV=production",
         path: ["BETTER_AUTH_SECRET"],
       });
+    }
+    // 19-02 (ROT-01, D-01/D-02/D-03/D-07): structural validation of the
+    // previous-secrets rotation list. Only runs when the variable is set
+    // and non-empty -- its absence is the normal pre-rotation state (D-01)
+    // and needs no validation. A comma inside an intended single entry is
+    // structurally unobservable after the split below (it simply becomes a
+    // list boundary), so the per-entry length and non-empty checks, not a
+    // per-fragment comma check, are the practical backstop for a mistyped
+    // entry. No issue message here echoes a secret value or a fragment of
+    // one (T-19-08).
+    if (val.UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS) {
+      if (/\s/.test(val.UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS entries must not contain whitespace (D-03)",
+          path: ["UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS"],
+        });
+      }
+      const entries = val.UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS.split(",");
+      if (entries.length > MAX_UNSUBSCRIBE_PREVIOUS_SECRETS) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS supports at most ${MAX_UNSUBSCRIBE_PREVIOUS_SECRETS} retired secrets`,
+          path: ["UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS"],
+        });
+      }
+      const seen = new Set<string>();
+      for (const entry of entries) {
+        if (entry.length === 0) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS must not contain empty entries",
+            path: ["UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS"],
+          });
+        } else if (entry.length < 32) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "each UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS entry must be at least 32 characters",
+            path: ["UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS"],
+          });
+        }
+        if (entry === val.UNSUBSCRIBE_TOKEN_SECRET || seen.has(entry)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS must not duplicate the primary secret or another entry",
+            path: ["UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS"],
+          });
+        }
+        seen.add(entry);
+      }
     }
   });
 

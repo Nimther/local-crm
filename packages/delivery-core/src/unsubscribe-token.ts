@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { logger } from "./logger.js";
 
 /**
  * Per-message unsubscribe token payload (SUBS-04, RESEARCH.md Pitfall 5 /
@@ -19,7 +20,9 @@ export interface UnsubscribeTokenPayload {
   exp: number;
 }
 
-function getSecret(): string {
+// ROT-01/D-01: the primary secret signs every NEW token. Its meaning and
+// name are unchanged by rotation -- only verification gains a fallback list.
+function getPrimarySecret(): string {
   const secret = process.env.UNSUBSCRIBE_TOKEN_SECRET;
   if (!secret) {
     throw new Error("UNSUBSCRIBE_TOKEN_SECRET is not set");
@@ -27,8 +30,25 @@ function getSecret(): string {
   return secret;
 }
 
+// ROT-01/D-01: optional, comma-separated, ordered list of retired secrets --
+// verification-only, never used to sign. Read lazily on every call (not
+// parsed once at module load) so a running process picks up an operator's
+// rotation the moment the env var changes and the process restarts, with no
+// other code path needing to know the list exists.
+function getPreviousSecrets(): string[] {
+  const raw = process.env.UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS;
+  if (!raw) {
+    return [];
+  }
+  return raw.split(",");
+}
+
+function signWith(secret: string, encodedPayload: string): string {
+  return createHmac("sha256", secret).update(encodedPayload).digest("base64url");
+}
+
 function sign(encodedPayload: string): string {
-  return createHmac("sha256", getSecret()).update(encodedPayload).digest("base64url");
+  return signWith(getPrimarySecret(), encodedPayload);
 }
 
 /**
@@ -59,17 +79,86 @@ export function verifyUnsubscribeToken(token: string): UnsubscribeTokenPayload |
     return null;
   }
 
-  let expectedSigBuf: Buffer;
   let actualSigBuf: Buffer;
   try {
-    expectedSigBuf = Buffer.from(sign(encodedPayload), "base64url");
     actualSigBuf = Buffer.from(signature, "base64url");
   } catch {
     return null;
   }
 
-  if (expectedSigBuf.length !== actualSigBuf.length || !timingSafeEqual(expectedSigBuf, actualSigBuf)) {
+  // ROT-01/ROT-02/D-04: try the primary first, then each retired secret in
+  // list order -- a link mailed under any retained secret still verifies.
+  // D-04/SC3: the loop is EXHAUSTIVE (no early break on a match) so total
+  // loop duration is a function of candidates.length alone, never of which
+  // candidate matched or whether any did -- this is what keeps the HTTP
+  // response byte-identical regardless of which secret (if any) produced
+  // the match (T-19-02).
+  //
+  // WR-01 fix: getPrimarySecret() throws if UNSUBSCRIBE_TOKEN_SECRET is
+  // unset. Before this phase, that throw was caught inside this function's
+  // own try/catch (it happened inside `sign()`), so an unset primary
+  // degraded to `null` like every other failure mode -- this function's own
+  // doc comment (above) promises it never throws. Wrapping candidate
+  // resolution here restores that guarantee explicitly, independent of
+  // whatever boot-time validation callers happen to run.
+  let candidates: string[];
+  try {
+    candidates = [getPrimarySecret(), ...getPreviousSecrets()];
+  } catch {
     return null;
+  }
+  let matchedIndex = -1;
+
+  for (let i = 0; i < candidates.length; i++) {
+    let expectedSigBuf: Buffer;
+    try {
+      expectedSigBuf = Buffer.from(signWith(candidates[i], encodedPayload), "base64url");
+    } catch {
+      continue;
+    }
+    // T-19-01: every candidate the loop reaches goes through the
+    // timing-safe primitive -- no raw equality, no cheap pre-filter that
+    // could skip it for a candidate that is actually reached.
+    const isMatch =
+      expectedSigBuf.length === actualSigBuf.length && timingSafeEqual(expectedSigBuf, actualSigBuf);
+    if (isMatch && matchedIndex === -1) {
+      matchedIndex = i;
+    }
+  }
+
+  if (matchedIndex === -1) {
+    return null;
+  }
+
+  // D-05: observability for the operator's retention decision -- logs ONLY
+  // the matched list position, never any secret value. Server-side only;
+  // the HTTP response is unaffected (T-19-03, no oracle).
+  //
+  // WR-02 (accepted risk, code review 2026-08-21): this synchronous Pino
+  // write runs only on the matchedIndex > 0 path, so a previous-secret
+  // match does measurably more synchronous work -- and takes measurably
+  // longer -- than a primary match or a no-match. That is a real,
+  // observable-by-latency asymmetry the exhaustive candidate loop above
+  // does NOT cover (the loop only makes candidate comparison itself
+  // uniform; it says nothing about what happens after). It is accepted
+  // as low-risk rather than fixed: it distinguishes "verified via
+  // previous secret" from "verified via primary, or did not verify," but
+  // primary-valid and invalid tokens still take the identical (faster)
+  // path as each other, so it creates no valid-vs-invalid oracle -- it
+  // cannot help forge or distinguish a valid token from a forged one,
+  // only reveal a rotation-in-progress detail that is not itself secret.
+  // Deferring the log (e.g. `setImmediate`) would remove the asymmetry
+  // but was rejected: it makes the call asynchronous, which breaks the
+  // synchronous `expect(logger.info).toHaveBeenCalledTimes(...)`
+  // assertions in `__tests__/unsubscribe-token-rotation.test.ts`'s D-05
+  // suite (the very tests that pin this line's shape as a phase
+  // deliverable) -- and any restructuring that made every path do
+  // identical logging work is equally incompatible with those tests,
+  // since they assert a 0-vs-1 call-count difference between paths as
+  // the intended, tested behavior. Revisit only if this signal is ever
+  // shown to be exploitable beyond "an operator's own log stream".
+  if (matchedIndex > 0) {
+    logger.info({ secretPosition: matchedIndex }, "unsubscribe token verified via previous secret");
   }
 
   try {
