@@ -5,8 +5,8 @@ milestone_name: Data Lifecycle & Delivery Trust
 current_phase: 21
 current_phase_name: Per-Contact DSR Export
 status: "Phase 20 shipped — PR #26"
-stopped_at: Phase 20 context gathered
-last_updated: "2026-08-21T15:05:29.949Z"
+stopped_at: Phase 21 context gathered
+last_updated: "2026-08-21T15:45:15.918Z"
 last_activity: 2026-08-21
 progress:
   total_phases: 5
@@ -115,9 +115,9 @@ Items acknowledged and deferred at milestone close on 2026-08-20 (open-artifact 
 
 ## Session Continuity
 
-Last session: 2026-08-21T05:50:13.538Z
-Stopped at: Phase 20 context gathered
-Resume file: .planning/phases/20-campaign-template-correctness/20-CONTEXT.md
+Last session: 2026-08-21T15:45:15.879Z
+Stopped at: Phase 21 context gathered
+Resume file: .planning/phases/21-per-contact-dsr-export/21-CONTEXT.md
 
 ## Operator Next Steps
 
