@@ -31,8 +31,8 @@ Requirements for this milestone. Each maps to roadmap phases (continuing from Ph
 
 ### Unsubscribe Secret Rotation
 
-- [ ] **ROT-01**: Оператор может ввести новый primary unsubscribe-secret — новые письма подписываются им, без инвалидации ранее разосланных ссылок
-- [ ] **ROT-02**: Previous secrets продолжают проверять старые ссылки на обоих путях (GET и RFC 8058 POST) с timing-safe сравнением и byte-identical ответами (no-token-oracle инвариант сохранён)
+- [x] **ROT-01**: Оператор может ввести новый primary unsubscribe-secret — новые письма подписываются им, без инвалидации ранее разосланных ссылок
+- [x] **ROT-02**: Previous secrets продолжают проверять старые ссылки на обоих путях (GET и RFC 8058 POST) с timing-safe сравнением и byte-identical ответами (no-token-oracle инвариант сохранён)
 
 ### Dependency Hygiene
 
@@ -88,8 +88,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PRG-04 | Phase 22 | Pending |
 | PRG-05 | Phase 22 | Pending |
 | PRG-06 | Phase 22 | Pending |
-| ROT-01 | Phase 19 | Pending |
-| ROT-02 | Phase 19 | Pending |
+| ROT-01 | Phase 19 | Complete |
+| ROT-02 | Phase 19 | Complete |
 | DEP-01 | Phase 18 | Complete |
 | DEP-02 | Phase 18 | Complete |
 | DEP-03 | Phase 18 | Complete |
