@@ -58,7 +58,7 @@ Full phase details: [milestones/v1.1-ROADMAP.md](milestones/v1.1-ROADMAP.md)
 
 - [x] **Phase 18: Dependency Hygiene & Advisory Gate** - Vulnerable runtime deps fixed; new untriaged HIGH advisories blocked by CI with an expiring accept-list (completed 2026-08-20)
 - [x] **Phase 19: Unsubscribe Secret Graceful Rotation** - Operator rotates the signing secret without invalidating a single already-sent link (completed 2026-08-21)
-- [ ] **Phase 20: Campaign Template Correctness** - The template shown as selected is the template that actually sends, on all three send paths
+- [x] **Phase 20: Campaign Template Correctness** - The template shown as selected is the template that actually sends, on all three send paths (completed 2026-08-21)
 - [ ] **Phase 21: Per-Contact DSR Export** - Owner/Admin hands a data subject their own data as one downloadable, tenant-isolated file
 - [ ] **Phase 22: Workspace Quiesce & Physical Purge** - A soft-deleted workspace stops sending and physically disappears after retention, leaving neighbours and compliance evidence intact
 
@@ -228,7 +228,7 @@ Plans:
 | 17. Address tech debt: WR-06 + security follow-ups | v1.1 | 6/6 | Complete | 2026-08-20 |
 | 18. Dependency Hygiene & Advisory Gate | v1.2 | 4/4 | Complete    | 2026-08-20 |
 | 19. Unsubscribe Secret Graceful Rotation | v1.2 | 5/5 | Complete    | 2026-08-21 |
-| 20. Campaign Template Correctness | v1.2 | 6/6 | In Progress|  |
+| 20. Campaign Template Correctness | v1.2 | 6/6 | Complete    | 2026-08-21 |
 | 21. Per-Contact DSR Export | v1.2 | 0/TBD | Not started | - |
 | 22. Workspace Quiesce & Physical Purge | v1.2 | 0/TBD | Not started | - |
 

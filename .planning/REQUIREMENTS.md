@@ -10,8 +10,8 @@ Requirements for this milestone. Each maps to roadmap phases (continuing from Ph
 ### Campaign Template Correctness
 
 - [x] **TMPL-01**: Маркетолог не может запустить, запланировать или отправить test-send кампании с несохранённым выбором шаблона — dirty state явно виден и блокирует действие до сохранения
-- [ ] **TMPL-02**: Launch и schedule выполняются только относительно подтверждённо сохранённой версии кампании; конкурентное или несохранённое изменение приводит к типизированному conflict без запуска отправки
-- [ ] **TMPL-03**: Test-send отправляет ровно тот шаблон, что подтверждённо сохранён в кампании, — доказано тестом на все три send-пути (launch/schedule/test-send)
+- [x] **TMPL-02**: Launch и schedule выполняются только относительно подтверждённо сохранённой версии кампании; конкурентное или несохранённое изменение приводит к типизированному conflict без запуска отправки
+- [x] **TMPL-03**: Test-send отправляет ровно тот шаблон, что подтверждённо сохранён в кампании, — доказано тестом на все три send-пути (launch/schedule/test-send)
 
 ### DSR Contact Data Export
 
@@ -76,8 +76,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | TMPL-01 | Phase 20 | Complete |
-| TMPL-02 | Phase 20 | Pending |
-| TMPL-03 | Phase 20 | Pending |
+| TMPL-02 | Phase 20 | Complete |
+| TMPL-03 | Phase 20 | Complete |
 | DSR-01 | Phase 21 | Pending |
 | DSR-02 | Phase 21 | Pending |
 | DSR-03 | Phase 21 | Pending |

@@ -2,19 +2,19 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Data Lifecycle & Delivery Trust
-current_phase: 20
-current_phase_name: campaign-template-correctness
-status: executing
+current_phase: 21
+current_phase_name: Per-Contact DSR Export
+status: planning
 stopped_at: Phase 20 context gathered
-last_updated: "2026-08-21T08:04:39.557Z"
+last_updated: "2026-08-21T12:54:47.996Z"
 last_activity: 2026-08-21
-last_activity_desc: Phase 20 execution started
+last_activity_desc: Phase 20 complete, transitioned to Phase 21
 progress:
   total_phases: 5
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 15
-  completed_plans: 9
-  percent: 40
+  completed_plans: 15
+  percent: 60
 ---
 
 # Project State
@@ -28,10 +28,10 @@ See: .planning/PROJECT.md (updated 2026-08-21 after Phase 19)
 
 ## Current Position
 
-Phase: 20 (campaign-template-correctness) — EXECUTING
-Plan: 1 of 6
-Status: Executing Phase 20
-Last activity: 2026-08-21 — Phase 20 execution started
+Phase: 21 — Per-Contact DSR Export
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-08-21 — Phase 20 complete, transitioned to Phase 21
 
 Progress: [████░░░░░░] 40% (2/5 v1.2 phases complete)
 
