@@ -211,12 +211,40 @@ interface SendPrereqs {
 }
 
 /**
+ * TMPL-03/D-12 (plan 20-04): an optional override for `readSendPrereqs`'s
+ * templateId/fromEmail resolution. ONLY the `kind === "test"` branch below
+ * ever passes one -- `claimCampaignSend` and the flow claim path
+ * (`flows/flow-send.ts`) call `readSendPrereqs` with no override at all, so
+ * launch/schedule dispatch keeps re-deriving from the row byte-for-byte
+ * (T-20-04-01: a snapshot field can never redirect a `kind='campaign'`
+ * dispatch). An absent field on this override falls back to the row read,
+ * so a job enqueued by pre-Phase-20 code (carrying neither field) still
+ * processes during a rolling deploy instead of being deferred or dropped.
+ */
+interface SendPrereqsOverride {
+  templateId?: string;
+  fromEmail?: string;
+}
+
+/**
  * Reads the tenant's decrypted SendGrid key, send settings (RPS), and the
  * campaign's templateId/fromEmail -- shared by both the campaign-claim
  * transaction and the test-send transaction so the two dispatch paths can
  * never drift on how these prerequisites are resolved.
+ *
+ * `override` (TMPL-03/D-12, plan 20-04): resolved independently per field,
+ * override-first then row-second. The missing-prerequisite check below is
+ * applied to the RESOLVED (effective) pair, not to the raw row values --
+ * a marketer who clears the campaign's template after a test send was
+ * already enqueued with a valid snapshot must not make that already-queued
+ * send throw a false "missing prerequisite" error.
  */
-async function readSendPrereqs(client: PoolClient, workspaceId: string, campaignId: string): Promise<SendPrereqs> {
+async function readSendPrereqs(
+  client: PoolClient,
+  workspaceId: string,
+  campaignId: string,
+  override: SendPrereqsOverride = {}
+): Promise<SendPrereqs> {
   const { rows: keyRows } = await client.query<SendgridKeyRow>(
     `SELECT ciphertext, encrypted_dek as "encryptedDek", iv, auth_tag as "authTag"
      FROM workspace_sendgrid_keys WHERE workspace_id = $1`,
@@ -237,11 +265,17 @@ async function readSendPrereqs(client: PoolClient, workspaceId: string, campaign
     [campaignId, workspaceId]
   );
   const campaign = campaignRows[0];
-  if (!campaign || !campaign.templateId || !campaign.fromEmail) {
+  if (!campaign) {
     throw new Error(`Campaign ${campaignId} is missing a templateId/fromEmail for dispatch`);
   }
 
-  return { apiKey, rps, templateId: campaign.templateId, fromEmail: campaign.fromEmail, status: campaign.status };
+  const templateId = override.templateId ?? campaign.templateId;
+  const fromEmail = override.fromEmail ?? campaign.fromEmail;
+  if (!templateId || !fromEmail) {
+    throw new Error(`Campaign ${campaignId} is missing a templateId/fromEmail for dispatch`);
+  }
+
+  return { apiKey, rps, templateId, fromEmail, status: campaign.status };
 }
 
 interface ClaimedCampaignSend extends SendPrereqs {
@@ -437,7 +471,7 @@ export async function processSendJob(
   }
 
   const job = emailBroadcastJobSchema.parse(data);
-  const { workspaceId, campaignId, kind, contactId, testTo, testData } = job;
+  const { workspaceId, campaignId, kind, contactId, testTo, testData, templateId, fromEmail } = job;
 
   return withTenant(workspaceId, async () => {
     if (kind === "campaign") {
@@ -627,7 +661,16 @@ export async function processSendJob(
           { unsubscribeUrl }
         ) as unknown as Record<string, unknown>);
 
-      const prereqs = await withTenantTransaction((client) => readSendPrereqs(client, workspaceId, campaignId));
+      // TMPL-03/D-12 (plan 20-04): the job's own templateId/fromEmail
+      // snapshot (present only for kind='test', packages/shared-schemas/src/
+      // queues.ts) takes precedence over a fresh row read -- what the
+      // marketer confirmed at the moment of the test send is what SendGrid
+      // receives, even if a save landed on the row while this job waited in
+      // the queue. Absent fields fall back to the row read (rolling-deploy
+      // safety for a pre-Phase-20 job carrying neither).
+      const prereqs = await withTenantTransaction((client) =>
+        readSendPrereqs(client, workspaceId, campaignId, { templateId, fromEmail })
+      );
 
       // WRK-02: the SAME lane-slot gate as the campaign/flow branches above,
       // acquired before the per-tenant RPS check -- but this path has no
