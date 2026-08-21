@@ -3,7 +3,13 @@ import { XCircle } from "lucide-react";
 import type { CampaignStatus } from "@/features/campaigns/api";
 import { Badge } from "@/components/ui/badge";
 
-const LABELS: Record<CampaignStatus, string> = {
+/**
+ * TMPL-02/D-09: exported so `campaignSendConflict.ts`'s illegal-transition
+ * copy can name a campaign's real current state using the EXACT same
+ * Russian word this badge already shows -- one label source, never two
+ * independently-worded names for the same status.
+ */
+export const CAMPAIGN_STATUS_LABELS: Record<CampaignStatus, string> = {
   draft: "Черновик",
   scheduled: "Запланирована",
   sending: "Отправляется",
@@ -29,7 +35,7 @@ export function CampaignStatusBadge({ status }: { status: CampaignStatus }) {
   return (
     <Badge variant="outline" className={CLASSES[status]}>
       {status === "canceled" ? <XCircle className="mr-1 h-3 w-3" /> : null}
-      {LABELS[status]}
+      {CAMPAIGN_STATUS_LABELS[status]}
     </Badge>
   );
 }

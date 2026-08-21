@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { useSession } from "@/lib/authClient";
@@ -9,6 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { CONFLICT_REFRESH_NOTICE, VERSION_CONFLICT_COPY, classifySendError } from "@/features/campaigns/campaignSendConflict";
+import { useCampaignDirtyState } from "@/features/campaigns/CampaignDirtyStateContext";
 import { getCampaignTestSample, testSendCampaign, type CampaignResponse } from "@/features/campaigns/api";
 
 const TEST_SEND_FAILURE =
@@ -42,6 +44,11 @@ const TEST_SEND_QUEUED_DESCRIPTION =
  */
 export function TestSendPanel({ slug, campaign }: { slug: string; campaign: CampaignResponse }) {
   const { data: session } = useSession();
+  const queryClient = useQueryClient();
+  // TMPL-01/D-01/D-02: an unsaved form edit blocks test-send the same way it
+  // blocks launch/schedule -- the test sample and dynamic_template_data
+  // preview stay visible, only the send action itself is gated.
+  const { isDirty, blockReason: dirtyBlockReason } = useCampaignDirtyState();
   const [to, setTo] = useState("");
   const [json, setJson] = useState("");
   const [jsonError, setJsonError] = useState<string | null>(null);
@@ -66,14 +73,38 @@ export function TestSendPanel({ slug, campaign }: { slug: string; campaign: Camp
 
   const testSendMutation = useMutation({
     mutationFn: (body: { to?: string; dynamicTemplateData?: Record<string, unknown> }) =>
-      testSendCampaign(slug, campaign.id, body),
+      // TMPL-02/D-06/D-11: echo back the version this panel is displaying --
+      // the route now requires it and compares it under lock, the same
+      // uniform precondition contract launch/schedule use.
+      testSendCampaign(slug, campaign.id, { ...body, expectedVersion: campaign.version }),
     onSuccess: (result) => {
       setServerError(null);
+      // TMPL-02: the route may have persisted a resolved sender under the
+      // lock and bumped the version -- without this the browser would keep
+      // the pre-bump value and the marketer's next launch would 409
+      // through no fault of their own. Safe against clobbering unsaved
+      // edits: a dirty campaign form blocks test-send (plan 20-05).
+      void queryClient.invalidateQueries({ queryKey: ["workspace", slug, "campaigns", campaign.id] });
       toast.success(`Тестовое письмо поставлено в очередь на ${result.to}`, {
         description: TEST_SEND_QUEUED_DESCRIPTION,
       });
     },
-    onError: () => setServerError(TEST_SEND_FAILURE),
+    onError: async (err) => {
+      // TMPL-02/D-08/D-11: same classification and uniform copy the launch/
+      // schedule dialogs use. `illegal_transition` is not reachable here --
+      // test-send performs no status transition -- so it falls through to
+      // the existing generic test-send failure copy rather than getting
+      // invented copy. No retry option is added; the marketer's next click
+      // is the only thing that may resend (T-20-06-01).
+      const kind = classifySendError(err);
+      if (kind === "version_conflict") {
+        setServerError(VERSION_CONFLICT_COPY);
+        await queryClient.invalidateQueries({ queryKey: ["workspace", slug, "campaigns"] });
+        toast(CONFLICT_REFRESH_NOTICE);
+        return;
+      }
+      setServerError(TEST_SEND_FAILURE);
+    },
   });
 
   function handleSend() {
@@ -122,8 +153,9 @@ export function TestSendPanel({ slug, campaign }: { slug: string; campaign: Camp
         </div>
 
         {serverError ? <p className="text-sm font-medium text-destructive">{serverError}</p> : null}
+        {dirtyBlockReason ? <p className="text-sm text-destructive">{dirtyBlockReason}</p> : null}
 
-        <Button type="button" onClick={handleSend} disabled={testSendMutation.isPending}>
+        <Button type="button" onClick={handleSend} disabled={testSendMutation.isPending || isDirty}>
           {testSendMutation.isPending ? "Отправляем…" : "Отправить тестовое письмо"}
         </Button>
       </CardContent>

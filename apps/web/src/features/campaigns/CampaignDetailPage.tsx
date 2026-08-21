@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router";
 import { Loader2 } from "lucide-react";
@@ -19,11 +19,18 @@ import {
 } from "@/features/campaigns/api";
 import { AudienceBreakdown } from "@/features/campaigns/AudienceBreakdown";
 import CampaignBuilderPage from "@/features/campaigns/CampaignBuilderPage";
+import { CampaignDirtyStateProvider } from "@/features/campaigns/CampaignDirtyStateContext";
 import { CampaignMetricsSummary } from "@/features/campaigns/CampaignMetricsSummary";
 import { CampaignProgress } from "@/features/campaigns/CampaignProgress";
 import { CampaignStatusBadge } from "@/features/campaigns/CampaignStatusBadge";
-import { CancelDialog, LaunchScheduleActions } from "@/features/campaigns/LaunchScheduleDialogs";
+import {
+  CancelDialog,
+  LaunchConfirmDialog,
+  LaunchScheduleActions,
+  ScheduleDialog,
+} from "@/features/campaigns/LaunchScheduleDialogs";
 import { TestSendPanel } from "@/features/campaigns/TestSendPanel";
+import { UnsavedChangesBanner } from "@/features/campaigns/UnsavedChangesBanner";
 
 function campaignQueryKey(slug: string, id: string) {
   return ["workspace", slug, "campaigns", id];
@@ -202,6 +209,15 @@ export function CampaignDetailPage() {
     refetchInterval: (query) => (query.state.data?.status === "sending" ? 3000 : false),
   });
 
+  // D-09 fix: owned HERE, above every early return, so hook order stays
+  // identical across renders. `LaunchConfirmDialog`/`ScheduleDialog` are
+  // mounted unconditionally below (regardless of campaign.status) so that
+  // an open dialog survives the very refetch its own conflict handling
+  // triggers -- see LaunchScheduleDialogs.tsx's LaunchScheduleActions
+  // doc comment for the failure this replaced.
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+
   function refreshCampaign() {
     void queryClient.invalidateQueries({ queryKey: campaignQueryKey(slug, id) });
   }
@@ -256,36 +272,77 @@ export function CampaignDetailPage() {
     />
   ) : null;
 
+  // D-09 fix: the status-branched view is now a VALUE, not an early return.
+  // `LaunchConfirmDialog`/`ScheduleDialog` below are appended as siblings of
+  // whichever branch this resolves to, in the single return at the bottom
+  // of the function -- so they stay mounted across a status change instead
+  // of unmounting with the branch that used to own them.
+  let content: ReactNode;
+
   if (campaign.status === "draft") {
-    return (
+    // TMPL-01/D-01/D-02/D-03/D-04: the provider wraps the embedded builder
+    // AND both sibling action components so all three compare against the
+    // exact same saved row (the `campaignQueryKey(slug, id)` query above).
+    // The banner is the FIRST child of this container, directly above
+    // TestSendPanel -- next to the actions it blocks (D-01). No
+    // `beforeunload` listener and no router-blocker of any kind is added
+    // here or anywhere in this phase: per D-04, unsaved edits block the
+    // three send actions, never navigation away from the page.
+    content = (
       <div className="space-y-6">
         {staleErrorBanner ? <div className="px-8 pt-8">{staleErrorBanner}</div> : null}
-        <CampaignBuilderPage />
-        <div className="space-y-6 px-8 pb-8">
-          <TestSendPanel slug={slug} campaign={campaign} />
-          <LaunchScheduleActions slug={slug} campaign={campaign} canLaunch={canLaunch} />
+        <CampaignDirtyStateProvider saved={campaign}>
+          <CampaignBuilderPage />
+          <div className="space-y-6 px-8 pb-8">
+            <UnsavedChangesBanner />
+            <TestSendPanel slug={slug} campaign={campaign} />
+            <LaunchScheduleActions
+              slug={slug}
+              campaign={campaign}
+              canLaunch={canLaunch}
+              onOpenConfirm={() => setConfirmOpen(true)}
+              onOpenSchedule={() => setScheduleOpen(true)}
+            />
+          </div>
+        </CampaignDirtyStateProvider>
+      </div>
+    );
+  } else {
+    content = (
+      <div className="space-y-6 p-8">
+        <div className="flex items-center gap-3">
+          <h1 className="text-display font-semibold">{campaign.name}</h1>
+          <CampaignStatusBadge status={campaign.status} />
         </div>
+
+        {staleErrorBanner}
+
+        {campaign.status === "scheduled" ? <ScheduledView slug={slug} campaign={campaign} /> : null}
+        {campaign.status === "sending" ? (
+          <SendingView slug={slug} campaign={campaign} onTerminal={refreshCampaign} />
+        ) : null}
+        {campaign.status === "sent" || campaign.status === "canceled" ? (
+          <SummaryView slug={slug} campaign={campaign} />
+        ) : null}
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 p-8">
-      <div className="flex items-center gap-3">
-        <h1 className="text-display font-semibold">{campaign.name}</h1>
-        <CampaignStatusBadge status={campaign.status} />
-      </div>
-
-      {staleErrorBanner}
-
-      {campaign.status === "scheduled" ? <ScheduledView slug={slug} campaign={campaign} /> : null}
-      {campaign.status === "sending" ? (
-        <SendingView slug={slug} campaign={campaign} onTerminal={refreshCampaign} />
-      ) : null}
-      {campaign.status === "sent" || campaign.status === "canceled" ? (
-        <SummaryView slug={slug} campaign={campaign} />
-      ) : null}
-    </div>
+    <>
+      {content}
+      {/*
+        D-09 fix: mounted unconditionally, regardless of campaign.status.
+        Each dialog only renders its own visible content while its `open`
+        prop is true, and clicking a trigger inside the draft branch above
+        is the only thing that ever sets `confirmOpen`/`scheduleOpen` true --
+        so this changes nothing about when a dialog becomes visible, only
+        that it is no longer unmounted by a status change that happens
+        while it is open.
+      */}
+      <LaunchConfirmDialog slug={slug} campaign={campaign} open={confirmOpen} onOpenChange={setConfirmOpen} />
+      <ScheduleDialog slug={slug} campaign={campaign} open={scheduleOpen} onOpenChange={setScheduleOpen} />
+    </>
   );
 }
 

@@ -57,8 +57,8 @@ Full phase details: [milestones/v1.1-ROADMAP.md](milestones/v1.1-ROADMAP.md)
 **Build order rationale:** dependency hygiene first (the CI gate protects every subsequent phase's own dependency changes), then the two small self-contained fixes (rotation, template correctness), then DSR export (must exist and be stable before anything is physically purged, and its keyset discipline informs the purge batching), then workspace purge last (largest surface, irreversible, two architectural decisions resolvable only at plan time).
 
 - [x] **Phase 18: Dependency Hygiene & Advisory Gate** - Vulnerable runtime deps fixed; new untriaged HIGH advisories blocked by CI with an expiring accept-list (completed 2026-08-20)
-- [ ] **Phase 19: Unsubscribe Secret Graceful Rotation** - Operator rotates the signing secret without invalidating a single already-sent link
-- [ ] **Phase 20: Campaign Template Correctness** - The template shown as selected is the template that actually sends, on all three send paths
+- [x] **Phase 19: Unsubscribe Secret Graceful Rotation** - Operator rotates the signing secret without invalidating a single already-sent link (completed 2026-08-21)
+- [x] **Phase 20: Campaign Template Correctness** - The template shown as selected is the template that actually sends, on all three send paths (completed 2026-08-21)
 - [ ] **Phase 21: Per-Contact DSR Export** - Owner/Admin hands a data subject their own data as one downloadable, tenant-isolated file
 - [ ] **Phase 22: Workspace Quiesce & Physical Purge** - A soft-deleted workspace stops sending and physically disappears after retention, leaving neighbours and compliance evidence intact
 
@@ -142,7 +142,30 @@ Plans:
   3. Launch and schedule act only on the confirmed-saved campaign version; a concurrent or stale change produces a typed conflict error and no mail is dispatched at all.
   4. After a save, all three send paths agree on the same template id — none of them can fall back to local client form state.
 
-**Plans**: TBD
+**Plans**: 6/6 plans executed
+
+Plans:
+**Wave 1**
+
+- [x] 20-01-PLAN.md — `campaigns.version` optimistic-lock column: migration `0066` with its snapshot, reversibility tier + hand-verified inverse + re-pinned trailing-run test, applied to the dev DB, filed in SPECIFICATION.md §4 (D-05)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [x] 20-02-PLAN.md — Tracer: the launch path end-to-end — required `expectedVersion`, compared inside the existing `FOR UPDATE` transaction, typed 409 `version_conflict` with `currentVersion`, `code` on every campaign-state error body, the launch route's first-ever body parse, and the sender-resolution split that stops the primary `fromSenderId` path self-conflicting (RESEARCH Pitfall #1)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [x] 20-03-PLAN.md — Schedule/cancel parity plus test-send precondition and the D-12 enqueue-time template/sender snapshot (additive-optional job fields, no `schemaVersion` bump); the persisting sender resolver retired
+
+**Wave 4** *(blocked on Wave 3 completion; the two plans touch disjoint files and run in parallel)*
+
+- [x] 20-04-PLAN.md — The dispatch worker honours the test-send snapshot (row-read fallback for in-flight jobs) and SC2's three-path template-correctness proof lands as executable assertions
+- [x] 20-05-PLAN.md — TMPL-01: pure dirty comparison + one shared context above all three consumers, the amber unsaved-changes banner with a one-click save, and launch/schedule/test-send all blocked with inline reasons (D-01 through D-04)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [x] 20-06-PLAN.md — Typed conflict recovery in both dialogs and the test-send panel (dialog stays open, copy names the real state, refetch, never an auto-retry), the Playwright proof of SC1 and SC3, and the human verification against a real SendGrid template (D-08 through D-10)
+
 **UI hint**: yes
 
 ### Phase 21: Per-Contact DSR Export
@@ -204,8 +227,8 @@ Plans:
 | 16. Live SendGrid Verification | v1.1 | 7/7 | Complete | 2026-08-19 |
 | 17. Address tech debt: WR-06 + security follow-ups | v1.1 | 6/6 | Complete | 2026-08-20 |
 | 18. Dependency Hygiene & Advisory Gate | v1.2 | 4/4 | Complete    | 2026-08-20 |
-| 19. Unsubscribe Secret Graceful Rotation | v1.2 | 5/5 | In Progress|  |
-| 20. Campaign Template Correctness | v1.2 | 0/TBD | Not started | - |
+| 19. Unsubscribe Secret Graceful Rotation | v1.2 | 5/5 | Complete    | 2026-08-21 |
+| 20. Campaign Template Correctness | v1.2 | 6/6 | Complete    | 2026-08-21 |
 | 21. Per-Contact DSR Export | v1.2 | 0/TBD | Not started | - |
 | 22. Workspace Quiesce & Physical Purge | v1.2 | 0/TBD | Not started | - |
 

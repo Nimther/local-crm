@@ -35,6 +35,14 @@ export const campaignStatusEnum = pgEnum("campaign_status", [
  * precedent). `bouncedCount` groups BOTH hard-bounce and address-drop
  * ("не доставлено", D-08) terminals into one field -- the distinguishing
  * reason stays queryable per-send via `sends.bounce_reason`/`drop_reason`.
+ *
+ * `version` (Phase 20, plan 20-01, TMPL-02/D-05): a monotonically-
+ * incrementing optimistic-lock token. Every mutation of the row (draft
+ * PATCH, launch, schedule, cancel) bumps it inside the SAME locked
+ * transaction that performs the write, so exactly one increment happens
+ * per user-initiated action. Application code outside a repository
+ * function never writes it directly; the client only ever echoes back a
+ * value it previously read, as `expectedVersion`.
  */
 export const campaigns = pgTable("campaigns", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -53,6 +61,7 @@ export const campaigns = pgTable("campaigns", {
   sendableTotal: integer("sendable_total"),
   sentCount: integer("sent_count").notNull().default(0),
   failedCount: integer("failed_count").notNull().default(0),
+  version: integer("version").notNull().default(1),
   excludedTotal: integer("excluded_total"),
   snapshotCursor: uuid("snapshot_cursor"),
   fanOutComplete: boolean("fan_out_complete").notNull().default(false),

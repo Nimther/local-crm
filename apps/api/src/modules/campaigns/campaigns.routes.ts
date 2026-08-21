@@ -3,6 +3,7 @@ import {
   createCampaignSchema,
   updateCampaignSchema,
   campaignListQuerySchema,
+  launchCampaignSchema,
   scheduleCampaignSchema,
   testSendCampaignSchema,
 } from "@mega-crm/shared-schemas";
@@ -26,12 +27,13 @@ import {
   getCampaignProgress,
   launchCampaign,
   listCampaigns,
+  prepareCampaignTestSend,
   scheduleCampaign,
   updateCampaign,
   type CampaignRow,
 } from "./campaign.repository.js";
 import { campaignKickoffQueue, emailBroadcastQueue } from "./campaign-queues.js";
-import { CampaignSenderError, resolveCampaignFromEmail } from "./sender-resolver.js";
+import { CampaignSenderError, resolveCampaignSenderEmail } from "./sender-resolver.js";
 
 /**
  * WR-03/T-03-04-style DoS-bounding statement_timeout, reused here for the
@@ -76,32 +78,48 @@ function launchIncompleteFields(campaign: CampaignRow): Record<string, string> {
 /**
  * Maps a CampaignStateError to its HTTP status (D-03/D-08): `not_found`->404,
  * `illegal_transition`->409 (locked state machine rejected the transition),
- * `incomplete`->422 (only ever thrown by launchCampaign; callers that need
- * the launchIncompleteFields breakdown check `err.code === "incomplete"`
- * BEFORE falling back to this generic mapper). Returns `null` for any other
- * error so the caller re-throws (never swallows an unrelated bug).
+ * `version_conflict`->409 (TMPL-02/D-05/D-06/D-07: the caller's
+ * `expectedVersion` no longer matches the row, carries `currentVersion` so
+ * the client can refetch without a second read), `incomplete`->422 (only
+ * ever thrown by launchCampaign; callers that need the
+ * launchIncompleteFields breakdown check `err.code === "incomplete"` BEFORE
+ * falling back to this generic mapper). Every branch's body carries `code`
+ * -- the client branches on it, so the field is part of the contract
+ * rather than debug decoration (RESEARCH Pitfall #2). Returns `null` for
+ * any other error so the caller re-throws (never swallows an unrelated
+ * bug).
  */
 function mapCampaignStateError(err: unknown): { code: number; body: Record<string, unknown> } | null {
   if (!(err instanceof CampaignStateError)) return null;
   if (err.code === "not_found") {
-    return { code: 404, body: { error: "Campaign not found" } };
+    return { code: 404, body: { error: "Campaign not found", code: err.code } };
   }
   if (err.code === "illegal_transition") {
-    return { code: 409, body: { error: err.message } };
+    return { code: 409, body: { error: err.message, code: err.code } };
   }
-  return { code: 422, body: { error: err.message } };
+  if (err.code === "version_conflict") {
+    return {
+      code: 409,
+      body: { error: err.message, code: err.code, currentVersion: err.currentVersion },
+    };
+  }
+  return { code: 422, body: { error: err.message, code: err.code } };
 }
 
 /**
  * CR-02: maps a `CampaignSenderError` (thrown by `resolveCampaignFromEmail`
- * when a campaign's `fromSenderId` cannot be resolved to a verified email)
- * to the same 422 + `fields.sender` shape `launchIncompleteFields` already
- * uses, so the UI's sender-field error rendering handles both cases
- * identically.
+ * or `resolveCampaignSenderEmail` when a campaign's `fromSenderId` cannot
+ * be resolved to a verified email) to the same 422 + `fields.sender` shape
+ * `launchIncompleteFields` already uses, so the UI's sender-field error
+ * rendering handles both cases identically. Carries `code` for the same
+ * reason `mapCampaignStateError` does -- one coherent error family.
  */
 function mapCampaignSenderError(err: unknown): { code: number; body: Record<string, unknown> } | null {
   if (!(err instanceof CampaignSenderError)) return null;
-  return { code: 422, body: { error: err.message, fields: { sender: MISSING_SENDER_COPY } } };
+  return {
+    code: 422,
+    body: { error: err.message, code: err.code, fields: { sender: MISSING_SENDER_COPY } },
+  };
 }
 
 function toCampaignResponse(row: CampaignRow) {
@@ -118,6 +136,10 @@ function toCampaignResponse(row: CampaignRow) {
     sendableTotal: row.sendableTotal,
     sentCount: row.sentCount,
     failedCount: row.failedCount,
+    // TMPL-02/D-05/RESEARCH Pitfall #4: the optimistic-lock token the
+    // client echoes back as `expectedVersion` on the send paths -- without
+    // this field the version is invisible to every consumer.
+    version: row.version,
     excludedTotal: row.excludedTotal,
     sendingStartedAt: row.sendingStartedAt ? row.sendingStartedAt.toISOString() : null,
     terminalAt: row.terminalAt ? row.terminalAt.toISOString() : null,
@@ -296,21 +318,35 @@ export async function registerCampaignsRoutes(fastify: FastifyInstance): Promise
     { preHandler: requirePermission("campaign", "launch") },
     async (request, reply) => {
       const { slug, id } = request.params as { slug: string; id: string };
+      // TMPL-02/D-05/D-06: parse the optimistic-lock precondition before the
+      // workspace lookup, same shape as the schedule handler's own block --
+      // a request with no (or malformed) expectedVersion never gets far
+      // enough to touch the campaign row at all.
+      const parsed = launchCampaignSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: parsed.error.flatten() });
+      }
+
       const workspace = await findActiveWorkspaceBySlug(slug);
       if (!workspace) {
         return reply.code(404).send(NOT_FOUND_BODY);
       }
 
       try {
-        // CR-02: resolve+persist a verified from_email BEFORE any transition
-        // or enqueue -- a fromSenderId-only campaign must never reach the
-        // kickoff queue with from_email still null.
+        // CR-02/TMPL-02/RESEARCH Pitfall #1: resolve the sender WITHOUT
+        // persisting -- persistence now happens inside launchCampaign's own
+        // locked transaction, in the SAME statement as the status flip and
+        // the version bump, so a fromSenderId-based launch never bumps the
+        // version more than once per marketer click.
         const preLaunch = await withTenant(workspace.id, () => getCampaign(id));
-        if (preLaunch && (preLaunch.fromSenderId || preLaunch.fromEmail)) {
-          await resolveCampaignFromEmail(workspace.id, preLaunch);
-        }
+        const resolvedFromEmail =
+          preLaunch && (preLaunch.fromSenderId || preLaunch.fromEmail)
+            ? await resolveCampaignSenderEmail(workspace.id, preLaunch)
+            : null;
 
-        const launched = await withTenant(workspace.id, () => launchCampaign(id));
+        const launched = await withTenant(workspace.id, () =>
+          launchCampaign(id, { expectedVersion: parsed.data.expectedVersion, resolvedFromEmail })
+        );
         // SEND-03: the kickoff worker (04-06) re-derives recipients/template/
         // sender from the campaign row itself -- the job only ever carries ids.
         await campaignKickoffQueue.add(
@@ -326,6 +362,7 @@ export async function registerCampaignsRoutes(fastify: FastifyInstance): Promise
           const campaign = await withTenant(workspace.id, () => getCampaign(id));
           return reply.code(422).send({
             error: err.message,
+            code: err.code,
             fields: campaign ? launchIncompleteFields(campaign) : {},
           });
         }
@@ -357,15 +394,26 @@ export async function registerCampaignsRoutes(fastify: FastifyInstance): Promise
       }
 
       try {
-        // CR-02: same resolve-before-transition guarantee as launch -- the
-        // 04-06 scheduler worker must find a populated from_email at send
-        // time, never re-resolve at kickoff time itself.
+        // CR-02/TMPL-02/RESEARCH Pitfall #1: resolve the sender WITHOUT
+        // persisting -- persistence now happens inside scheduleCampaign's
+        // own locked transaction, in the SAME statement as the status flip
+        // and the version bump, exactly as the launch route (plan 20-02)
+        // already does. The 04-06 scheduler worker still finds a populated
+        // from_email at send time; it just gets written under the lock now,
+        // not in a separate transaction ahead of it.
         const preSchedule = await withTenant(workspace.id, () => getCampaign(id));
-        if (preSchedule && (preSchedule.fromSenderId || preSchedule.fromEmail)) {
-          await resolveCampaignFromEmail(workspace.id, preSchedule);
-        }
+        const resolvedFromEmail =
+          preSchedule && (preSchedule.fromSenderId || preSchedule.fromEmail)
+            ? await resolveCampaignSenderEmail(workspace.id, preSchedule)
+            : null;
 
-        const scheduled = await withTenant(workspace.id, () => scheduleCampaign(id, scheduledAtDate));
+        const scheduled = await withTenant(workspace.id, () =>
+          scheduleCampaign(id, {
+            scheduledAt: scheduledAtDate,
+            expectedVersion: parsed.data.expectedVersion,
+            resolvedFromEmail,
+          })
+        );
         return reply.send(toCampaignResponse(scheduled));
       } catch (err) {
         const senderMapped = mapCampaignSenderError(err);
@@ -449,22 +497,41 @@ export async function registerCampaignsRoutes(fastify: FastifyInstance): Promise
       return reply.code(401).send({ error: "Not authenticated" });
     }
 
-    // CR-02: resolve+persist BEFORE enqueuing -- a test send from a
-    // fromSenderId-only campaign must reach SendGrid with a concrete
-    // verified from.email, never rely on the dispatch worker to resolve it.
-    if (campaign.fromSenderId || campaign.fromEmail) {
-      try {
-        await resolveCampaignFromEmail(workspace.id, campaign);
-      } catch (err) {
-        const senderMapped = mapCampaignSenderError(err);
-        if (senderMapped) return reply.code(senderMapped.code).send(senderMapped.body);
-        throw err;
-      }
-    } else {
+    if (!campaign.fromSenderId && !campaign.fromEmail) {
       return reply.code(422).send({
         error: "Campaign has no sender configured",
         fields: { sender: MISSING_SENDER_COPY },
       });
+    }
+
+    // CR-02/TMPL-03/D-11/D-12: resolve WITHOUT persisting -- persistence
+    // (when it changes anything) now happens inside prepareCampaignTestSend's
+    // own locked transaction, in the SAME statement as the version compare
+    // and bump, exactly as launch/schedule (plans 20-02/20-03) already do.
+    // The returned row is the snapshot source for the job payload below --
+    // never `request.body` (SC4).
+    let prepared: CampaignRow;
+    try {
+      const resolvedFromEmail = await resolveCampaignSenderEmail(workspace.id, campaign);
+      prepared = await withTenant(workspace.id, () =>
+        prepareCampaignTestSend(id, {
+          expectedVersion: parsed.data.expectedVersion,
+          resolvedFromEmail,
+        })
+      );
+    } catch (err) {
+      const senderMapped = mapCampaignSenderError(err);
+      if (senderMapped) return reply.code(senderMapped.code).send(senderMapped.body);
+      if (err instanceof CampaignStateError && err.code === "incomplete") {
+        return reply.code(422).send({
+          error: err.message,
+          code: err.code,
+          fields: launchIncompleteFields(campaign),
+        });
+      }
+      const mapped = mapCampaignStateError(err);
+      if (mapped) return reply.code(mapped.code).send(mapped.body);
+      throw err;
     }
 
     const testTo = parsed.data.to ?? session.user.email;
@@ -483,6 +550,12 @@ export async function registerCampaignsRoutes(fastify: FastifyInstance): Promise
         kind: "test",
         testTo,
         testData: parsed.data.dynamicTemplateData,
+        // TMPL-03/D-12: the template/sender the locked precondition check
+        // above just verified -- captured here, not re-read at dispatch
+        // time, so a save between now and worker pickup can never redirect
+        // this already-queued test send.
+        ...(prepared.templateId !== null ? { templateId: prepared.templateId } : {}),
+        ...(prepared.fromEmail !== null ? { fromEmail: prepared.fromEmail } : {}),
         ...(requestId !== undefined ? { requestId } : {}),
       },
       { jobId }

@@ -34,6 +34,14 @@ import {
   type CampaignResponse,
 } from "@/features/campaigns/api";
 import { AudienceBreakdown } from "@/features/campaigns/AudienceBreakdown";
+import {
+  classifySendError,
+  CONFLICT_REFRESH_NOTICE,
+  illegalTransitionCopy,
+  VERSION_CONFLICT_COPY,
+  type SendConflictKind,
+} from "@/features/campaigns/campaignSendConflict";
+import { useCampaignDirtyState } from "@/features/campaigns/CampaignDirtyStateContext";
 
 const GENERIC_ERROR = "Что-то пошло не так. Попробуйте ещё раз — если ошибка повторится, обновите страницу.";
 const MEMBER_TOOLTIP = "Только Owner или Admin может запускать кампании.";
@@ -62,6 +70,11 @@ export function LaunchConfirmDialog({
 }) {
   const queryClient = useQueryClient();
   const [serverError, setServerError] = useState<string | null>(null);
+  // TMPL-02/D-08/D-09: which recoverable 409 kind (if any) the last attempt
+  // hit. The message itself is composed at RENDER time from the live
+  // `campaign` prop below, not captured here -- the invalidation this
+  // triggers has already refreshed it by the time it renders.
+  const [conflict, setConflict] = useState<SendConflictKind | null>(null);
 
   const breakdownQuery = useQuery({
     queryKey: ["workspace", slug, "campaigns", campaign.id, "audience-breakdown"],
@@ -70,15 +83,43 @@ export function LaunchConfirmDialog({
   });
 
   const launchMutation = useMutation({
-    mutationFn: () => launchCampaign(slug, campaign.id),
+    // TMPL-02/D-06: echo back the version this dialog is displaying -- the
+    // launch route now requires it and compares it under lock.
+    mutationFn: () => launchCampaign(slug, campaign.id, { expectedVersion: campaign.version }),
     onSuccess: async () => {
       setServerError(null);
+      setConflict(null);
       await queryClient.invalidateQueries({ queryKey: campaignsQueryKey(slug) });
       toast.success("Кампания отправлена");
       onOpenChange(false);
     },
-    onError: () => setServerError(GENERIC_ERROR),
+    onError: async (err) => {
+      const kind = classifySendError(err);
+      if (kind) {
+        // D-08/D-09: the dialog stays OPEN and the mutation is never
+        // re-invoked here -- only the marketer's next click may resend
+        // (T-20-06-01). The refetch below is what makes the live
+        // `campaign.status` read in the render below the fresh one.
+        setServerError(null);
+        setConflict(kind);
+        await queryClient.invalidateQueries({ queryKey: campaignsQueryKey(slug) });
+        toast(CONFLICT_REFRESH_NOTICE);
+        return;
+      }
+      setConflict(null);
+      setServerError(GENERIC_ERROR);
+    },
   });
+
+  // D-09: read from the LIVE campaign prop, not a value captured when the
+  // error arrived -- the invalidation above has already refreshed it.
+  const conflictMessage =
+    conflict === "version_conflict"
+      ? VERSION_CONFLICT_COPY
+      : conflict === "illegal_transition"
+        ? illegalTransitionCopy(campaign.status)
+        : null;
+  const errorMessage = conflictMessage ?? serverError;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -94,7 +135,7 @@ export function LaunchConfirmDialog({
           <AudienceBreakdown data={breakdownQuery.data} />
         ) : null}
 
-        {serverError ? <p className="text-sm font-medium text-destructive">{serverError}</p> : null}
+        {errorMessage ? <p className="text-sm font-medium text-destructive">{errorMessage}</p> : null}
 
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
@@ -134,17 +175,38 @@ export function ScheduleDialog({
   const [value, setValue] = useState("");
   const [dateError, setDateError] = useState<string | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
+  // TMPL-02/D-08/D-09: same shape as LaunchConfirmDialog's -- rendered from
+  // the live `campaign` prop below, never captured at error time.
+  const [conflict, setConflict] = useState<SendConflictKind | null>(null);
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   const scheduleMutation = useMutation({
-    mutationFn: (scheduledAt: string) => scheduleCampaign(slug, campaign.id, { scheduledAt }),
+    // TMPL-02/D-06: echo back the version this dialog is displaying -- the
+    // schedule route now requires it and compares it under lock, the same
+    // uniform precondition contract launchMutation uses.
+    mutationFn: (scheduledAt: string) =>
+      scheduleCampaign(slug, campaign.id, { scheduledAt, expectedVersion: campaign.version }),
     onSuccess: async () => {
       setServerError(null);
+      setConflict(null);
       await queryClient.invalidateQueries({ queryKey: campaignsQueryKey(slug) });
       toast.success("Кампания запланирована");
       handleOpenChange(false);
     },
-    onError: () => setServerError(GENERIC_ERROR),
+    onError: async (err) => {
+      const kind = classifySendError(err);
+      if (kind) {
+        // D-08/D-09: stays open, never re-invokes the mutation -- only a
+        // fresh click may resend (T-20-06-01).
+        setServerError(null);
+        setConflict(kind);
+        await queryClient.invalidateQueries({ queryKey: campaignsQueryKey(slug) });
+        toast(CONFLICT_REFRESH_NOTICE);
+        return;
+      }
+      setConflict(null);
+      setServerError(GENERIC_ERROR);
+    },
   });
 
   function handleOpenChange(next: boolean) {
@@ -153,8 +215,19 @@ export function ScheduleDialog({
       setValue("");
       setDateError(null);
       setServerError(null);
+      setConflict(null);
     }
   }
+
+  // D-09: read from the LIVE campaign prop -- the invalidation above has
+  // already refreshed it by the time this renders.
+  const conflictMessage =
+    conflict === "version_conflict"
+      ? VERSION_CONFLICT_COPY
+      : conflict === "illegal_transition"
+        ? illegalTransitionCopy(campaign.status)
+        : null;
+  const errorMessage = conflictMessage ?? serverError;
 
   function handleConfirm() {
     if (!value) {
@@ -168,6 +241,7 @@ export function ScheduleDialog({
     }
     setDateError(null);
     setServerError(null);
+    setConflict(null);
     scheduleMutation.mutate(local.toISOString());
   }
 
@@ -190,7 +264,7 @@ export function ScheduleDialog({
           {dateError ? <p className="text-sm text-destructive">{dateError}</p> : null}
         </div>
 
-        {serverError ? <p className="text-sm font-medium text-destructive">{serverError}</p> : null}
+        {errorMessage ? <p className="text-sm font-medium text-destructive">{errorMessage}</p> : null}
 
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
@@ -282,22 +356,44 @@ function computeIncompleteReason(campaign: CampaignResponse): string | null {
  * matching dialog. Disabled with the Owner/Admin tooltip for Members
  * (T-04-08-01 defense-in-depth — the server route is the authoritative gate)
  * and with inline copy when template/sender/audience aren't all chosen yet.
+ *
+ * D-09 fix: this component no longer owns `confirmOpen`/`scheduleOpen` and
+ * no longer mounts `LaunchConfirmDialog`/`ScheduleDialog` itself. It used to
+ * -- and `CampaignDetailPage` only rendered this whole component while
+ * `campaign.status === "draft"`, so an open dialog's onError conflict
+ * handler invalidating the campaign query (to refresh the real status) also
+ * flipped `campaign.status` away from "draft", which unmounted THIS
+ * component and the open dialog with it before the marketer ever saw the
+ * conflict copy. The dialogs are now mounted by `CampaignDetailPage` itself,
+ * unconditionally (regardless of status), so an open dialog survives the
+ * very refetch its own conflict handling triggers. This component keeps
+ * only the trigger row and its own `mode` state; opening either dialog is
+ * delegated to the parent via these two callbacks.
  */
 export function LaunchScheduleActions({
-  slug,
+  slug: _slug,
   campaign,
   canLaunch,
+  onOpenConfirm,
+  onOpenSchedule,
 }: {
   slug: string;
   campaign: CampaignResponse;
   canLaunch: boolean;
+  onOpenConfirm: () => void;
+  onOpenSchedule: () => void;
 }) {
   const [mode, setMode] = useState<"now" | "schedule">("now");
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [scheduleOpen, setScheduleOpen] = useState(false);
 
+  // TMPL-01/D-01/D-02: the dirty gate composes with the existing
+  // completeness/permission gates (any one disables the action); when both
+  // an incomplete-field reason and the dirty reason apply, the incomplete
+  // reason wins and is the ONLY line shown -- one line, one element, never
+  // both stacked.
+  const { isDirty, blockReason: dirtyBlockReason } = useCampaignDirtyState();
   const incompleteReason = computeIncompleteReason(campaign);
-  const disabled = !canLaunch || Boolean(incompleteReason);
+  const reason = incompleteReason ?? dirtyBlockReason;
+  const disabled = !canLaunch || Boolean(incompleteReason) || isDirty;
 
   return (
     <div className="space-y-3">
@@ -316,7 +412,7 @@ export function LaunchScheduleActions({
         </div>
       </RadioGroup>
 
-      {incompleteReason ? <p className="text-sm text-destructive">{incompleteReason}</p> : null}
+      {reason ? <p className="text-sm text-destructive">{reason}</p> : null}
 
       <TooltipProvider>
         <Tooltip>
@@ -325,7 +421,7 @@ export function LaunchScheduleActions({
               <Button
                 type="button"
                 disabled={disabled}
-                onClick={() => (mode === "now" ? setConfirmOpen(true) : setScheduleOpen(true))}
+                onClick={() => (mode === "now" ? onOpenConfirm() : onOpenSchedule())}
               >
                 {mode === "now" ? "Отправить сейчас" : "Запланировать"}
               </Button>
@@ -334,9 +430,6 @@ export function LaunchScheduleActions({
           {!canLaunch ? <TooltipContent>{MEMBER_TOOLTIP}</TooltipContent> : null}
         </Tooltip>
       </TooltipProvider>
-
-      <LaunchConfirmDialog slug={slug} campaign={campaign} open={confirmOpen} onOpenChange={setConfirmOpen} />
-      <ScheduleDialog slug={slug} campaign={campaign} open={scheduleOpen} onOpenChange={setScheduleOpen} />
     </div>
   );
 }

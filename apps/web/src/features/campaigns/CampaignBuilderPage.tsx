@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
@@ -14,6 +14,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { createCampaign, getCampaign, updateCampaign } from "@/features/campaigns/api";
 import { listSegments } from "@/features/segments/api";
 import { SenderPicker, TemplatePicker } from "@/features/campaigns/TemplateSenderPickers";
+import { usePublishCampaignFormState } from "@/features/campaigns/CampaignDirtyStateContext";
 
 const GENERIC_ERROR = "Что-то пошло не так. Попробуйте ещё раз — если ошибка повторится, обновите страницу.";
 const MISSING_NAME_COPY = "Укажите название кампании";
@@ -100,6 +101,10 @@ export function CampaignBuilderPage() {
   const [nameError, setNameError] = useState<string | null>(null);
   const [segmentError, setSegmentError] = useState<string | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
+  // TMPL-01/D-02: set true only once the server-row sync effect below has
+  // run, so the empty initial field values never get published as dirty
+  // for one commit and flash the banner.
+  const [hasSyncedFromServer, setHasSyncedFromServer] = useState(false);
 
   const campaignQuery = useQuery({
     queryKey: ["workspace", slug, "campaigns", id],
@@ -114,6 +119,7 @@ export function CampaignBuilderPage() {
     setSegmentId(campaign.segmentId);
     setTemplateId(campaign.templateId);
     setFromSenderId(campaign.fromSenderId);
+    setHasSyncedFromServer(true);
   }, [campaignQuery.data]);
 
   const isDraft = !isEdit || campaignQuery.data?.status === "draft";
@@ -141,7 +147,7 @@ export function CampaignBuilderPage() {
     },
   });
 
-  function handleSave() {
+  const handleSave = useCallback(() => {
     const trimmedName = name.trim();
     if (!trimmedName) {
       setNameError(MISSING_NAME_COPY);
@@ -157,7 +163,20 @@ export function CampaignBuilderPage() {
     setServerError(null);
 
     saveMutation.mutate();
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [name, segmentId]);
+
+  // TMPL-01/D-01/D-02/D-03: publish only for the embedded edit-draft case --
+  // nothing is published for /campaigns/new (no saved row to compare
+  // against), for a non-draft campaign (not editable), or before the first
+  // server-row sync (see hasSyncedFromServer above). Outside a provider
+  // (e.g. /campaigns/new, which mounts no provider) this hook is a no-op.
+  usePublishCampaignFormState({
+    form: { name, segmentId, templateId, fromSenderId },
+    save: handleSave,
+    isSaving: saveMutation.isPending,
+    enabled: isEdit && isDraft && hasSyncedFromServer,
+  });
 
   if (isEdit && campaignQuery.isLoading) {
     return (

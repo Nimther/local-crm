@@ -188,8 +188,18 @@ describe("Campaign sender resolution (CR-02, CAMP-01/02/04)", () => {
       method: "POST",
       url: `/api/workspaces/${workspace.slug}/campaigns/${campaign.id}/launch`,
       headers: { cookie },
+      // TMPL-02/RESEARCH Pitfall #1 regression: the version echoed back is
+      // the campaign's own first-read version (1) -- sender resolution no
+      // longer performs its own write ahead of this locked check, so this
+      // primary (non-fallback) sender path must succeed on the FIRST
+      // attempt, not 409 with a spuriously-already-stale version.
+      payload: { expectedVersion: 1 },
     });
     expect(launchRes.statusCode, `launch failed: ${launchRes.body}`).toBe(200);
+    const launchBody = launchRes.json<{ fromEmail: string | null; status: string; version: number }>();
+    expect(launchBody.fromEmail).toBe(VERIFIED_SENDER_EMAIL);
+    expect(launchBody.status).toBe("sending");
+    expect(launchBody.version).toBe(2);
 
     const persisted = await getCampaign(cookie, workspace.slug, campaign.id);
     expect(persisted.fromEmail).toBe(VERIFIED_SENDER_EMAIL);
@@ -213,7 +223,10 @@ describe("Campaign sender resolution (CR-02, CAMP-01/02/04)", () => {
       method: "POST",
       url: `/api/workspaces/${workspace.slug}/campaigns/${campaign.id}/test-send`,
       headers: { cookie },
-      payload: {},
+      // TMPL-03/D-11: test-send now requires the same expectedVersion
+      // precondition as launch -- echoing the campaign's own first-read
+      // version (1), same reasoning as the launch case above.
+      payload: { expectedVersion: 1 },
     });
     expect(testSendRes.statusCode, `test-send failed: ${testSendRes.body}`).toBe(202);
 
@@ -238,6 +251,7 @@ describe("Campaign sender resolution (CR-02, CAMP-01/02/04)", () => {
       method: "POST",
       url: `/api/workspaces/${workspace.slug}/campaigns/${campaign.id}/launch`,
       headers: { cookie },
+      payload: { expectedVersion: 1 },
     });
     expect(launchRes.statusCode, `expected 422, got ${launchRes.statusCode}: ${launchRes.body}`).toBe(422);
     const body = launchRes.json<{ error?: string; fields?: Record<string, string> }>();
@@ -261,7 +275,8 @@ describe("Campaign sender resolution (CR-02, CAMP-01/02/04)", () => {
       method: "POST",
       url: `/api/workspaces/${workspace.slug}/campaigns/${campaign.id}/test-send`,
       headers: { cookie },
-      payload: {},
+      // TMPL-03/D-11: same required precondition as above.
+      payload: { expectedVersion: 1 },
     });
     expect(
       testSendRes.statusCode,
