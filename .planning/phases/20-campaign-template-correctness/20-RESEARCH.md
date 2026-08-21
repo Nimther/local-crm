@@ -373,14 +373,14 @@ Not applicable — no external ecosystem shift is relevant here; this phase is e
 
 **If this table is empty:** N/A — two low-risk assumptions logged above; both are verifiable by the planner with one additional grep (`grep -rn "from_email" apps/worker apps/api` for A1; `grep -rn "CampaignResponse" apps/web` for A2) before finalizing the plan if extra confidence is wanted.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Should `updateCampaign` (draft PATCH) itself require `expectedVersion`?**
+1. **RESOLVED — Should `updateCampaign` (draft PATCH) itself require `expectedVersion`?** → No, per D-06's explicit enumeration (launch/schedule/test-send only). Resolved in plan 20-02, «Resolved research questions» section.
    - What we know: D-06 explicitly names only launch/schedule/test-send as requiring the precondition. The draft PATCH is not in that list.
    - What's unclear: Two marketers editing the same draft concurrently could still silently clobber each other's field edits on PATCH (a pre-existing gap, not introduced by this phase) — this phase's scope is send-path correctness, not general draft-edit conflict resolution.
    - Recommendation: Out of scope per D-06's explicit enumeration; do not add `expectedVersion` to `updateCampaignSchema`. Flag as a known pre-existing gap only if the planner wants to note it for a future phase — do not silently expand this phase's scope to fix it.
 
-2. **Does test-send's sender resolution still need ANY persistence to `from_email`?**
+2. **RESOLVED — Does test-send's sender resolution still need ANY persistence to `from_email`?** → Yes, kept as-is (rolling-deploy fallback for an old worker plus the sender-configured UI checks). Resolved in plan 20-03, «Resolved research questions» section.
    - What we know: D-12 snapshots the resolved email into the job payload, so the dispatch worker never needs to re-read `campaigns.from_email` for a test send.
    - What's unclear: Whether removing the persistence changes the audience-breakdown/launch-incomplete-fields UI logic, which checks `campaign.fromEmail` (`launchIncompleteFields` in `campaigns.routes.ts:68-74`) to decide whether the sender field shows as "missing."
    - Recommendation: Keep test-send's resolution persisting `from_email` as it does today (this is NOT what causes the version race — only launch/schedule's pre-transaction UPDATE does, because launch/schedule ALSO do a status-transition UPDATE moments later that checks the now-stale version). Confirm this at plan time by tracing whether skipping persistence changes any UI-visible "sender configured" check.
