@@ -124,19 +124,24 @@ describe("newestAutoReversibleTier", () => {
     }
   });
 
-  it("returns the current repository's trailing run as exactly [] -- 0065 (the newest shipped migration) is forward-only", () => {
+  it("returns the current repository's trailing run as exactly [\"0066_campaigns_version\"] -- 0066 is the newest shipped migration and is itself auto-reversible", () => {
     // Phase 15 (OPS-13, plan 15-14, Task 1): 0065 is a grants-only migration
     // (column-level GRANT + CREATE POLICY on workspace_webhook_endpoints,
     // human-approved override of this plan's own "no new migration"
     // prohibition -- see 0065's own header comment and 15-14-SUMMARY.md's
     // Deviations section). A CREATE POLICY is forward-only by this module's
-    // own reason (2) (an access-control posture change), so the trailing
-    // run RESETS to empty here -- it does not extend the previous
-    // [0062, 0063, 0064] run, because 0065 now sits strictly after all
-    // three and is itself not auto-reversible. Pinned explicitly so a
-    // future migration silently changing this fails loudly here rather
-    // than only inside the rehearsal test.
-    expect(newestAutoReversibleTier(MIGRATIONS_DIR)).toEqual([]);
+    // own reason (2) (an access-control posture change), so 0065 itself
+    // reset the trailing run to empty and stays forward-only.
+    //
+    // Phase 20 (TMPL-02/D-05, plan 20-01, Task 2): 0066_campaigns_version
+    // adds exactly one column (`campaigns.version`, constant default, no
+    // backfill) and is classified auto-reversible. Because it is the newest
+    // shipped migration and sits directly after the still-forward-only
+    // 0065, the trailing run becomes a one-element run starting after 0065
+    // rather than extending any earlier run. Pinned explicitly so a future
+    // migration silently changing this fails loudly here rather than only
+    // inside the rehearsal test.
+    expect(newestAutoReversibleTier(MIGRATIONS_DIR)).toEqual(["0066_campaigns_version"]);
   });
 
   it("returns an empty run when the newest migration is forward-only", () => {
