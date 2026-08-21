@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { useCampaignDirtyState } from "@/features/campaigns/CampaignDirtyStateContext";
 import { getCampaignTestSample, testSendCampaign, type CampaignResponse } from "@/features/campaigns/api";
 
 const TEST_SEND_FAILURE =
@@ -43,6 +44,10 @@ const TEST_SEND_QUEUED_DESCRIPTION =
 export function TestSendPanel({ slug, campaign }: { slug: string; campaign: CampaignResponse }) {
   const { data: session } = useSession();
   const queryClient = useQueryClient();
+  // TMPL-01/D-01/D-02: an unsaved form edit blocks test-send the same way it
+  // blocks launch/schedule -- the test sample and dynamic_template_data
+  // preview stay visible, only the send action itself is gated.
+  const { isDirty, blockReason: dirtyBlockReason } = useCampaignDirtyState();
   const [to, setTo] = useState("");
   const [json, setJson] = useState("");
   const [jsonError, setJsonError] = useState<string | null>(null);
@@ -132,8 +137,9 @@ export function TestSendPanel({ slug, campaign }: { slug: string; campaign: Camp
         </div>
 
         {serverError ? <p className="text-sm font-medium text-destructive">{serverError}</p> : null}
+        {dirtyBlockReason ? <p className="text-sm text-destructive">{dirtyBlockReason}</p> : null}
 
-        <Button type="button" onClick={handleSend} disabled={testSendMutation.isPending}>
+        <Button type="button" onClick={handleSend} disabled={testSendMutation.isPending || isDirty}>
           {testSendMutation.isPending ? "Отправляем…" : "Отправить тестовое письмо"}
         </Button>
       </CardContent>

@@ -34,6 +34,7 @@ import {
   type CampaignResponse,
 } from "@/features/campaigns/api";
 import { AudienceBreakdown } from "@/features/campaigns/AudienceBreakdown";
+import { useCampaignDirtyState } from "@/features/campaigns/CampaignDirtyStateContext";
 
 const GENERIC_ERROR = "Что-то пошло не так. Попробуйте ещё раз — если ошибка повторится, обновите страницу.";
 const MEMBER_TOOLTIP = "Только Owner или Admin может запускать кампании.";
@@ -302,8 +303,15 @@ export function LaunchScheduleActions({
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
 
+  // TMPL-01/D-01/D-02: the dirty gate composes with the existing
+  // completeness/permission gates (any one disables the action); when both
+  // an incomplete-field reason and the dirty reason apply, the incomplete
+  // reason wins and is the ONLY line shown -- one line, one element, never
+  // both stacked.
+  const { isDirty, blockReason: dirtyBlockReason } = useCampaignDirtyState();
   const incompleteReason = computeIncompleteReason(campaign);
-  const disabled = !canLaunch || Boolean(incompleteReason);
+  const reason = incompleteReason ?? dirtyBlockReason;
+  const disabled = !canLaunch || Boolean(incompleteReason) || isDirty;
 
   return (
     <div className="space-y-3">
@@ -322,7 +330,7 @@ export function LaunchScheduleActions({
         </div>
       </RadioGroup>
 
-      {incompleteReason ? <p className="text-sm text-destructive">{incompleteReason}</p> : null}
+      {reason ? <p className="text-sm text-destructive">{reason}</p> : null}
 
       <TooltipProvider>
         <Tooltip>

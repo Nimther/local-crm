@@ -19,11 +19,13 @@ import {
 } from "@/features/campaigns/api";
 import { AudienceBreakdown } from "@/features/campaigns/AudienceBreakdown";
 import CampaignBuilderPage from "@/features/campaigns/CampaignBuilderPage";
+import { CampaignDirtyStateProvider } from "@/features/campaigns/CampaignDirtyStateContext";
 import { CampaignMetricsSummary } from "@/features/campaigns/CampaignMetricsSummary";
 import { CampaignProgress } from "@/features/campaigns/CampaignProgress";
 import { CampaignStatusBadge } from "@/features/campaigns/CampaignStatusBadge";
 import { CancelDialog, LaunchScheduleActions } from "@/features/campaigns/LaunchScheduleDialogs";
 import { TestSendPanel } from "@/features/campaigns/TestSendPanel";
+import { UnsavedChangesBanner } from "@/features/campaigns/UnsavedChangesBanner";
 
 function campaignQueryKey(slug: string, id: string) {
   return ["workspace", slug, "campaigns", id];
@@ -257,14 +259,25 @@ export function CampaignDetailPage() {
   ) : null;
 
   if (campaign.status === "draft") {
+    // TMPL-01/D-01/D-02/D-03/D-04: the provider wraps the embedded builder
+    // AND both sibling action components so all three compare against the
+    // exact same saved row (the `campaignQueryKey(slug, id)` query above).
+    // The banner is the FIRST child of this container, directly above
+    // TestSendPanel -- next to the actions it blocks (D-01). No
+    // `beforeunload` listener and no router-blocker of any kind is added
+    // here or anywhere in this phase: per D-04, unsaved edits block the
+    // three send actions, never navigation away from the page.
     return (
       <div className="space-y-6">
         {staleErrorBanner ? <div className="px-8 pt-8">{staleErrorBanner}</div> : null}
-        <CampaignBuilderPage />
-        <div className="space-y-6 px-8 pb-8">
-          <TestSendPanel slug={slug} campaign={campaign} />
-          <LaunchScheduleActions slug={slug} campaign={campaign} canLaunch={canLaunch} />
-        </div>
+        <CampaignDirtyStateProvider saved={campaign}>
+          <CampaignBuilderPage />
+          <div className="space-y-6 px-8 pb-8">
+            <UnsavedChangesBanner />
+            <TestSendPanel slug={slug} campaign={campaign} />
+            <LaunchScheduleActions slug={slug} campaign={campaign} canLaunch={canLaunch} />
+          </div>
+        </CampaignDirtyStateProvider>
       </div>
     );
   }
