@@ -1,0 +1,1 @@
+No external API integration: the detector returned `detected: false` for phase 20 — the phase changes which templateId/fromEmail an already-integrated SendGrid path is given (a Postgres concurrency token, a zod body field, a job-payload snapshot and client blocking), and adds no new capability of any external API.
