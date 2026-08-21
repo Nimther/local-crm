@@ -215,13 +215,46 @@ describe("Campaign state machine (CAMP-01..05)", () => {
 
     const { scheduleCampaign } = await import("../campaign.repository.js");
     const scheduled = await withTenant(workspace.id, () =>
-      scheduleCampaign(campaign.id, new Date(Date.now() + 60 * 60 * 1000))
+      scheduleCampaign(campaign.id, {
+        scheduledAt: new Date(Date.now() + 60 * 60 * 1000),
+        expectedVersion: 1,
+        resolvedFromEmail: null,
+      })
     );
     expect(scheduled.status).toBe("scheduled");
 
     await expect(
       withTenant(workspace.id, () => updateCampaign(campaign.id, { name: "Renamed" }))
     ).rejects.toMatchObject({ code: "illegal_transition" });
+  });
+
+  it("scheduleCampaign called with a stale expectedVersion rejects with version_conflict and the row's real version", async () => {
+    const { cookie, workspace } = await owner("campaign-schedule-stale-version");
+    const segment = await createSegment(cookie, workspace.slug, "All contacts");
+
+    const campaign = await withTenant(workspace.id, () =>
+      createCampaign({ name: "Stale schedule", segmentId: segment.id, createdByUserId: TEST_USER_ID })
+    );
+
+    const bumped = await withTenant(workspace.id, () =>
+      updateCampaign(campaign.id, { name: "Renamed" })
+    );
+    expect(bumped.version).toBe(2);
+
+    const { scheduleCampaign } = await import("../campaign.repository.js");
+    await expect(
+      withTenant(workspace.id, () =>
+        scheduleCampaign(campaign.id, {
+          scheduledAt: new Date(Date.now() + 60 * 60 * 1000),
+          expectedVersion: 1,
+          resolvedFromEmail: null,
+        })
+      )
+    ).rejects.toMatchObject({
+      name: "CampaignStateError",
+      code: "version_conflict",
+      currentVersion: 2,
+    });
   });
 
   it("scheduled -> draft cancel works (D-07)", async () => {
@@ -234,7 +267,11 @@ describe("Campaign state machine (CAMP-01..05)", () => {
 
     const { scheduleCampaign } = await import("../campaign.repository.js");
     await withTenant(workspace.id, () =>
-      scheduleCampaign(campaign.id, new Date(Date.now() + 60 * 60 * 1000))
+      scheduleCampaign(campaign.id, {
+        scheduledAt: new Date(Date.now() + 60 * 60 * 1000),
+        expectedVersion: 1,
+        resolvedFromEmail: null,
+      })
     );
 
     const canceled = await withTenant(workspace.id, () => cancelCampaign(campaign.id));
