@@ -142,7 +142,7 @@ Plans:
   3. Launch and schedule act only on the confirmed-saved campaign version; a concurrent or stale change produces a typed conflict error and no mail is dispatched at all.
   4. After a save, all three send paths agree on the same template id — none of them can fall back to local client form state.
 
-**Plans**: 3/6 plans executed
+**Plans**: 5/6 plans executed
 
 Plans:
 **Wave 1**
@@ -159,8 +159,8 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion; the two plans touch disjoint files and run in parallel)*
 
-- [ ] 20-04-PLAN.md — The dispatch worker honours the test-send snapshot (row-read fallback for in-flight jobs) and SC2's three-path template-correctness proof lands as executable assertions
-- [ ] 20-05-PLAN.md — TMPL-01: pure dirty comparison + one shared context above all three consumers, the amber unsaved-changes banner with a one-click save, and launch/schedule/test-send all blocked with inline reasons (D-01 through D-04)
+- [x] 20-04-PLAN.md — The dispatch worker honours the test-send snapshot (row-read fallback for in-flight jobs) and SC2's three-path template-correctness proof lands as executable assertions
+- [x] 20-05-PLAN.md — TMPL-01: pure dirty comparison + one shared context above all three consumers, the amber unsaved-changes banner with a one-click save, and launch/schedule/test-send all blocked with inline reasons (D-01 through D-04)
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
@@ -228,7 +228,7 @@ Plans:
 | 17. Address tech debt: WR-06 + security follow-ups | v1.1 | 6/6 | Complete | 2026-08-20 |
 | 18. Dependency Hygiene & Advisory Gate | v1.2 | 4/4 | Complete    | 2026-08-20 |
 | 19. Unsubscribe Secret Graceful Rotation | v1.2 | 5/5 | Complete    | 2026-08-21 |
-| 20. Campaign Template Correctness | v1.2 | 3/6 | In Progress|  |
+| 20. Campaign Template Correctness | v1.2 | 5/6 | In Progress|  |
 | 21. Per-Contact DSR Export | v1.2 | 0/TBD | Not started | - |
 | 22. Workspace Quiesce & Physical Purge | v1.2 | 0/TBD | Not started | - |
 
