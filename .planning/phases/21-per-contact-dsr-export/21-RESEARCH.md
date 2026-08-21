@@ -10,7 +10,7 @@
 ### Locked Decisions
 
 - **D-01:** `events.properties` is excluded entirely from the export. Each event exports only its non-JSONB columns (name, occurred_at, and similar row metadata). This mirrors the Phase 13 erasure ruling verbatim (`buildScrubbedEventProperties` returns `{}`).
-- **D-02:** `send_events.payload` passes through an extended export allowlist: the 9 existing evidence keys (`SEND_EVENT_PAYLOAD_EVIDENCE_ALLOWLIST`) PLUS the subject's own single-recipient fields: `ip`, `useragent`, `url`, `reason`. The export list is a strict superset of the evidence list (export ⊇ evidence, relationship documented and test-asserted); tenant-defined keys (unique_args, categories, marketing_campaign_*) stay out. Both lists are explicit build-up allowlists.
+- **D-02:** `send_events.payload` passes through an extended export allowlist: the 10 existing evidence keys (`SEND_EVENT_PAYLOAD_EVIDENCE_ALLOWLIST`) PLUS the subject's own single-recipient fields: `ip`, `useragent`, `url`, `reason`. The export list is a strict superset of the evidence list (export ⊇ evidence, relationship documented and test-asserted); tenant-defined keys (unique_args, categories, marketing_campaign_*) stay out. Both lists are explicit build-up allowlists.
 - **D-03:** Allowlist constants move into a shared package importable by both `apps/api` (export) and `apps/worker` (erasure scrub) — single definition, no copy-drift — and this phase writes a PII inventory (SPECIFICATION.md section or dedicated doc) enumerating per-table what counts as the contact's personal data. Reversibility: costly.
 - **D-04:** Table scope includes journey tables: `flow_runs`/`flow_run_steps` and `campaign_recipients`. Infrastructure rows excluded with documented reasons in the inventory: `suppressions` (HMAC-hashed, no plaintext), `send_event_quarantine`, `erasure_records`, checkpoints/plumbing.
 - **D-05:** Single JSON document with top-level sections: `metadata`, `profile`, `custom_properties`, `consent_history`, `events`, `sends` (with nested send_events), `flow_participation`, `campaign_memberships`. One HTTP response. Reversibility: costly.
@@ -366,17 +366,21 @@ Not applicable in the usual sense (no external library version drift to track) �
 | A2 | Adding an `options.isolationLevel` parameter to the shared `withTenantTransaction` helper (rather than writing a fully separate, non-shared transaction wrapper just for this route) is the right layering choice. | Common Pitfall 1 / Recommended Project Structure | Medium — if `withTenantTransaction`'s ~100+ existing call sites have any assumption baked in about isolation level (e.g. relying on `READ COMMITTED`'s per-statement snapshot behavior for correctness elsewhere), extending the shared helper needs a careful audit; a self-contained wrapper local to the export module is the safer fallback if that audit turns up a conflict |
 | A3 | A full-table scan on `flow_runs`/`campaign_recipients` (absent the new indexes in Pitfall 2) would be "acceptable but slow," not a hard blocker, at this project's stated 100k-1M contact target scale. | Common Pitfall 2 | Medium — if a workspace's `flow_runs` table is very large (years of flow history, high enrollment volume), an uncovered scan on every DSR export request could be a real operational cost; the safer default is to add the three indexes in this phase rather than defer them |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Should the three missing indexes (Pitfall 2) be added in this phase's migration, or is that explicitly deferred?**
+Both questions below were plan-time decisions and both are now resolved by the phase plans. Kept for provenance.
+
+1. **RESOLVED: Should the three missing indexes (Pitfall 2) be added in this phase's migration, or is that explicitly deferred?**
    - What we know: they are missing today, verified directly against migrations; `events`/`sends` already have the equivalent index.
    - What's unclear: whether the user considers this in-scope for Phase 21 (a schema change adjacent to, but not required by, the DSR-01..04 requirements as literally worded) or a Phase-22-adjacent follow-up.
    - Recommendation: raise explicitly at plan time — the safest default is to add the migration in this phase, since Phase 22 (purge) will also need to scan these same tables by contact and would benefit from the same indexes, and CONTEXT.md's own "reversibility: costly" framing for other decisions suggests this project's convention is to close known gaps rather than defer them silently.
+   - **RESOLVED:** added in this phase, per the recommendation. `21-06-PLAN.md` Task 2 implements migration `0067_dsr_export_contact_indexes.sql` with all three contact-scoped indexes (`idx_flow_runs_workspace_contact`, `idx_campaign_recipients_workspace_contact`, `idx_flow_run_steps_flow_run_id`) plus the `_journal.json` entry, and `21-06-PLAN.md` Task 3 records them in SPECIFICATION.md §4.5/§4.6.
 
-2. **Does `withTenantTransaction` need a generic isolation-level option, or should this route bypass it entirely with a bespoke wrapper?**
+2. **RESOLVED: Does `withTenantTransaction` need a generic isolation-level option, or should this route bypass it entirely with a bespoke wrapper?**
    - What we know: the existing helper's first statement (`SELECT set_config`) forecloses raising isolation level afterward; a combined `BEGIN ISOLATION LEVEL REPEATABLE READ` statement is the fix.
    - What's unclear: whether extending the shared, widely-used helper is safer than a route-local wrapper, given how many call sites depend on its current exact behavior.
    - Recommendation: plan-time decision; either is workable, but the plan MUST explicitly name which one, since "just reuse `withTenantTransaction`" (the CONTEXT.md canonical-refs' implicit assumption) does not work unmodified.
+   - **RESOLVED:** neither option as posed — `21-01-PLAN.md` Task 1 adds `withTenantTransactionRepeatableRead` as a dedicated sibling helper in `packages/tenant-context/src/index.ts` (copy of `withTenantTransaction` differing only in the combined `BEGIN ISOLATION LEVEL REPEATABLE READ` first statement). No isolation option is added to `withTenantTransaction` and its existing call sites keep READ COMMITTED.
 
 ## Environment Availability
 
