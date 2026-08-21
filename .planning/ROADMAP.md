@@ -142,7 +142,7 @@ Plans:
   3. Launch and schedule act only on the confirmed-saved campaign version; a concurrent or stale change produces a typed conflict error and no mail is dispatched at all.
   4. After a save, all three send paths agree on the same template id — none of them can fall back to local client form state.
 
-**Plans**: 2/6 plans executed
+**Plans**: 3/6 plans executed
 
 Plans:
 **Wave 1**
@@ -155,7 +155,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 20-03-PLAN.md — Schedule/cancel parity plus test-send precondition and the D-12 enqueue-time template/sender snapshot (additive-optional job fields, no `schemaVersion` bump); the persisting sender resolver retired
+- [x] 20-03-PLAN.md — Schedule/cancel parity plus test-send precondition and the D-12 enqueue-time template/sender snapshot (additive-optional job fields, no `schemaVersion` bump); the persisting sender resolver retired
 
 **Wave 4** *(blocked on Wave 3 completion; the two plans touch disjoint files and run in parallel)*
 
@@ -228,7 +228,7 @@ Plans:
 | 17. Address tech debt: WR-06 + security follow-ups | v1.1 | 6/6 | Complete | 2026-08-20 |
 | 18. Dependency Hygiene & Advisory Gate | v1.2 | 4/4 | Complete    | 2026-08-20 |
 | 19. Unsubscribe Secret Graceful Rotation | v1.2 | 5/5 | Complete    | 2026-08-21 |
-| 20. Campaign Template Correctness | v1.2 | 2/6 | In Progress|  |
+| 20. Campaign Template Correctness | v1.2 | 3/6 | In Progress|  |
 | 21. Per-Contact DSR Export | v1.2 | 0/TBD | Not started | - |
 | 22. Workspace Quiesce & Physical Purge | v1.2 | 0/TBD | Not started | - |
 
