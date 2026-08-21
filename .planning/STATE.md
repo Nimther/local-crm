@@ -4,17 +4,17 @@ milestone: v1.2
 milestone_name: Data Lifecycle & Delivery Trust
 current_phase: 21
 current_phase_name: Per-Contact DSR Export
-status: planning
+status: "Phase 20 shipped — PR #26"
 stopped_at: Phase 20 context gathered
-last_updated: "2026-08-21T12:54:47.996Z"
+last_updated: "2026-08-21T15:05:29.949Z"
 last_activity: 2026-08-21
-last_activity_desc: Phase 20 complete, transitioned to Phase 21
 progress:
   total_phases: 5
   completed_phases: 3
   total_plans: 15
   completed_plans: 15
   percent: 60
+last_activity_desc: Phase 20 complete, transitioned to Phase 21
 ---
 
 # Project State
@@ -30,8 +30,8 @@ See: .planning/PROJECT.md (updated 2026-08-21 after Phase 19)
 
 Phase: 21 — Per-Contact DSR Export
 Plan: Not started
-Status: Ready to plan
-Last activity: 2026-08-21 — Completed quick task 260821-p8i: committed knowledge-base.md ci-tenant-fairness-double-run entry as docs
+Status: Phase 20 shipped — PR #26
+Last activity: 2026-08-21
 
 Progress: [████░░░░░░] 40% (2/5 v1.2 phases complete)
 
