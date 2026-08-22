@@ -143,6 +143,58 @@ export const dsrExportSendSchema = z.object({
 });
 export type DsrExportSend = z.infer<typeof dsrExportSendSchema>;
 
+/**
+ * Phase 21 plan 06 (DSR-02, D-04): one `flow_run_steps` row nested under its
+ * parent run, exactly as `selectFlowRunStepsPage` reads it in
+ * `dsr-export.repository.ts` -- `flowRunId` is deliberately NOT a field here
+ * (the nesting already carries it via the parent `flowParticipation` array
+ * entry).
+ */
+export const dsrExportFlowRunStepSchema = z.object({
+  id: z.string(),
+  nodeId: z.string(),
+  nodeType: z.string(),
+  outcome: z.string(),
+  sendId: z.string().nullable(),
+  createdAt: z.string(),
+});
+export type DsrExportFlowRunStep = z.infer<typeof dsrExportFlowRunStepSchema>;
+
+/**
+ * Phase 21 plan 06 (DSR-02, D-04): one `flow_runs` row, exactly as
+ * `selectFlowRunsPage` reads it in `dsr-export.repository.ts` --
+ * deliberately carries EVERY status (no filter narrows this to only the
+ * active statuses `flow_runs_one_active_per_contact` covers), since
+ * completed/exited/ejected runs are processing history under GDPR Art. 15
+ * just as much as an in-flight one. `steps` nests every `flow_run_steps`
+ * row for this run, oldest first.
+ */
+export const dsrExportFlowRunSchema = z.object({
+  id: z.string(),
+  flowId: z.string(),
+  flowVersionId: z.string(),
+  status: z.string(),
+  currentNodeId: z.string().nullable(),
+  enteredAt: z.string(),
+  lastEntryAt: z.string(),
+  exitedAt: z.string().nullable(),
+  exitReason: z.string().nullable(),
+  steps: z.array(dsrExportFlowRunStepSchema),
+});
+export type DsrExportFlowRun = z.infer<typeof dsrExportFlowRunSchema>;
+
+/**
+ * Phase 21 plan 06 (DSR-02, D-04): one `campaign_recipients` row, exactly as
+ * `selectCampaignRecipientsPage` reads it in `dsr-export.repository.ts` --
+ * which campaign targeted this contact and when the snapshot recorded it.
+ */
+export const dsrExportCampaignMembershipSchema = z.object({
+  id: z.string(),
+  campaignId: z.string(),
+  createdAt: z.string(),
+});
+export type DsrExportCampaignMembership = z.infer<typeof dsrExportCampaignMembershipSchema>;
+
 /** D-05: the document shape this plan establishes -- see the module doc comment for the Growth rule governing every later section. */
 export const dsrExportDocumentSchema = z.object({
   metadata: dsrExportMetadataSchema,
@@ -151,6 +203,8 @@ export const dsrExportDocumentSchema = z.object({
   consentHistory: z.array(dsrExportConsentHistoryEntrySchema),
   events: z.array(dsrExportEventSchema),
   sends: z.array(dsrExportSendSchema),
+  flowParticipation: z.array(dsrExportFlowRunSchema),
+  campaignMemberships: z.array(dsrExportCampaignMembershipSchema),
 });
 export type DsrExportDocument = z.infer<typeof dsrExportDocumentSchema>;
 
