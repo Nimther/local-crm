@@ -142,6 +142,16 @@ None - no external service configuration required.
 - `walkToExhaustion` is exported only implicitly via its two call sites inside `dsr-export.repository.ts` (not exported from the module) — a later plan needing it from outside this file should export it explicitly rather than duplicating the loop.
 - No blockers for 21-04/21-05/21-06.
 
+## Self-Check: PASSED
+
+- FOUND: apps/api/src/modules/contacts/dsr-export.repository.ts
+- FOUND: packages/shared-schemas/src/dsr-export.ts
+- FOUND: apps/api/src/modules/contacts/__tests__/dsr-export.test.ts
+- FOUND: .planning/phases/21-per-contact-dsr-export/21-03-SUMMARY.md
+- FOUND commit: e6f82aa (test)
+- FOUND commit: ea769d4 (feat)
+- FOUND commit: cb30f9c (docs, this summary)
+
 ---
 *Phase: 21-per-contact-dsr-export*
 *Completed: 2026-08-22*
