@@ -34,11 +34,17 @@ describe("GET .../contacts/:id/dsr-export (DSR-01/DSR-04, plan 21-01)", () => {
     await pool.end();
   });
 
+  // Phase 21 plan 05: this file's per-test owners/admins now exceed the
+  // /api/auth/* scope's 20 req/min per-IP rate limit from inject's single
+  // default address (contact-crud.test.ts's own precedent) -- each simulated
+  // account signs up from its own source IP.
+  let nextSignUpIp = 1;
   async function signUp(email: string, password: string, name: string) {
     const res = await app.inject({
       method: "POST",
       url: "/api/auth/sign-up/email",
       payload: { email, password, name },
+      remoteAddress: `127.0.2.${nextSignUpIp++}`,
     });
     expect(res.statusCode, `sign-up failed: ${res.body}`).toBe(200);
     const sessionCookie = res.cookies.find((c) => c.name.toLowerCase().includes("session"));
@@ -443,4 +449,458 @@ describe("GET .../contacts/:id/dsr-export (DSR-01/DSR-04, plan 21-01)", () => {
     expect(body.events).toHaveLength(0);
     expect(body.metadata.sectionRowCounts.events).toBe(0);
   });
+
+  /**
+   * Phase 21 plan 05 (DSR-02): seeds one `sends` row directly (mirrors
+   * `contact-erasure.test.ts`'s raw-insert precedent), with every
+   * delivery-status/telemetry column addressable so tests can populate
+   * exactly what they need to assert on. Defaults leave every optional
+   * column null/zero.
+   */
+  async function seedSend(
+    workspaceId: string,
+    contactId: string,
+    fields: {
+      kind?: string;
+      status?: string;
+      queuedAt: Date;
+      sentAt?: Date | null;
+      deliveredAt?: Date | null;
+      firstOpenedAt?: Date | null;
+      firstClickedAt?: Date | null;
+      bouncedAt?: Date | null;
+      droppedAt?: Date | null;
+      unsubscribedAt?: Date | null;
+      spamReportedAt?: Date | null;
+      bounceReason?: string | null;
+      dropReason?: string | null;
+      flowRunId?: string | null;
+      nodeId?: string | null;
+      openCount?: number;
+      clickCount?: number;
+      reconcilingSince?: Date | null;
+      dispatchedAt?: Date | null;
+      dispatchDurationMs?: number | null;
+    }
+  ): Promise<string> {
+    return withTenant(workspaceId, () =>
+      withTenantTransaction(async (client) => {
+        const { rows } = await client.query<{ id: string }>(
+          `INSERT INTO sends (
+             workspace_id, contact_id, kind, status, queued_at, sent_at, delivered_at,
+             first_opened_at, first_clicked_at, bounced_at, dropped_at, unsubscribed_at,
+             spam_reported_at, bounce_reason, drop_reason, flow_run_id, node_id,
+             open_count, click_count, reconciling_since, dispatched_at, dispatch_duration_ms
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
+           RETURNING id`,
+          [
+            workspaceId,
+            contactId,
+            fields.kind ?? "campaign",
+            fields.status ?? "sent",
+            fields.queuedAt,
+            fields.sentAt ?? null,
+            fields.deliveredAt ?? null,
+            fields.firstOpenedAt ?? null,
+            fields.firstClickedAt ?? null,
+            fields.bouncedAt ?? null,
+            fields.droppedAt ?? null,
+            fields.unsubscribedAt ?? null,
+            fields.spamReportedAt ?? null,
+            fields.bounceReason ?? null,
+            fields.dropReason ?? null,
+            fields.flowRunId ?? null,
+            fields.nodeId ?? null,
+            fields.openCount ?? 0,
+            fields.clickCount ?? 0,
+            fields.reconcilingSince ?? null,
+            fields.dispatchedAt ?? null,
+            fields.dispatchDurationMs ?? null,
+          ]
+        );
+        return rows[0].id;
+      })
+    );
+  }
+
+  /**
+   * Phase 21 plan 05 (DSR-02/DSR-03): seeds one `send_events` row directly,
+   * joined to `sends` through `sendId` -- the table itself carries no
+   * `contact_id`.
+   */
+  async function seedSendEvent(
+    workspaceId: string,
+    sendId: string,
+    fields: {
+      sgEventId?: string;
+      eventType?: string;
+      reason?: string | null;
+      payload?: Record<string, unknown>;
+      isTest?: boolean;
+      occurredAt: Date;
+    }
+  ): Promise<string> {
+    return withTenant(workspaceId, () =>
+      withTenantTransaction(async (client) => {
+        const { rows } = await client.query<{ id: string }>(
+          `INSERT INTO send_events (
+             id, workspace_id, sg_event_id, send_id, event_type, reason, payload,
+             is_test, occurred_at, received_at
+           ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, now())
+           RETURNING id`,
+          [
+            workspaceId,
+            fields.sgEventId ?? `sg-evt-${randomUUID()}`,
+            sendId,
+            fields.eventType ?? "delivered",
+            fields.reason ?? null,
+            JSON.stringify(fields.payload ?? {}),
+            fields.isTest ?? false,
+            fields.occurredAt,
+          ]
+        );
+        return rows[0].id;
+      })
+    );
+  }
+
+  it("sends: every send for this contact is exported oldest first (DSR-02)", async () => {
+    const owner = await signUp(`owner-dsr-sends-${Date.now()}@example.com`, "correct horse battery staple 42", "Owner");
+    const workspace = await createWorkspace(owner.cookie, "DSR Sends Co");
+    const contact = await createContact(owner.cookie, workspace.slug, { email: `dsr-sends-${Date.now()}@example.test` });
+
+    const now = Date.now();
+    const send1Queued = new Date(now - 60_000);
+    await seedSend(workspace.id, contact.id, {
+      kind: "campaign",
+      status: "sent",
+      queuedAt: send1Queued,
+      sentAt: new Date(now - 59_000),
+      deliveredAt: new Date(now - 58_000),
+      firstOpenedAt: new Date(now - 57_000),
+      openCount: 2,
+      clickCount: 0,
+    });
+    const send2Queued = new Date(now - 30_000);
+    await seedSend(workspace.id, contact.id, {
+      kind: "flow",
+      status: "failed",
+      queuedAt: send2Queued,
+      droppedAt: new Date(now - 29_000),
+      dropReason: "hard_bounce",
+      nodeId: "node-abc",
+      openCount: 0,
+      clickCount: 0,
+    });
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/contacts/${contact.id}/dsr-export`,
+      headers: { cookie: owner.cookie },
+    });
+    expect(res.statusCode, `export failed: ${res.body}`).toBe(200);
+    const body = res.json<DsrExportDocument>();
+
+    expect(body.sends).toHaveLength(2);
+    expect(body.metadata.sectionRowCounts.sends).toBe(2);
+
+    const queuedAts = body.sends.map((s) => new Date(s.queuedAt).getTime());
+    expect(queuedAts).toEqual([...queuedAts].sort((a, b) => a - b));
+
+    const [first, second] = body.sends;
+    expect(first).toMatchObject({
+      campaignId: null,
+      kind: "campaign",
+      status: "sent",
+      bounceReason: null,
+      dropReason: null,
+      flowRunId: null,
+      nodeId: null,
+      openCount: 2,
+      clickCount: 0,
+    });
+    expect(new Date(first.queuedAt).getTime()).toBe(send1Queued.getTime());
+    expect(first.sentAt).not.toBeNull();
+    expect(first.deliveredAt).not.toBeNull();
+    expect(first.firstOpenedAt).not.toBeNull();
+    expect(first.firstClickedAt).toBeNull();
+    expect(first.bouncedAt).toBeNull();
+    expect(first.droppedAt).toBeNull();
+
+    expect(second).toMatchObject({
+      campaignId: null,
+      kind: "flow",
+      status: "failed",
+      dropReason: "hard_bounce",
+      bounceReason: null,
+      nodeId: "node-abc",
+      openCount: 0,
+      clickCount: 0,
+    });
+    expect(new Date(second.queuedAt).getTime()).toBe(send2Queued.getTime());
+    expect(second.droppedAt).not.toBeNull();
+    expect(second.sentAt).toBeNull();
+  });
+
+  it("sends: excluded telemetry columns are absent (DSR-02)", async () => {
+    const owner = await signUp(`owner-dsr-sends-tel-${Date.now()}@example.com`, "correct horse battery staple 42", "Owner");
+    const workspace = await createWorkspace(owner.cookie, "DSR Sends Telemetry Co");
+    const contact = await createContact(owner.cookie, workspace.slug, { email: `dsr-sends-tel-${Date.now()}@example.test` });
+
+    await seedSend(workspace.id, contact.id, {
+      queuedAt: new Date(),
+      reconcilingSince: new Date(),
+      dispatchedAt: new Date(),
+      dispatchDurationMs: 250,
+    });
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/contacts/${contact.id}/dsr-export`,
+      headers: { cookie: owner.cookie },
+    });
+    expect(res.statusCode, `export failed: ${res.body}`).toBe(200);
+    const body = res.json<DsrExportDocument>();
+
+    expect(body.sends).toHaveLength(1);
+    expect(Object.keys(body.sends[0])).not.toContain("reconcilingSince");
+    expect(Object.keys(body.sends[0])).not.toContain("dispatchDurationMs");
+  });
+
+  it("sends: another contact's sends are absent (DSR-02)", async () => {
+    const owner = await signUp(`owner-dsr-sends-iso-${Date.now()}@example.com`, "correct horse battery staple 42", "Owner");
+    const workspace = await createWorkspace(owner.cookie, "DSR Sends Iso Co");
+    const contactA = await createContact(owner.cookie, workspace.slug, { email: `dsr-sends-iso-a-${Date.now()}@example.test` });
+    const contactB = await createContact(owner.cookie, workspace.slug, { email: `dsr-sends-iso-b-${Date.now()}@example.test` });
+
+    await seedSend(workspace.id, contactB.id, { queuedAt: new Date() });
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/contacts/${contactA.id}/dsr-export`,
+      headers: { cookie: owner.cookie },
+    });
+    expect(res.statusCode, `export failed: ${res.body}`).toBe(200);
+    const body = res.json<DsrExportDocument>();
+
+    expect(body.sends).toHaveLength(0);
+    expect(body.metadata.sectionRowCounts.sends).toBe(0);
+  });
+
+  it("sends: a contact with no sends exports an empty array with count 0 (DSR-02)", async () => {
+    const owner = await signUp(`owner-dsr-sends-empty-${Date.now()}@example.com`, "correct horse battery staple 42", "Owner");
+    const workspace = await createWorkspace(owner.cookie, "DSR Sends Empty Co");
+    const contact = await createContact(owner.cookie, workspace.slug, { email: `dsr-sends-empty-${Date.now()}@example.test` });
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/contacts/${contact.id}/dsr-export`,
+      headers: { cookie: owner.cookie },
+    });
+    expect(res.statusCode, `export failed: ${res.body}`).toBe(200);
+    const body = res.json<DsrExportDocument>();
+
+    expect(body.sends).toHaveLength(0);
+    expect(body.metadata.sectionRowCounts.sends).toBe(0);
+  });
+
+  /**
+   * Phase 21 plan 05 (DSR-03, SC4): the synthetic other-subject-field proof.
+   * A distinctive, unlikely-to-collide address shared as a constant so the
+   * assertion cannot pass by accident.
+   */
+  const SYNTHETIC_OTHER_SUBJECT_ADDRESS = "another-subject-in-payload-key@example.test";
+
+  it("send events nest under their send, oldest first (DSR-02)", async () => {
+    const owner = await signUp(`owner-dsr-sevt-${Date.now()}@example.com`, "correct horse battery staple 42", "Owner");
+    const workspace = await createWorkspace(owner.cookie, "DSR Send Events Co");
+    const contact = await createContact(owner.cookie, workspace.slug, { email: `dsr-sevt-${Date.now()}@example.test` });
+    const sendId = await seedSend(workspace.id, contact.id, { queuedAt: new Date() });
+
+    const now = Date.now();
+    await seedSendEvent(workspace.id, sendId, { eventType: "processed", occurredAt: new Date(now - 3000) });
+    await seedSendEvent(workspace.id, sendId, { eventType: "delivered", occurredAt: new Date(now - 2000) });
+    await seedSendEvent(workspace.id, sendId, { eventType: "open", occurredAt: new Date(now - 1000) });
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/contacts/${contact.id}/dsr-export`,
+      headers: { cookie: owner.cookie },
+    });
+    expect(res.statusCode, `export failed: ${res.body}`).toBe(200);
+    const body = res.json<DsrExportDocument>();
+
+    expect(body.sends).toHaveLength(1);
+    expect(body.sends[0].sendEvents).toHaveLength(3);
+    expect(body.metadata.sectionRowCounts.sendEvents).toBe(3);
+    expect(body.sends[0].sendEvents.map((e) => e.eventType)).toEqual(["processed", "delivered", "open"]);
+    const occurredAts = body.sends[0].sendEvents.map((e) => new Date(e.occurredAt).getTime());
+    expect(occurredAts).toEqual([...occurredAts].sort((a, b) => a - b));
+  });
+
+  it("allowlist: a synthetic field holding another subject's data is absent from the export (DSR-03, SC4)", async () => {
+    const owner = await signUp(`owner-dsr-sc4-${Date.now()}@example.com`, "correct horse battery staple 42", "Owner");
+    const workspace = await createWorkspace(owner.cookie, "DSR SC4 Co");
+    const contact = await createContact(owner.cookie, workspace.slug, { email: `dsr-sc4-${Date.now()}@example.test` });
+    const sendId = await seedSend(workspace.id, contact.id, { queuedAt: new Date() });
+
+    await seedSendEvent(workspace.id, sendId, {
+      eventType: "bounce",
+      occurredAt: new Date(),
+      payload: {
+        // Evidence keys (SEND_EVENT_PAYLOAD_EVIDENCE_ALLOWLIST):
+        event: "bounce",
+        type: "bounce",
+        timestamp: 1700000000,
+        sg_event_id: "sg-evt-1",
+        sg_message_id: "sg-msg-1",
+        "smtp-id": "<abc@sendgrid>",
+        status: "5.1.1",
+        attempt: "1",
+        asm_group_id: 42,
+        bounce_classification: "hard",
+        // Export-only keys:
+        ip: "203.0.113.10",
+        useragent: "Mozilla/5.0",
+        url: "https://example.test/click",
+        reason: "550 mailbox unavailable",
+        // Tenant-invented keys holding another subject's data:
+        referred_by_contact: { nested_email: SYNTHETIC_OTHER_SUBJECT_ADDRESS },
+        internal_notes: `escalated to ${SYNTHETIC_OTHER_SUBJECT_ADDRESS} for follow-up`,
+      },
+    });
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/contacts/${contact.id}/dsr-export`,
+      headers: { cookie: owner.cookie },
+    });
+    expect(res.statusCode, `export failed: ${res.body}`).toBe(200);
+    const body = res.json<DsrExportDocument>();
+
+    const entry = body.sends[0].sendEvents[0];
+    expect(entry.payload).toMatchObject({
+      event: "bounce",
+      type: "bounce",
+      timestamp: 1700000000,
+      sg_event_id: "sg-evt-1",
+      sg_message_id: "sg-msg-1",
+      "smtp-id": "<abc@sendgrid>",
+      status: "5.1.1",
+      attempt: "1",
+      asm_group_id: 42,
+      bounce_classification: "hard",
+    });
+    expect(entry.payload).not.toHaveProperty("referred_by_contact");
+    expect(entry.payload).not.toHaveProperty("internal_notes");
+
+    const serialized = JSON.stringify(body);
+    expect(serialized).not.toContain(SYNTHETIC_OTHER_SUBJECT_ADDRESS);
+  });
+
+  it("allowlist: the export list is applied, not the evidence list (DSR-03, D-02)", async () => {
+    const owner = await signUp(`owner-dsr-explist-${Date.now()}@example.com`, "correct horse battery staple 42", "Owner");
+    const workspace = await createWorkspace(owner.cookie, "DSR Export List Co");
+    const contact = await createContact(owner.cookie, workspace.slug, { email: `dsr-explist-${Date.now()}@example.test` });
+    const sendId = await seedSend(workspace.id, contact.id, { queuedAt: new Date() });
+
+    await seedSendEvent(workspace.id, sendId, {
+      eventType: "click",
+      occurredAt: new Date(),
+      payload: {
+        ip: "198.51.100.7",
+        useragent: "curl/8.0",
+        url: "https://example.test/offer",
+        reason: "clicked link",
+      },
+    });
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/contacts/${contact.id}/dsr-export`,
+      headers: { cookie: owner.cookie },
+    });
+    expect(res.statusCode, `export failed: ${res.body}`).toBe(200);
+    const body = res.json<DsrExportDocument>();
+
+    const entry = body.sends[0].sendEvents[0];
+    expect(entry.payload.ip).toBe("198.51.100.7");
+    expect(entry.payload.useragent).toBe("curl/8.0");
+    expect(entry.payload.url).toBe("https://example.test/offer");
+    expect(entry.payload.reason).toBe("clicked link");
+  });
+
+  it("allowlist: a payload of only non-allowlisted keys exports an empty object (DSR-03)", async () => {
+    const owner = await signUp(`owner-dsr-empty-payload-${Date.now()}@example.com`, "correct horse battery staple 42", "Owner");
+    const workspace = await createWorkspace(owner.cookie, "DSR Empty Payload Co");
+    const contact = await createContact(owner.cookie, workspace.slug, { email: `dsr-empty-payload-${Date.now()}@example.test` });
+    const sendId = await seedSend(workspace.id, contact.id, { queuedAt: new Date() });
+
+    await seedSendEvent(workspace.id, sendId, {
+      eventType: "unsubscribe",
+      occurredAt: new Date(),
+      payload: { unique_args: { foo: "bar" }, marketing_campaign_id: "mc-1" },
+    });
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/contacts/${contact.id}/dsr-export`,
+      headers: { cookie: owner.cookie },
+    });
+    expect(res.statusCode, `export failed: ${res.body}`).toBe(200);
+    const body = res.json<DsrExportDocument>();
+
+    expect(body.sends[0].sendEvents).toHaveLength(1);
+    expect(body.sends[0].sendEvents[0].payload).toEqual({});
+  });
+
+  it("send events: another contact's send events are absent (DSR-02)", async () => {
+    const owner = await signUp(`owner-dsr-sevt-iso-${Date.now()}@example.com`, "correct horse battery staple 42", "Owner");
+    const workspace = await createWorkspace(owner.cookie, "DSR Send Events Iso Co");
+    const contactA = await createContact(owner.cookie, workspace.slug, { email: `dsr-sevt-iso-a-${Date.now()}@example.test` });
+    const contactB = await createContact(owner.cookie, workspace.slug, { email: `dsr-sevt-iso-b-${Date.now()}@example.test` });
+    const sendB = await seedSend(workspace.id, contactB.id, { queuedAt: new Date() });
+    await seedSendEvent(workspace.id, sendB, { occurredAt: new Date() });
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/contacts/${contactA.id}/dsr-export`,
+      headers: { cookie: owner.cookie },
+    });
+    expect(res.statusCode, `export failed: ${res.body}`).toBe(200);
+    const body = res.json<DsrExportDocument>();
+
+    expect(body.sends).toHaveLength(0);
+    expect(body.metadata.sectionRowCounts.sendEvents).toBe(0);
+  });
+
+  it("send events: more than one page of send events all reach the file (D-10)", async () => {
+    const owner = await signUp(`owner-dsr-sevt-page-${Date.now()}@example.com`, "correct horse battery staple 42", "Owner");
+    const workspace = await createWorkspace(owner.cookie, "DSR Send Events Page Co");
+    const contact = await createContact(owner.cookie, workspace.slug, { email: `dsr-sevt-page-${Date.now()}@example.test` });
+    const sendId = await seedSend(workspace.id, contact.id, { queuedAt: new Date() });
+
+    const total = DSR_EXPORT_PAGE_LIMIT + 3;
+    const base = Date.now() - total * 1000;
+    for (let i = 0; i < total; i++) {
+      await seedSendEvent(workspace.id, sendId, {
+        eventType: `synthetic_${i}`,
+        occurredAt: new Date(base + i * 1000),
+      });
+    }
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/contacts/${contact.id}/dsr-export`,
+      headers: { cookie: owner.cookie },
+    });
+    expect(res.statusCode, `export failed: ${res.body}`).toBe(200);
+    const body = res.json<DsrExportDocument>();
+
+    expect(body.sends).toHaveLength(1);
+    expect(body.sends[0].sendEvents).toHaveLength(total);
+    expect(body.metadata.sectionRowCounts.sendEvents).toBe(total);
+    const ids = new Set(body.sends[0].sendEvents.map((e) => e.id));
+    expect(ids.size).toBe(total);
+  }, 30_000);
 });
