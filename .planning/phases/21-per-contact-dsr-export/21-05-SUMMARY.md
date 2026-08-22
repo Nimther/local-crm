@@ -183,6 +183,10 @@ None - no external service configuration required.
 - The export document now covers: `metadata`, `profile`, `customProperties`, `consentHistory`, `events`, `sends` (with nested `sendEvents`) -- DSR-01 and DSR-02 are fully covered by this plan and its predecessors; DSR-03's JSONB bound is proven for both `events.properties` (21-03, empty by construction) and `send_events.payload` (this plan, allowlist-bounded with a synthetic-field proof).
 - Phase 22 (Workspace Quiesce & Physical Purge) can reuse `SEND_EVENT_PAYLOAD_EXPORT_ALLOWLIST`/`SEND_EVENT_PAYLOAD_EVIDENCE_ALLOWLIST` from `@mega-crm/delivery-core` as the same shared definition this plan's isolation test already exercises against the real worker's update shape -- no new allowlist should be invented there.
 
+## Self-Check: PASSED
+
+All claimed files verified present on disk (`dsr-export.repository.ts`, `packages/shared-schemas/src/dsr-export.ts`, `dsr-export.test.ts`, `dsr-export-isolation.test.ts`, this SUMMARY). All claimed commit hashes verified present in `git log` (`ce35125`, `b909168`, `df2a196`).
+
 ---
 *Phase: 21-per-contact-dsr-export*
 *Completed: 2026-08-22*
