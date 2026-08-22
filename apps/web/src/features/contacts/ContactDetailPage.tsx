@@ -2,9 +2,10 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
+import { Download } from "lucide-react";
 
-import type { ContactResponse, PropertyRegistryItem } from "@mega-crm/shared-schemas";
-import { apiDelete, apiGet, apiPatch } from "@/lib/api";
+import type { ContactResponse, DsrExportDocument, PropertyRegistryItem, WorkspaceResponse } from "@mega-crm/shared-schemas";
+import { apiDelete, apiGet, apiPatch, ApiError } from "@/lib/api";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,6 +29,65 @@ import { CustomPropertyEditor } from "@/features/contacts/CustomPropertyEditor";
 import { SubscriptionStatusBadge } from "@/features/contacts/SubscriptionStatusBadge";
 
 const GENERIC_ERROR = "Что-то пошло не так. Попробуйте ещё раз — если ошибка повторится, обновите страницу.";
+
+/** D-13 backstop copy -- the same fixed string a later plan's disabled-erased-button state (D-14) will use. */
+const EXPORT_ERASED_MESSAGE = "Контакт обезличен — персональные данные удалены";
+
+/** Derives the export action's inline error copy from a mutation's `error` field -- `null` when there is nothing to show. */
+function computeExportErrorMessage(error: unknown): string | null {
+  if (!error) return null;
+  if (error instanceof ApiError && error.status === 410) return EXPORT_ERASED_MESSAGE;
+  return GENERIC_ERROR;
+}
+
+/**
+ * D-01/D-04/D-08/D-09/D-12: the Export action on the contact card.
+ * Owner/Admin only -- gated by a conditional render (`canExport ? ... :
+ * null`), never a disabled state, because SC3 requires a Member to not see
+ * the action at all (stricter than the campaign-actions disabled+tooltip
+ * pattern used elsewhere). Reuses `apiGet` (already parses JSON and throws
+ * a typed `ApiError` on non-2xx) rather than a raw `fetch`/blob bypass --
+ * the 403/404/410 typed-error handling comes "for free" that way.
+ */
+export function ExportContactButton({
+  slug,
+  contact,
+  viewerRole,
+}: {
+  slug: string;
+  contact: ContactResponse;
+  viewerRole: string;
+}) {
+  const canExport = viewerRole === "owner" || viewerRole === "admin";
+
+  const exportMutation = useMutation({
+    mutationFn: () => apiGet<DsrExportDocument>(`/api/workspaces/${slug}/contacts/${contact.id}/dsr-export`),
+    onSuccess: (doc) => {
+      const blob = new Blob([JSON.stringify(doc, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      // D-08: ids and today's date only, never contact PII -- the date is
+      // the moment of download, not `doc.metadata.generatedAt`.
+      a.download = `dsr-export-${contact.id}-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success("Файл с данными контакта скачан");
+    },
+  });
+
+  const serverError = computeExportErrorMessage(exportMutation.error);
+
+  return canExport ? (
+    <div className="flex items-center gap-2">
+      <Button type="button" variant="outline" disabled={exportMutation.isPending} onClick={() => exportMutation.mutate()}>
+        <Download className="mr-2 h-4 w-4" />
+        {exportMutation.isPending ? "Скачиваем…" : "Скачать данные контакта"}
+      </Button>
+      {serverError ? <p className="text-sm font-medium text-destructive">{serverError}</p> : null}
+    </div>
+  ) : null;
+}
 
 /** D-08: exact compliance copy for the destructive delete confirmation. */
 function DeleteContactDialog({ slug, contact }: { slug: string; contact: ContactResponse }) {
@@ -149,6 +209,17 @@ function PropertiesTab({ slug, contact }: { slug: string; contact: ContactRespon
 export function ContactDetailPage() {
   const { slug = "", id = "" } = useParams<{ slug: string; id: string }>();
 
+  // D-01/D-04: the page previously fetched no workspace query at all --
+  // owned HERE, above every early return, so hook order stays stable
+  // across renders (same CampaignDetailPage.tsx/TeamPage.tsx precedent).
+  const workspaceQuery = useQuery({
+    queryKey: ["workspace", slug],
+    queryFn: () => apiGet<WorkspaceResponse>(`/api/workspaces/${slug}`),
+    enabled: Boolean(slug),
+  });
+  const viewerRole = workspaceQuery.data?.role ?? "member";
+  const canExport = viewerRole === "owner" || viewerRole === "admin";
+
   const contactQuery = useQuery({
     queryKey: ["workspace", slug, "contacts", id],
     queryFn: () => apiGet<ContactResponse>(`/api/workspaces/${slug}/contacts/${id}`),
@@ -197,7 +268,11 @@ export function ContactDetailPage() {
           <h1 className="text-display font-semibold">{title}</h1>
           <SubscriptionStatusBadge status={contact.subscriptionStatus} />
         </div>
-        <DeleteContactDialog slug={slug} contact={contact} />
+        <div className="flex items-center gap-2">
+          {/* D-01/DSR-04/SC3: non-destructive action left of the destructive Delete button. */}
+          {canExport ? <ExportContactButton slug={slug} contact={contact} viewerRole={viewerRole} /> : null}
+          <DeleteContactDialog slug={slug} contact={contact} />
+        </div>
       </div>
 
       <Tabs defaultValue="overview">
