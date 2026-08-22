@@ -23,11 +23,16 @@ describe("Contact CRUD (CONT-01, CONT-05)", () => {
     await app.close();
   });
 
+  // The /api/auth/* scope is rate-limited to 20 req/min per IP; this file's
+  // per-test owners now exceed that from inject's single default address, so
+  // each simulated user signs up from its own source IP.
+  let nextSignUpIp = 1;
   async function signUp(email: string, password: string, name: string) {
     const res = await app.inject({
       method: "POST",
       url: "/api/auth/sign-up/email",
       payload: { email, password, name },
+      remoteAddress: `127.0.1.${nextSignUpIp++}`,
     });
     expect(res.statusCode, `sign-up failed: ${res.body}`).toBe(200);
     const sessionCookie = res.cookies.find((c) => c.name.toLowerCase().includes("session"));
