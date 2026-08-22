@@ -1051,7 +1051,7 @@ describe("GET .../contacts/:id/dsr-export (DSR-01/DSR-04, plan 21-01)", () => {
       exitReason: "exit_condition_met",
     });
     const run2Entered = new Date(now - 30_000);
-    const run2Id = await seedFlowRun(workspace.id, contact.id, flowId, flowVersionId, {
+    await seedFlowRun(workspace.id, contact.id, flowId, flowVersionId, {
       status: "waiting",
       currentNodeId: "wait-1",
       enteredAt: run2Entered,

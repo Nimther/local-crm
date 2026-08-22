@@ -3,9 +3,12 @@ import { withTenantTransactionRepeatableRead } from "@mega-crm/tenant-context";
 import { buildExportSendEventPayload } from "@mega-crm/delivery-core";
 import {
   DSR_EXPORT_FORMAT_VERSION,
+  type DsrExportCampaignMembership,
   type DsrExportConsentHistoryEntry,
   type DsrExportDocument,
   type DsrExportEvent,
+  type DsrExportFlowRun,
+  type DsrExportFlowRunStep,
   type DsrExportSend,
   type DsrExportSendEvent,
 } from "@mega-crm/shared-schemas";
@@ -277,6 +280,143 @@ export async function selectSendEventsPage(
 }
 
 /**
+ * Phase 21 plan 06 (DSR-02, D-04): one `flow_runs` row, exactly as
+ * `dsrExportFlowRunSchema` expects it minus `steps` (attached separately,
+ * once the whole `flow_run_steps` walk for this contact's runs finishes).
+ */
+export interface FlowRunPageRow {
+  id: string;
+  flowId: string;
+  flowVersionId: string;
+  status: string;
+  currentNodeId: string | null;
+  enteredAt: string;
+  lastEntryAt: string;
+  exitedAt: string | null;
+  exitReason: string | null;
+}
+
+/**
+ * Phase 21 plan 06 (DSR-02, D-04, T-21-06-02): one bounded page of
+ * `flow_runs` rows for this contact, ordered `(entered_at, id)` ascending.
+ * Deliberately carries NO status predicate: the only pre-existing
+ * contact-scoped index on this table (`flow_runs_one_active_per_contact`,
+ * migration 0026) is a partial unique index restricted to `waiting`/
+ * `advancing`, and every status -- including `completed`/`exited`/
+ * `ejected` -- is processing history under GDPR Art. 15 (D-04). Migration
+ * 0067 supplies the unconditional `(workspace_id, contact_id)` index this
+ * query rides instead.
+ */
+export async function selectFlowRunsPage(
+  client: PoolClient,
+  workspaceId: string,
+  contactId: string,
+  cursor: KeysetCursor | null,
+  limit: number = DSR_EXPORT_PAGE_LIMIT
+): Promise<FlowRunPageRow[]> {
+  const afterClause = cursor ? `AND (entered_at, id) > ($3::timestamptz, $4::uuid)` : "";
+  const params: unknown[] = cursor
+    ? [workspaceId, contactId, cursor.timestamp, cursor.id, limit]
+    : [workspaceId, contactId, limit];
+  const limitIdx = params.length;
+
+  const { rows } = await client.query<FlowRunPageRow>(
+    `SELECT
+       id,
+       flow_id as "flowId",
+       flow_version_id as "flowVersionId",
+       status,
+       current_node_id as "currentNodeId",
+       entered_at::text as "enteredAt",
+       last_entry_at::text as "lastEntryAt",
+       exited_at::text as "exitedAt",
+       exit_reason as "exitReason"
+     FROM flow_runs
+     WHERE workspace_id = $1 AND contact_id = $2 ${afterClause}
+     ORDER BY entered_at ASC, id ASC
+     LIMIT $${limitIdx}`,
+    params
+  );
+  return rows;
+}
+
+/**
+ * Phase 21 plan 06 (DSR-02, D-04): one `flow_run_steps` row nested under its
+ * parent run, reached ONLY through a list of run ids the caller already
+ * walked from `selectFlowRunsPage` -- the table carries no `contact_id` of
+ * its own. `createdAt` leads the keyset (mirrors `selectSendEventsPage`'s
+ * shape); `flowRunId` is returned alongside the export-shaped fields so the
+ * caller can group pages by their parent run, then stripped before the row
+ * is placed under `flowParticipation[].steps` (the nesting already carries
+ * it).
+ */
+export interface FlowRunStepPageRow extends DsrExportFlowRunStep {
+  flowRunId: string;
+}
+
+export async function selectFlowRunStepsPage(
+  client: PoolClient,
+  workspaceId: string,
+  flowRunIds: string[],
+  cursor: KeysetCursor | null,
+  limit: number = DSR_EXPORT_PAGE_LIMIT
+): Promise<FlowRunStepPageRow[]> {
+  const afterClause = cursor ? `AND (created_at, id) > ($3::timestamptz, $4::uuid)` : "";
+  const params: unknown[] = cursor
+    ? [workspaceId, flowRunIds, cursor.timestamp, cursor.id, limit]
+    : [workspaceId, flowRunIds, limit];
+  const limitIdx = params.length;
+
+  const { rows } = await client.query<FlowRunStepPageRow>(
+    `SELECT
+       id,
+       flow_run_id as "flowRunId",
+       node_id as "nodeId",
+       node_type as "nodeType",
+       outcome,
+       send_id as "sendId",
+       created_at::text as "createdAt"
+     FROM flow_run_steps
+     WHERE workspace_id = $1 AND flow_run_id = ANY($2::uuid[]) ${afterClause}
+     ORDER BY created_at ASC, id ASC
+     LIMIT $${limitIdx}`,
+    params
+  );
+  return rows;
+}
+
+/**
+ * Phase 21 plan 06 (DSR-02, D-04): one bounded page of `campaign_recipients`
+ * rows for this contact, ordered `(created_at, id)` ascending -- which
+ * campaigns targeted them and when the recipient snapshot recorded it.
+ */
+export type CampaignRecipientPageRow = DsrExportCampaignMembership;
+
+export async function selectCampaignRecipientsPage(
+  client: PoolClient,
+  workspaceId: string,
+  contactId: string,
+  cursor: KeysetCursor | null,
+  limit: number = DSR_EXPORT_PAGE_LIMIT
+): Promise<CampaignRecipientPageRow[]> {
+  const afterClause = cursor ? `AND (created_at, id) > ($3::timestamptz, $4::uuid)` : "";
+  const params: unknown[] = cursor
+    ? [workspaceId, contactId, cursor.timestamp, cursor.id, limit]
+    : [workspaceId, contactId, limit];
+  const limitIdx = params.length;
+
+  const { rows } = await client.query<CampaignRecipientPageRow>(
+    `SELECT id, campaign_id as "campaignId", created_at::text as "createdAt"
+     FROM campaign_recipients
+     WHERE workspace_id = $1 AND contact_id = $2 ${afterClause}
+     ORDER BY created_at ASC, id ASC
+     LIMIT $${limitIdx}`,
+    params
+  );
+  return rows;
+}
+
+/**
  * Phase 21 plan 03 (D-10): walks a keyset page reader to exhaustion inside
  * the caller's already-open transaction, accumulating every row. No
  * checkpoint table, no cursor persistence -- this loop's whole lifetime is
@@ -295,6 +435,31 @@ async function walkToExhaustion<Row extends { id: string }>(
     allRows.push(...page);
     const last = page[page.length - 1];
     cursor = { timestamp: cursorFromRow(last), id: last.id };
+  }
+  return allRows;
+}
+
+/**
+ * Phase 21 plan 06 (D-04, D-10): walks `selectFlowRunStepsPage` to
+ * exhaustion for a contact's whole set of flow-run ids, batching those ids
+ * into groups no larger than `limit` so the `ANY($::uuid[])` array
+ * parameter stays bounded when a contact has many runs -- each group gets
+ * its own independent `(created_at, id)` keyset walk via `walkToExhaustion`.
+ */
+async function walkFlowRunStepsToExhaustion(
+  client: PoolClient,
+  workspaceId: string,
+  flowRunIds: string[],
+  limit: number = DSR_EXPORT_PAGE_LIMIT
+): Promise<FlowRunStepPageRow[]> {
+  const allRows: FlowRunStepPageRow[] = [];
+  for (let i = 0; i < flowRunIds.length; i += limit) {
+    const batch = flowRunIds.slice(i, i + limit);
+    const batchRows = await walkToExhaustion(
+      (cursor) => selectFlowRunStepsPage(client, workspaceId, batch, cursor, limit),
+      (last) => last.createdAt
+    );
+    allRows.push(...batchRows);
   }
   return allRows;
 }
@@ -425,6 +590,38 @@ export async function getDsrExportDocument(
       sendEvents: sendEventsBySendId.get(row.id) ?? [],
     }));
 
+    // Phase 21 plan 06 (DSR-02/DSR-03, D-04, D-10): same discipline as the
+    // sends/sendEvents pair above -- both journey walks on the SAME client,
+    // inside this same REPEATABLE READ transaction.
+    const flowRunRows = await walkToExhaustion(
+      (cursor) => selectFlowRunsPage(client, workspaceId, contactId, cursor),
+      (last) => last.enteredAt
+    );
+    const flowRunStepRows = await walkFlowRunStepsToExhaustion(
+      client,
+      workspaceId,
+      flowRunRows.map((run) => run.id)
+    );
+    const campaignRecipientRows = await walkToExhaustion(
+      (cursor) => selectCampaignRecipientsPage(client, workspaceId, contactId, cursor),
+      (last) => last.createdAt
+    );
+
+    // Groups the run's whole step walk by its parent run id, then attaches
+    // each group to its run as `steps` (dropping `flowRunId` -- the nesting
+    // already carries it), mirroring the sendEvents grouping above.
+    const stepsByFlowRunId = new Map<string, DsrExportFlowRunStep[]>();
+    for (const { flowRunId, ...entry } of flowRunStepRows) {
+      const group = stepsByFlowRunId.get(flowRunId) ?? [];
+      group.push(entry);
+      stepsByFlowRunId.set(flowRunId, group);
+    }
+    const flowParticipation: DsrExportFlowRun[] = flowRunRows.map((row) => ({
+      ...row,
+      steps: stepsByFlowRunId.get(row.id) ?? [],
+    }));
+    const campaignMemberships: DsrExportCampaignMembership[] = campaignRecipientRows;
+
     const document: DsrExportDocument = {
       metadata: {
         generatedAt: new Date().toISOString(),
@@ -440,6 +637,9 @@ export async function getDsrExportDocument(
           events: events.length,
           sends: sends.length,
           sendEvents: sendEventRows.length,
+          flowParticipation: flowParticipation.length,
+          flowRunSteps: flowRunStepRows.length,
+          campaignMemberships: campaignMemberships.length,
         },
       },
       profile: {
@@ -461,6 +661,8 @@ export async function getDsrExportDocument(
       consentHistory,
       events,
       sends,
+      flowParticipation,
+      campaignMemberships,
     };
 
     return document;
