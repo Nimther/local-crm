@@ -13,6 +13,12 @@ import {
   type ScrubCursor,
   type ScrubTable,
 } from "./erasure-scrub-checkpoint.js";
+import {
+  SEND_EVENT_PAYLOAD_EVIDENCE_ALLOWLIST,
+  buildScrubbedSendEventPayload,
+  buildScrubbedEventProperties,
+  ERASURE_SCRUB_PAGE_LIMIT,
+} from "@mega-crm/delivery-core";
 
 /**
  * Phase 13 (CMP-04, D-01/D-04, plan 13-13): the asynchronous evidence-hygiene
@@ -55,106 +61,26 @@ import {
  */
 
 /**
- * The complete, frozen list of `send_events.payload` top-level keys that
- * survive a scrub. This list IS the PII bound and the evidence contract at
- * once (T-13-13-03): shrinking it trades away evidence, widening it risks
- * carrying PII forward, so a change here is a decision about both at the
- * same time, not a routine edit.
- *
- * SURVIVING (what evidence each preserves):
- *   - `event`                 the provider's event name; what happened
- *   - `type`                  the provider's bounce sub-classification (`bounce` vs `blocked`)
- *   - `timestamp`             the provider's event time
- *   - `sg_event_id`           provider event identity, for forensic correlation
- *   - `sg_message_id`         provider message identity, the join back to the send
- *   - `smtp-id`               the message identity the receiving MTA saw
- *   - `status`                the SMTP status code (e.g. `5.1.1`); the delivery outcome
- *   - `attempt`               the delivery attempt number
- *   - `asm_group_id`          the SendGrid unsubscribe-group id; consent evidence
- *   - `bounce_classification` the provider's own bounce category
- *
- * EXCLUDED (everything else, by default -- named here so a future reader
- * does not "restore" one without re-reading why it was dropped):
- *   - `email`                 the recipient address; the entire point of the scrub
- *   - `reason`, `response`    free-form SMTP text that routinely embeds the
- *                             recipient address verbatim inside a longer
- *                             string -- the clearest demonstration of why a
- *                             key-name denylist fails: neither key name
- *                             looks like PII, so no key rule would flag
- *                             them, and the address is a SUBSTRING of a
- *                             longer diagnostic message, not the whole value
- *   - `ip`, `useragent`       network/device identifiers about the person, personal data in their own right
- *   - `url`, `url_offset`     a clicked link can carry a per-recipient token/identifier in its query string
- *   - `category`, `unique_args`, `marketing_campaign_*`, and every other
- *     custom argument -- a tenant-defined key space, unenumerable by construction
- *   - everything else, by default -- the property that makes the guarantee hold
+ * Phase 21 (DSR-03, D-03, plan 21-02): `SEND_EVENT_PAYLOAD_EVIDENCE_ALLOWLIST`,
+ * `buildScrubbedSendEventPayload`, `buildScrubbedEventProperties` and
+ * `ERASURE_SCRUB_PAGE_LIMIT` moved (verbatim, including their doc comments)
+ * to `@mega-crm/delivery-core`'s `send-event-payload-allowlist.ts` -- the
+ * shared package both this worker (erasure) and `apps/api`'s DSR export
+ * (disclosure) now import from, so the two runtimes can never independently
+ * drift on what counts as this contact's personal data. This is a pure
+ * relocation plus one addition on the delivery-core side (the export
+ * superset, D-02) -- no behavior of the erasure path changed. Imported here
+ * for this file's own internal call sites (`scrubSendEventsPage`,
+ * `scrubEventsPage`) and re-exported below (not re-declared) so
+ * `erasure-scrub.test.ts` keeps importing these four names from
+ * `"../erasure-scrub.worker.js"` exactly as before.
  */
-export const SEND_EVENT_PAYLOAD_EVIDENCE_ALLOWLIST = [
-  "event",
-  "type",
-  "timestamp",
-  "sg_event_id",
-  "sg_message_id",
-  "smtp-id",
-  "status",
-  "attempt",
-  "asm_group_id",
-  "bounce_classification",
-] as const;
-
-/**
- * Reconstructs a `send_events.payload` value by copying ONLY allowlisted
- * keys forward from the input -- builds a NEW object up from nothing, never
- * walks the input tearing keys out of it. The distinction matters even
- * though the two read as equivalent on a known-shape input: a build-up
- * implementation cannot leak a key nobody thought to name, a tear-down one
- * always can.
- *
- * Handles `null`, an array, or any other non-plain-object input by returning
- * an empty object rather than throwing -- the scrub must never fail on a
- * malformed historical row. Omits an allowlisted key that was absent from
- * the input rather than materializing it as `null`, so a scrubbed payload
- * never gains a field the original never had. Pure and idempotent by
- * construction (a reconstruction from a fixed allowlist applied to its own
- * output is a fixed point) -- asserted by tests anyway, because a resumed
- * page or a replayed job re-processes rows and a future change to this
- * function could break that silently.
- */
-export function buildScrubbedSendEventPayload(payload: unknown): Record<string, unknown> {
-  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
-    return {};
-  }
-  const input = payload as Record<string, unknown>;
-  const result: Record<string, unknown> = {};
-  for (const key of SEND_EVENT_PAYLOAD_EVIDENCE_ALLOWLIST) {
-    if (key in input) {
-      result[key] = input[key];
-    }
-  }
-  return result;
-}
-
-/**
- * Unconditionally returns an empty object, for every input. `events.properties`
- * gets NO allowlist because there is no field in it that can be shown to be
- * evidence: the entire key space is tenant-supplied at event-ingestion time,
- * so naming any field here would be a guess about one tenant's schema
- * applied to every tenant. The event's own evidence -- that it occurred,
- * when, and for which contact -- lives in the row's non-JSONB columns
- * (`name`, `occurred_at`, `contact_id`), which this scrub never touches. If
- * a specific tenant-defined field is ever proven necessary as evidence,
- * adding a scoped allowlist for it is the change to make at that time; until
- * then, empty is the only defensible bound. Pure and idempotent (an empty
- * object rewritten from an empty object is still empty) -- asserted by
- * tests for the same replay-safety reason as `buildScrubbedSendEventPayload`.
- */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- signature intentionally accepts the input it ignores, documenting that no field of it is ever inspected
-export function buildScrubbedEventProperties(properties: unknown): Record<string, unknown> {
-  return {};
-}
-
-/** Rows-per-page bound for both scrub walks (T-13-13-05). Sized to match `flow-segment-sweep-flow.worker.ts`'s `SWEEP_PAGE_SIZE` precedent: large enough that a typical contact's history scrubs in a handful of pages, small enough that each page's transaction (a bounded SELECT plus up to this many single-row UPDATEs) stays short. */
-export const ERASURE_SCRUB_PAGE_LIMIT = 500;
+export {
+  SEND_EVENT_PAYLOAD_EVIDENCE_ALLOWLIST,
+  buildScrubbedSendEventPayload,
+  buildScrubbedEventProperties,
+  ERASURE_SCRUB_PAGE_LIMIT,
+};
 
 /**
  * `occurredAt` is read as TEXT (`se.occurred_at::text`), never as a parsed
