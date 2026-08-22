@@ -6,6 +6,7 @@ import { buildServer } from "../../../server.js";
 import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool } from "../../../test/db-fixture.js";
 import { withTenant, withTenantTransaction } from "../../../middleware/tenant-context.js";
 import { withTenantTransactionRepeatableRead } from "@mega-crm/tenant-context";
+import { deleteContact } from "../contact.repository.js";
 
 /**
  * Phase 21 plan 01 (DSR-01/DSR-04, tracer): end-to-end HTTP coverage of the
@@ -163,5 +164,93 @@ describe("GET .../contacts/:id/dsr-export (DSR-01/DSR-04, plan 21-01)", () => {
       })
     );
     expect(defaultLevel).toBe("read committed");
+  });
+
+  it("role guard: member is refused with 403, no document assembled", async () => {
+    const owner = await signUp(`owner-dsr-refuse-${Date.now()}@example.com`, "correct horse battery staple 42", "Owner");
+    const workspace = await createWorkspace(owner.cookie, "DSR Refuse Co");
+    const email = `dsr-refuse-${Date.now()}@example.test`;
+    const contact = await createContact(owner.cookie, workspace.slug, { email });
+    const memberAccount = await addMemberWithRole(workspace.id, "member");
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/contacts/${contact.id}/dsr-export`,
+      headers: { cookie: memberAccount.cookie },
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.body).not.toContain(email);
+  });
+
+  it("cross-tenant: a contact id from another workspace, and a contact id that never existed, are byte-identical 404s", async () => {
+    const ownerA = await signUp(`owner-dsr-tenant-a-${Date.now()}@example.com`, "correct horse battery staple 42", "Owner A");
+    const workspaceA = await createWorkspace(ownerA.cookie, "DSR Tenant A Co");
+    const ownerB = await signUp(`owner-dsr-tenant-b-${Date.now()}@example.com`, "correct horse battery staple 42", "Owner B");
+    const workspaceB = await createWorkspace(ownerB.cookie, "DSR Tenant B Co");
+    const contactB = await createContact(ownerB.cookie, workspaceB.slug, { email: `dsr-tenant-b-${Date.now()}@example.test` });
+
+    const crossTenantRes = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspaceA.slug}/contacts/${contactB.id}/dsr-export`,
+      headers: { cookie: ownerA.cookie },
+    });
+    expect(crossTenantRes.statusCode).toBe(404);
+    expect(crossTenantRes.json()).toEqual({ error: "Workspace not found" });
+
+    const neverExistedRes = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspaceA.slug}/contacts/00000000-0000-0000-0000-000000000000/dsr-export`,
+      headers: { cookie: ownerA.cookie },
+    });
+    expect(neverExistedRes.statusCode).toBe(crossTenantRes.statusCode);
+    expect(neverExistedRes.json()).toEqual(crossTenantRes.json());
+  });
+
+  it("invalid contact id: a non-UUID :id returns 400 for a workspace member", async () => {
+    const owner = await signUp(`owner-dsr-invalid-${Date.now()}@example.com`, "correct horse battery staple 42", "Owner");
+    const workspace = await createWorkspace(owner.cookie, "DSR Invalid Co");
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/contacts/not-a-uuid/dsr-export`,
+      headers: { cookie: owner.cookie },
+    });
+
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("erased: an anonymized contact returns a typed 410, never a document", async () => {
+    const owner = await signUp(`owner-dsr-erased-${Date.now()}@example.com`, "correct horse battery staple 42", "Owner");
+    const workspace = await createWorkspace(owner.cookie, "DSR Erased Co");
+    const contact = await createContact(owner.cookie, workspace.slug, { email: `dsr-erased-${Date.now()}@example.test` });
+
+    await withTenant(workspace.id, () => deleteContact(contact.id));
+
+    const erasureRecord = await withTenant(workspace.id, () =>
+      withTenantTransaction(async (client) => {
+        const { rows } = await client.query<{ id: string; anonymizedAt: Date }>(
+          `SELECT id, anonymized_at as "anonymizedAt" FROM erasure_records WHERE workspace_id = $1 AND contact_id = $2`,
+          [workspace.id, contact.id]
+        );
+        return rows[0];
+      })
+    );
+    expect(erasureRecord).toBeTruthy();
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/contacts/${contact.id}/dsr-export`,
+      headers: { cookie: owner.cookie },
+    });
+
+    expect(res.statusCode, `expected 410, got: ${res.body}`).toBe(410);
+    const body = res.json<{ code: string; erasedAt: string; erasureRecordId: string | null }>();
+    expect(body.code).toBe("contact_erased");
+    expect(new Date(body.erasedAt).toISOString()).toBe(erasureRecord.anonymizedAt.toISOString());
+    expect(body.erasureRecordId).toBe(erasureRecord.id);
+    expect(body).not.toHaveProperty("profile");
+    expect(body).not.toHaveProperty("customProperties");
+    expect(body).not.toHaveProperty("metadata");
   });
 });

@@ -341,6 +341,16 @@ describe("Negative cross-tenant suite: API surface (SEC-16)", () => {
       foreignId: () => foreignContactId,
     },
     {
+      // Phase 21 (DSR-04/SC4): read-only route, no write attempt -- workspace
+      // A's Owner (cookieA has full permissions in their own workspace) reads
+      // workspace B's contact id through workspace A's slug and must get the
+      // same 404 a nonexistent id gets (byte-identical, per SC4).
+      module: "registerDsrExportRoutes",
+      name: "dsr-export",
+      read: { method: "GET", buildPath: (slug, id) => `/api/workspaces/${slug}/contacts/${id}/dsr-export` },
+      foreignId: () => foreignContactId,
+    },
+    {
       module: "registerCampaignsRoutes",
       name: "campaign",
       read: { method: "GET", buildPath: (slug, id) => `/api/workspaces/${slug}/campaigns/${id}` },
