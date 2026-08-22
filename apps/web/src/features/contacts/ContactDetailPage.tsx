@@ -30,7 +30,7 @@ import { SubscriptionStatusBadge } from "@/features/contacts/SubscriptionStatusB
 
 const GENERIC_ERROR = "Что-то пошло не так. Попробуйте ещё раз — если ошибка повторится, обновите страницу.";
 
-/** D-13 backstop copy -- the same fixed string a later plan's disabled-erased-button state (D-14) will use. */
+/** D-13/D-14 backstop copy -- one source, used by both the disabled-erased-button state and the mid-session 410 branch below. */
 const EXPORT_ERASED_MESSAGE = "Контакт обезличен — персональные данные удалены";
 
 /** Derives the export action's inline error copy from a mutation's `error` field -- `null` when there is nothing to show. */
@@ -38,6 +38,19 @@ function computeExportErrorMessage(error: unknown): string | null {
   if (!error) return null;
   if (error instanceof ApiError && error.status === 410) return EXPORT_ERASED_MESSAGE;
   return GENERIC_ERROR;
+}
+
+/**
+ * DSR-01/D-14 (plan 21-04): whether the contact card should show the Export
+ * button as visible-but-disabled with an on-screen reason, mirroring
+ * `computeIncompleteReason`'s inline-copy pattern
+ * (LaunchScheduleDialogs.tsx). `getContact`/`listContacts` filter
+ * `anonymized_at IS NULL` (Phase 13 CMP-04), so this state is reachable in
+ * production only through a stale client cache -- the typed 410 from the
+ * export route remains the API's enforcement backstop for that race.
+ */
+export function computeExportDisabledReason(contact: ContactResponse): string | null {
+  return contact.anonymizedAt ? EXPORT_ERASED_MESSAGE : null;
 }
 
 /**
@@ -59,6 +72,7 @@ export function ExportContactButton({
   viewerRole: string;
 }) {
   const canExport = viewerRole === "owner" || viewerRole === "admin";
+  const queryClient = useQueryClient();
 
   const exportMutation = useMutation({
     mutationFn: () => apiGet<DsrExportDocument>(`/api/workspaces/${slug}/contacts/${contact.id}/dsr-export`),
@@ -74,17 +88,37 @@ export function ExportContactButton({
       URL.revokeObjectURL(url);
       toast.success("Файл с данными контакта скачан");
     },
+    onError: (err) => {
+      // D-13/D-14 backstop: a contact erased mid-session (after this card
+      // loaded) surfaces the typed 410 here. Invalidate the contact query
+      // so the page re-reads instead of leaving a stale-enabled button --
+      // that refetch will 404 (Phase 13's `anonymized_at IS NULL` filter,
+      // unchanged by this plan) and the page falls into its existing
+      // not-found state, the honest outcome for a contact that is no
+      // longer tenant-visible, not a bug to route around.
+      if (err instanceof ApiError && err.status === 410) {
+        void queryClient.invalidateQueries({ queryKey: ["workspace", slug, "contacts", contact.id] });
+      }
+    },
   });
 
+  const disabledReason = computeExportDisabledReason(contact);
   const serverError = computeExportErrorMessage(exportMutation.error);
+  // Reason takes precedence over a stale mutation error -- never render both.
+  const message = disabledReason ?? serverError;
 
   return canExport ? (
     <div className="flex items-center gap-2">
-      <Button type="button" variant="outline" disabled={exportMutation.isPending} onClick={() => exportMutation.mutate()}>
+      <Button
+        type="button"
+        variant="outline"
+        disabled={Boolean(disabledReason) || exportMutation.isPending}
+        onClick={() => exportMutation.mutate()}
+      >
         <Download className="mr-2 h-4 w-4" />
         {exportMutation.isPending ? "Скачиваем…" : "Скачать данные контакта"}
       </Button>
-      {serverError ? <p className="text-sm font-medium text-destructive">{serverError}</p> : null}
+      {message ? <p className="text-sm font-medium text-destructive">{message}</p> : null}
     </div>
   ) : null;
 }
