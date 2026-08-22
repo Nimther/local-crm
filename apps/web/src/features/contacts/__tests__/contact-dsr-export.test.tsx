@@ -5,7 +5,7 @@ import { MemoryRouter } from "react-router";
 
 import type { ContactResponse } from "@mega-crm/shared-schemas";
 import { ApiError } from "@/lib/api";
-import { ExportContactButton } from "../ContactDetailPage";
+import { computeExportDisabledReason, ExportContactButton } from "../ContactDetailPage";
 
 /**
  * Phase 21 plan 01 (DSR-01/DSR-04, D-12): node-lane markup assertions only
@@ -57,6 +57,7 @@ function baseContact(overrides: Partial<ContactResponse> = {}): ContactResponse 
     subscriptionStatus: "subscribed",
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
+    anonymizedAt: null,
     ...overrides,
   };
 }
@@ -133,5 +134,66 @@ describe("ExportContactButton (DSR-01/DSR-04, plan 21-01)", () => {
     const html = render("owner");
     expect(html).toContain("Контакт обезличен — персональные данные удалены");
     expect(html).not.toContain("Что-то пошло не так");
+  });
+});
+
+/**
+ * Phase 21 plan 04 (DSR-01/D-14): the disabled-with-reason erased-contact
+ * state, closing the courtesy half of SC5. `getContact` still filters
+ * `anonymized_at IS NULL` (Phase 13 CMP-04 unchanged), so this state is
+ * reachable in production only via a stale client cache -- proven here at
+ * the component level with a synthetic `anonymizedAt`-set contact, per the
+ * plan's flagged_assumptions.
+ */
+describe("ExportContactButton erased-contact state (DSR-01/D-14, plan 21-04)", () => {
+  beforeEach(() => {
+    mockedUseMutation.mockReset();
+    mockedUseMutation.mockImplementation((options: Parameters<typeof useMutation>[0]) => realUseMutationRef.current!(options));
+  });
+
+  it("erased contact: button is present but disabled with the reason on screen", () => {
+    const erased = baseContact({ anonymizedAt: "2026-08-22T00:00:00.000Z" });
+    const html = render("owner", erased);
+
+    expect(html).toContain("Скачать данные контакта");
+
+    const tagStart = html.lastIndexOf("<button");
+    const tagEnd = html.indexOf(">", tagStart);
+    const openTag = html.slice(tagStart, tagEnd + 1);
+    expect(openTag).toContain('disabled=""');
+
+    expect(html).toContain("Контакт обезличен — персональные данные удалены");
+    expect(html).toContain("text-destructive");
+  });
+
+  it("erased contact: the button is not hidden", () => {
+    const erased = baseContact({ anonymizedAt: "2026-08-22T00:00:00.000Z" });
+    const html = render("owner", erased);
+    expect(html).toContain("Скачать данные контакта");
+    expect(html).not.toBe("");
+  });
+
+  it("live contact: no reason paragraph", () => {
+    const live = baseContact({ anonymizedAt: null });
+    const html = render("owner", live);
+    expect(html).not.toContain("Контакт обезличен — персональные данные удалены");
+  });
+
+  it("410 sets the erased reason in the message slot", () => {
+    mockedUseMutation.mockReturnValue({
+      isPending: false,
+      error: new ApiError(410, "erased", { code: "contact_erased" }),
+      mutate: vi.fn(),
+    });
+
+    const html = render("owner");
+    expect(html).toContain("Контакт обезличен — персональные данные удалены");
+  });
+
+  it("computeExportDisabledReason: returns the erased string for a non-null anonymizedAt, null otherwise", () => {
+    const erased = baseContact({ anonymizedAt: "2026-08-22T00:00:00.000Z" });
+    const live = baseContact({ anonymizedAt: null });
+    expect(computeExportDisabledReason(erased)).toBe("Контакт обезличен — персональные данные удалены");
+    expect(computeExportDisabledReason(live)).toBeNull();
   });
 });

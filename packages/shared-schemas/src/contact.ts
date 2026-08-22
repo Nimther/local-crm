@@ -91,6 +91,12 @@ export const contactResponseSchema = z.object({
   subscriptionStatus: subscriptionStatusSchema,
   createdAt: z.string(),
   updatedAt: z.string(),
+  // DSR-01/D-14 (plan 21-04): the contact card reads this to decide whether
+  // the DSR export action can run. Always present (never optional) so no
+  // consumer has to branch on presence -- `null` for every contact a tenant
+  // can actually see, because the tenant-facing list/get/create/patch reads
+  // still filter `anonymized_at IS NULL` (Phase 13 CMP-04, unchanged here).
+  anonymizedAt: z.string().nullable(),
 });
 export type ContactResponse = z.infer<typeof contactResponseSchema>;
 
