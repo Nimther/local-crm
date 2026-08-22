@@ -89,6 +89,82 @@ describe("Contact CRUD (CONT-01, CONT-05)", () => {
     expect(fetched.properties).toEqual({ favoriteColor: "teal", loyaltyTier: 3, isVip: true });
   });
 
+  /**
+   * DSR-01/D-14 (plan 21-04): `anonymizedAt` must be present (not omitted)
+   * on every contact response shape -- `toContactResponse` is shared by
+   * list/get/create/patch -- so the contact card always has a field to
+   * read when deciding whether the DSR export action can run. It is `null`
+   * for every contact a tenant can see because the tenant-facing reads
+   * still filter `anonymized_at IS NULL` (Phase 13 CMP-04, unchanged by
+   * this plan).
+   */
+  it("DSR-01/D-14: single-contact GET carries anonymizedAt as null for a live contact", async () => {
+    const { cookie, workspace } = await owner("crud-get-anonymizedat-null");
+    const created = (
+      await app.inject({
+        method: "POST",
+        url: contactsUrl(workspace.slug),
+        headers: { cookie },
+        payload: { email: `dsr-get-${Date.now()}@example.com` },
+      })
+    ).json();
+
+    const getRes = await app.inject({
+      method: "GET",
+      url: contactsUrl(workspace.slug, created.id),
+      headers: { cookie },
+    });
+    expect(getRes.statusCode).toBe(200);
+    const fetched = getRes.json();
+    expect(Object.keys(fetched)).toContain("anonymizedAt");
+    expect(fetched.anonymizedAt).toBeNull();
+  });
+
+  it("DSR-01/D-14: contact list rows carry anonymizedAt as null", async () => {
+    const { cookie, workspace } = await owner("crud-list-anonymizedat-null");
+    await app.inject({
+      method: "POST",
+      url: contactsUrl(workspace.slug),
+      headers: { cookie },
+      payload: { email: `dsr-list-${Date.now()}@example.com` },
+    });
+
+    const listRes = await app.inject({ method: "GET", url: contactsUrl(workspace.slug), headers: { cookie } });
+    expect(listRes.statusCode).toBe(200);
+    const items = listRes.json().items as Array<Record<string, unknown>>;
+    expect(items.length).toBeGreaterThan(0);
+    for (const item of items) {
+      expect(Object.keys(item)).toContain("anonymizedAt");
+      expect(item.anonymizedAt).toBeNull();
+    }
+  });
+
+  it("DSR-01/D-14: create and patch responses carry anonymizedAt as null", async () => {
+    const { cookie, workspace } = await owner("crud-create-patch-anonymizedat-null");
+
+    const createRes = await app.inject({
+      method: "POST",
+      url: contactsUrl(workspace.slug),
+      headers: { cookie },
+      payload: { email: `dsr-create-patch-${Date.now()}@example.com`, firstName: "Ada" },
+    });
+    expect(createRes.statusCode).toBe(201);
+    const created = createRes.json();
+    expect(Object.keys(created)).toContain("anonymizedAt");
+    expect(created.anonymizedAt).toBeNull();
+
+    const patchRes = await app.inject({
+      method: "PATCH",
+      url: contactsUrl(workspace.slug, created.id),
+      headers: { cookie },
+      payload: { firstName: "Grace" },
+    });
+    expect(patchRes.statusCode).toBe(200);
+    const patched = patchRes.json();
+    expect(Object.keys(patched)).toContain("anonymizedAt");
+    expect(patched.anonymizedAt).toBeNull();
+  });
+
   it("D-01: creating a second contact with an email already used in the workspace is rejected", async () => {
     const { cookie, workspace } = await owner("crud-email-unique");
     const email = `dupe-${Date.now()}@example.com`;
