@@ -903,4 +903,348 @@ describe("GET .../contacts/:id/dsr-export (DSR-01/DSR-04, plan 21-01)", () => {
     const ids = new Set(body.sends[0].sendEvents.map((e) => e.id));
     expect(ids.size).toBe(total);
   }, 30_000);
+
+  /**
+   * Phase 21 plan 06 (DSR-02, D-04): seeds a flow + one live flow_version
+   * directly (mirrors `negative-cross-tenant-jobs.test.ts`'s
+   * `seedWaitingFlowRun` precedent), returning the ids `flow_runs` rows need.
+   */
+  async function seedFlow(workspaceId: string): Promise<{ flowId: string; flowVersionId: string }> {
+    return withTenant(workspaceId, () =>
+      withTenantTransaction(async (client) => {
+        const { rows: flowRows } = await client.query<{ id: string }>(
+          `INSERT INTO flows (workspace_id, name, status, trigger_type, trigger_event_name, created_by_user_id)
+           VALUES ($1, 'DSR export test flow', 'live', 'event', 'fixture_event', 'test-user') RETURNING id`,
+          [workspaceId]
+        );
+        const { rows: versionRows } = await client.query<{ id: string }>(
+          `INSERT INTO flow_versions (workspace_id, flow_id, version_number, definition, published_at)
+           VALUES ($1, $2, 1, $3, now()) RETURNING id`,
+          [workspaceId, flowRows[0].id, { nodes: [{ id: "exit-1", type: "exit", position: { x: 0, y: 0 } }], edges: [] }]
+        );
+        return { flowId: flowRows[0].id, flowVersionId: versionRows[0].id };
+      })
+    );
+  }
+
+  /** Phase 21 plan 06 (DSR-02, D-04): seeds one `flow_runs` row directly. */
+  async function seedFlowRun(
+    workspaceId: string,
+    contactId: string,
+    flowId: string,
+    flowVersionId: string,
+    fields: {
+      status?: string;
+      currentNodeId?: string | null;
+      enteredAt: Date;
+      lastEntryAt?: Date;
+      exitedAt?: Date | null;
+      exitReason?: string | null;
+    }
+  ): Promise<string> {
+    return withTenant(workspaceId, () =>
+      withTenantTransaction(async (client) => {
+        const { rows } = await client.query<{ id: string }>(
+          `INSERT INTO flow_runs (
+             workspace_id, flow_id, flow_version_id, contact_id, status,
+             current_node_id, entered_at, last_entry_at, exited_at, exit_reason
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+          [
+            workspaceId,
+            flowId,
+            flowVersionId,
+            contactId,
+            fields.status ?? "waiting",
+            fields.currentNodeId ?? null,
+            fields.enteredAt,
+            fields.lastEntryAt ?? fields.enteredAt,
+            fields.exitedAt ?? null,
+            fields.exitReason ?? null,
+          ]
+        );
+        return rows[0].id;
+      })
+    );
+  }
+
+  /** Phase 21 plan 06 (DSR-02, D-04): seeds one `flow_run_steps` row directly. */
+  async function seedFlowRunStep(
+    workspaceId: string,
+    flowRunId: string,
+    fields: { nodeId?: string; nodeType?: string; outcome?: string; sendId?: string | null; createdAt: Date }
+  ): Promise<string> {
+    return withTenant(workspaceId, () =>
+      withTenantTransaction(async (client) => {
+        const { rows } = await client.query<{ id: string }>(
+          `INSERT INTO flow_run_steps (workspace_id, flow_run_id, node_id, node_type, outcome, send_id, created_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+          [
+            workspaceId,
+            flowRunId,
+            fields.nodeId ?? "node-1",
+            fields.nodeType ?? "send",
+            fields.outcome ?? "enqueued",
+            fields.sendId ?? null,
+            fields.createdAt,
+          ]
+        );
+        return rows[0].id;
+      })
+    );
+  }
+
+  /**
+   * Phase 21 plan 06 (DSR-02, D-04): seeds a segment + campaign directly
+   * (mirrors `segment-delete-conflict.test.ts`'s precedent) so a
+   * `campaign_recipients` row has a valid `campaign_id` to reference.
+   */
+  async function seedCampaign(workspaceId: string): Promise<string> {
+    return withTenant(workspaceId, () =>
+      withTenantTransaction(async (client) => {
+        const { rows: segmentRows } = await client.query<{ id: string }>(
+          `INSERT INTO segments (workspace_id, name, definition, created_by_user_id)
+           VALUES ($1, 'DSR export test segment', $2, 'test-user') RETURNING id`,
+          [workspaceId, { version: 1, groups: [{ conditions: [] }] }]
+        );
+        const { rows: campaignRows } = await client.query<{ id: string }>(
+          `INSERT INTO campaigns (workspace_id, name, status, segment_id, created_by_user_id)
+           VALUES ($1, 'DSR export test campaign', 'draft', $2, 'test-user') RETURNING id`,
+          [workspaceId, segmentRows[0].id]
+        );
+        return campaignRows[0].id;
+      })
+    );
+  }
+
+  /** Phase 21 plan 06 (DSR-02, D-04): seeds one `campaign_recipients` row directly. */
+  async function seedCampaignRecipient(
+    workspaceId: string,
+    campaignId: string,
+    contactId: string,
+    createdAt: Date
+  ): Promise<string> {
+    return withTenant(workspaceId, () =>
+      withTenantTransaction(async (client) => {
+        const { rows } = await client.query<{ id: string }>(
+          `INSERT INTO campaign_recipients (workspace_id, campaign_id, contact_id, created_at)
+           VALUES ($1, $2, $3, $4) RETURNING id`,
+          [workspaceId, campaignId, contactId, createdAt]
+        );
+        return rows[0].id;
+      })
+    );
+  }
+
+  it("flow participation: runs of every status are exported, oldest first, with their steps (DSR-02, D-04)", async () => {
+    const owner = await signUp(`owner-dsr-flow-${Date.now()}@example.com`, "correct horse battery staple 42", "Owner");
+    const workspace = await createWorkspace(owner.cookie, "DSR Flow Co");
+    const contact = await createContact(owner.cookie, workspace.slug, { email: `dsr-flow-${Date.now()}@example.test` });
+    const { flowId, flowVersionId } = await seedFlow(workspace.id);
+
+    const now = Date.now();
+    const run1Entered = new Date(now - 60_000);
+    const run1Id = await seedFlowRun(workspace.id, contact.id, flowId, flowVersionId, {
+      status: "exited",
+      currentNodeId: "exit-1",
+      enteredAt: run1Entered,
+      exitedAt: new Date(now - 10_000),
+      exitReason: "exit_condition_met",
+    });
+    const run2Entered = new Date(now - 30_000);
+    await seedFlowRun(workspace.id, contact.id, flowId, flowVersionId, {
+      status: "waiting",
+      currentNodeId: "wait-1",
+      enteredAt: run2Entered,
+    });
+
+    const step1Created = new Date(now - 50_000);
+    const step2Created = new Date(now - 40_000);
+    await seedFlowRunStep(workspace.id, run1Id, { nodeId: "send-1", nodeType: "send", outcome: "enqueued", createdAt: step1Created });
+    await seedFlowRunStep(workspace.id, run1Id, { nodeId: "exit-1", nodeType: "exit", outcome: "reached", createdAt: step2Created });
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/contacts/${contact.id}/dsr-export`,
+      headers: { cookie: owner.cookie },
+    });
+    expect(res.statusCode, `export failed: ${res.body}`).toBe(200);
+    const body = res.json<DsrExportDocument>();
+
+    expect(body.flowParticipation).toHaveLength(2);
+    expect(body.metadata.sectionRowCounts.flowParticipation).toBe(2);
+    expect(body.metadata.sectionRowCounts.flowRunSteps).toBe(2);
+
+    const enteredAts = body.flowParticipation.map((r) => new Date(r.enteredAt).getTime());
+    expect(enteredAts).toEqual([...enteredAts].sort((a, b) => a - b));
+
+    const [firstRun, secondRun] = body.flowParticipation;
+    expect(firstRun).toMatchObject({
+      flowId,
+      flowVersionId,
+      status: "exited",
+      currentNodeId: "exit-1",
+      exitReason: "exit_condition_met",
+    });
+    expect(firstRun.exitedAt).not.toBeNull();
+    expect(secondRun).toMatchObject({ flowId, flowVersionId, status: "waiting", currentNodeId: "wait-1", exitReason: null });
+    expect(secondRun.exitedAt).toBeNull();
+
+    expect(firstRun.steps).toHaveLength(2);
+    expect(firstRun.steps.map((s) => s.nodeId)).toEqual(["send-1", "exit-1"]);
+    const stepCreatedAts = firstRun.steps.map((s) => new Date(s.createdAt).getTime());
+    expect(stepCreatedAts).toEqual([...stepCreatedAts].sort((a, b) => a - b));
+    expect(secondRun.steps).toHaveLength(0);
+  });
+
+  it("flow participation: a terminal run is not filtered out (DSR-02, D-04)", async () => {
+    const owner = await signUp(`owner-dsr-flow-term-${Date.now()}@example.com`, "correct horse battery staple 42", "Owner");
+    const workspace = await createWorkspace(owner.cookie, "DSR Flow Terminal Co");
+    const contact = await createContact(owner.cookie, workspace.slug, { email: `dsr-flow-term-${Date.now()}@example.test` });
+    const { flowId, flowVersionId } = await seedFlow(workspace.id);
+
+    await seedFlowRun(workspace.id, contact.id, flowId, flowVersionId, {
+      status: "completed",
+      enteredAt: new Date(Date.now() - 10_000),
+      exitedAt: new Date(),
+      exitReason: "reached_end",
+    });
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/contacts/${contact.id}/dsr-export`,
+      headers: { cookie: owner.cookie },
+    });
+    expect(res.statusCode, `export failed: ${res.body}`).toBe(200);
+    const body = res.json<DsrExportDocument>();
+
+    expect(body.flowParticipation).toHaveLength(1);
+    expect(body.flowParticipation[0].status).toBe("completed");
+    expect(body.metadata.sectionRowCounts.flowParticipation).toBe(1);
+  });
+
+  it("campaign memberships: every campaign that targeted this contact is exported (DSR-02, D-04)", async () => {
+    const owner = await signUp(`owner-dsr-camp-${Date.now()}@example.com`, "correct horse battery staple 42", "Owner");
+    const workspace = await createWorkspace(owner.cookie, "DSR Campaign Membership Co");
+    const contact = await createContact(owner.cookie, workspace.slug, { email: `dsr-camp-${Date.now()}@example.test` });
+
+    const campaign1 = await seedCampaign(workspace.id);
+    const campaign2 = await seedCampaign(workspace.id);
+    const now = Date.now();
+    await seedCampaignRecipient(workspace.id, campaign1, contact.id, new Date(now - 20_000));
+    await seedCampaignRecipient(workspace.id, campaign2, contact.id, new Date(now - 5_000));
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/contacts/${contact.id}/dsr-export`,
+      headers: { cookie: owner.cookie },
+    });
+    expect(res.statusCode, `export failed: ${res.body}`).toBe(200);
+    const body = res.json<DsrExportDocument>();
+
+    expect(body.campaignMemberships).toHaveLength(2);
+    expect(body.metadata.sectionRowCounts.campaignMemberships).toBe(2);
+    expect(body.campaignMemberships.map((m) => m.campaignId)).toEqual([campaign1, campaign2]);
+    const createdAts = body.campaignMemberships.map((m) => new Date(m.createdAt).getTime());
+    expect(createdAts).toEqual([...createdAts].sort((a, b) => a - b));
+  });
+
+  it("journey sections: another contact's runs and memberships are absent (DSR-02, D-04)", async () => {
+    const owner = await signUp(`owner-dsr-journey-iso-${Date.now()}@example.com`, "correct horse battery staple 42", "Owner");
+    const workspace = await createWorkspace(owner.cookie, "DSR Journey Iso Co");
+    const contactA = await createContact(owner.cookie, workspace.slug, { email: `dsr-journey-iso-a-${Date.now()}@example.test` });
+    const contactB = await createContact(owner.cookie, workspace.slug, { email: `dsr-journey-iso-b-${Date.now()}@example.test` });
+    const { flowId, flowVersionId } = await seedFlow(workspace.id);
+    await seedFlowRun(workspace.id, contactB.id, flowId, flowVersionId, { enteredAt: new Date() });
+    const campaign = await seedCampaign(workspace.id);
+    await seedCampaignRecipient(workspace.id, campaign, contactB.id, new Date());
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/contacts/${contactA.id}/dsr-export`,
+      headers: { cookie: owner.cookie },
+    });
+    expect(res.statusCode, `export failed: ${res.body}`).toBe(200);
+    const body = res.json<DsrExportDocument>();
+
+    expect(body.flowParticipation).toHaveLength(0);
+    expect(body.campaignMemberships).toHaveLength(0);
+    expect(body.metadata.sectionRowCounts.flowParticipation).toBe(0);
+    expect(body.metadata.sectionRowCounts.campaignMemberships).toBe(0);
+  });
+
+  it("journey sections: a contact with neither exports two empty arrays with counts of 0 (DSR-02, D-04)", async () => {
+    const owner = await signUp(`owner-dsr-journey-empty-${Date.now()}@example.com`, "correct horse battery staple 42", "Owner");
+    const workspace = await createWorkspace(owner.cookie, "DSR Journey Empty Co");
+    const contact = await createContact(owner.cookie, workspace.slug, { email: `dsr-journey-empty-${Date.now()}@example.test` });
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/contacts/${contact.id}/dsr-export`,
+      headers: { cookie: owner.cookie },
+    });
+    expect(res.statusCode, `export failed: ${res.body}`).toBe(200);
+    const body = res.json<DsrExportDocument>();
+
+    expect(body.flowParticipation).toEqual([]);
+    expect(body.campaignMemberships).toEqual([]);
+    expect(body.metadata.sectionRowCounts.flowParticipation).toBe(0);
+    expect(body.metadata.sectionRowCounts.campaignMemberships).toBe(0);
+  });
+
+  it("the document now has all eight sections, every count verified against a real length (D-05, D-06)", async () => {
+    const owner = await signUp(`owner-dsr-eight-${Date.now()}@example.com`, "correct horse battery staple 42", "Owner");
+    const workspace = await createWorkspace(owner.cookie, "DSR Eight Sections Co");
+    const contact = await createContact(owner.cookie, workspace.slug, {
+      email: `dsr-eight-${Date.now()}@example.test`,
+      properties: { plan: "pro" },
+    });
+
+    await setSubscriptionStatus(owner.cookie, workspace.slug, contact.id, "unsubscribed");
+    await seedEvent(workspace.id, contact.id, "signed_up", {}, new Date());
+    const sendId = await seedSend(workspace.id, contact.id, { queuedAt: new Date() });
+    await seedSendEvent(workspace.id, sendId, { occurredAt: new Date() });
+    const { flowId, flowVersionId } = await seedFlow(workspace.id);
+    const runId = await seedFlowRun(workspace.id, contact.id, flowId, flowVersionId, { enteredAt: new Date() });
+    await seedFlowRunStep(workspace.id, runId, { createdAt: new Date() });
+    const campaign = await seedCampaign(workspace.id);
+    await seedCampaignRecipient(workspace.id, campaign, contact.id, new Date());
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/contacts/${contact.id}/dsr-export`,
+      headers: { cookie: owner.cookie },
+    });
+    expect(res.statusCode, `export failed: ${res.body}`).toBe(200);
+    const body = res.json<DsrExportDocument>();
+
+    const parsed = dsrExportDocumentSchema.safeParse(body);
+    expect(parsed.success, `body failed schema validation: ${JSON.stringify(parsed.success ? null : parsed.error)}`).toBe(true);
+
+    expect(new Set(Object.keys(body))).toEqual(
+      new Set([
+        "metadata",
+        "profile",
+        "customProperties",
+        "consentHistory",
+        "events",
+        "sends",
+        "flowParticipation",
+        "campaignMemberships",
+      ])
+    );
+
+    expect(body.metadata.sectionRowCounts.profile).toBe(1);
+    expect(body.metadata.sectionRowCounts.customProperties).toBe(Object.keys(body.customProperties).length);
+    expect(body.metadata.sectionRowCounts.consentHistory).toBe(body.consentHistory.length);
+    expect(body.metadata.sectionRowCounts.events).toBe(body.events.length);
+    expect(body.metadata.sectionRowCounts.sends).toBe(body.sends.length);
+    expect(body.metadata.sectionRowCounts.sendEvents).toBe(
+      body.sends.reduce((total, send) => total + send.sendEvents.length, 0)
+    );
+    expect(body.metadata.sectionRowCounts.flowParticipation).toBe(body.flowParticipation.length);
+    expect(body.metadata.sectionRowCounts.flowRunSteps).toBe(
+      body.flowParticipation.reduce((total, run) => total + run.steps.length, 0)
+    );
+    expect(body.metadata.sectionRowCounts.campaignMemberships).toBe(body.campaignMemberships.length);
+  });
 });
