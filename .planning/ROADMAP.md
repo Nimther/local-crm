@@ -181,7 +181,7 @@ Plans:
   4. An export request naming a contact id from another workspace returns nothing (negative cross-tenant test), and freeform JSONB (`events.properties`, `send_events.payload`) reaches the file only through an explicit allowlist — a synthetic field holding another subject's data is provably absent from the export.
   5. Exporting an already-anonymized (erased) contact behaves predictably — a typed response describing the state, never a silently empty file.
 
-**Plans**: 2/6 plans executed
+**Plans**: 4/6 plans executed
 
 Plans:
 **Wave 1**
@@ -191,8 +191,8 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 21-03-PLAN.md — Consent-history and events sections: keyset walks to exhaustion, `events.properties` provably never read, multi-page completeness proven (DSR-01, DSR-02)
-- [ ] 21-04-PLAN.md — SC5 courtesy half: `anonymizedAt` on the contact response and the visible-but-disabled Export button with inline reason, without weakening any Phase 13 visibility filter (DSR-01)
+- [x] 21-03-PLAN.md — Consent-history and events sections: keyset walks to exhaustion, `events.properties` provably never read, multi-page completeness proven (DSR-01, DSR-02)
+- [x] 21-04-PLAN.md — SC5 courtesy half: `anonymizedAt` on the contact response and the visible-but-disabled Export button with inline reason, without weakening any Phase 13 visibility filter (DSR-01)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -249,7 +249,7 @@ Plans:
 | 18. Dependency Hygiene & Advisory Gate | v1.2 | 4/4 | Complete    | 2026-08-20 |
 | 19. Unsubscribe Secret Graceful Rotation | v1.2 | 5/5 | Complete    | 2026-08-21 |
 | 20. Campaign Template Correctness | v1.2 | 6/6 | Complete    | 2026-08-21 |
-| 21. Per-Contact DSR Export | v1.2 | 2/6 | In Progress|  |
+| 21. Per-Contact DSR Export | v1.2 | 4/6 | In Progress|  |
 | 22. Workspace Quiesce & Physical Purge | v1.2 | 0/TBD | Not started | - |
 
 ---
