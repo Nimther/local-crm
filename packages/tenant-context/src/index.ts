@@ -257,6 +257,71 @@ export async function withTenantTransaction<T>(
 }
 
 /**
+ * Phase 21 plan 01 (DSR-04/D-15, RESEARCH.md Pitfall 1): a sibling of
+ * `withTenantTransaction` for the ONE caller (the DSR export route) that
+ * needs its whole read to run inside a single consistent snapshot, not just
+ * a single transaction. `withTenantTransaction`'s first statement is
+ * already a `SELECT set_config(...)` -- and Postgres forbids `SET
+ * TRANSACTION ISOLATION LEVEL` once any statement (including that SELECT)
+ * has run in the transaction [VERIFIED: PostgreSQL docs,
+ * sql-set-transaction.html] -- so this helper cannot be built by calling
+ * `withTenantTransaction` and raising the isolation level inside its
+ * callback; the isolation clause must ride on the combined `BEGIN
+ * ISOLATION LEVEL REPEATABLE READ` statement instead, which is why this is
+ * a separate function rather than an option threaded through the existing
+ * one.
+ *
+ * Under `READ COMMITTED` (the pool default, and what `withTenantTransaction`
+ * uses), each statement in a transaction gets its own fresh snapshot -- a
+ * concurrent UPDATE committed between two SELECTs in the SAME transaction
+ * is visible to the second one. `REPEATABLE READ` takes one snapshot at the
+ * transaction's first query and holds it for every subsequent statement, so
+ * the DSR export's anonymizedAt gate and every section read that follows it
+ * see one consistent point in time -- exactly what D-15's fail-closed
+ * guarantee over a concurrent erasure-scrub sweep requires.
+ *
+ * This transaction is read-only (no INSERT/UPDATE/DELETE), so raising the
+ * isolation level introduces no serialization-failure retry need -- that
+ * failure mode is `SERIALIZABLE`'s concern, and even there only for
+ * transactions that write.
+ *
+ * Otherwise an exact copy of `withTenantTransaction`'s tenant-context guard,
+ * `set_config` RLS binding, and COMMIT/ROLLBACK/`client.release(
+ * releaseWithError)` discipline -- see that function's own doc comment for
+ * the reasoning behind each of those, unchanged here.
+ */
+export async function withTenantTransactionRepeatableRead<T>(
+  fn: (client: PoolClient) => Promise<T>
+): Promise<T> {
+  const ctx = tenantContext.getStore();
+  if (!ctx || ctx.workspaceId === undefined) {
+    throw new Error("No tenant context set for this request");
+  }
+
+  const client = await pool.connect();
+  let releaseWithError: Error | undefined;
+  try {
+    await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
+    await client.query(
+      "SELECT set_config('app.current_workspace_id', $1, true), set_config('application_name', $2, true)",
+      [ctx.workspaceId, composeApplicationName(ctx)],
+    );
+    const result = await fn(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (err) {
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackErr) {
+      releaseWithError = rollbackErr instanceof Error ? rollbackErr : new Error(String(rollbackErr));
+    }
+    throw err;
+  } finally {
+    client.release(releaseWithError);
+  }
+}
+
+/**
  * Phase 10 plan 10-07 (SEC-03/SEC-04, migration 0044): the all-zeros UUID.
  * `gen_random_uuid()` cannot produce this value (it is not a valid v4 UUID),
  * so it matches no real `organization.id` and therefore no real workspace's
