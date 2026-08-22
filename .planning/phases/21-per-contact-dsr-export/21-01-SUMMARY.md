@@ -207,3 +207,7 @@ None - no external service configuration required.
 ---
 *Phase: 21-per-contact-dsr-export*
 *Completed: 2026-08-22*
+
+## Self-Check: PASSED
+
+All 5 created files verified present on disk; all 6 commit hashes (`13f2d1e`, `04e14f7`, `1a5a449`, `516d404`, `2e716fb`, `6d89d50`) verified present in `git log --oneline --all`.
