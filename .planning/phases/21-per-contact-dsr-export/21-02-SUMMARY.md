@@ -166,3 +166,7 @@ None - no external service configuration required.
 ---
 *Phase: 21-per-contact-dsr-export*
 *Completed: 2026-08-22*
+
+## Self-Check: PASSED
+
+All created files verified present on disk (`packages/delivery-core/src/send-event-payload-allowlist.ts`, `packages/delivery-core/src/__tests__/send-event-payload-allowlist.test.ts`, `docs/PII-INVENTORY.md`, this SUMMARY.md); all four commit hashes (`45a15b1`, `51435ba`, `54a9265`, `8984c68`) verified present in `git log`.
