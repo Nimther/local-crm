@@ -16,8 +16,8 @@ Requirements for this milestone. Each maps to roadmap phases (continuing from Ph
 ### DSR Contact Data Export
 
 - [ ] **DSR-01**: Owner/Admin может из карточки контакта скачать machine-readable файл с персональными данными контакта: профиль, custom properties, consent history
-- [ ] **DSR-02**: Выгрузка включает события контакта и связанные с отправками персональные данные (send-факты, статусы доставки), ограниченные данными этого субъекта
-- [ ] **DSR-03**: Все данные выгрузки ограничены workspace_id + contact_id; правила включения и редактирования freeform JSONB (events.properties, send_events.payload) определяются отдельным решением после анализа возможных данных других субъектов
+- [x] **DSR-02**: Выгрузка включает события контакта и связанные с отправками персональные данные (send-факты, статусы доставки), ограниченные данными этого субъекта
+- [x] **DSR-03**: Все данные выгрузки ограничены workspace_id + contact_id; правила включения и редактирования freeform JSONB (events.properties, send_events.payload) определяются отдельным решением после анализа возможных данных других субъектов
 - [ ] **DSR-04**: Member без Owner/Admin-роли не может запустить выгрузку (ролевой гейт на API и в UI)
 
 ### Workspace Purge
@@ -79,8 +79,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TMPL-02 | Phase 20 | Complete |
 | TMPL-03 | Phase 20 | Complete |
 | DSR-01 | Phase 21 | Pending |
-| DSR-02 | Phase 21 | Pending |
-| DSR-03 | Phase 21 | Pending |
+| DSR-02 | Phase 21 | Complete |
+| DSR-03 | Phase 21 | Complete |
 | DSR-04 | Phase 21 | Pending |
 | PRG-01 | Phase 22 | Pending |
 | PRG-02 | Phase 22 | Pending |
