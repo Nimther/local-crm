@@ -116,3 +116,12 @@ export {
   type ReputationTier,
   type ReputationObservation,
 } from "./reputation-rates.js";
+
+export {
+  SEND_EVENT_PAYLOAD_EVIDENCE_ALLOWLIST,
+  SEND_EVENT_PAYLOAD_EXPORT_ALLOWLIST,
+  buildScrubbedSendEventPayload,
+  buildExportSendEventPayload,
+  buildScrubbedEventProperties,
+  ERASURE_SCRUB_PAGE_LIMIT,
+} from "./send-event-payload-allowlist.js";
