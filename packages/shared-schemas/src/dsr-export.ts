@@ -55,11 +55,44 @@ export const dsrExportProfileSchema = z.object({
 });
 export type DsrExportProfile = z.infer<typeof dsrExportProfileSchema>;
 
+/**
+ * Phase 21 plan 03 (DSR-01): one `subscription_status_history` row, exactly
+ * as `selectConsentHistoryPage` reads it in `dsr-export.repository.ts`.
+ * `oldStatus`/`reason` are nullable because the underlying columns are
+ * (a first-ever history row can have no prior status; not every source
+ * records a reason).
+ */
+export const dsrExportConsentHistoryEntrySchema = z.object({
+  id: z.string(),
+  oldStatus: z.string().nullable(),
+  newStatus: z.string(),
+  source: z.string(),
+  reason: z.string().nullable(),
+  changedAt: z.string(),
+});
+export type DsrExportConsentHistoryEntry = z.infer<typeof dsrExportConsentHistoryEntrySchema>;
+
+/**
+ * Phase 21 plan 03 (DSR-02, D-01): one `events` row -- deliberately no
+ * `properties` field. The repository's `selectEventsPage` never selects
+ * that column at all, so there is no value here to omit; the schema simply
+ * has no key for it.
+ */
+export const dsrExportEventSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  occurredAt: z.string(),
+  receivedAt: z.string(),
+});
+export type DsrExportEvent = z.infer<typeof dsrExportEventSchema>;
+
 /** D-05: the document shape this plan establishes -- see the module doc comment for the Growth rule governing every later section. */
 export const dsrExportDocumentSchema = z.object({
   metadata: dsrExportMetadataSchema,
   profile: dsrExportProfileSchema,
   customProperties: z.record(z.string(), z.unknown()),
+  consentHistory: z.array(dsrExportConsentHistoryEntrySchema),
+  events: z.array(dsrExportEventSchema),
 });
 export type DsrExportDocument = z.infer<typeof dsrExportDocumentSchema>;
 

@@ -1,5 +1,11 @@
+import type { PoolClient } from "pg";
 import { withTenantTransactionRepeatableRead } from "@mega-crm/tenant-context";
-import { DSR_EXPORT_FORMAT_VERSION, type DsrExportDocument } from "@mega-crm/shared-schemas";
+import {
+  DSR_EXPORT_FORMAT_VERSION,
+  type DsrExportConsentHistoryEntry,
+  type DsrExportDocument,
+  type DsrExportEvent,
+} from "@mega-crm/shared-schemas";
 
 /**
  * Phase 21 plan 01 (D-10, mirrors ERASURE_SCRUB_PAGE_LIMIT): the bounded
@@ -25,6 +31,113 @@ export class ContactErasedError extends Error {
     super(message);
     this.name = "ContactErasedError";
   }
+}
+
+/**
+ * Phase 21 plan 03 (D-10, D-15): a keyset cursor over `(timestamp, id)`,
+ * mirroring `erasure-scrub.worker.ts`'s `scrubEventsPage` shape but with no
+ * checkpoint persistence -- this walk lives entirely inside the single
+ * REPEATABLE READ transaction `getDsrExportDocument` already opened, and is
+ * never resumed across requests.
+ */
+interface KeysetCursor {
+  timestamp: string;
+  id: string;
+}
+
+/**
+ * Phase 21 plan 03 (DSR-01): one bounded page of `subscription_status_history`
+ * rows for this contact, ordered `(changed_at, id)` ascending. `client` is
+ * the first argument so a test can drive one page directly on a client it
+ * owns, matching `scrubEventsPage`'s signature shape.
+ */
+export async function selectConsentHistoryPage(
+  client: PoolClient,
+  workspaceId: string,
+  contactId: string,
+  cursor: KeysetCursor | null,
+  limit: number = DSR_EXPORT_PAGE_LIMIT
+): Promise<DsrExportConsentHistoryEntry[]> {
+  const afterClause = cursor ? `AND (changed_at, id) > ($3::timestamptz, $4::uuid)` : "";
+  const params: unknown[] = cursor
+    ? [workspaceId, contactId, cursor.timestamp, cursor.id, limit]
+    : [workspaceId, contactId, limit];
+  const limitIdx = params.length;
+
+  const { rows } = await client.query<DsrExportConsentHistoryEntry>(
+    `SELECT
+       id,
+       old_status as "oldStatus",
+       new_status as "newStatus",
+       source,
+       reason,
+       changed_at::text as "changedAt"
+     FROM subscription_status_history
+     WHERE workspace_id = $1 AND contact_id = $2 ${afterClause}
+     ORDER BY changed_at ASC, id ASC
+     LIMIT $${limitIdx}`,
+    params
+  );
+  return rows;
+}
+
+/**
+ * Phase 21 plan 03 (DSR-02, D-01): one bounded page of `events` rows for
+ * this contact, ordered `(occurred_at, id)` ascending -- `occurred_at`
+ * leads the keyset because `events` is range-partitioned on it (Postgres
+ * needs the partition key in any ordering that must stay stable across
+ * pages), matching the existing `scrubEventsPage` walk exactly.
+ *
+ * `properties` is never named in this SELECT. Unlike the erasure scrub
+ * (which rewrites the column to `{}`), the export does not read it at all
+ * -- there is no code path on which a tenant-supplied key under this
+ * freeform JSONB column could reach the exported artifact (D-01).
+ */
+export async function selectEventsPage(
+  client: PoolClient,
+  workspaceId: string,
+  contactId: string,
+  cursor: KeysetCursor | null,
+  limit: number = DSR_EXPORT_PAGE_LIMIT
+): Promise<DsrExportEvent[]> {
+  const afterClause = cursor ? `AND (occurred_at, id) > ($3::timestamptz, $4::uuid)` : "";
+  const params: unknown[] = cursor
+    ? [workspaceId, contactId, cursor.timestamp, cursor.id, limit]
+    : [workspaceId, contactId, limit];
+  const limitIdx = params.length;
+
+  const { rows } = await client.query<DsrExportEvent>(
+    `SELECT id, name, occurred_at::text as "occurredAt", received_at::text as "receivedAt"
+     FROM events
+     WHERE workspace_id = $1 AND contact_id = $2 ${afterClause}
+     ORDER BY occurred_at ASC, id ASC
+     LIMIT $${limitIdx}`,
+    params
+  );
+  return rows;
+}
+
+/**
+ * Phase 21 plan 03 (D-10): walks a keyset page reader to exhaustion inside
+ * the caller's already-open transaction, accumulating every row. No
+ * checkpoint table, no cursor persistence -- this loop's whole lifetime is
+ * one HTTP request's transaction, never resumed across requests (unlike the
+ * erasure scrub's resumable multi-job walk).
+ */
+async function walkToExhaustion<Row extends { id: string }>(
+  pageReader: (cursor: KeysetCursor | null) => Promise<Row[]>,
+  cursorFromRow: (row: Row) => string
+): Promise<Row[]> {
+  const allRows: Row[] = [];
+  let cursor: KeysetCursor | null = null;
+  for (;;) {
+    const page = await pageReader(cursor);
+    if (page.length === 0) break;
+    allRows.push(...page);
+    const last = page[page.length - 1];
+    cursor = { timestamp: cursorFromRow(last), id: last.id };
+  }
+  return allRows;
 }
 
 interface ContactExportRow {
@@ -110,6 +223,21 @@ export async function getDsrExportDocument(
 
     const customProperties = row.properties ?? {};
 
+    // Phase 21 plan 03 (DSR-01, D-10): walk to exhaustion on the SAME
+    // client, inside this same REPEATABLE READ transaction -- no section
+    // opens a transaction of its own.
+    const consentHistory = await walkToExhaustion(
+      (cursor) => selectConsentHistoryPage(client, workspaceId, contactId, cursor),
+      (last) => last.changedAt
+    );
+
+    // Phase 21 plan 03 (DSR-02, D-01, D-10): same discipline, `events.properties`
+    // never named in the reader's SELECT.
+    const events = await walkToExhaustion(
+      (cursor) => selectEventsPage(client, workspaceId, contactId, cursor),
+      (last) => last.occurredAt
+    );
+
     const document: DsrExportDocument = {
       metadata: {
         generatedAt: new Date().toISOString(),
@@ -121,6 +249,8 @@ export async function getDsrExportDocument(
         sectionRowCounts: {
           profile: 1,
           customProperties: Object.keys(customProperties).length,
+          consentHistory: consentHistory.length,
+          events: events.length,
         },
       },
       profile: {
@@ -139,6 +269,8 @@ export async function getDsrExportDocument(
         updatedAt: row.updatedAt.toISOString(),
       },
       customProperties,
+      consentHistory,
+      events,
     };
 
     return document;
