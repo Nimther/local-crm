@@ -181,7 +181,7 @@ Plans:
   4. An export request naming a contact id from another workspace returns nothing (negative cross-tenant test), and freeform JSONB (`events.properties`, `send_events.payload`) reaches the file only through an explicit allowlist — a synthetic field holding another subject's data is provably absent from the export.
   5. Exporting an already-anonymized (erased) contact behaves predictably — a typed response describing the state, never a silently empty file.
 
-**Plans**: 4/6 plans executed
+**Plans**: 5/6 plans executed
 
 Plans:
 **Wave 1**
@@ -196,7 +196,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 21-05-PLAN.md — Sends with nested send events through the export allowlist, SC4's synthetic other-subject-field proof, and the REPEATABLE READ mid-scrub race test with its READ COMMITTED negative control (DSR-02, DSR-03)
+- [x] 21-05-PLAN.md — Sends with nested send events through the export allowlist, SC4's synthetic other-subject-field proof, and the REPEATABLE READ mid-scrub race test with its READ COMMITTED negative control (DSR-02, DSR-03)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
@@ -249,7 +249,7 @@ Plans:
 | 18. Dependency Hygiene & Advisory Gate | v1.2 | 4/4 | Complete    | 2026-08-20 |
 | 19. Unsubscribe Secret Graceful Rotation | v1.2 | 5/5 | Complete    | 2026-08-21 |
 | 20. Campaign Template Correctness | v1.2 | 6/6 | Complete    | 2026-08-21 |
-| 21. Per-Contact DSR Export | v1.2 | 4/6 | In Progress|  |
+| 21. Per-Contact DSR Export | v1.2 | 5/6 | In Progress|  |
 | 22. Workspace Quiesce & Physical Purge | v1.2 | 0/TBD | Not started | - |
 
 ---
