@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Data Lifecycle & Delivery Trust
 current_phase: 21
-current_phase_name: Per-Contact DSR Export
-status: "Phase 20 shipped — PR #26"
+current_phase_name: per-contact-dsr-export
+status: executing
 stopped_at: Phase 21 UI-SPEC approved
-last_updated: "2026-08-21T17:24:06.914Z"
-last_activity: 2026-08-21
-last_activity_desc: Phase 21 planning complete
+last_updated: "2026-08-22T11:11:22.539Z"
+last_activity: 2026-08-22
+last_activity_desc: Phase 21 execution started
 progress:
   total_phases: 5
   completed_phases: 3
@@ -24,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-21 after Phase 19)
 
 **Core value:** Маркетолог настраивает триггерную цепочку или кампанию — и письма надёжно и вовремя доходят до нужных контактов, со сквозным отслеживанием статусов (delivered/opened/clicked/bounced).
-**Current focus:** Phase 20 — campaign-template-correctness
+**Current focus:** Phase 21 — per-contact-dsr-export
 
 ## Current Position
 
-Phase: 21 — Per-Contact DSR Export
-Plan: Not started
-Status: Phase 20 shipped — PR #26
-Last activity: 2026-08-21 — Phase 21 planning complete
+Phase: 21 (per-contact-dsr-export) — EXECUTING
+Plan: 1 of 6
+Status: Executing Phase 21
+Last activity: 2026-08-22 — Phase 21 execution started
 
 Progress: [████░░░░░░] 40% (2/5 v1.2 phases complete)
 

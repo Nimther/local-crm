@@ -181,13 +181,13 @@ Plans:
   4. An export request naming a contact id from another workspace returns nothing (negative cross-tenant test), and freeform JSONB (`events.properties`, `send_events.payload`) reaches the file only through an explicit allowlist — a synthetic field holding another subject's data is provably absent from the export.
   5. Exporting an already-anonymized (erased) contact behaves predictably — a typed response describing the state, never a silently empty file.
 
-**Plans**: 6 plans
+**Plans**: 2/6 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 21-01-PLAN.md — Tracer: end-to-end DSR export of one contact's profile — new `contact:export` permission, `withTenantTransactionRepeatableRead`, the anonymizedAt-first gate, `Content-Disposition` attachment response, the 403/404/410/400 refusal triad, and the role-gated Export button with blob download (DSR-01, DSR-04)
-- [ ] 21-02-PLAN.md — Shared allowlist package: relocate the evidence allowlist and build-up functions into `@mega-crm/delivery-core`, add the export superset (`ip`, `useragent`, `url`, `reason`) with a test-asserted superset relation, and write `docs/PII-INVENTORY.md` for Phase 22 (DSR-03)
+- [x] 21-01-PLAN.md — Tracer: end-to-end DSR export of one contact's profile — new `contact:export` permission, `withTenantTransactionRepeatableRead`, the anonymizedAt-first gate, `Content-Disposition` attachment response, the 403/404/410/400 refusal triad, and the role-gated Export button with blob download (DSR-01, DSR-04)
+- [x] 21-02-PLAN.md — Shared allowlist package: relocate the evidence allowlist and build-up functions into `@mega-crm/delivery-core`, add the export superset (`ip`, `useragent`, `url`, `reason`) with a test-asserted superset relation, and write `docs/PII-INVENTORY.md` for Phase 22 (DSR-03)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -249,7 +249,7 @@ Plans:
 | 18. Dependency Hygiene & Advisory Gate | v1.2 | 4/4 | Complete    | 2026-08-20 |
 | 19. Unsubscribe Secret Graceful Rotation | v1.2 | 5/5 | Complete    | 2026-08-21 |
 | 20. Campaign Template Correctness | v1.2 | 6/6 | Complete    | 2026-08-21 |
-| 21. Per-Contact DSR Export | v1.2 | 0/TBD | Not started | - |
+| 21. Per-Contact DSR Export | v1.2 | 2/6 | In Progress|  |
 | 22. Workspace Quiesce & Physical Purge | v1.2 | 0/TBD | Not started | - |
 
 ---
