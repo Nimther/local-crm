@@ -41,6 +41,18 @@ export {
   type UpsertContactIdentityResult,
 };
 
+/**
+ * DSR-01/D-14 (plan 21-04): `getContact`'s additive select (mirroring
+ * `updateContact`'s existing precedent below) returns `anonymizedAt` too, so
+ * the single-contact route can put it on the wire. Every OTHER read in this
+ * file returns plain `ContactRow` -- `anonymizedAt` is `undefined` there,
+ * not `null`, because those selects never fetch the column; `toContactResponse`
+ * normalises `undefined` to `null` on the wire (see contacts.routes.ts).
+ */
+export interface ContactRowWithAnonymizedAt extends ContactRow {
+  anonymizedAt?: Date | null;
+}
+
 export interface CreateContactInput {
   externalId?: string;
   email?: string;
@@ -250,11 +262,11 @@ export async function listContacts(query: ListContactsQuery): Promise<ListContac
  * convention, and evidence queries over sends/send_events/
  * subscription_status_history deliberately do NOT apply it.
  */
-export async function getContact(id: string): Promise<ContactRow | null> {
+export async function getContact(id: string): Promise<ContactRowWithAnonymizedAt | null> {
   return withTenantTransaction(async (client) => {
     const workspaceId = getWorkspaceId();
-    const { rows } = await client.query<ContactRow>(
-      `SELECT ${CONTACT_COLUMNS} FROM contacts WHERE workspace_id = $1 AND id = $2 AND anonymized_at IS NULL`,
+    const { rows } = await client.query<ContactRowWithAnonymizedAt>(
+      `SELECT ${CONTACT_COLUMNS}, anonymized_at as "anonymizedAt" FROM contacts WHERE workspace_id = $1 AND id = $2 AND anonymized_at IS NULL`,
       [workspaceId, id]
     );
     return rows[0] ?? null;
