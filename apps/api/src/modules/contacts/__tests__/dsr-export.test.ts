@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Pool } from "pg";
 import { authDb, member } from "@mega-crm/db";
@@ -7,6 +8,7 @@ import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool } from "../../
 import { withTenant, withTenantTransaction } from "../../../middleware/tenant-context.js";
 import { withTenantTransactionRepeatableRead } from "@mega-crm/tenant-context";
 import { deleteContact } from "../contact.repository.js";
+import { DSR_EXPORT_PAGE_LIMIT } from "../dsr-export.repository.js";
 
 /**
  * Phase 21 plan 01 (DSR-01/DSR-04, tracer): end-to-end HTTP coverage of the
@@ -76,6 +78,49 @@ describe("GET .../contacts/:id/dsr-export (DSR-01/DSR-04, plan 21-01)", () => {
     });
     expect(res.statusCode, `create contact failed: ${res.body}`).toBe(201);
     return res.json<{ id: string }>();
+  }
+
+  /** Drives the real `manual_ui` history write path via the PATCH route (mirrors subscription-status-history.test.ts Test A). */
+  async function setSubscriptionStatus(ownerCookie: string, slug: string, contactId: string, status: string) {
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/api/workspaces/${slug}/contacts/${contactId}`,
+      headers: { cookie: ownerCookie },
+      payload: { subscriptionStatus: status },
+    });
+    expect(res.statusCode, `status update failed: ${res.body}`).toBe(200);
+  }
+
+  /** Reads the real subscription_status_history row count straight from the table -- never a guessed number. */
+  async function statusHistoryRowCount(workspaceId: string, contactId: string): Promise<number> {
+    return withTenant(workspaceId, () =>
+      withTenantTransaction(async (client) => {
+        const { rows } = await client.query<{ count: string }>(
+          `SELECT count(*)::text as count FROM subscription_status_history WHERE workspace_id = $1 AND contact_id = $2`,
+          [workspaceId, contactId]
+        );
+        return Number(rows[0].count);
+      })
+    );
+  }
+
+  /** Seeds one event row directly (mirrors contact-events-read.test.ts's `seedEvent`), the same table events:ingest writes to. */
+  async function seedEvent(
+    workspaceId: string,
+    contactId: string,
+    name: string,
+    properties: Record<string, unknown>,
+    occurredAt: Date
+  ) {
+    await withTenant(workspaceId, () =>
+      withTenantTransaction((client) =>
+        client.query(
+          `INSERT INTO events (id, workspace_id, contact_id, name, properties, occurred_at, received_at)
+           VALUES ($1, $2, $3, $4, $5, $6, now())`,
+          [randomUUID(), workspaceId, contactId, name, properties, occurredAt]
+        )
+      )
+    );
   }
 
   it("profile: an Owner gets a 200 export with metadata/profile/customProperties, no requester identity in the body", async () => {
@@ -252,5 +297,150 @@ describe("GET .../contacts/:id/dsr-export (DSR-01/DSR-04, plan 21-01)", () => {
     expect(body).not.toHaveProperty("profile");
     expect(body).not.toHaveProperty("customProperties");
     expect(body).not.toHaveProperty("metadata");
+  });
+
+  it("consent history: every transition is exported oldest first (DSR-01)", async () => {
+    const owner = await signUp(`owner-dsr-consent-${Date.now()}@example.com`, "correct horse battery staple 42", "Owner");
+    const workspace = await createWorkspace(owner.cookie, "DSR Consent Co");
+    const contact = await createContact(owner.cookie, workspace.slug, { email: `dsr-consent-${Date.now()}@example.test` });
+
+    await setSubscriptionStatus(owner.cookie, workspace.slug, contact.id, "unsubscribed");
+    await setSubscriptionStatus(owner.cookie, workspace.slug, contact.id, "subscribed");
+    await setSubscriptionStatus(owner.cookie, workspace.slug, contact.id, "unsubscribed");
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/contacts/${contact.id}/dsr-export`,
+      headers: { cookie: owner.cookie },
+    });
+    expect(res.statusCode, `export failed: ${res.body}`).toBe(200);
+    const body = res.json<DsrExportDocument>();
+
+    const expectedCount = await statusHistoryRowCount(workspace.id, contact.id);
+    expect(expectedCount).toBe(3);
+    expect(body.consentHistory).toHaveLength(3);
+    expect(body.metadata.sectionRowCounts.consentHistory).toBe(3);
+
+    expect(body.consentHistory[0]).toMatchObject({ oldStatus: "subscribed", newStatus: "unsubscribed", source: "manual_ui" });
+    expect(body.consentHistory[1]).toMatchObject({ oldStatus: "unsubscribed", newStatus: "subscribed", source: "manual_ui" });
+    expect(body.consentHistory[2]).toMatchObject({ oldStatus: "subscribed", newStatus: "unsubscribed", source: "manual_ui" });
+
+    const changedAts = body.consentHistory.map((entry) => new Date(entry.changedAt).getTime());
+    expect(changedAts).toEqual([...changedAts].sort((a, b) => a - b));
+  });
+
+  it("consent history: a contact with no transitions exports the real row count, not a guessed number (DSR-01)", async () => {
+    const owner = await signUp(`owner-dsr-consent-empty-${Date.now()}@example.com`, "correct horse battery staple 42", "Owner");
+    const workspace = await createWorkspace(owner.cookie, "DSR Consent Empty Co");
+    const contact = await createContact(owner.cookie, workspace.slug, { email: `dsr-consent-empty-${Date.now()}@example.test` });
+
+    const expectedCount = await statusHistoryRowCount(workspace.id, contact.id);
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/contacts/${contact.id}/dsr-export`,
+      headers: { cookie: owner.cookie },
+    });
+    expect(res.statusCode, `export failed: ${res.body}`).toBe(200);
+    const body = res.json<DsrExportDocument>();
+
+    expect(body.consentHistory).toHaveLength(expectedCount);
+    expect(body.metadata.sectionRowCounts.consentHistory).toBe(expectedCount);
+  });
+
+  it("consent history: another contact's transitions are absent from this contact's section (DSR-01)", async () => {
+    const owner = await signUp(`owner-dsr-consent-iso-${Date.now()}@example.com`, "correct horse battery staple 42", "Owner");
+    const workspace = await createWorkspace(owner.cookie, "DSR Consent Iso Co");
+    const contactA = await createContact(owner.cookie, workspace.slug, { email: `dsr-consent-iso-a-${Date.now()}@example.test` });
+    const contactB = await createContact(owner.cookie, workspace.slug, { email: `dsr-consent-iso-b-${Date.now()}@example.test` });
+
+    await setSubscriptionStatus(owner.cookie, workspace.slug, contactB.id, "unsubscribed");
+    await setSubscriptionStatus(owner.cookie, workspace.slug, contactB.id, "subscribed");
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/contacts/${contactA.id}/dsr-export`,
+      headers: { cookie: owner.cookie },
+    });
+    expect(res.statusCode, `export failed: ${res.body}`).toBe(200);
+    const body = res.json<DsrExportDocument>();
+
+    expect(body.consentHistory).toHaveLength(0);
+    expect(body.metadata.sectionRowCounts.consentHistory).toBe(0);
+  });
+
+  it("events: every event is exported oldest first, without properties (DSR-02, D-01)", async () => {
+    const owner = await signUp(`owner-dsr-events-${Date.now()}@example.com`, "correct horse battery staple 42", "Owner");
+    const workspace = await createWorkspace(owner.cookie, "DSR Events Co");
+    const contact = await createContact(owner.cookie, workspace.slug, { email: `dsr-events-${Date.now()}@example.test` });
+    const otherPersonEmail = "another-subject-under-tenant-key@example.test";
+
+    const now = Date.now();
+    await seedEvent(workspace.id, contact.id, "signed_up", { plan: "free" }, new Date(now - 120_000));
+    await seedEvent(workspace.id, contact.id, "order_placed", { total: 42 }, new Date(now - 60_000));
+    await seedEvent(workspace.id, contact.id, "referral_shared", { referredEmail: otherPersonEmail }, new Date(now));
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/contacts/${contact.id}/dsr-export`,
+      headers: { cookie: owner.cookie },
+    });
+    expect(res.statusCode, `export failed: ${res.body}`).toBe(200);
+    const body = res.json<DsrExportDocument>();
+
+    expect(body.events).toHaveLength(3);
+    expect(body.metadata.sectionRowCounts.events).toBe(3);
+    expect(body.events.map((e) => e.name)).toEqual(["signed_up", "order_placed", "referral_shared"]);
+    for (const entry of body.events) {
+      expect(Object.keys(entry)).not.toContain("properties");
+    }
+
+    const serialized = JSON.stringify(body);
+    expect(serialized).not.toContain(otherPersonEmail);
+  });
+
+  it("events: a contact with more rows than one page exports all of them (D-10)", async () => {
+    const owner = await signUp(`owner-dsr-events-page-${Date.now()}@example.com`, "correct horse battery staple 42", "Owner");
+    const workspace = await createWorkspace(owner.cookie, "DSR Events Page Co");
+    const contact = await createContact(owner.cookie, workspace.slug, { email: `dsr-events-page-${Date.now()}@example.test` });
+
+    const total = DSR_EXPORT_PAGE_LIMIT + 7;
+    const base = Date.now() - total * 1000;
+    for (let i = 0; i < total; i++) {
+      await seedEvent(workspace.id, contact.id, `event_${i}`, {}, new Date(base + i * 1000));
+    }
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/contacts/${contact.id}/dsr-export`,
+      headers: { cookie: owner.cookie },
+    });
+    expect(res.statusCode, `export failed: ${res.body}`).toBe(200);
+    const body = res.json<DsrExportDocument>();
+
+    expect(body.events).toHaveLength(total);
+    expect(body.metadata.sectionRowCounts.events).toBe(total);
+    const ids = new Set(body.events.map((e) => e.id));
+    expect(ids.size).toBe(total);
+  }, 30_000);
+
+  it("events: another contact's events are absent (DSR-02)", async () => {
+    const owner = await signUp(`owner-dsr-events-iso-${Date.now()}@example.com`, "correct horse battery staple 42", "Owner");
+    const workspace = await createWorkspace(owner.cookie, "DSR Events Iso Co");
+    const contactA = await createContact(owner.cookie, workspace.slug, { email: `dsr-events-iso-a-${Date.now()}@example.test` });
+    const contactB = await createContact(owner.cookie, workspace.slug, { email: `dsr-events-iso-b-${Date.now()}@example.test` });
+
+    await seedEvent(workspace.id, contactB.id, "signed_up", {}, new Date());
+
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/workspaces/${workspace.slug}/contacts/${contactA.id}/dsr-export`,
+      headers: { cookie: owner.cookie },
+    });
+    expect(res.statusCode, `export failed: ${res.body}`).toBe(200);
+    const body = res.json<DsrExportDocument>();
+
+    expect(body.events).toHaveLength(0);
+    expect(body.metadata.sectionRowCounts.events).toBe(0);
   });
 });
