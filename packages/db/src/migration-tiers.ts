@@ -137,6 +137,7 @@ export const MIGRATION_TIERS: Readonly<Record<string, MigrationTier>> = Object.f
   "0064_ops_alert_state_and_rollup_watermark": "auto-reversible", // CREATE TABLE ops_alert_state + ADD COLUMN workspace_daily_rollup.updated_at -- pure additive shape, no backfill, destroys nothing that existed before
   "0065_webhook_endpoints_scan_grant": "forward-only", // GRANT (column-level) + CREATE POLICY -- access-control posture change, same reasoning as 0045/0042 (no table/column/index/constraint of its own to derive a "drop the X" inverse from, and revoking/re-granting scan-role privileges plus a row-security policy is itself a security decision, not a schema decision)
   "0066_campaigns_version": "auto-reversible", // single ADD COLUMN with a constant default and no backfill -- the mechanical inverse (drop the column) destroys only the token this migration introduced and nothing that existed before it
+  "0067_dsr_export_contact_indexes": "auto-reversible", // three plain CREATE INDEX statements (plus COMMENT ON INDEX) -- no table/column/constraint change, no backfill; dropping the three indexes destroys only bookkeeping this migration introduced and nothing pre-existing
 });
 
 /**
