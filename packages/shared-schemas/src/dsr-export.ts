@@ -86,6 +86,63 @@ export const dsrExportEventSchema = z.object({
 });
 export type DsrExportEvent = z.infer<typeof dsrExportEventSchema>;
 
+/**
+ * Phase 21 plan 05 (DSR-02, DSR-03): one `send_events` row nested under its
+ * parent send, exactly as `selectSendEventsPage` reads it in
+ * `dsr-export.repository.ts` -- `sendId` is deliberately NOT a field here
+ * (the nesting already carries it via the parent `sends` array entry).
+ * `payload` is a free-form record because `buildExportSendEventPayload` has
+ * already bounded it to `SEND_EVENT_PAYLOAD_EXPORT_ALLOWLIST` by the time it
+ * reaches this shape -- the schema itself does not re-enforce that bound
+ * (the allowlist function is the single place that does).
+ */
+export const dsrExportSendEventSchema = z.object({
+  id: z.string(),
+  sgEventId: z.string(),
+  eventType: z.string(),
+  reason: z.string().nullable(),
+  isTest: z.boolean(),
+  occurredAt: z.string(),
+  receivedAt: z.string(),
+  payload: z.record(z.string(), z.unknown()),
+});
+export type DsrExportSendEvent = z.infer<typeof dsrExportSendEventSchema>;
+
+/**
+ * Phase 21 plan 05 (DSR-02): one `sends` row, exactly as `selectSendsPage`
+ * reads it in `dsr-export.repository.ts` -- deliberately excludes
+ * `reconcilingSince`/`dispatchDurationMs` (platform telemetry about the
+ * dispatch attempt, not the subject's personal data, per
+ * `docs/PII-INVENTORY.md`). `sendEvents` nests every provider event for
+ * this send, oldest first.
+ */
+export const dsrExportSendSchema = z.object({
+  id: z.string(),
+  campaignId: z.string().nullable(),
+  kind: z.string(),
+  status: z.string(),
+  exclusionReason: z.string().nullable(),
+  providerMessageId: z.string().nullable(),
+  queuedAt: z.string(),
+  sentAt: z.string().nullable(),
+  deliveredAt: z.string().nullable(),
+  firstOpenedAt: z.string().nullable(),
+  firstClickedAt: z.string().nullable(),
+  bouncedAt: z.string().nullable(),
+  droppedAt: z.string().nullable(),
+  unsubscribedAt: z.string().nullable(),
+  spamReportedAt: z.string().nullable(),
+  bounceReason: z.string().nullable(),
+  dropReason: z.string().nullable(),
+  flowRunId: z.string().nullable(),
+  nodeId: z.string().nullable(),
+  openCount: z.number().int(),
+  clickCount: z.number().int(),
+  dispatchedAt: z.string().nullable(),
+  sendEvents: z.array(dsrExportSendEventSchema),
+});
+export type DsrExportSend = z.infer<typeof dsrExportSendSchema>;
+
 /** D-05: the document shape this plan establishes -- see the module doc comment for the Growth rule governing every later section. */
 export const dsrExportDocumentSchema = z.object({
   metadata: dsrExportMetadataSchema,
@@ -93,6 +150,7 @@ export const dsrExportDocumentSchema = z.object({
   customProperties: z.record(z.string(), z.unknown()),
   consentHistory: z.array(dsrExportConsentHistoryEntrySchema),
   events: z.array(dsrExportEventSchema),
+  sends: z.array(dsrExportSendSchema),
 });
 export type DsrExportDocument = z.infer<typeof dsrExportDocumentSchema>;
 
