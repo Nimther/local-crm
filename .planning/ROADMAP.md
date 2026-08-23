@@ -228,7 +228,7 @@ Plans:
   4. Another workspace's rows in the same monthly partitions are provably unchanged after a purge — demonstrated by a negative test — and the purge performs no DROP, DETACH or TRUNCATE.
   5. A workspace restored after its purge was enqueued is not purged: eligibility is re-checked inside every batch and the purge refuses rather than silently skipping.
 
-**Plans**: 7/10 plans executed
+**Plans**: 8/10 plans executed
 
 Plans:
 **Wave 1**
@@ -245,7 +245,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2)*
 
-- [ ] 22-07-PLAN.md — `member`/`invitation` deletion through a scoped `mega_crm_auth` pool, with a real 42501 proving the Phase 10 trust boundary still refuses the ordinary pool (PRG-02)
+- [x] 22-07-PLAN.md — `member`/`invitation` deletion through a scoped `mega_crm_auth` pool, with a real 42501 proving the Phase 10 trust boundary still refuses the ordinary pool (PRG-02)
 - [x] 22-08-PLAN.md — Stuck/failed-purge watchdog on the `ops_alert_state` dedup claim, its runbook, and four healthy-state controls so the report-only window never alerts (PRG-01, PRG-03)
 
 **Wave 4** *(blocked on Wave 3)*
@@ -287,7 +287,7 @@ Plans:
 | 19. Unsubscribe Secret Graceful Rotation | v1.2 | 5/5 | Complete    | 2026-08-21 |
 | 20. Campaign Template Correctness | v1.2 | 6/6 | Complete    | 2026-08-21 |
 | 21. Per-Contact DSR Export | v1.2 | 8/8 | Complete    | 2026-08-23 |
-| 22. Workspace Quiesce & Physical Purge | v1.2 | 7/10 | In Progress|  |
+| 22. Workspace Quiesce & Physical Purge | v1.2 | 8/10 | In Progress|  |
 
 ---
 *v1.2 roadmap created 2026-08-20 — 18/18 requirements mapped, no orphans. Next: `/gsd-plan-phase 18`.*
