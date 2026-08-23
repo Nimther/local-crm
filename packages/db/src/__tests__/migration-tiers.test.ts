@@ -124,7 +124,7 @@ describe("newestAutoReversibleTier", () => {
     }
   });
 
-  it("returns the current repository's trailing run as exactly [\"0066_campaigns_version\", \"0067_dsr_export_contact_indexes\"] -- 0067 is the newest shipped migration and is itself auto-reversible", () => {
+  it("returns the current repository's trailing run as exactly [\"0066_campaigns_version\", \"0067_dsr_export_contact_indexes\", \"0068_workspace_purge_records\"] -- 0068 is the newest shipped migration and is itself auto-reversible", () => {
     // Phase 15 (OPS-13, plan 15-14, Task 1): 0065 is a grants-only migration
     // (column-level GRANT + CREATE POLICY on workspace_webhook_endpoints,
     // human-approved override of this plan's own "no new migration"
@@ -140,15 +140,25 @@ describe("newestAutoReversibleTier", () => {
     // Phase 21 (DSR-02/DSR-03, plan 21-06, Task 2): 0067_dsr_export_contact_indexes
     // adds exactly three plain CREATE INDEX statements (no table/column/
     // constraint) and is classified auto-reversible too, extending the
-    // trailing run one tag further -- it is now the newest shipped
-    // migration, directly after 0066, so the run grows to
-    // ["0066_campaigns_version", "0067_dsr_export_contact_indexes"] rather
-    // than resetting. Pinned explicitly so a future migration silently
-    // changing this fails loudly here rather than only inside the
-    // rehearsal test.
+    // trailing run one tag further.
+    //
+    // Phase 22 (PRG-01/PRG-02/PRG-03/PRG-05, plan 22-01, Task 1):
+    // 0068_workspace_purge_records creates a brand-new table (no RLS, no FK)
+    // and adds one defaulted, nullable column (organization.purgedAt) -- pure
+    // additive shape, no backfill, and is classified auto-reversible too,
+    // extending the trailing run one tag further still -- it is now the
+    // newest shipped migration, directly after 0067, so the run grows to
+    // ["0066_campaigns_version", "0067_dsr_export_contact_indexes",
+    // "0068_workspace_purge_records"] rather than resetting. Plan 22-01's
+    // OWN Task 2 (migration 0069, which drops and re-adds a foreign key
+    // constraint) resets this trailing run to empty again -- see that
+    // task's edit to this same assertion. Pinned explicitly so a future
+    // migration silently changing this fails loudly here rather than only
+    // inside the rehearsal test.
     expect(newestAutoReversibleTier(MIGRATIONS_DIR)).toEqual([
       "0066_campaigns_version",
       "0067_dsr_export_contact_indexes",
+      "0068_workspace_purge_records",
     ]);
   });
 

@@ -89,6 +89,16 @@ export const organization = pgTable("organization", {
   // Project-added additionalField (D-20): soft-delete, physical cleanup
   // deferred to 01-04's delete-workspace flow.
   deletedAt: timestamp("deletedAt"),
+  // Phase 22 (D-09, plan 22-01): stamped by `tombstoneOrganization`
+  // (apps/worker/src/queues/workspace-purge.worker.ts) in the SAME UPDATE
+  // that scrubs `name`/`slug` to non-identifying values -- non-null means
+  // this workspace's tenant data has been physically destroyed and this row
+  // survives only as an anonymized tombstone. `deletedAt` is left UNCHANGED
+  // by that UPDATE (it still records when the soft-delete happened); this
+  // column is the separate, later fact that the physical purge completed.
+  // `timestamptz` (unlike `deletedAt`'s bare `timestamp`) because this is a
+  // brand-new column with no legacy-value convention to match.
+  purgedAt: timestamp("purgedAt", { withTimezone: true }),
 });
 
 export const member = pgTable(
