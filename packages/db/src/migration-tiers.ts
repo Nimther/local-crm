@@ -140,6 +140,7 @@ export const MIGRATION_TIERS: Readonly<Record<string, MigrationTier>> = Object.f
   "0067_dsr_export_contact_indexes": "auto-reversible", // three plain CREATE INDEX statements (plus COMMENT ON INDEX) -- no table/column/constraint change, no backfill; dropping the three indexes destroys only bookkeeping this migration introduced and nothing pre-existing
   "0068_workspace_purge_records": "auto-reversible", // CREATE TABLE purge_records (no RLS, no FK) + ADD COLUMN organization.purgedAt -- pure additive shape, no backfill, destroys nothing that existed before
   "0069_erasure_records_contact_fk_relax": "forward-only", // DROP CONSTRAINT (drops and re-adds the erasure_records.contact_id FK) -- reason (5): re-adding a constraint recreates the SHAPE, never the history of what was rejected while the old CASCADE FK was enforced
+  "0070_scan_policies_exclude_deleted_workspaces": "forward-only", // DROP POLICY + CREATE POLICY x3 (campaigns_scan, flows_scan, flow_runs_scan) -- reasons (2)/(3): re-narrowing (or reverting) a row-security policy's visibility predicate is an access-control posture change, not a schema decision; no GRANT/REVOKE of any kind is added, so this is classified on the policy signature alone
 });
 
 /**

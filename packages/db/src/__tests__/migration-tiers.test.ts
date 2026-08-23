@@ -124,7 +124,7 @@ describe("newestAutoReversibleTier", () => {
     }
   });
 
-  it("returns an empty run -- 0069_erasure_records_contact_fk_relax is the newest shipped migration and is itself forward-only", () => {
+  it("returns an empty run -- 0070_scan_policies_exclude_deleted_workspaces is the newest shipped migration and is itself forward-only", () => {
     // Phase 15 (OPS-13, plan 15-14, Task 1): 0065 is a grants-only migration
     // (column-level GRANT + CREATE POLICY on workspace_webhook_endpoints,
     // human-approved override of this plan's own "no new migration"
@@ -156,10 +156,18 @@ describe("newestAutoReversibleTier", () => {
     // (NOT NULL/CASCADE -> nullable/SET NULL) -- a DROP CONSTRAINT, forward-
     // only reason (5) (re-adding a constraint recreates the SHAPE, never the
     // history of what was rejected while the old constraint was enforced).
-    // It is now the newest shipped migration and is itself forward-only, so
-    // the trailing run resets to EMPTY, same as 0065 did earlier in this
-    // journal. Pinned explicitly so a future migration silently changing
-    // this fails loudly here rather than only inside the rehearsal test.
+    // It briefly WAS the newest shipped migration and was itself
+    // forward-only, resetting the trailing run to EMPTY, same as 0065 did
+    // earlier in this journal.
+    //
+    // Phase 22 (PRG-06, SC1, D-01, plan 22-04): 0070_scan_policies_exclude_deleted_workspaces
+    // drops and re-creates three RLS policies (campaigns_scan, flows_scan,
+    // flow_runs_scan) with an added soft-delete exclusion predicate -- a
+    // CREATE POLICY, forward-only reason (2) (an access-control posture
+    // change). It is now the newest shipped migration and is ALSO
+    // forward-only, so the trailing run stays EMPTY. Pinned explicitly so a
+    // future migration silently changing this fails loudly here rather than
+    // only inside the rehearsal test.
     expect(newestAutoReversibleTier(MIGRATIONS_DIR)).toEqual([]);
   });
 
