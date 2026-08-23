@@ -31,7 +31,15 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
     ...init,
     credentials: "include",
     headers: {
-      "Content-Type": "application/json",
+      // Only attach the JSON content type when a body is actually sent.
+      // Fastify 5.9.0 runs its content-type parser whenever this header is
+      // present (regardless of content-length), so a bodyless request that
+      // still carries it -- every bodyless apiDelete call before this fix --
+      // is rejected with 400 FST_ERR_CTP_EMPTY_JSON_BODY before the route
+      // handler ever runs. See
+      // .planning/debug/ui-delete-empty-json-body-400.md. Do not "simplify"
+      // this back to unconditional -- that reintroduces G-21-2.
+      ...(init?.body !== undefined ? { "Content-Type": "application/json" } : {}),
       ...init?.headers,
     },
   });
