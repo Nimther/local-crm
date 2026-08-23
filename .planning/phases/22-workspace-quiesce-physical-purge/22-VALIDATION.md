@@ -64,8 +64,8 @@ created: 2026-08-23
 | 22-08-02 | 08 | 3 | PRG-01 | T-22-08-05 | Alert has a runbook at the derived path; watchdog registered at boot | gate + unit | `npm run check:runbook-coverage && npm run test -w apps/api -- purge-watchdog` | ❌ W0 | ⬜ pending |
 | 22-09-01 | 09 | 4 | PRG-03 | T-22-09-01/02 | Real SIGKILL mid-walk resumes; counts equal an uninterrupted control run | failure injection | `npm run failure:workspace-purge-resume` | ❌ W0 | ⬜ pending |
 | 22-09-02 | 09 | 4 | PRG-03 | T-22-09-03 | Kill between tables and before the tail leaves a correct intermediate state | failure injection | `npm run failure:workspace-purge-resume` | ❌ W0 | ⬜ pending |
-| 22-10-01 | 10 | 4 | PRG-01/02 | T-22-10-02/04 | Env example and specification move in one commit; no secret values | gate | `npm run check:spec-env-coverage && npm run verify:prod-compose` | ✅ | ⬜ pending |
-| 22-10-02 | 10 | 4 | PRG-01/02 | T-22-10-01/03/05 | Irreversibility claim qualified by the backup horizon; evidence sets documented | gate | `npm run check:runbook-coverage && npm run check:root-hygiene` | ✅ | ⬜ pending |
+| 22-10-01 | 10 | 5 | PRG-01/02 | T-22-10-02/04 | Env example and specification move in one commit; no secret values | gate | `npm run check:spec-env-coverage && npm run verify:prod-compose` | ✅ | ⬜ pending |
+| 22-10-02 | 10 | 5 | PRG-01/02 | T-22-10-01/03/05 | Irreversibility claim qualified by the backup horizon; evidence sets documented | gate | `npm run check:runbook-coverage && npm run check:root-hygiene` | ✅ | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
