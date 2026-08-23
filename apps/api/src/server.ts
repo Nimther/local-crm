@@ -75,6 +75,12 @@ import {
   FAILED_SEND_SHARE_ALERT_DEDUP_HOURS,
   type FailedSendShareAlertMessage,
 } from "./modules/ops/failed-send-share-watchdog.js";
+import {
+  startWorkspacePurgeWatchdog,
+  WORKSPACE_PURGE_WATCHDOG_INTERVAL_MS,
+  WORKSPACE_PURGE_ALERT_DEDUP_HOURS,
+  type WorkspacePurgeAlertMessage,
+} from "./modules/ops/purge-watchdog.js";
 import { closeQueueMonitorQueues } from "./modules/ops/queue-monitor.js";
 import { authPlugin } from "./modules/auth/plugin.js";
 import { registerWorkspaceRoutes } from "./modules/tenancy/workspaces.js";
@@ -508,6 +514,21 @@ async function sendFailedSendShareAlert(message: FailedSendShareAlertMessage): P
   });
 }
 
+/**
+ * Phase 22 (PRG-01/PRG-03, D-08, plan 22-08): the tenth watchdog's own real
+ * dispatch -- same platform-key-only, plain-text discipline as every sibling
+ * above, a tenth distinct subject line so all ten alert channels stay
+ * distinguishable in an operator's inbox.
+ */
+async function sendWorkspacePurgeAlert(message: WorkspacePurgeAlertMessage): Promise<void> {
+  await sgMail.send({
+    to: message.to,
+    from: env.PLATFORM_MAIL_FROM,
+    subject: "Mega CRM workspace-purge-stuck alert",
+    text: message.text,
+  });
+}
+
 async function main(): Promise<void> {
   await assertKmsReady();
   const app = await buildServer();
@@ -627,6 +648,21 @@ async function main(): Promise<void> {
     operatorEmail: env.OPERATOR_ALERT_EMAIL,
     sendMail: sendFailedSendShareAlert,
   });
+  // Phase 22 (PRG-01/PRG-03, D-08, plan 22-08): a TENTH independent
+  // dead-man's switch, and the API-process side of the two-process design
+  // over `apps/worker`'s workspace physical-purge state machine -- the
+  // worker (a DIFFERENT process) writes `purge_records`; this watchdog only
+  // ever reads it. Claims under its own alert name ("workspace-purge-stuck")
+  // via the SAME shared `ops_alert_state` table plan 15-12 introduced,
+  // independent of every watchdog above. Unlike every sibling above, a
+  // HEALTHY evaluation here also releases any existing claim (see
+  // purge-watchdog.ts's own header) so a resolved incident re-arms the
+  // switch immediately rather than sitting inside a stale dedup window.
+  startWorkspacePurgeWatchdog({
+    client: pool,
+    operatorEmail: env.OPERATOR_ALERT_EMAIL,
+    sendMail: sendWorkspacePurgeAlert,
+  });
 
   // Names only the interval/threshold numbers -- never the operator
   // address or anything derived from the SendGrid key (T-09-11).
@@ -669,6 +705,10 @@ async function main(): Promise<void> {
   logger.info(
     { pollIntervalMs: FAILED_SEND_SHARE_WATCHDOG_INTERVAL_MS, alertDedupHours: FAILED_SEND_SHARE_ALERT_DEDUP_HOURS },
     "failed-send-share watchdog armed -- watching the rolling share of terminal sends that failed"
+  );
+  logger.info(
+    { pollIntervalMs: WORKSPACE_PURGE_WATCHDOG_INTERVAL_MS, alertDedupHours: WORKSPACE_PURGE_ALERT_DEDUP_HOURS },
+    "workspace-purge watchdog armed -- watching purge_records for a stuck or failed workspace physical purge"
   );
 }
 
