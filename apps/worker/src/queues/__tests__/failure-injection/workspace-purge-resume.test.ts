@@ -2,9 +2,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { Pool } from "pg";
+import { Pool } from "pg";
 import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
-import { PURGE_BATCH_SIZE } from "@mega-crm/db";
+import { PURGE_BATCH_SIZE, deletePurgeBatch } from "@mega-crm/db";
 import {
   createTestPool,
   ensureTestDbMigrated,
@@ -15,6 +15,7 @@ import {
 } from "@mega-crm/test-support";
 import { insertFixtureOrganization } from "../../../test/failure-fixtures.js";
 import { WORKSPACE_PURGE_KILL_HARNESS_READY } from "../../../test/harness/workspace-purge-kill-entrypoint.js";
+import { closeAuthPurgePool } from "../../workspace-purge-auth.js";
 import { processWorkspacePurge } from "../../workspace-purge.worker.js";
 
 /**
@@ -43,6 +44,7 @@ import { processWorkspacePurge } from "../../workspace-purge.worker.js";
  */
 describe("failure injection: workspace-purge kill-resume (PRG-03, SC3, plan 22-09)", () => {
   let pool: Pool;
+  let authPool: Pool;
   let survivor: SpawnedChild | undefined;
 
   const HARNESS_ENTRYPOINT = path.resolve(
@@ -54,6 +56,10 @@ describe("failure injection: workspace-purge kill-resume (PRG-03, SC3, plan 22-0
     await ensureTestDbMigrated();
     process.env.DATABASE_URL = getTestDatabaseUrl();
     pool = createTestPool();
+    // Published into process.env by packages/test-support's global-setup.ts
+    // for every workspace's test project -- see workspace-purge-auth.test.ts's
+    // own comment on this exact pattern.
+    authPool = new Pool({ connectionString: process.env.AUTH_DATABASE_URL });
   });
 
   afterAll(async () => {
@@ -61,6 +67,8 @@ describe("failure injection: workspace-purge kill-resume (PRG-03, SC3, plan 22-0
     // otherwise leave a frozen child holding a database connection.
     if (survivor) await killAndAwaitExit(survivor).catch(() => undefined);
     await pool.end();
+    await authPool.end();
+    await closeAuthPurgePool();
   });
 
   const TABLE_A = "subscription_status_history" as const;
@@ -159,6 +167,42 @@ describe("failure injection: workspace-purge kill-resume (PRG-03, SC3, plan 22-0
       [workspaceId],
     );
     return rows[0];
+  }
+
+  /** Mirrors workspace-purge-auth.test.ts's own fixture helpers -- `member`/`invitation` require the mega_crm_auth-backed pool, not the ordinary app pool. */
+  async function createAuthUser(seed: string): Promise<string> {
+    const { rows } = await authPool.query<{ id: string }>(`INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id`, [
+      `Purge Kill ${seed}`,
+      `purge-kill-${seed}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@fixture.test`,
+    ]);
+    return rows[0].id;
+  }
+
+  async function createMember(organizationId: string, userId: string): Promise<void> {
+    await authPool.query(`INSERT INTO member ("organizationId", "userId", role) VALUES ($1, $2, 'member')`, [organizationId, userId]);
+  }
+
+  async function createInvitation(organizationId: string, inviterId: string, email: string): Promise<void> {
+    await authPool.query(
+      `INSERT INTO invitation ("organizationId", email, status, "expiresAt", "inviterId")
+       VALUES ($1, $2, 'pending', now() + interval '7 days', $3)`,
+      [organizationId, email, inviterId],
+    );
+  }
+
+  /** `mega_crm_app` holds SELECT on member/invitation (migration 0045) -- reading through the ordinary pool is fine. */
+  async function memberCount(organizationId: string): Promise<number> {
+    const { rows } = await pool.query<{ count: string }>(`SELECT count(*) AS count FROM member WHERE "organizationId" = $1`, [
+      organizationId,
+    ]);
+    return Number(rows[0].count);
+  }
+
+  async function invitationCount(organizationId: string): Promise<number> {
+    const { rows } = await pool.query<{ count: string }>(`SELECT count(*) AS count FROM invitation WHERE "organizationId" = $1`, [
+      organizationId,
+    ]);
+    return Number(rows[0].count);
   }
 
   /**
@@ -361,5 +405,191 @@ describe("failure injection: workspace-purge kill-resume (PRG-03, SC3, plan 22-0
       ).toEqual({ ...census, member: 0, invitation: 0 });
     },
     120_000,
+  );
+
+  it(
+    "kill between tables: the finished table is marked done and empty, the next table is neither, and the resumed run completes with table_counts unchanged",
+    async () => {
+      const subjectId = await freshWorkspaceId("wp-kill-between-tables");
+      const contactId = await seedManyContacts(subjectId, ROWS_PER_TABLE);
+      await seedManySubscriptionHistory(subjectId, contactId, ROWS_PER_TABLE);
+      await seedManyPropertyRegistryEntries(subjectId, ROWS_PER_TABLE);
+      await softDeleteWorkspace(subjectId, 40);
+
+      await processWorkspacePurge(); // report
+      const census = (await readPurgeRecord(subjectId))!.tableCounts;
+
+      // Freezes BEFORE table B's very first batch is ever attempted -- table
+      // A has already fully drained and committed by this point, and no
+      // DELETE is ever issued for table B, so there is no open-transaction
+      // lock to worry about on resume (unlike the mid-batch seam above).
+      await spawnAndKillOnReady({
+        WPK_MODE: "between_tables",
+        WPK_TARGET_WORKSPACE_ID: subjectId,
+        WPK_STOP_BEFORE_TABLE: TABLE_B,
+      });
+
+      // --- intermediate: the boundary's own granularity, proven directly ---
+      expect(await countRows(subjectId, TABLE_A), "the finished table is empty").toBe(0);
+      expect(await countRows(subjectId, TABLE_B), "the next table was never even attempted").toBe(ROWS_PER_TABLE);
+      expect(await countRows(subjectId, TABLE_C), "the table after that is equally untouched").toBe(ROWS_PER_TABLE);
+
+      const midKillRecord = await readPurgeRecord(subjectId);
+      expect(midKillRecord!.status).toBe("purging");
+      expect(midKillRecord!.completedTables, "the finished table is marked done").toContain(TABLE_A);
+      expect(midKillRecord!.completedTables, "the next table is NOT marked done").not.toContain(TABLE_B);
+      expect(midKillRecord!.completedTables).not.toContain(TABLE_C);
+
+      // --- resume ------------------------------------------------------------
+      await processWorkspacePurge();
+
+      expect(await countRows(subjectId, TABLE_A)).toBe(0);
+      expect(await countRows(subjectId, TABLE_B)).toBe(0);
+      expect(await countRows(subjectId, TABLE_C)).toBe(0);
+
+      const finalRecord = await readPurgeRecord(subjectId);
+      expect(finalRecord!.status).toBe("complete");
+      expect(finalRecord!.tableCounts, "table_counts is still the immutable pre-destruction census").toEqual({
+        ...census,
+        member: 0,
+        invitation: 0,
+      });
+    },
+    60_000,
+  );
+
+  it(
+    "kill before the tail: membership rows survive the kill, and the resumed run finishes the auth step and tombstones the organization",
+    async () => {
+      const subjectId = await freshWorkspaceId("wp-kill-before-tail");
+      const contactId = await seedManyContacts(subjectId, ROWS_PER_TABLE);
+      await seedManySubscriptionHistory(subjectId, contactId, ROWS_PER_TABLE);
+      await seedManyPropertyRegistryEntries(subjectId, ROWS_PER_TABLE);
+      await softDeleteWorkspace(subjectId, 40);
+
+      const userId = await createAuthUser("wp-kill-before-tail");
+      await createMember(subjectId, userId);
+      await createInvitation(subjectId, userId, `invitee-${Date.now().toString(36)}@fixture.test`);
+
+      await processWorkspacePurge(); // report
+
+      // Freezes AFTER every table is confirmed empty and marked done, but
+      // BEFORE the auth step and the tombstone -- the one boundary the
+      // table loop's own checkpoint cannot reach on its own.
+      await spawnAndKillOnReady({
+        WPK_MODE: "before_tail",
+        WPK_TARGET_WORKSPACE_ID: subjectId,
+      });
+
+      // --- intermediate: every table done, the tail never ran ---------------
+      expect(await countRows(subjectId, TABLE_A)).toBe(0);
+      expect(await countRows(subjectId, TABLE_B)).toBe(0);
+      expect(await countRows(subjectId, TABLE_C)).toBe(0);
+
+      const midKillRecord = await readPurgeRecord(subjectId);
+      expect(midKillRecord!.completedTables).toEqual(expect.arrayContaining([TABLE_A, TABLE_B, TABLE_C]));
+      expect(midKillRecord!.status, "the tail never ran -- this purge is not complete").not.toBe("complete");
+      expect(midKillRecord!.purgedAt).toBeNull();
+
+      const midKillOrg = await readOrganization(subjectId);
+      expect(midKillOrg.purgedAt, "the organization is not tombstoned").toBeNull();
+
+      expect(await memberCount(subjectId), "membership rows still exist").toBe(1);
+      expect(await invitationCount(subjectId), "invitation rows still exist").toBe(1);
+
+      // --- resume: the tail finishes ------------------------------------------
+      await processWorkspacePurge();
+
+      expect(await memberCount(subjectId), "the auth step's resume deletes the surviving membership row").toBe(0);
+      expect(await invitationCount(subjectId)).toBe(0);
+
+      const finalRecord = await readPurgeRecord(subjectId);
+      expect(finalRecord!.status).toBe("complete");
+      expect(finalRecord!.purgedAt).not.toBeNull();
+      expect(finalRecord!.tableCounts).toMatchObject({ member: 1, invitation: 1 });
+
+      const finalOrg = await readOrganization(subjectId);
+      expect(finalOrg.purgedAt, "the organization is tombstoned once the tail actually runs").not.toBeNull();
+    },
+    60_000,
+  );
+
+  it(
+    "resume does not re-walk: the resumed run issues zero deletePurgeBatch calls against a table already in completed_tables",
+    async () => {
+      const subjectId = await freshWorkspaceId("wp-kill-no-rewalk");
+      const contactId = await seedManyContacts(subjectId, ROWS_PER_TABLE);
+      await seedManySubscriptionHistory(subjectId, contactId, ROWS_PER_TABLE);
+      await seedManyPropertyRegistryEntries(subjectId, ROWS_PER_TABLE);
+      await softDeleteWorkspace(subjectId, 40);
+
+      await processWorkspacePurge(); // report
+
+      await spawnAndKillOnReady({
+        WPK_MODE: "between_tables",
+        WPK_TARGET_WORKSPACE_ID: subjectId,
+        WPK_STOP_BEFORE_TABLE: TABLE_B,
+      });
+
+      const midKillRecord = await readPurgeRecord(subjectId);
+      expect(midKillRecord!.completedTables).toContain(TABLE_A);
+
+      const calls: { table: string; workspaceId: string }[] = [];
+      const spyDeletePurgeBatch: typeof deletePurgeBatch = async (client, table, wsId, limit) => {
+        calls.push({ table, workspaceId: wsId });
+        return deletePurgeBatch(client, table, wsId, limit);
+      };
+
+      await processWorkspacePurge({ deletePurgeBatch: spyDeletePurgeBatch });
+
+      const callsForSubject = calls.filter((call) => call.workspaceId === subjectId);
+      expect(
+        callsForSubject.some((call) => call.table === TABLE_A),
+        "a table already in completed_tables must never be re-walked -- zero calls, not merely zero rows deleted",
+      ).toBe(false);
+      expect(callsForSubject.some((call) => call.table === TABLE_B), "the unfinished table IS walked").toBe(true);
+
+      expect(await countRows(subjectId, TABLE_A)).toBe(0);
+      expect(await countRows(subjectId, TABLE_B)).toBe(0);
+      expect(await countRows(subjectId, TABLE_C)).toBe(0);
+    },
+    60_000,
+  );
+
+  it(
+    "double resume: a third tick after completion changes nothing anywhere",
+    async () => {
+      const subjectId = await freshWorkspaceId("wp-kill-double-resume");
+      const contactId = await seedManyContacts(subjectId, ROWS_PER_TABLE);
+      await seedManySubscriptionHistory(subjectId, contactId, ROWS_PER_TABLE);
+      await seedManyPropertyRegistryEntries(subjectId, ROWS_PER_TABLE);
+      await softDeleteWorkspace(subjectId, 40);
+
+      const userId = await createAuthUser("wp-kill-double-resume");
+      await createMember(subjectId, userId);
+
+      await processWorkspacePurge(); // report
+
+      await spawnAndKillOnReady({
+        WPK_MODE: "before_tail",
+        WPK_TARGET_WORKSPACE_ID: subjectId,
+      });
+
+      await processWorkspacePurge(); // resume -- finishes the tail
+
+      const firstRecord = await readPurgeRecord(subjectId);
+      const firstOrg = await readOrganization(subjectId);
+      expect(firstRecord!.status).toBe("complete");
+
+      await processWorkspacePurge(); // third tick -- replay
+      await processWorkspacePurge(); // fourth tick -- replay of the replay
+
+      const secondRecord = await readPurgeRecord(subjectId);
+      const secondOrg = await readOrganization(subjectId);
+
+      expect(secondRecord, "a killed-and-resumed purge's replay is a no-op exactly like an uninterrupted one's").toEqual(firstRecord);
+      expect(secondOrg).toEqual(firstOrg);
+    },
+    60_000,
   );
 });

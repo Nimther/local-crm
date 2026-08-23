@@ -329,6 +329,7 @@ async function runWorkspacePurgeWalk(
   workspaceId: string,
   batchSize: number,
   deleteBatchFn: DeletePurgeBatchFn,
+  afterTableWalk?: (workspaceId: string) => Promise<void> | void,
 ): Promise<void> {
   const lockConn = await platformClient.connect();
   let locked = false;
@@ -354,6 +355,20 @@ async function runWorkspacePurgeWalk(
       for (const table of PURGE_TABLE_ORDER) {
         if (progress.completedTables.includes(table)) continue;
         await walkPurgeTable(platformClient, workspaceId, table, batchSize, deleteBatchFn);
+      }
+
+      // Plan 22-09 (PRG-03, SC3): test-only seam, invoked once every table is
+      // confirmed empty and marked done but BEFORE the auth step and the
+      // tombstone. A no-op unless a caller supplies one -- production never
+      // does. This is what lets `workspace-purge-resume.test.ts`'s real-
+      // SIGKILL harness freeze the child process at exactly the "before the
+      // tail" boundary, proving that boundary is resumable rather than
+      // merely assumed to be (the table loop above is the only naturally
+      // checkpointed part of the tail; the auth step and the tombstone are
+      // not, so this is the only way to land a real kill precisely between
+      // them).
+      if (afterTableWalk) {
+        await afterTableWalk(workspaceId);
       }
 
       // Phase 22 (PRG-02, D-12, plan 22-07): the auth step runs AFTER every
@@ -420,6 +435,13 @@ export interface ProcessWorkspacePurgeDeps {
   batchSize?: number;
   /** Injectable seam for tests (walk-order spies, the restore-mid-walk fault injection). */
   deletePurgeBatch?: DeletePurgeBatchFn;
+  /**
+   * Plan 22-09 test-only seam: called once per workspace immediately after
+   * every table in `PURGE_TABLE_ORDER` is confirmed empty and marked done,
+   * but before the auth step and the tombstone. See `runWorkspacePurgeWalk`'s
+   * own call site comment. Never set in production.
+   */
+  afterTableWalk?: (workspaceId: string) => Promise<void> | void;
 }
 
 /**
@@ -435,7 +457,7 @@ export async function processWorkspacePurge(deps: ProcessWorkspacePurgeDeps = {}
 
   const destructible = await loadDestructiblePurgeRecords(client);
   for (const record of destructible) {
-    await runWorkspacePurgeWalk(client, record.workspaceId, batchSize, deleteBatchFn);
+    await runWorkspacePurgeWalk(client, record.workspaceId, batchSize, deleteBatchFn, deps.afterTableWalk);
   }
 
   const nowValue = now();
