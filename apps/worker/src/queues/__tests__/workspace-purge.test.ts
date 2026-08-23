@@ -172,7 +172,13 @@ describe("workspace purge: discover, report, destroy, tombstone (Task 1)", () =>
     expect(record!.reportedAt).not.toBeNull();
     expect(record!.firstDestructiveBatchAt).toBeNull();
     expect(record!.purgedAt).toBeNull();
-    expect(record!.tableCounts).toEqual({ contacts: 3, subscription_status_history: 5 });
+    // Plan 22-05 widened PURGE_TABLE_ORDER from this tracer's own two-table
+    // walk to the full ~25-table FK order -- the census now covers every
+    // table in that order, not just the two this fixture seeds. A partial
+    // match on the two tables this test actually cares about is what
+    // "the tracer suite survives the longer list" (22-05's own acceptance
+    // criteria) means in practice.
+    expect(record!.tableCounts).toMatchObject({ contacts: 3, subscription_status_history: 5 });
 
     expect(await countContacts(workspaceId)).toBe(3);
     expect(await countSubscriptionStatusHistory(workspaceId)).toBe(5);
@@ -196,7 +202,8 @@ describe("workspace purge: discover, report, destroy, tombstone (Task 1)", () =>
     expect(record!.purgedAt).not.toBeNull();
     expect(record!.reportedAt!.getTime()).toBeLessThanOrEqual(record!.firstDestructiveBatchAt!.getTime());
     expect(record!.firstDestructiveBatchAt!.getTime()).toBeLessThanOrEqual(record!.purgedAt!.getTime());
-    expect(record!.tableCounts).toEqual({ contacts: 3, subscription_status_history: 5 });
+    // See the report-only tick's own comment above: 22-05 widened the order.
+    expect(record!.tableCounts).toMatchObject({ contacts: 3, subscription_status_history: 5 });
   });
 
   it("tombstone, not delete: the organization row survives with deletedAt intact, purgedAt set, and non-identifying name/slug", async () => {
