@@ -29,6 +29,7 @@ import { PARTITION_MAINTENANCE_QUEUE } from "./partition-maintenance.worker.js";
 import { WEBHOOK_REPLAY_SWEEP_QUEUE } from "./webhook-replay-sweep.worker.js";
 import { REPUTATION_TICK_QUEUE } from "./reputation-tick.worker.js";
 import { ERASURE_SCRUB_RECLAIM_QUEUE } from "./erasure-scrub-reclaim.worker.js";
+import { WORKSPACE_PURGE_QUEUE } from "./workspace-purge.worker.js";
 import { registerTrackedQueue } from "./queue-registry.js";
 
 /**
@@ -85,8 +86,8 @@ const REUSED_PRODUCER_QUEUES: ReadonlyMap<string, Queue> = new Map<string, Queue
 
 /**
  * Every queue name `server.ts`'s `buildWorker()` registers a BullMQ `Worker`
- * for (twenty today) -- listed once here, from constants, not re-typed as
- * literal strings.
+ * for (twenty-one as of Phase 22 plan 22-01) -- listed once here, from
+ * constants, not re-typed as literal strings.
  */
 const WORKER_QUEUE_NAMES: readonly string[] = [
   EVENTS_INGEST_QUEUE,
@@ -109,6 +110,7 @@ const WORKER_QUEUE_NAMES: readonly string[] = [
   REPUTATION_TICK_QUEUE,
   ERASURE_SCRUB_QUEUE,
   ERASURE_SCRUB_RECLAIM_QUEUE,
+  WORKSPACE_PURGE_QUEUE,
 ];
 
 function buildBoardQueue(name: string): Queue {
