@@ -5,16 +5,16 @@ milestone_name: Data Lifecycle & Delivery Trust
 current_phase: 21
 current_phase_name: per-contact-dsr-export
 status: executing
-stopped_at: "Completed 21-07-PLAN.md (gap closure G-21-2: bodyless delete Content-Type fix)"
-last_updated: "2026-08-23T07:45:55.378Z"
+stopped_at: "Completed 21-08-PLAN.md (gap closure G-21-3: responsive shell + contact card header wrap for 375px overflow)"
+last_updated: "2026-08-23T08:04:11.927Z"
 last_activity: 2026-08-23
 last_activity_desc: Phase 21 execution resumed (wave continue)
 progress:
   total_phases: 5
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 23
-  completed_plans: 22
-  percent: 60
+  completed_plans: 23
+  percent: 80
 ---
 
 # Project State
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-08-21 after Phase 19)
 ## Current Position
 
 Phase: 21 (per-contact-dsr-export) — EXECUTING
-Plan: 2 of 6
+Plan: 3 of 6
 Status: Ready to execute
 Last activity: 2026-08-23 — Phase 21 execution resumed (wave continue)
 
-Progress: [██████████] 96% (2/5 v1.2 phases complete)
+Progress: [██████████] 100% (2/5 v1.2 phases complete)
 
 ### Milestone v1.2 phase map
 
@@ -58,6 +58,7 @@ Execution order: 18 → 19 → 20 → 21 → 22 (dependency gate first protects 
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
 | Phase 21 P07 | 15min | 3 tasks | 4 files |
+| Phase 21 P08 | 25min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -66,6 +67,7 @@ Execution order: 18 → 19 → 20 → 21 → 22 (dependency gate first protects 
 Full decision log lives in PROJECT.md (Key Decisions) and the archived phase summaries/CONTEXT files in `.planning/milestones/v1.0-phases/` and `.planning/milestones/v1.1-phases/`.
 
 - [Phase ?]: Fixed apiFetch to attach Content-Type: application/json only when a body is present (keyed on init?.body !== undefined), closing gap G-21-2 for all five bodyless UI delete actions without touching the server's content-type parser
+- [Phase ?]: 21-08: Made AppShell responsive (sidebar hidden below md, mobile drawer) instead of re-scoping the 375px no-overflow criterion to the content column, closing gap G-21-3
 
 ### Open decisions to resolve at plan time (v1.2)
 
@@ -123,8 +125,8 @@ Items acknowledged and deferred at milestone close on 2026-08-20 (open-artifact 
 
 ## Session Continuity
 
-Last session: 2026-08-23T07:45:55.331Z
-Stopped at: Completed 21-07-PLAN.md (gap closure G-21-2: bodyless delete Content-Type fix)
+Last session: 2026-08-23T08:04:11.881Z
+Stopped at: Completed 21-08-PLAN.md (gap closure G-21-3: responsive shell + contact card header wrap for 375px overflow)
 Resume file: None
 
 ## Operator Next Steps
