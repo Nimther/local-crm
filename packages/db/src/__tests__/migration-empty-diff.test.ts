@@ -81,8 +81,14 @@ describe("checkEmptyDiff against the real repository (the CI-enforced copy of db
     // comparedAgainstSnapshot and snapshotFileCount move to that new file;
     // shippedMigrationCount grows to 70 (two more shipped tags in the
     // journal); snapshotFileCount grows to 16 (one new snapshot file).
+    //
+    // Phase 22 (PRG-06, SC1, D-01, plan 22-04): 0070_scan_policies_exclude_deleted_workspaces
+    // is SQL-only (DROP POLICY + CREATE POLICY x3, no packages/db/src/schema/*.ts
+    // change) -- same precedent as 0065/0067, so it ships NO snapshot of its
+    // own. comparedAgainstSnapshot and snapshotFileCount are therefore
+    // UNCHANGED by this migration; only shippedMigrationCount grows to 71.
     expect(result.comparedAgainstSnapshot).toBe("0069_snapshot.json");
-    expect(result.shippedMigrationCount).toBe(70);
+    expect(result.shippedMigrationCount).toBe(71);
     expect(result.snapshotFileCount).toBe(16);
 
     // Never touches the repository -- proven, not assumed: the directory
@@ -100,12 +106,17 @@ describe("checkEmptyDiff against the real repository (the CI-enforced copy of db
     // CHANGING migration's tag prefix -- a mismatch here would mean
     // db:check-empty-diff is silently comparing against the wrong point in
     // history. Phase 22 (plan 22-01): 0069_erasure_records_contact_fk_relax
-    // is both the newest SCHEMA-CHANGING migration (asserted separately
-    // above via `comparedAgainstSnapshot`) AND the newest SHIPPED migration
-    // overall. This assertion tracks the JOURNAL's newest tag, which is now
-    // 0069.
+    // was both the newest SCHEMA-CHANGING migration (asserted separately
+    // above via `comparedAgainstSnapshot`, which stays UNCHANGED by 0070
+    // below) AND the newest SHIPPED migration at that point.
+    //
+    // Phase 22 (plan 22-04): 0070_scan_policies_exclude_deleted_workspaces is
+    // SQL-only (no packages/db/src/schema/*.ts change), so it does not move
+    // `comparedAgainstSnapshot` -- but it IS now the newest SHIPPED
+    // migration overall. This assertion tracks the JOURNAL's newest tag,
+    // which is now 0070.
     const newestTag = journal.entries[journal.entries.length - 1]?.tag;
-    expect(newestTag).toBe("0069_erasure_records_contact_fk_relax");
+    expect(newestTag).toBe("0070_scan_policies_exclude_deleted_workspaces");
   });
 });
 
