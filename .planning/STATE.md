@@ -5,15 +5,15 @@ milestone_name: Data Lifecycle & Delivery Trust
 current_phase: 21
 current_phase_name: per-contact-dsr-export
 status: executing
-stopped_at: Phase 21 UI-SPEC approved
-last_updated: "2026-08-22T11:11:22.539Z"
-last_activity: 2026-08-22
-last_activity_desc: Phase 21 execution started
+stopped_at: "Completed 21-07-PLAN.md (gap closure G-21-2: bodyless delete Content-Type fix)"
+last_updated: "2026-08-23T07:45:55.378Z"
+last_activity: 2026-08-23
+last_activity_desc: Phase 21 execution resumed (wave continue)
 progress:
   total_phases: 5
   completed_phases: 3
-  total_plans: 21
-  completed_plans: 15
+  total_plans: 23
+  completed_plans: 22
   percent: 60
 ---
 
@@ -29,11 +29,11 @@ See: .planning/PROJECT.md (updated 2026-08-21 after Phase 19)
 ## Current Position
 
 Phase: 21 (per-contact-dsr-export) — EXECUTING
-Plan: 1 of 6
-Status: Executing Phase 21
-Last activity: 2026-08-22 — Phase 21 execution started
+Plan: 2 of 6
+Status: Ready to execute
+Last activity: 2026-08-23 — Phase 21 execution resumed (wave continue)
 
-Progress: [████░░░░░░] 40% (2/5 v1.2 phases complete)
+Progress: [██████████] 96% (2/5 v1.2 phases complete)
 
 ### Milestone v1.2 phase map
 
@@ -53,11 +53,19 @@ Execution order: 18 → 19 → 20 → 21 → 22 (dependency gate first protects 
 - v1.1: 929 commits, 716 files changed, ~139k LOC TypeScript total (was ~57k after v1.0)
 - Per-plan execution metrics for v1.1 live in the archived phase summaries (`milestones/v1.1-phases/`)
 
+**Per-Plan Metrics:**
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 21 P07 | 15min | 3 tasks | 4 files |
+
 ## Accumulated Context
 
 ### Decisions
 
 Full decision log lives in PROJECT.md (Key Decisions) and the archived phase summaries/CONTEXT files in `.planning/milestones/v1.0-phases/` and `.planning/milestones/v1.1-phases/`.
+
+- [Phase ?]: Fixed apiFetch to attach Content-Type: application/json only when a body is present (keyed on init?.body !== undefined), closing gap G-21-2 for all five bodyless UI delete actions without touching the server's content-type parser
 
 ### Open decisions to resolve at plan time (v1.2)
 
@@ -115,9 +123,9 @@ Items acknowledged and deferred at milestone close on 2026-08-20 (open-artifact 
 
 ## Session Continuity
 
-Last session: 2026-08-21T16:27:09.157Z
-Stopped at: Phase 21 UI-SPEC approved
-Resume file: /Users/primeropanther/Projects/mega-crm/.planning/phases/21-per-contact-dsr-export/21-UI-SPEC.md
+Last session: 2026-08-23T07:45:55.331Z
+Stopped at: Completed 21-07-PLAN.md (gap closure G-21-2: bodyless delete Content-Type fix)
+Resume file: None
 
 ## Operator Next Steps
 

@@ -181,7 +181,7 @@ Plans:
   4. An export request naming a contact id from another workspace returns nothing (negative cross-tenant test), and freeform JSONB (`events.properties`, `send_events.payload`) reaches the file only through an explicit allowlist — a synthetic field holding another subject's data is provably absent from the export.
   5. Exporting an already-anonymized (erased) contact behaves predictably — a typed response describing the state, never a silently empty file.
 
-**Plans**: 8 plans — 6/6 executed, 2 gap-closure plans pending from UAT
+**Plans**: 7/8 plans executed
 
 Plans:
 **Wave 1**
@@ -204,7 +204,7 @@ Plans:
 
 **Wave 5** *(gap closure — UAT gap G-21-2)*
 
-- [ ] 21-07-PLAN.md — Bodyless UI deletes: `apiFetch` attaches the JSON content type only when a body is present, pinned by a per-verb request-shape matrix, plus the contact-card delete path as a Playwright spec (unblocks UAT Test 2's two-tab erasure race; fixes team/segments/campaigns/flows deletes by the same change)
+- [x] 21-07-PLAN.md — Bodyless UI deletes: `apiFetch` attaches the JSON content type only when a body is present, pinned by a per-verb request-shape matrix, plus the contact-card delete path as a Playwright spec (unblocks UAT Test 2's two-tab erasure race; fixes team/segments/campaigns/flows deletes by the same change)
 
 **Wave 6** *(gap closure — UAT gap G-21-3; blocked on Wave 5: imports its e2e preamble helper and the Playwright lane's fixed ports are exclusive)*
 
@@ -259,7 +259,7 @@ Plans:
 | 18. Dependency Hygiene & Advisory Gate | v1.2 | 4/4 | Complete    | 2026-08-20 |
 | 19. Unsubscribe Secret Graceful Rotation | v1.2 | 5/5 | Complete    | 2026-08-21 |
 | 20. Campaign Template Correctness | v1.2 | 6/6 | Complete    | 2026-08-21 |
-| 21. Per-Contact DSR Export | v1.2 | 6/6 | In Progress|  |
+| 21. Per-Contact DSR Export | v1.2 | 7/8 | In Progress|  |
 | 22. Workspace Quiesce & Physical Purge | v1.2 | 0/TBD | Not started | - |
 
 ---
