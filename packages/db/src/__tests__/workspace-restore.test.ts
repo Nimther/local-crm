@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { applyMigrationFile, createEphemeralDatabase, dropEphemeralDatabase, listMigrationFiles } from "@mega-crm/test-support";
 
 import { restoreWorkspace, WorkspaceNotDeletedError, WorkspacePurgeStartedError } from "../workspace-restore.js";
+import { buildWorkspacePurgeReport, formatWorkspacePurgeReport } from "../workspace-purge-report.js";
 
 /**
  * Phase 22 (PRG-05, D-13/D-14/D-15, plan 22-06), Task 1: `restoreWorkspace`
@@ -307,6 +308,79 @@ describe("workspace restore + purge report (Phase 22, plan 22-06)", () => {
 
       const org = await readOrganization(workspaceId);
       expect(org.deletedAt).not.toBeNull();
+    });
+  });
+
+  describe("Task 2: the on-demand eligibility report -- read-only, no personal data", () => {
+    it("report for one workspace: per-table counts, eligibleAt and status match the underlying data", async () => {
+      const workspaceId = await freshWorkspaceId("report-one-workspace");
+      const deletedAt = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000);
+      await pool.query(`UPDATE organization SET "deletedAt" = $2 WHERE id = $1`, [workspaceId, deletedAt]);
+      const [contactId] = await seedContacts(workspaceId, 3);
+      await withWorkspace(workspaceId, (client) =>
+        client.query(
+          `INSERT INTO subscription_status_history (workspace_id, contact_id, old_status, new_status, source)
+           VALUES ($1, $2, 'subscribed', 'unsubscribed', 'manual_ui')`,
+          [workspaceId, contactId],
+        ),
+      );
+
+      const report = await buildWorkspacePurgeReport({ pool, retentionDays: 30 }, { workspaceId });
+
+      expect(report.workspaces).toHaveLength(1);
+      const entry = report.workspaces[0];
+      expect(entry.workspaceId).toBe(workspaceId);
+      expect(entry.tableCounts).toEqual({ contacts: 3, subscription_status_history: 1 });
+      expect(entry.eligibleAt?.getTime()).toBe(deletedAt.getTime() + 30 * 24 * 60 * 60 * 1000);
+      expect(entry.status).toBe("not yet reported");
+    });
+
+    it("report for all eligible: lists exactly the eligible workspaces, excluding one not yet eligible", async () => {
+      const eligibleA = await freshWorkspaceId("report-eligible-a");
+      const eligibleB = await freshWorkspaceId("report-eligible-b");
+      const notYetEligible = await freshWorkspaceId("report-not-yet-eligible");
+      await softDeleteWorkspace(eligibleA, 40);
+      await softDeleteWorkspace(eligibleB, 35);
+      await softDeleteWorkspace(notYetEligible, 3);
+
+      const report = await buildWorkspacePurgeReport({ pool, retentionDays: 30 }, { allEligible: true });
+
+      const ids = report.workspaces.map((w) => w.workspaceId);
+      expect(ids).toContain(eligibleA);
+      expect(ids).toContain(eligibleB);
+      expect(ids).not.toContain(notYetEligible);
+    });
+
+    it("report is read-only: running it against a workspace with no purge_records row writes nothing", async () => {
+      const workspaceId = await freshWorkspaceId("report-read-only");
+      await softDeleteWorkspace(workspaceId, 40);
+
+      await buildWorkspacePurgeReport({ pool, retentionDays: 30 }, { workspaceId });
+
+      const { rows } = await pool.query(`SELECT 1 FROM purge_records WHERE workspace_id = $1`, [workspaceId]);
+      expect(rows).toHaveLength(0);
+      const org = await readOrganization(workspaceId);
+      expect(org.deletedAt).not.toBeNull(); // untouched
+    });
+
+    it("report contains no personal data: no contact email, no contact name, no workspace name in the formatted output", async () => {
+      const workspaceId = await freshWorkspaceId("report-no-pii-sentinel");
+      await softDeleteWorkspace(workspaceId, 40);
+      const sentinelEmail = "sentinel-pii-marker@example.test";
+      const sentinelFirstName = "SentinelFirstNameMarker";
+      await withWorkspace(workspaceId, (client) =>
+        client.query(
+          `INSERT INTO contacts (workspace_id, email, first_name, subscription_status) VALUES ($1, $2, $3, 'subscribed')`,
+          [workspaceId, sentinelEmail, sentinelFirstName],
+        ),
+      );
+
+      const report = await buildWorkspacePurgeReport({ pool, retentionDays: 30 }, { workspaceId });
+      const formatted = formatWorkspacePurgeReport(report);
+
+      expect(formatted).not.toContain(sentinelEmail);
+      expect(formatted).not.toContain(sentinelFirstName);
+      expect(formatted).not.toContain("report-no-pii-sentinel"); // the seeded organization name fragment
     });
   });
 });
