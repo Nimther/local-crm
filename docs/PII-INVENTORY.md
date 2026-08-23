@@ -93,10 +93,20 @@ Tables that hold no per-subject disclosable data, each with a written reason.
 
 | Table | Reason |
 |---|---|
-| `workspace_suppressions` | Entries are HMAC hashes of the address, keyed per-workspace. There is no plaintext to return; returning the hash would disclose nothing useful to the subject while leaking the suppression mechanism itself. |
-| `send_event_quarantine` | Provider events that could not be attributed to a send. Unattributed by definition, so not provably this subject's data. |
-| `erasure_records` | Relevant only *after* erasure, at which point the export refuses entirely with the typed 410 that references this row (see "Erased contact" below) rather than exporting the row's contents. |
+| `workspace_suppressions` | Entries are HMAC hashes of the address, keyed per-workspace. There is no plaintext to return; returning the hash would disclose nothing useful to the subject while leaking the suppression mechanism itself. Phase 22 (D-10): a surviving evidence table -- the physical purge never deletes from it. |
+| `send_event_quarantine` | Provider events that could not be attributed to a send. Unattributed by definition, so not provably this subject's data. Phase 22: destroyed by the physical purge (workspace-scoped platform bookkeeping, not per-contact data). |
+| `erasure_records` | Relevant only *after* erasure, at which point the export refuses entirely with the typed 410 that references this row (see "Erased contact" below) rather than exporting the row's contents. Phase 22 (D-10): a surviving evidence table -- the physical purge never deletes from it; its `contact_id` is set NULL (migration 0069) when the contact it references is destroyed. |
+| `workspace_daily_rollup` | Per-workspace-per-day aggregate counters, not per-subject data. Phase 22 (D-10): a surviving evidence table -- referencing only `organization`, never `contacts`, it is never at risk from the purge's contact-level destruction and is never deleted. |
 | Checkpoint and plumbing tables (erasure-scrub cursors, partition maintenance, reconciler runs, alert state, rollups) | Platform bookkeeping with no per-subject content. |
+| `campaigns`, `flows`, `flow_versions`, `segments` | Workspace-level configuration objects (a campaign, a triggered chain, its versioned definition, a segment definition) -- authored by the tenant's own marketer, not personal data about any one contact. Phase 22: all four are destroyed by the physical purge as ordinary tenant data, in FK order (`flows`/`campaigns` before `segments`, both `ON DELETE RESTRICT` edges; `flow_versions` before `flows`). |
+| `csv_imports`, `csv_import_rows` | Import job metadata and staged raw CSV rows -- workspace-scoped operational data about an import run, not a per-subject record in the sense this document tracks (the created/updated contacts the import produces are the `contacts` rows already covered above). Phase 22: both destroyed by the physical purge, `csv_import_rows` before its parent `csv_imports`. |
+| `workspace_property_registry` | Auto-discovered custom-property key/type suggestions -- workspace-level schema metadata, not a subject's own data. Phase 22: destroyed by the physical purge. |
+| `ingress_journal` | Webhook batch durability/replay bookkeeping, workspace-scoped, not per-subject. Phase 22: destroyed by the physical purge. |
+| `workspace_api_keys` | Platform credentials for API access, not personal data about a contact. Phase 22: destroyed by the physical purge. |
+| `workspace_send_settings` | Workspace-level throttling/quiet-hours configuration, not per-subject data. Phase 22: destroyed by the physical purge. |
+| `reputation_alert_state` | Workspace-level sender-reputation metric bookkeeping, not per-subject data. Phase 22: destroyed by the physical purge. |
+| `flow_segment_membership_snapshot`, `flow_segment_sweep_checkpoint` | The membership snapshot is per-contact plumbing (a sweep-dedup marker, not a fact disclosable under GDPR Art. 15 the way `flow_runs`/`flow_run_steps` are), and the sweep checkpoint is workspace-level cursor state. Phase 22: both destroyed by the physical purge. |
+| `workspace_sendgrid_keys`, `workspace_suppression_keys`, `workspace_webhook_endpoints` | Tenant secrets (KMS-wrapped SendGrid API key, per-workspace suppression HMAC key, webhook trust anchors) -- platform credentials, not personal data about any contact. Phase 22 (PRG-02, D-11): all three destroyed by the physical purge, ordered LAST so a purge that fails halfway leaves credentials intact for retry rather than destroyed with a half-purged tenant. |
 
 ## Erased contact
 
