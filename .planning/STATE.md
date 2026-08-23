@@ -5,8 +5,8 @@ milestone_name: Data Lifecycle & Delivery Trust
 current_phase: 22
 current_phase_name: Workspace Quiesce & Physical Purge
 status: "Phase 21 shipped — PR #27"
-stopped_at: Phase 21 complete (UAT 4/4, verification passed, security 41/41 closed), ready to plan Phase 22
-last_updated: "2026-08-23T14:23:51.682Z"
+stopped_at: Phase 22 context gathered
+last_updated: "2026-08-23T15:00:58.743Z"
 last_activity: 2026-08-23
 progress:
   total_phases: 5
@@ -127,9 +127,9 @@ Items acknowledged and deferred at milestone close on 2026-08-20 (open-artifact 
 
 ## Session Continuity
 
-Last session: 2026-08-23T11:57:00Z
-Stopped at: Phase 21 complete, ready to plan Phase 22
-Resume file: None
+Last session: 2026-08-23T15:00:58.700Z
+Stopped at: Phase 22 context gathered
+Resume file: .planning/phases/22-workspace-quiesce-physical-purge/22-CONTEXT.md
 
 ## Operator Next Steps
 
