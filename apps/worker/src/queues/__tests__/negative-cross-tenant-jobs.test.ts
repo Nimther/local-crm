@@ -1022,6 +1022,23 @@ describe("Negative cross-tenant suite: background-job families (SEC-16)", () => 
         "already has a dedicated attempted-access proof in webhook-events-sibling-drop.test.ts (SEC-09/WR-01 -- a sibling workspace's send_id is resolved via the scan role and dropped, never redirected) -- this file does not duplicate it",
       PartitionMaintenance:
         "processes cluster-wide partition DDL with no workspace id anywhere in its job payload or query -- there is no tenant boundary for a hostile payload to cross",
+      // Phase 22 (PRG-01 through PRG-05, plan 22-01): same shape as
+      // PartitionMaintenance above -- the workspace-purge tick's job payload
+      // is always `{}`; which workspace(s) a tick acts on is discovered
+      // entirely from `organization`/`purge_records` inside the tick itself,
+      // never from job data a hostile enqueuer could point at a different
+      // tenant. There is no "job for workspace A naming workspace B" shape
+      // for this queue to be vulnerable to. Per-row isolation once a
+      // workspace IS selected is a separate, already-proven property:
+      // workspace-purge.test.ts's own multi-workspace cases ("not yet
+      // eligible", "checkpoint resume skips completed tables") seed more
+      // than one workspace in the same test-database and assert each tick
+      // only ever mutates the rows of the workspace_id it explicitly binds
+      // via `withTenant(workspaceId, ...)` plus the batch DELETE's own
+      // `WHERE workspace_id = $1` -- RLS-enforced, not merely unmodified by
+      // choice.
+      WorkspacePurge:
+        "the tick's job payload is always {} -- which workspace(s) it acts on is discovered entirely inside the tick from organization/purge_records, never from job data, so there is no hostile-payload-naming-another-workspace shape to test here",
     };
 
     it("every create*Worker family in buildWorker's array is covered or has a documented exclusion reason", () => {

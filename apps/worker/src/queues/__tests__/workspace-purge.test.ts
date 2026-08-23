@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Pool } from "pg";
 import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
-import { PURGE_TABLE_ORDER, deletePurgeBatch } from "@mega-crm/db";
+import { PURGE_TABLE_ORDER, PURGE_ADVISORY_LOCK_NAMESPACE, deletePurgeBatch } from "@mega-crm/db";
 import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool } from "../../test/db-fixture.js";
 import { insertFixtureOrganization } from "../../test/failure-fixtures.js";
 import { parseWorkerEnv } from "../../env.js";
@@ -104,24 +104,39 @@ describe("workspace purge: discover, report, destroy, tombstone (Task 1)", () =>
   }
 
   interface PurgeRecordRow {
+    id: string;
+    workspaceId: string;
+    softDeletedAt: Date;
+    eligibleAt: Date;
     status: string;
     reportedAt: Date | null;
     firstDestructiveBatchAt: Date | null;
     purgedAt: Date | null;
+    lastProgressAt: Date | null;
     tableCounts: Record<string, number>;
     completedTables: string[];
     purgeError: string | null;
+    createdAt: Date;
+    updatedAt: Date;
   }
 
+  /** Selects every column -- Task 3's replay case asserts on the WHOLE row, not just status. */
   async function readPurgeRecord(workspaceId: string): Promise<PurgeRecordRow | null> {
     const { rows } = await pool.query<PurgeRecordRow>(
-      `SELECT status,
+      `SELECT id,
+              workspace_id AS "workspaceId",
+              soft_deleted_at AS "softDeletedAt",
+              eligible_at AS "eligibleAt",
+              status,
               reported_at AS "reportedAt",
               first_destructive_batch_at AS "firstDestructiveBatchAt",
               purged_at AS "purgedAt",
+              last_progress_at AS "lastProgressAt",
               table_counts AS "tableCounts",
               completed_tables AS "completedTables",
-              purge_error AS "purgeError"
+              purge_error AS "purgeError",
+              created_at AS "createdAt",
+              updated_at AS "updatedAt"
          FROM purge_records WHERE workspace_id = $1`,
       [workspaceId],
     );
@@ -324,5 +339,138 @@ describe("workspace purge: discover, report, destroy, tombstone (Task 1)", () =>
     for (const table of PURGE_TABLE_ORDER) {
       expect(PURGE_EVIDENCE_TABLES as readonly string[]).not.toContain(table);
     }
+  });
+
+  /**
+   * Task 3 (PRG-03/PRG-05): replay is a no-op, and a restored workspace is
+   * refused rather than skipped.
+   */
+  it("replay is a no-op: two more ticks after completion change nothing in purge_records or the tombstone", async () => {
+    const workspaceId = await freshWorkspaceId("purge-replay-noop");
+    await softDeleteWorkspace(workspaceId, 40);
+    const [contactId] = await seedContacts(workspaceId, 2);
+    await seedSubscriptionStatusHistory(workspaceId, contactId, 2);
+
+    await processWorkspacePurge(); // report
+    await processWorkspacePurge(); // destroy
+
+    const firstRecord = await readPurgeRecord(workspaceId);
+    const firstOrg = await readOrganization(workspaceId);
+    expect(firstRecord!.status).toBe("complete");
+
+    await processWorkspacePurge();
+    await processWorkspacePurge();
+
+    const secondRecord = await readPurgeRecord(workspaceId);
+    const secondOrg = await readOrganization(workspaceId);
+
+    expect(secondRecord).toEqual(firstRecord);
+    expect(secondOrg).toEqual(firstOrg);
+  });
+
+  it("restored mid-walk is refused: the walk throws, the record is marked failed with a recorded reason, and a later tick does not resume", async () => {
+    const workspaceId = await freshWorkspaceId("purge-restored-mid-walk");
+    await softDeleteWorkspace(workspaceId, 40);
+    await seedContacts(workspaceId, 5); // no subscription_status_history rows -- that table's walk completes trivially
+
+    await processWorkspacePurge(); // report
+
+    let realContactsCalls = 0;
+    const restoreMidWalkDeletePurgeBatch: typeof deletePurgeBatch = async (client, table, wsId, limit) => {
+      const n = await deletePurgeBatch(client, table, wsId, limit);
+      if (table === "contacts") {
+        realContactsCalls += 1;
+        if (realContactsCalls === 1) {
+          // Simulate a restore landing strictly BETWEEN this page's commit
+          // and the next page's own re-read -- a direct UPDATE, not a
+          // second processWorkspacePurge tick.
+          await pool.query(`UPDATE organization SET "deletedAt" = NULL WHERE id = $1`, [workspaceId]);
+        }
+      }
+      return n;
+    };
+
+    await expect(
+      processWorkspacePurge({ deletePurgeBatch: restoreMidWalkDeletePurgeBatch, batchSize: 2 }),
+    ).rejects.toThrow(/restored/);
+
+    expect(realContactsCalls).toBe(1); // the second page never ran -- refused before it could delete anything further
+
+    const failedRecord = await readPurgeRecord(workspaceId);
+    expect(failedRecord!.status).toBe("failed");
+    expect(failedRecord!.purgeError).toMatch(/restored/);
+
+    const remainingAfterRefusal = await countContacts(workspaceId);
+    expect(remainingAfterRefusal).toBe(3); // 5 seeded, 2 deleted by the one page that ran before refusal
+
+    // A later tick does NOT quietly resume or quietly ignore the workspace --
+    // the destructive selector matches 'reported'/'purging' only, never 'failed'.
+    await processWorkspacePurge();
+
+    const recordAfterLaterTick = await readPurgeRecord(workspaceId);
+    expect(recordAfterLaterTick!.status).toBe("failed");
+    expect(await countContacts(workspaceId)).toBe(remainingAfterRefusal);
+  });
+
+  it("single-flight: a lock already held on another connection is skipped without deleting a row or marking failed", async () => {
+    const workspaceId = await freshWorkspaceId("purge-single-flight");
+    await softDeleteWorkspace(workspaceId, 40);
+    const [contactId] = await seedContacts(workspaceId, 2);
+    await seedSubscriptionStatusHistory(workspaceId, contactId, 1);
+
+    await processWorkspacePurge(); // report
+
+    const lockClient = await pool.connect();
+    try {
+      const { rows } = await lockClient.query<{ locked: boolean }>(
+        `SELECT pg_try_advisory_lock($1, hashtext($2)) AS locked`,
+        [PURGE_ADVISORY_LOCK_NAMESPACE, workspaceId],
+      );
+      expect(rows[0].locked).toBe(true);
+
+      await processWorkspacePurge(); // destroy tick -- should skip entirely, lock held elsewhere
+
+      expect(await countContacts(workspaceId)).toBe(2);
+      expect(await countSubscriptionStatusHistory(workspaceId)).toBe(1);
+      const record = await readPurgeRecord(workspaceId);
+      expect(record!.status).toBe("reported"); // never transitioned to purging or failed
+    } finally {
+      await lockClient.query(`SELECT pg_advisory_unlock($1, hashtext($2))`, [PURGE_ADVISORY_LOCK_NAMESPACE, workspaceId]);
+      lockClient.release();
+    }
+  });
+
+  it("checkpoint resume skips completed tables: a pre-seeded completed_tables entry is never re-walked", async () => {
+    const workspaceId = await freshWorkspaceId("purge-resume-skip");
+    await softDeleteWorkspace(workspaceId, 40);
+    const [contactId] = await seedContacts(workspaceId, 2);
+    await seedSubscriptionStatusHistory(workspaceId, contactId, 3);
+
+    await processWorkspacePurge(); // report
+    await pool.query(`UPDATE purge_records SET completed_tables = ARRAY['subscription_status_history'] WHERE workspace_id = $1`, [
+      workspaceId,
+    ]);
+
+    const calls: Array<{ table: string; workspaceId: string }> = [];
+    const resumeSkipSpy: typeof deletePurgeBatch = async (client, table, wsId, limit) => {
+      calls.push({ table, workspaceId: wsId });
+      return deletePurgeBatch(client, table, wsId, limit);
+    };
+
+    await processWorkspacePurge({ deletePurgeBatch: resumeSkipSpy }); // destroy
+
+    const callsForWorkspace = calls.filter((c) => c.workspaceId === workspaceId);
+    // The load-bearing assertion: no EXPLICIT deletePurgeBatch call for the
+    // pre-completed table -- subscription_status_history's own row count
+    // reaching zero below is `contacts.id ON DELETE CASCADE` firing as a
+    // side effect of the (still-required) contacts walk, never this purge
+    // worker's own batched DELETE against that table. The resume contract
+    // this test proves is "never re-walk a table already in completed_tables",
+    // not "the table's rows are somehow protected from an unrelated FK
+    // cascade" -- the two are different properties, and only the first is
+    // this test's job.
+    expect(callsForWorkspace.some((c) => c.table === "subscription_status_history")).toBe(false);
+    expect(callsForWorkspace.some((c) => c.table === "contacts")).toBe(true);
+    expect(await countContacts(workspaceId)).toBe(0);
   });
 });
