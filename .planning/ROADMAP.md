@@ -228,7 +228,7 @@ Plans:
   4. Another workspace's rows in the same monthly partitions are provably unchanged after a purge — demonstrated by a negative test — and the purge performs no DROP, DETACH or TRUNCATE.
   5. A workspace restored after its purge was enqueued is not purged: eligibility is re-checked inside every batch and the purge refuses rather than silently skipping.
 
-**Plans**: 8/10 plans executed
+**Plans**: 9/10 plans executed
 
 Plans:
 **Wave 1**
@@ -250,7 +250,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3)*
 
-- [ ] 22-09-PLAN.md — Real-SIGKILL kill-and-resume proof at three seams, with destroyed-row counts compared against an uninterrupted control run (PRG-03)
+- [x] 22-09-PLAN.md — Real-SIGKILL kill-and-resume proof at three seams, with destroyed-row counts compared against an uninterrupted control run (PRG-03)
 
 **Wave 5** *(blocked on Wave 4: 22-10's end-of-phase `failure:all` regression runs the `failure:workspace-purge-resume` script 22-09 adds to the root `package.json`)*
 
@@ -287,7 +287,7 @@ Plans:
 | 19. Unsubscribe Secret Graceful Rotation | v1.2 | 5/5 | Complete    | 2026-08-21 |
 | 20. Campaign Template Correctness | v1.2 | 6/6 | Complete    | 2026-08-21 |
 | 21. Per-Contact DSR Export | v1.2 | 8/8 | Complete    | 2026-08-23 |
-| 22. Workspace Quiesce & Physical Purge | v1.2 | 8/10 | In Progress|  |
+| 22. Workspace Quiesce & Physical Purge | v1.2 | 9/10 | In Progress|  |
 
 ---
 *v1.2 roadmap created 2026-08-20 — 18/18 requirements mapped, no orphans. Next: `/gsd-plan-phase 18`.*
