@@ -21,6 +21,8 @@ import {
   buildListUnsubscribeUrl,
   getWorkspaceSendSettings,
   classifyTransportError,
+  isWorkspaceSoftDeleted,
+  WORKSPACE_DELETED_EXCLUSION_REASON,
   type SendGridMailSendRequest,
   type SendTenantMailResult,
 } from "@mega-crm/delivery-core";
@@ -314,6 +316,22 @@ async function claimCampaignSend(
   // fetch, the pre-send gate, or dispatchSendGate's own claim insert.
   if (prereqs.status !== "sending") {
     return { kind: "skipped" };
+  }
+
+  // T-22-02-01 (PRG-06, D-01/D-02/D-03): the fail-closed dispatch-time
+  // quiesce check -- re-read fresh on EVERY claim attempt (never cached, see
+  // isWorkspaceSoftDeleted's own doc comment), positioned before the contact
+  // fetch, before evaluatePreSendGate, and before any transport call, so a
+  // workspace soft-deleted after this job was already enqueued still gets
+  // refused here rather than dispatched. Records through the SAME
+  // recordExcluded the pre-send-gate branch below calls -- a
+  // workspace-deleted refusal is queryable through the identical D-04
+  // audience-exclusion-breakdown path, and this branch touches nothing else
+  // (no campaign counter, no completion check): D-02's freeze-never-cancel
+  // rule.
+  if (await isWorkspaceSoftDeleted(client, workspaceId)) {
+    await recordExcluded(client, { workspaceId, campaignId, contactId }, WORKSPACE_DELETED_EXCLUSION_REASON);
+    return { kind: "excluded", reason: WORKSPACE_DELETED_EXCLUSION_REASON };
   }
 
   const { rows: contactRows } = await client.query<ContactRow>(
