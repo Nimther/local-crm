@@ -228,7 +228,7 @@ Plans:
   4. Another workspace's rows in the same monthly partitions are provably unchanged after a purge — demonstrated by a negative test — and the purge performs no DROP, DETACH or TRUNCATE.
   5. A workspace restored after its purge was enqueued is not purged: eligibility is re-checked inside every batch and the purge refuses rather than silently skipping.
 
-**Plans**: 9/10 plans executed
+**Plans**: 10/10 plans executed
 
 Plans:
 **Wave 1**
@@ -254,7 +254,7 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4: 22-10's end-of-phase `failure:all` regression runs the `failure:workspace-purge-resume` script 22-09 adds to the root `package.json`)*
 
-- [ ] 22-10-PLAN.md — As-built filing: SPECIFICATION.md §3-§8, `prod.env.example`, the PT-02 backup-horizon caveat, and the workspace-lifecycle operator runbook (PRG-01, PRG-02)
+- [x] 22-10-PLAN.md — As-built filing: SPECIFICATION.md §3-§8, `prod.env.example`, the PT-02 backup-horizon caveat, and the workspace-lifecycle operator runbook (PRG-01, PRG-02)
 
 **Research flag**: RESOLVED at planning — RESEARCH.md mapped the full FK graph (27 tenant tables, three RESTRICT edges) and the deletion order; no separate architecture spike is needed.
 **Plan-time decisions**: RESOLVED at planning. (a) Privilege model → a dedicated pool authenticated as the **existing** `mega_crm_auth` role (22-07), not a grant widening: the real gap is narrower than framed — `mega_crm_app` already owns every tenant table and already has `UPDATE` on `organization`, and only `member`/`invitation` are out of reach (migration 0045). (b) Quiesce mechanism → a pure RLS policy-predicate change to **three** scan policies (`flow_runs_scan` is a third gap the discussion did not name), with no new grant, since migration 0042 already gives `mega_crm_scan` table-level `SELECT` on `organization`; the discussion's assumption that a column-level grant was needed is incorrect. (c) Backup caveat → a note in `docs/runbooks/backups.md` beside the structurally identical Phase 14 D-08 note, plus a one-line pointer in SPECIFICATION.md (22-10).
@@ -287,7 +287,7 @@ Plans:
 | 19. Unsubscribe Secret Graceful Rotation | v1.2 | 5/5 | Complete    | 2026-08-21 |
 | 20. Campaign Template Correctness | v1.2 | 6/6 | Complete    | 2026-08-21 |
 | 21. Per-Contact DSR Export | v1.2 | 8/8 | Complete    | 2026-08-23 |
-| 22. Workspace Quiesce & Physical Purge | v1.2 | 9/10 | In Progress|  |
+| 22. Workspace Quiesce & Physical Purge | v1.2 | 10/10 | In Progress|  |
 
 ---
 *v1.2 roadmap created 2026-08-20 — 18/18 requirements mapped, no orphans. Next: `/gsd-plan-phase 18`.*
