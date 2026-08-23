@@ -228,9 +228,33 @@ Plans:
   4. Another workspace's rows in the same monthly partitions are provably unchanged after a purge — demonstrated by a negative test — and the purge performs no DROP, DETACH or TRUNCATE.
   5. A workspace restored after its purge was enqueued is not purged: eligibility is re-checked inside every batch and the purge refuses rather than silently skipping.
 
-**Plans**: TBD
-**Research flag**: deeper research at plan time (multi-table FK ordering, privilege model, PITR-backup caveat for compliance claims) — research recommends a short architecture spike before implementation.
-**Plan-time decisions**: (a) privilege model for cross-tenant deletion — grant migration on `organization` for `mega_crm_app` vs a dedicated elevated DSN following the partition-relocation precedent; (b) exact quiesce mechanism closing the verified `campaigns_scan`/`flows_scan` gap (they do not check `organization.deletedAt` today); (c) documented caveat that purged data persists in encrypted pgBackRest backups until their retention expires.
+**Plans**: 10 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 22-01-PLAN.md — Tracer: purge state machine end-to-end on one workspace — `purge_records` (platform table, no RLS, no FK), the worker's first env module with the retention floor, discover → report-only tick → checkpointed two-table walk → anonymized `organization` tombstone, plus the `erasure_records` FK relax that keeps evidence alive (PRG-01, PRG-02, PRG-03, PRG-05)
+- [ ] 22-02-PLAN.md — Dispatch-time quiesce kill on all three send paths, recorded as an `excluded` send fact with the new `workspace_deleted` reason, plus the kickoff fan-out guard and the test-send path that has no ledger row (PRG-06)
+- [ ] 22-03-PLAN.md — Ingestion quiesce: typed 403 in the shared `apiKeyAuth` hook, indistinguishable generic 404 on the anonymous webhook route before signature verification, and drain-window guards on both ingest workers (PRG-06)
+
+**Wave 2** *(blocked on Wave 1)*
+
+- [ ] 22-04-PLAN.md — Migration 0070: `campaigns_scan`, `flows_scan` and `flow_runs_scan` exclude soft-deleted workspaces (three policies, not the two originally named), plus the analytics-reconciliation enumeration filter, proven by a negative discovery test per policy (PRG-06)
+- [ ] 22-05-PLAN.md — Full FK-ordered table coverage incl. both partitioned tables and the three secret tables, `docs/PII-INVENTORY.md` reconciled table-by-table, and the SC4 neighbour-safety negative test (PRG-02, PRG-04)
+- [ ] 22-06-PLAN.md — Operator restore CLI (point-of-no-return refusal under the purge's own advisory lock, overdue campaigns flipped to draft) and the on-demand eligibility report CLI (PRG-01, PRG-05)
+
+**Wave 3** *(blocked on Wave 2)*
+
+- [ ] 22-07-PLAN.md — `member`/`invitation` deletion through a scoped `mega_crm_auth` pool, with a real 42501 proving the Phase 10 trust boundary still refuses the ordinary pool (PRG-02)
+- [ ] 22-08-PLAN.md — Stuck/failed-purge watchdog on the `ops_alert_state` dedup claim, its runbook, and four healthy-state controls so the report-only window never alerts (PRG-01, PRG-03)
+
+**Wave 4** *(blocked on Wave 3)*
+
+- [ ] 22-09-PLAN.md — Real-SIGKILL kill-and-resume proof at three seams, with destroyed-row counts compared against an uninterrupted control run (PRG-03)
+- [ ] 22-10-PLAN.md — As-built filing: SPECIFICATION.md §3-§8, `prod.env.example`, the PT-02 backup-horizon caveat, and the workspace-lifecycle operator runbook (PRG-01, PRG-02)
+
+**Research flag**: RESOLVED at planning — RESEARCH.md mapped the full FK graph (27 tenant tables, three RESTRICT edges) and the deletion order; no separate architecture spike is needed.
+**Plan-time decisions**: RESOLVED at planning. (a) Privilege model → a dedicated pool authenticated as the **existing** `mega_crm_auth` role (22-07), not a grant widening: the real gap is narrower than framed — `mega_crm_app` already owns every tenant table and already has `UPDATE` on `organization`, and only `member`/`invitation` are out of reach (migration 0045). (b) Quiesce mechanism → a pure RLS policy-predicate change to **three** scan policies (`flow_runs_scan` is a third gap the discussion did not name), with no new grant, since migration 0042 already gives `mega_crm_scan` table-level `SELECT` on `organization`; the discussion's assumption that a column-level grant was needed is incorrect. (c) Backup caveat → a note in `docs/runbooks/backups.md` beside the structurally identical Phase 14 D-08 note, plus a one-line pointer in SPECIFICATION.md (22-10).
 **UI hint**: no
 
 ## Progress
@@ -260,7 +284,7 @@ Plans:
 | 19. Unsubscribe Secret Graceful Rotation | v1.2 | 5/5 | Complete    | 2026-08-21 |
 | 20. Campaign Template Correctness | v1.2 | 6/6 | Complete    | 2026-08-21 |
 | 21. Per-Contact DSR Export | v1.2 | 8/8 | Complete    | 2026-08-23 |
-| 22. Workspace Quiesce & Physical Purge | v1.2 | 0/TBD | Not started | - |
+| 22. Workspace Quiesce & Physical Purge | v1.2 | 0/10 | Planned | - |
 
 ---
 *v1.2 roadmap created 2026-08-20 — 18/18 requirements mapped, no orphans. Next: `/gsd-plan-phase 18`.*
