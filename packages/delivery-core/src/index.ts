@@ -47,6 +47,8 @@ export {
   type ResolveReconcilingVerdict,
 } from "./send-ledger.js";
 
+export { isWorkspaceSoftDeleted, WORKSPACE_DELETED_EXCLUSION_REASON } from "./workspace-quiesce.js";
+
 export {
   classifyReconcilableSend,
   RECONCILE_RESOLUTION_WINDOW_MS,

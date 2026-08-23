@@ -10,6 +10,8 @@ import {
   signUnsubscribeToken,
   buildListUnsubscribeUrl,
   getWorkspaceSendSettings,
+  isWorkspaceSoftDeleted,
+  WORKSPACE_DELETED_EXCLUSION_REASON,
   type DispatchSendGateResult,
 } from "@mega-crm/delivery-core";
 import type { FlowDefinition } from "@mega-crm/flows-core";
@@ -133,6 +135,20 @@ export async function claimFlowSend(
   params: { workspaceId: string; flowRunId: string; nodeId: string; contactId: string }
 ): Promise<FlowClaimResult> {
   const { workspaceId, flowRunId, nodeId, contactId } = params;
+
+  // T-22-02-01 (PRG-06, D-01/D-02/D-03): the SAME fail-closed dispatch-time
+  // quiesce check as the campaign path (send-dispatch.ts's
+  // claimCampaignSend) -- one shared lookup, imported not hand-rolled, so
+  // the two paths can never drift on what "deleted" means. Positioned before
+  // readFlowSendPrereqs, evaluatePreSendGate, and any transport call.
+  // Records through recordFlowExcluded, the flow-side sibling of the
+  // campaign path's recordExcluded, and touches nothing else -- D-02's
+  // freeze-never-cancel rule.
+  if (await isWorkspaceSoftDeleted(client, workspaceId)) {
+    await recordFlowExcluded(client, { workspaceId, flowRunId, nodeId, contactId }, WORKSPACE_DELETED_EXCLUSION_REASON);
+    return { kind: "excluded", reason: WORKSPACE_DELETED_EXCLUSION_REASON };
+  }
+
   const prereqs = await readFlowSendPrereqs(client, workspaceId, flowRunId, nodeId);
 
   const { rows: contactRows } = await client.query<ContactRow>(
