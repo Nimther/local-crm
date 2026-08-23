@@ -108,7 +108,7 @@ export function ExportContactButton({
   const message = disabledReason ?? serverError;
 
   return canExport ? (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       <Button
         type="button"
         variant="outline"
@@ -118,7 +118,11 @@ export function ExportContactButton({
         <Download className="mr-2 h-4 w-4" />
         {exportMutation.isPending ? "Скачиваем…" : "Скачать данные контакта"}
       </Button>
-      {message ? <p className="text-sm font-medium text-destructive">{message}</p> : null}
+      {/* 21-08/G-21-3: basis-full drops the message onto its own line below
+          the button instead of pinning it beside it at narrow widths --
+          only layout classes added, the destructive text styling trio is
+          unchanged (contact-dsr-export.test.tsx asserts it). */}
+      {message ? <p className="basis-full break-words text-sm font-medium text-destructive">{message}</p> : null}
     </div>
   ) : null;
 }
@@ -297,12 +301,12 @@ export function ContactDetailPage() {
 
   return (
     <div className="space-y-6 p-8">
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <h1 className="text-display font-semibold">{title}</h1>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <h1 className="min-w-0 break-words text-display font-semibold">{title}</h1>
           <SubscriptionStatusBadge status={contact.subscriptionStatus} />
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           {/* D-01/DSR-04/SC3: non-destructive action left of the destructive Delete button. */}
           {canExport ? <ExportContactButton slug={slug} contact={contact} viewerRole={viewerRole} /> : null}
           <DeleteContactDialog slug={slug} contact={contact} />
