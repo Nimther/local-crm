@@ -124,7 +124,7 @@ describe("newestAutoReversibleTier", () => {
     }
   });
 
-  it("returns the current repository's trailing run as exactly [\"0066_campaigns_version\", \"0067_dsr_export_contact_indexes\", \"0068_workspace_purge_records\"] -- 0068 is the newest shipped migration and is itself auto-reversible", () => {
+  it("returns an empty run -- 0069_erasure_records_contact_fk_relax is the newest shipped migration and is itself forward-only", () => {
     // Phase 15 (OPS-13, plan 15-14, Task 1): 0065 is a grants-only migration
     // (column-level GRANT + CREATE POLICY on workspace_webhook_endpoints,
     // human-approved override of this plan's own "no new migration"
@@ -146,20 +146,21 @@ describe("newestAutoReversibleTier", () => {
     // 0068_workspace_purge_records creates a brand-new table (no RLS, no FK)
     // and adds one defaulted, nullable column (organization.purgedAt) -- pure
     // additive shape, no backfill, and is classified auto-reversible too,
-    // extending the trailing run one tag further still -- it is now the
-    // newest shipped migration, directly after 0067, so the run grows to
+    // extending the trailing run one tag further still (it briefly became
     // ["0066_campaigns_version", "0067_dsr_export_contact_indexes",
-    // "0068_workspace_purge_records"] rather than resetting. Plan 22-01's
-    // OWN Task 2 (migration 0069, which drops and re-adds a foreign key
-    // constraint) resets this trailing run to empty again -- see that
-    // task's edit to this same assertion. Pinned explicitly so a future
-    // migration silently changing this fails loudly here rather than only
-    // inside the rehearsal test.
-    expect(newestAutoReversibleTier(MIGRATIONS_DIR)).toEqual([
-      "0066_campaigns_version",
-      "0067_dsr_export_contact_indexes",
-      "0068_workspace_purge_records",
-    ]);
+    // "0068_workspace_purge_records"] between this plan's Task 1 and Task 2
+    // commits).
+    //
+    // Phase 22 (PRG-02, D-10, plan 22-01, Task 2): 0069_erasure_records_contact_fk_relax
+    // drops and re-adds the erasure_records.contact_id foreign key
+    // (NOT NULL/CASCADE -> nullable/SET NULL) -- a DROP CONSTRAINT, forward-
+    // only reason (5) (re-adding a constraint recreates the SHAPE, never the
+    // history of what was rejected while the old constraint was enforced).
+    // It is now the newest shipped migration and is itself forward-only, so
+    // the trailing run resets to EMPTY, same as 0065 did earlier in this
+    // journal. Pinned explicitly so a future migration silently changing
+    // this fails loudly here rather than only inside the rehearsal test.
+    expect(newestAutoReversibleTier(MIGRATIONS_DIR)).toEqual([]);
   });
 
   it("returns an empty run when the newest migration is forward-only", () => {

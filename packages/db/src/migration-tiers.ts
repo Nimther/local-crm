@@ -139,6 +139,7 @@ export const MIGRATION_TIERS: Readonly<Record<string, MigrationTier>> = Object.f
   "0066_campaigns_version": "auto-reversible", // single ADD COLUMN with a constant default and no backfill -- the mechanical inverse (drop the column) destroys only the token this migration introduced and nothing that existed before it
   "0067_dsr_export_contact_indexes": "auto-reversible", // three plain CREATE INDEX statements (plus COMMENT ON INDEX) -- no table/column/constraint change, no backfill; dropping the three indexes destroys only bookkeeping this migration introduced and nothing pre-existing
   "0068_workspace_purge_records": "auto-reversible", // CREATE TABLE purge_records (no RLS, no FK) + ADD COLUMN organization.purgedAt -- pure additive shape, no backfill, destroys nothing that existed before
+  "0069_erasure_records_contact_fk_relax": "forward-only", // DROP CONSTRAINT (drops and re-adds the erasure_records.contact_id FK) -- reason (5): re-adding a constraint recreates the SHAPE, never the history of what was rejected while the old CASCADE FK was enforced
 });
 
 /**
