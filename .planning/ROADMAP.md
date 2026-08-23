@@ -181,7 +181,7 @@ Plans:
   4. An export request naming a contact id from another workspace returns nothing (negative cross-tenant test), and freeform JSONB (`events.properties`, `send_events.payload`) reaches the file only through an explicit allowlist — a synthetic field holding another subject's data is provably absent from the export.
   5. Exporting an already-anonymized (erased) contact behaves predictably — a typed response describing the state, never a silently empty file.
 
-**Plans**: 6/6 plans executed
+**Plans**: 8 plans — 6/6 executed, 2 gap-closure plans pending from UAT
 
 Plans:
 **Wave 1**
@@ -201,6 +201,16 @@ Plans:
 **Wave 4** *(blocked on Wave 3 completion)*
 
 - [x] 21-06-PLAN.md — Journey sections (`flowParticipation` with steps, `campaignMemberships`), migration 0067's three contact-scoped indexes, and the as-built record in SPECIFICATION.md + COVERAGE.md (DSR-02, DSR-03)
+
+**Wave 5** *(gap closure — UAT gap G-21-2)*
+
+- [ ] 21-07-PLAN.md — Bodyless UI deletes: `apiFetch` attaches the JSON content type only when a body is present, pinned by a per-verb request-shape matrix, plus the contact-card delete path as a Playwright spec (unblocks UAT Test 2's two-tab erasure race; fixes team/segments/campaigns/flows deletes by the same change)
+
+**Wave 6** *(gap closure — UAT gap G-21-3; blocked on Wave 5: imports its e2e preamble helper and the Playwright lane's fixed ports are exclusive)*
+
+- [ ] 21-08-PLAN.md — Narrow-viewport contact card: responsive shell (fixed sidebar leaves the layout below `md`, drawer replaces it), wrapping header/actions/message, content-column fit, proven by a 375px measurement spec that reproduces the UAT numbers
+
+**Gap-closure decisions**: the G-21-2 fix is client-side only — a server-side empty-JSON-tolerant content-type parser was rejected in diagnosis (it would relax the contract platform-wide, including the public event-ingestion and webhook surfaces). For G-21-3 the planner settled the shell-layer choice the diagnosis handed over: make `AppShell` responsive rather than re-scope the "no horizontal page overflow" criterion to the content column, because header wrapping alone provably cannot clear page overflow at 375px while the 256px sidebar stands.
 
 **Plan-time decisions**: RESOLVED at planning — the JSONB rule is two explicit build-up allowlists in one shared package (`@mega-crm/delivery-core`), consumed by both the API export path and the worker erasure path: `events.properties` is excluded entirely (D-01, mirroring the Phase 13 erasure ruling — the whole key space is tenant-supplied, so no allowlist over it can be defended), and `send_events.payload` passes an export allowlist that is structurally a superset of the erasure evidence allowlist, adding only the subject's own single-recipient fields `ip`, `useragent`, `url`, `reason` (D-02). The superset relation is asserted by a test, not just documented, and the per-table definition of a contact's personal data lives in `docs/PII-INVENTORY.md` (D-03/D-04) for Phase 22's purge to consume. Also resolved: RESEARCH.md Pitfall 2's verified index gap is closed in this phase by migration 0067 rather than deferred, since Phase 22 scans the same tables by contact.
 **UI hint**: yes
