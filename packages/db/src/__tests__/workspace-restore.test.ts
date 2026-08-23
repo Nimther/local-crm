@@ -374,6 +374,18 @@ describe("workspace restore + purge report (Phase 22, plan 22-06)", () => {
       expect(entry.tableCounts).toEqual({ contacts: 3, subscription_status_history: 1 });
       expect(entry.eligibleAt?.getTime()).toBe(deletedAt.getTime() + 30 * 24 * 60 * 60 * 1000);
       expect(entry.status).toBe("not yet reported");
+
+      // The primary branch of loadPurgeStatus: once a purge_records row
+      // exists, the report reflects its real status rather than the
+      // "not yet reported" fallback.
+      await insertPurgeRecord(workspaceId, {
+        status: "reported",
+        softDeletedAt: deletedAt,
+        eligibleAt: new Date(deletedAt.getTime() + 30 * 24 * 60 * 60 * 1000),
+        firstDestructiveBatchAt: null,
+      });
+      const reportAfterRecord = await buildWorkspacePurgeReport({ pool, retentionDays: 30 }, { workspaceId });
+      expect(reportAfterRecord.workspaces[0].status).toBe("reported");
     });
 
     it("report for all eligible: lists exactly the eligible workspaces, excluding one not yet eligible", async () => {
