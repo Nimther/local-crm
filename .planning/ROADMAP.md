@@ -251,6 +251,9 @@ Plans:
 **Wave 4** *(blocked on Wave 3)*
 
 - [ ] 22-09-PLAN.md — Real-SIGKILL kill-and-resume proof at three seams, with destroyed-row counts compared against an uninterrupted control run (PRG-03)
+
+**Wave 5** *(blocked on Wave 4: 22-10's end-of-phase `failure:all` regression runs the `failure:workspace-purge-resume` script 22-09 adds to the root `package.json`)*
+
 - [ ] 22-10-PLAN.md — As-built filing: SPECIFICATION.md §3-§8, `prod.env.example`, the PT-02 backup-horizon caveat, and the workspace-lifecycle operator runbook (PRG-01, PRG-02)
 
 **Research flag**: RESOLVED at planning — RESEARCH.md mapped the full FK graph (27 tenant tables, three RESTRICT edges) and the deletion order; no separate architecture spike is needed.
