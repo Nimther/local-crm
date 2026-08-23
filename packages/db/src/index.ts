@@ -189,6 +189,14 @@ export * from "./schema/purge-records.js";
 // import PURGE_ADVISORY_LOCK_NAMESPACE / PURGE_TABLE_ORDER / countPurgeTableRows
 // too, and a package cannot depend back on an app.
 export * from "./workspace-purge-tables.js";
+// Phase 22 (PRG-05, D-13/D-14/D-15, plan 22-06): the restore half of the
+// purge state machine -- see that file's header for the shared-advisory-lock
+// and D-15 overdue-campaign rationale.
+export * from "./workspace-restore.js";
+// Phase 22 (PRG-01, D-07, plan 22-06): the on-demand eligibility census the
+// operator report CLI builds -- see that file's header for why it never
+// writes.
+export * from "./workspace-purge-report.js";
 export { TENANT_GUC_KEY } from "./rls.js";
 // Phase 14 plan 01 (D-13, DB-05/DB-06, OPS-04/OPS-05): the one shared
 // definition of "a migration is applied", consumed by scripts/migrate-runner.mjs
