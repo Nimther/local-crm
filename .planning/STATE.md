@@ -4,17 +4,17 @@ milestone: v1.2
 milestone_name: Data Lifecycle & Delivery Trust
 current_phase: 22
 current_phase_name: Workspace Quiesce & Physical Purge
-status: planning
-stopped_at: "Phase 21 complete (UAT 4/4, verification passed, security 41/41 closed), ready to plan Phase 22"
-last_updated: "2026-08-23T11:57:11.174Z"
+status: "Phase 21 shipped — PR #27"
+stopped_at: Phase 21 complete (UAT 4/4, verification passed, security 41/41 closed), ready to plan Phase 22
+last_updated: "2026-08-23T14:23:51.682Z"
 last_activity: 2026-08-23
-last_activity_desc: Phase 21 complete, transitioned to Phase 22
 progress:
   total_phases: 5
   completed_phases: 4
   total_plans: 23
   completed_plans: 23
   percent: 80
+last_activity_desc: Phase 21 complete, transitioned to Phase 22
 ---
 
 # Project State
@@ -30,8 +30,8 @@ See: .planning/PROJECT.md (updated 2026-08-23 after Phase 21)
 
 Phase: 22 — Workspace Quiesce & Physical Purge
 Plan: Not started
-Status: Ready to plan
-Last activity: 2026-08-23 — Phase 21 complete, transitioned to Phase 22
+Status: Phase 21 shipped — PR #27
+Last activity: 2026-08-23
 
 Progress: [████████░░] 80% (4/5 v1.2 phases complete)
 
