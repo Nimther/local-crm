@@ -228,14 +228,14 @@ Plans:
   4. Another workspace's rows in the same monthly partitions are provably unchanged after a purge — demonstrated by a negative test — and the purge performs no DROP, DETACH or TRUNCATE.
   5. A workspace restored after its purge was enqueued is not purged: eligibility is re-checked inside every batch and the purge refuses rather than silently skipping.
 
-**Plans**: 10 plans
+**Plans**: 3/10 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 22-01-PLAN.md — Tracer: purge state machine end-to-end on one workspace — `purge_records` (platform table, no RLS, no FK), the worker's first env module with the retention floor, discover → report-only tick → checkpointed two-table walk → anonymized `organization` tombstone, plus the `erasure_records` FK relax that keeps evidence alive (PRG-01, PRG-02, PRG-03, PRG-05)
-- [ ] 22-02-PLAN.md — Dispatch-time quiesce kill on all three send paths, recorded as an `excluded` send fact with the new `workspace_deleted` reason, plus the kickoff fan-out guard and the test-send path that has no ledger row (PRG-06)
-- [ ] 22-03-PLAN.md — Ingestion quiesce: typed 403 in the shared `apiKeyAuth` hook, indistinguishable generic 404 on the anonymous webhook route before signature verification, and drain-window guards on both ingest workers (PRG-06)
+- [x] 22-01-PLAN.md — Tracer: purge state machine end-to-end on one workspace — `purge_records` (platform table, no RLS, no FK), the worker's first env module with the retention floor, discover → report-only tick → checkpointed two-table walk → anonymized `organization` tombstone, plus the `erasure_records` FK relax that keeps evidence alive (PRG-01, PRG-02, PRG-03, PRG-05)
+- [x] 22-02-PLAN.md — Dispatch-time quiesce kill on all three send paths, recorded as an `excluded` send fact with the new `workspace_deleted` reason, plus the kickoff fan-out guard and the test-send path that has no ledger row (PRG-06)
+- [x] 22-03-PLAN.md — Ingestion quiesce: typed 403 in the shared `apiKeyAuth` hook, indistinguishable generic 404 on the anonymous webhook route before signature verification, and drain-window guards on both ingest workers (PRG-06)
 
 **Wave 2** *(blocked on Wave 1)*
 
@@ -287,7 +287,7 @@ Plans:
 | 19. Unsubscribe Secret Graceful Rotation | v1.2 | 5/5 | Complete    | 2026-08-21 |
 | 20. Campaign Template Correctness | v1.2 | 6/6 | Complete    | 2026-08-21 |
 | 21. Per-Contact DSR Export | v1.2 | 8/8 | Complete    | 2026-08-23 |
-| 22. Workspace Quiesce & Physical Purge | v1.2 | 0/10 | Planned | - |
+| 22. Workspace Quiesce & Physical Purge | v1.2 | 3/10 | In Progress|  |
 
 ---
 *v1.2 roadmap created 2026-08-20 — 18/18 requirements mapped, no orphans. Next: `/gsd-plan-phase 18`.*
