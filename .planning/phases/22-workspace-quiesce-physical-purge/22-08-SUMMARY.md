@@ -153,3 +153,7 @@ None - no external service configuration required.
 ---
 *Phase: 22-workspace-quiesce-physical-purge*
 *Completed: 2026-08-23*
+
+## Self-Check: PASSED
+
+All created files verified present on disk (`purge-watchdog.ts`, `purge-watchdog.test.ts`, `workspace-purge-stuck-alert.md`, this SUMMARY.md). All four task commits (`4721905`, `045f6dc`, `23472a9`, `d553e66`) verified present in `git log --oneline --all`.
