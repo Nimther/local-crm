@@ -1,6 +1,7 @@
 import { randomBytes, createHash, timingSafeEqual } from "node:crypto";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { lookupApiKeyById } from "./api-keys.repository.js";
+import { isWorkspaceSoftDeletedById } from "../tenancy/workspace-lookup.js";
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -58,6 +59,17 @@ export function generateApiKey(): GeneratedApiKey {
 const UNAUTHORIZED_BODY = { error: "Invalid or missing API key" };
 
 /**
+ * Phase 22 (PRG-06, D-04): every failure path on this branch returns this
+ * frozen body -- a workspace-deleted 403 must be as stable/predictable a
+ * shape as `UNAUTHORIZED_BODY`/`FORBIDDEN_SCOPE_BODY`. Unlike those two, a
+ * distinct machine-readable `code` is intentional here: the caller already
+ * proved possession of a valid key for this exact workspace (unlike the
+ * anonymous webhook surface), so telling them their OWN workspace's state
+ * is not an enumeration oracle -- it is their own account status.
+ */
+const WORKSPACE_DELETED_BODY = { error: "Workspace not found", code: "workspace_deleted" };
+
+/**
  * onRequest hook (Pattern 3): resolves `workspace_id` from a presented
  * `Authorization: Bearer mcrm_<id>.<secret>` header -- the auth mechanism
  * for the Contacts API (CONT-03) and Event API (EVNT-01), distinct from
@@ -90,6 +102,20 @@ export async function apiKeyAuth(request: FastifyRequest, reply: FastifyReply): 
   const storedHash = Buffer.from(row.secretHash);
   if (providedHash.length !== storedHash.length || !timingSafeEqual(providedHash, storedHash)) {
     await reply.code(401).send(UNAUTHORIZED_BODY);
+    return;
+  }
+
+  // Phase 22 (PRG-06, D-04): placed in this shared hook, not on the events
+  // route alone -- apiKeyAuth ALSO fronts the public Contacts API, which
+  // writes contact PII, and D-04's purpose ("nothing accumulates new PII in
+  // a workspace awaiting purge") covers both. One check here covers every
+  // present and future key-authed surface; a route-scoped check would have
+  // to be remembered on each new one. Goes through the shared
+  // `isWorkspaceSoftDeletedById` lookup (fail-closed) rather than a second
+  // hand-rolled `organization` query -- the webhook route uses the same
+  // function so the two ingress refusals can never drift onto two rules.
+  if (await isWorkspaceSoftDeletedById(row.workspaceId)) {
+    await reply.code(403).send(WORKSPACE_DELETED_BODY);
     return;
   }
 
