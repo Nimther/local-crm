@@ -46,9 +46,13 @@ export const erasureRecords = pgTable(
     workspaceId: uuid("workspace_id")
       .notNull()
       .references(() => organization.id, { onDelete: "cascade" }),
-    contactId: uuid("contact_id")
-      .notNull()
-      .references(() => contacts.id, { onDelete: "cascade" }),
+    // Phase 22 (PRG-02, D-10, migration 0069): nullable, ON DELETE SET NULL
+    // -- was NOT NULL / ON DELETE CASCADE (migration 0059). A workspace
+    // physical purge destroys `contacts` rows directly (never relying on
+    // this cascade); SET NULL is what lets this evidence row survive that
+    // destruction, readable, with its contact reference cleared rather than
+    // being destroyed alongside the contact it once described.
+    contactId: uuid("contact_id").references(() => contacts.id, { onDelete: "set null" }),
     requestedAt: timestamp("requested_at", { withTimezone: true }).notNull().defaultNow(),
     anonymizedAt: timestamp("anonymized_at", { withTimezone: true }).notNull(),
     scrubStartedAt: timestamp("scrub_started_at", { withTimezone: true }),

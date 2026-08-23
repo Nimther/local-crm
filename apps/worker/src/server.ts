@@ -1,4 +1,10 @@
 import "./load-env.js";
+// Phase 22 (D-06, plan 22-01): imported ONLY after the `./load-env.js`
+// side-effect import above -- the same load-ordering apps/api depends on
+// for its own env.ts. This module's `workerEnv = parseWorkerEnv(process.env)`
+// evaluates at module scope, so importing it before `./load-env.js` has run
+// would validate against an as-yet-unpopulated environment.
+import "./env.js";
 import type { Redis } from "ioredis";
 import type { Job, Worker } from "bullmq";
 import { scrubbedConsole } from "@mega-crm/redaction";
@@ -33,6 +39,7 @@ import { createWebhookReplaySweepWorker } from "./queues/webhook-replay-sweep.wo
 import { createReputationTickWorker } from "./queues/reputation-tick.worker.js";
 import { createErasureScrubWorker } from "./queues/erasure-scrub.worker.js";
 import { createErasureScrubReclaimWorker } from "./queues/erasure-scrub-reclaim.worker.js";
+import { createWorkspacePurgeWorker } from "./queues/workspace-purge.worker.js";
 
 /**
  * The worker process's runtime handle: a standalone shared ioredis
@@ -379,6 +386,12 @@ export async function buildWorker(): Promise<WorkerRuntime> {
     // request path uses, so a reclaim of an already-queued record is a
     // no-op rather than a second scrub.
     createErasureScrubReclaimWorker(buildRedisConnectionOptions(redisUrl)),
+    // PRG-01/PRG-02/PRG-03/PRG-05 (22-01): the workspace physical-purge
+    // tracer -- discovers retention-elapsed soft-deleted workspaces,
+    // announces them (report-only tick, per-table census), then destroys
+    // their tenant rows in FK order across checkpointed, resumable batches
+    // one tick later, ending as an anonymized organization tombstone.
+    createWorkspacePurgeWorker(buildRedisConnectionOptions(redisUrl)),
   ];
 
   // Phase 12 (WRK-08/WRK-10): attach the shared error/failed listener,
@@ -448,7 +461,7 @@ async function main(): Promise<void> {
   process.on("SIGTERM", shutdown);
 
   scrubbedConsole.log(
-    `apps/worker started (${runtime.workers.length} BullMQ worker(s) registered: events:ingest, imports:csv, email-broadcast, email-triggered, campaign-kickoff, campaign-scheduler, webhook-events, analytics-reconciliation, flow-run-advance, flow-reconciliation, flow-trigger-evaluator, flow-segment-sweep, flow-segment-sweep-flow, flow-enroll-existing, partition-maintenance, send-reconciler, webhook-replay-sweep, reputation-tick, erasure-scrub, erasure-scrub-reclaim)`
+    `apps/worker started (${runtime.workers.length} BullMQ worker(s) registered: events:ingest, imports:csv, email-broadcast, email-triggered, campaign-kickoff, campaign-scheduler, webhook-events, analytics-reconciliation, flow-run-advance, flow-reconciliation, flow-trigger-evaluator, flow-segment-sweep, flow-segment-sweep-flow, flow-enroll-existing, partition-maintenance, send-reconciler, webhook-replay-sweep, reputation-tick, erasure-scrub, erasure-scrub-reclaim, workspace-purge)`
   );
 }
 

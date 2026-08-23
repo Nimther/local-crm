@@ -62,7 +62,19 @@ const CORE_DOMAIN_TABLES = [
  * `workspace_isolation` policy and this exemption must be removed at that
  * time -- it is not a permanent carve-out.
  */
-const RLS_ACCEPT_EXEMPT = new Set(["reputation_alert_state"]);
+/**
+ * Phase 22 (PRG-01/PRG-02/PRG-03/PRG-05, migration 0068, threat T-22-01-07,
+ * disposition: accept). `purge_records` carries a `workspace_id` column
+ * (every row is scoped to exactly one workspace) but is a REVIEWED,
+ * DELIBERATE exception to the blanket "every workspace_id-bearing table gets
+ * RLS" invariant below -- not a missed table. It is read/written exclusively
+ * by the platform-side purge worker, never a tenant-facing surface, and it
+ * must survive the destruction of the very tenant tables RLS would
+ * otherwise scope it alongside -- see migration 0068's own table comment for
+ * the full reasoning. Same "role identity is the boundary" precedent as
+ * `organization`/`dead_letter_jobs`/`reputation_alert_state` above.
+ */
+const RLS_ACCEPT_EXEMPT = new Set(["reputation_alert_state", "purge_records"]);
 
 describe("migration chain: empty database (QG-05 run A)", () => {
   let pool: Pool;

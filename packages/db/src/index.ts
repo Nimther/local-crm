@@ -35,6 +35,7 @@ import * as erasureRecordsSchema from "./schema/erasure-records.js";
 import * as workspaceSuppressionKeysSchema from "./schema/workspace-suppression-keys.js";
 import * as partitionRetentionDropsSchema from "./schema/partition-retention-drops.js";
 import * as opsAlertStateSchema from "./schema/ops-alert-state.js";
+import * as purgeRecordsSchema from "./schema/purge-records.js";
 
 const schema = {
   ...authSchema,
@@ -71,6 +72,7 @@ const schema = {
   ...workspaceSuppressionKeysSchema,
   ...partitionRetentionDropsSchema,
   ...opsAlertStateSchema,
+  ...purgeRecordsSchema,
 };
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -177,6 +179,16 @@ export * from "./schema/partition-retention-drops.js";
 // type-inference shape -- see that file's header for the keyed-not-singleton
 // rationale.
 export * from "./schema/ops-alert-state.js";
+// Phase 22 (PRG-01/PRG-02/PRG-03/PRG-05, plan 22-01): the workspace-purge
+// checkpoint-plus-evidence table's own type-inference shape -- see that
+// file's header for the RLS-free/FK-free rationale.
+export * from "./schema/purge-records.js";
+// Phase 22 (plan 22-01): the frozen purge table allowlist and its batched-
+// DELETE/count primitives -- lives in packages/db (not apps/worker) because
+// 22-06's restore path and report builder, both in packages/db, need to
+// import PURGE_ADVISORY_LOCK_NAMESPACE / PURGE_TABLE_ORDER / countPurgeTableRows
+// too, and a package cannot depend back on an app.
+export * from "./workspace-purge-tables.js";
 export { TENANT_GUC_KEY } from "./rls.js";
 // Phase 14 plan 01 (D-13, DB-05/DB-06, OPS-04/OPS-05): the one shared
 // definition of "a migration is applied", consumed by scripts/migrate-runner.mjs

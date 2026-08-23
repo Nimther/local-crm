@@ -477,6 +477,20 @@
       "when": 1786598400004,
       "tag": "0067_dsr_export_contact_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1786598400005,
+      "tag": "0068_workspace_purge_records",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1786598400006,
+      "tag": "0069_erasure_records_contact_fk_relax",
+      "breakpoints": true
     }
   ]
 }
