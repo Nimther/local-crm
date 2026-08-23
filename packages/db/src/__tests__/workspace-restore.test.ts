@@ -371,7 +371,15 @@ describe("workspace restore + purge report (Phase 22, plan 22-06)", () => {
       expect(report.workspaces).toHaveLength(1);
       const entry = report.workspaces[0];
       expect(entry.workspaceId).toBe(workspaceId);
-      expect(entry.tableCounts).toEqual({ contacts: 3, subscription_status_history: 1 });
+      // The census covers every table in PURGE_TABLE_ORDER (widened to the
+      // full FK-ordered allowlist by plan 22-05); only the two seeded tables
+      // carry rows here, everything else must census to zero.
+      expect(entry.tableCounts).toMatchObject({ contacts: 3, subscription_status_history: 1 });
+      for (const [table, count] of Object.entries(entry.tableCounts)) {
+        if (table !== "contacts" && table !== "subscription_status_history") {
+          expect(count, `expected zero rows censused in ${table}`).toBe(0);
+        }
+      }
       expect(entry.eligibleAt?.getTime()).toBe(deletedAt.getTime() + 30 * 24 * 60 * 60 * 1000);
       expect(entry.status).toBe("not yet reported");
 
