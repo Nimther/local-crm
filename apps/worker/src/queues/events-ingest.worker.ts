@@ -1,9 +1,33 @@
 import { Worker, type Job, type ConnectionOptions } from "bullmq";
 import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { upsertContactByIdentity } from "@mega-crm/contacts-core";
+import { db } from "@mega-crm/db";
 import { EVENTS_INGEST_QUEUE, eventsIngestJobSchema, type EventsIngestJob } from "@mega-crm/shared-schemas";
 import { flowTriggerEvaluatorQueue } from "./flows/flow-queues.js";
 import { wrapProcessor } from "../processor-wrapper.js";
+import { logger } from "../logger.js";
+
+/**
+ * Phase 22 (PRG-06, RESEARCH Open Question 1, zero-tolerance resolution):
+ * closes the queue-drain window -- a job already sitting in the queue when
+ * its workspace was soft-deleted must not write a contact or event row.
+ *
+ * TODO(22-02): `packages/delivery-core/src/workspace-quiesce.ts` (plan
+ * 22-02, same wave) is meant to be the ONE shared fail-closed lookup every
+ * dispatch/ingest path uses. This is a deliberate local duplicate of that
+ * exact rule (SELECT "deletedAt" FROM organization WHERE id = $1; refuse on
+ * both a non-null deletedAt AND a missing row) added because 22-02 had not
+ * yet landed on this branch when this task ran. Whichever of 22-02/22-03
+ * merges second MUST delete this local copy in favour of importing the
+ * shared helper -- do not leave two lookups with two rules on the branch
+ * past the wave boundary.
+ */
+async function isWorkspaceSoftDeletedForIngest(workspaceId: string): Promise<boolean> {
+  const org = await db.query.organization.findFirst({
+    where: (fields, { eq }) => eq(fields.id, workspaceId),
+  });
+  return !org || org.deletedAt !== null;
+}
 
 /**
  * The events:ingest job handler (EVNT-02/EVNT-03, Pattern 2): re-derives
@@ -38,6 +62,18 @@ import { wrapProcessor } from "../processor-wrapper.js";
 export async function processEventIngestJob(data: EventsIngestJob): Promise<void> {
   const { workspaceId, eventId, occurredAt, name, properties, externalId, email } =
     eventsIngestJobSchema.parse(data);
+
+  // Phase 22 (PRG-06): resolved once per job, before any tenant write and
+  // before the flow-trigger fan-out -- never per event inside a batch. Not a
+  // failure: returns the processor's normal success value so BullMQ never
+  // retries or dead-letters work that must simply never happen.
+  if (await isWorkspaceSoftDeletedForIngest(workspaceId)) {
+    logger.info(
+      { workspaceId, eventId },
+      "events:ingest job dropped -- workspace soft-deleted (PRG-06 drain-window guard)"
+    );
+    return;
+  }
 
   const { contactId } = await withTenant(workspaceId, () =>
     withTenantTransaction(async (client) => {
