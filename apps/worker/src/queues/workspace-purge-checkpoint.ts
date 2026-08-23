@@ -107,3 +107,36 @@ export async function markPurgeTableDone(client: PurgeRecordsClient, workspaceId
     [workspaceId, table],
   );
 }
+
+/**
+ * Phase 22 (PRG-02, D-10/D-12, plan 22-07): merges the auth step's two
+ * destroyed-row counts (`member`, `invitation`) into the SAME `table_counts`
+ * jsonb payload the tenant-table census above populates -- one evidence
+ * record describing the whole purge, not two separate shapes. This does NOT
+ * violate this module's own header comment ("table_counts is written EXACTLY
+ * ONCE, by the reporting phase"): that claim is about the `PURGE_TABLE_ORDER`
+ * census keys specifically. `member` and `invitation` are Better Auth tables
+ * that are never part of `PURGE_TABLE_ORDER` (see
+ * `@mega-crm/db`'s `workspace-purge-tables.ts`) and therefore never have a
+ * census value to begin with -- this jsonb `||` merge only ever ADDS those
+ * two new keys, it can never overwrite a tenant-table census entry. Called
+ * exactly once per successful auth step, from
+ * `apps/worker/src/queues/workspace-purge.worker.ts`, on the SAME
+ * `platformClient` connection immediately before `markPurgeTableDone` marks
+ * the step complete -- a resumed purge that re-runs an already-completed
+ * auth step (a no-op, see `deleteWorkspaceAuthRows`'s own doc comment) writes
+ * the same two numbers again, which is harmless.
+ */
+export async function recordAuthPurgeCounts(
+  client: PurgeRecordsClient,
+  workspaceId: string,
+  counts: { memberCount: number; invitationCount: number },
+): Promise<void> {
+  await client.query(
+    `UPDATE purge_records
+        SET table_counts = table_counts || jsonb_build_object('member', $2::int, 'invitation', $3::int),
+            updated_at = now()
+      WHERE workspace_id = $1`,
+    [workspaceId, counts.memberCount, counts.invitationCount],
+  );
+}

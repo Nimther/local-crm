@@ -19,7 +19,9 @@ import {
   advanceWorkspacePurgeCheckpoint,
   loadWorkspacePurgeProgress,
   markPurgeTableDone,
+  recordAuthPurgeCounts,
 } from "./workspace-purge-checkpoint.js";
+import { deleteWorkspaceAuthRows } from "./workspace-purge-auth.js";
 
 /**
  * Phase 22 (PRG-01/PRG-02/PRG-03/PRG-05, D-05/D-07/D-09/D-14, plan 22-01):
@@ -187,6 +189,18 @@ async function beginDestructivePhase(client: PlatformClient, workspaceId: string
   );
 }
 
+/**
+ * Phase 22 (PRG-02, D-10/D-12, plan 22-07): the synthetic `completed_tables`
+ * marker for the auth step -- never a real `PurgeTable` name, so it can never
+ * collide with an entry in `PURGE_TABLE_ORDER`. Recorded via the SAME
+ * `markPurgeTableDone` primitive every tenant table uses, so a resumed purge
+ * skips an already-completed auth step exactly like it skips an
+ * already-completed table -- and re-running it anyway would be harmless
+ * regardless, since `deleteWorkspaceAuthRows` deleting already-absent rows is
+ * a zero-count no-op.
+ */
+const AUTH_STEP_MARKER = "auth";
+
 type DeletePurgeBatchFn = typeof deletePurgeBatchDefault;
 
 /**
@@ -340,6 +354,37 @@ async function runWorkspacePurgeWalk(
       for (const table of PURGE_TABLE_ORDER) {
         if (progress.completedTables.includes(table)) continue;
         await walkPurgeTable(platformClient, workspaceId, table, batchSize, deleteBatchFn);
+      }
+
+      // Phase 22 (PRG-02, D-12, plan 22-07): the auth step runs AFTER every
+      // tenant table is empty and BEFORE the tombstone -- this ordering IS
+      // the guarantee that a purge never reports success with membership
+      // rows left behind. Guarded by the SAME `progress.completedTables`
+      // snapshot the table loop above reads (fetched once at the top of this
+      // function): a resumed purge whose auth step already succeeded on an
+      // earlier tick skips it here exactly like it skips an
+      // already-completed table above.
+      //
+      // Deliberately inside THIS try block, not a nested one: any failure
+      // from `deleteWorkspaceAuthRows` (a missing `AUTH_DATABASE_URL`, a
+      // connection error, a permission error) falls straight into the
+      // catch below -- `purge_records` is marked `failed` with a reason
+      // naming the auth connection (the thrown error's own message), the
+      // organization is NOT tombstoned, and the error is re-thrown so BullMQ
+      // sees this tick's job fail. The re-throw buys VISIBILITY only -- it
+      // does not cause a retry into destruction. Per this file's own header
+      // comment, `loadDestructiblePurgeRecords` matches `reported` and
+      // `purging` only, so once this catch marks the row `failed` every
+      // later tick (retried or scheduled) passes it over. The only way past
+      // `failed` is the documented operator act (`UPDATE purge_records SET
+      // status = 'purging', purge_error = NULL WHERE workspace_id = $1`,
+      // 22-08's runbook) -- after which the next tick resumes here, sees
+      // `AUTH_STEP_MARKER` still absent from `completed_tables`, and tries
+      // the auth step again.
+      if (!progress.completedTables.includes(AUTH_STEP_MARKER)) {
+        const authCounts = await deleteWorkspaceAuthRows(workspaceId);
+        await recordAuthPurgeCounts(platformClient, workspaceId, authCounts);
+        await markPurgeTableDone(platformClient, workspaceId, AUTH_STEP_MARKER);
       }
 
       await tombstoneOrganization(platformClient, workspaceId);
