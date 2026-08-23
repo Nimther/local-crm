@@ -154,6 +154,10 @@ None beyond the investigative step described above.
 
 None — no external service configuration required.
 
+## Self-Check: PASSED
+
+All created/modified files confirmed present on disk; all four commits (`f6cb341`, `cf18ffe`, `badb8f8`, `4f4446b`) confirmed present in git log.
+
 ## Next Phase Readiness
 
 - Gap G-21-3 is closed: all four `must_haves.truths` from the plan frontmatter are met and machine-verified by `contact-card-narrow-viewport.spec.ts`, except the drawer's own interactive behavior (D5, deferred to human verification above).
