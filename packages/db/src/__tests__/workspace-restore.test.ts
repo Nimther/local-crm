@@ -1,12 +1,16 @@
+import os from "node:os";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
+import { execSync } from "node:child_process";
 
 import { Pool, type PoolClient } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { applyMigrationFile, createEphemeralDatabase, dropEphemeralDatabase, listMigrationFiles } from "@mega-crm/test-support";
 
+import { PURGE_ADVISORY_LOCK_NAMESPACE } from "../workspace-purge-tables.js";
 import { restoreWorkspace, WorkspaceNotDeletedError, WorkspacePurgeStartedError } from "../workspace-restore.js";
 import { buildWorkspacePurgeReport, formatWorkspacePurgeReport } from "../workspace-purge-report.js";
 
@@ -30,6 +34,9 @@ import { buildWorkspacePurgeReport, formatWorkspacePurgeReport } from "../worksp
  */
 
 const MIGRATIONS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../migrations");
+const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
+const RESTORE_CLI = path.resolve(PROJECT_ROOT, "packages/db/scripts/restore-workspace.ts");
+const SCRATCHPAD = fs.mkdtempSync(path.join(os.tmpdir(), "workspace-restore-cli-"));
 
 function adminDsnForDatabase(adminDsn: string, databaseName: string): string {
   const url = new URL(adminDsn);
@@ -43,6 +50,7 @@ describe("workspace restore + purge report (Phase 22, plan 22-06)", () => {
   let databaseName: string;
   let adminDsn: string;
   let dsn: string;
+  let emptyEnvFile: string;
 
   beforeAll(async () => {
     const created = await createEphemeralDatabase({ workspace: "workspace-restore" });
@@ -56,13 +64,46 @@ describe("workspace restore + purge report (Phase 22, plan 22-06)", () => {
     for (const file of files) {
       await applyMigrationFile(pool, MIGRATIONS_DIR, file);
     }
+
+    // Empty .env file so the restore CLI subprocess never loads this
+    // machine's real dev config (mirrors replay-webhook-journal-cli.test.ts's
+    // identical hermetic-environment precedent).
+    emptyEnvFile = path.join(SCRATCHPAD, `.env.workspace-restore-test.${Date.now()}`);
+    fs.writeFileSync(emptyEnvFile, "");
   }, 60_000);
 
   afterAll(async () => {
     await pool?.end();
     await adminPool?.end();
     if (databaseName) await dropEphemeralDatabase(databaseName, adminDsn);
+    fs.rmSync(SCRATCHPAD, { recursive: true, force: true });
   });
+
+  /**
+   * Spawns the restore CLI as a real subprocess with a hermetic environment
+   * -- mirrors `replay-webhook-journal-cli.test.ts`'s own `spawnCli` helper.
+   * Proves the CLI wrapper's own exit code, not merely the thrown error
+   * type restoreWorkspace itself produces.
+   */
+  function spawnRestoreCli(args: string[]): { exitCode: number; stdout: string; stderr: string } {
+    let stdout = "";
+    let stderr = "";
+    let exitCode = 0;
+    try {
+      stdout = execSync(`npx tsx ${RESTORE_CLI} ${args.join(" ")}`, {
+        cwd: path.join(PROJECT_ROOT, "packages/db"),
+        env: { MEGA_CRM_ENV_FILE: emptyEnvFile, DATABASE_URL: dsn, NODE_ENV: "test", PATH: process.env.PATH },
+        encoding: "utf-8",
+        timeout: 30_000,
+      });
+    } catch (caught) {
+      const err = caught as { status?: number; stdout?: Buffer | string; stderr?: Buffer | string };
+      exitCode = err.status ?? 1;
+      stdout = err.stdout?.toString() ?? "";
+      stderr = err.stderr?.toString() ?? "";
+    }
+    return { exitCode, stdout, stderr };
+  }
 
   async function freshWorkspaceId(nameSeed: string): Promise<string> {
     const { rows } = await adminPool.query<{ id: string }>(
@@ -381,6 +422,139 @@ describe("workspace restore + purge report (Phase 22, plan 22-06)", () => {
       expect(formatted).not.toContain(sentinelEmail);
       expect(formatted).not.toContain(sentinelFirstName);
       expect(formatted).not.toContain("report-no-pii-sentinel"); // the seeded organization name fragment
+    });
+  });
+
+  describe("Task 3: the race -- restore against a running purge, in both directions, refused not skipped", () => {
+    /**
+     * Both directions are driven deterministically by taking the SAME
+     * advisory lock the purge worker
+     * (apps/worker/src/queues/workspace-purge.worker.ts's
+     * `runWorkspacePurgeWalk`) and `restoreWorkspace` both take -- never by
+     * a sleep. `packages/db` cannot import `apps/worker` (a package cannot
+     * depend on an app -- see `workspace-purge-tables.ts`'s own header), so
+     * the purge side of each race is simulated with the exact same raw
+     * `pg_try_advisory_lock`/`pg_advisory_unlock` calls and `purge_records`
+     * writes the real worker issues, not by invoking that worker's code.
+     * The worker's own structured "advisory lock already held -- skipping"
+     * log line for this exact probe is asserted directly by 22-01's own
+     * suite (apps/worker/src/queues/__tests__/workspace-purge.test.ts,
+     * "single-flight"); this suite's job is only the lock arbitration
+     * itself.
+     */
+    it("restore wins: while the lock is held, a concurrent purge probe fails and skips, then restore completes once the lock is released", async () => {
+      const workspaceId = await freshWorkspaceId("race-restore-wins");
+      const deletedAt = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000);
+      await pool.query(`UPDATE organization SET "deletedAt" = $2 WHERE id = $1`, [workspaceId, deletedAt]);
+      await insertPurgeRecord(workspaceId, {
+        status: "reported",
+        softDeletedAt: deletedAt,
+        eligibleAt: new Date(),
+        firstDestructiveBatchAt: null,
+      });
+
+      // Simulate "the restore path just after it takes the advisory lock" --
+      // hold the SAME namespace/key on a dedicated raw connection.
+      const holderClient = await pool.connect();
+      const { rows: holderRows } = await holderClient.query<{ locked: boolean }>(
+        `SELECT pg_try_advisory_lock($1, hashtext($2)) AS locked`,
+        [PURGE_ADVISORY_LOCK_NAMESPACE, workspaceId],
+      );
+      expect(holderRows[0].locked).toBe(true);
+
+      try {
+        // Simulate "start a purge tick": the SAME non-blocking probe
+        // runWorkspacePurgeWalk issues before its own destructive phase.
+        const purgeProbeClient = await pool.connect();
+        try {
+          const { rows: probeRows } = await purgeProbeClient.query<{ locked: boolean }>(
+            `SELECT pg_try_advisory_lock($1, hashtext($2)) AS locked`,
+            [PURGE_ADVISORY_LOCK_NAMESPACE, workspaceId],
+          );
+          expect(probeRows[0].locked).toBe(false); // the purge tick is refused the lock -- it would skip, not proceed
+        } finally {
+          purgeProbeClient.release();
+        }
+
+        // Nothing was stamped or deleted while the "purge" side was skipped.
+        const { rows: recordRows } = await pool.query<{ firstDestructiveBatchAt: Date | null }>(
+          `SELECT first_destructive_batch_at AS "firstDestructiveBatchAt" FROM purge_records WHERE workspace_id = $1`,
+          [workspaceId],
+        );
+        expect(recordRows[0].firstDestructiveBatchAt).toBeNull();
+      } finally {
+        await holderClient.query(`SELECT pg_advisory_unlock($1, hashtext($2))`, [PURGE_ADVISORY_LOCK_NAMESPACE, workspaceId]);
+        holderClient.release();
+      }
+
+      // Restore proceeds normally once the lock is free.
+      const result = await restoreWorkspace(workspaceId, { pool });
+      expect(result.workspaceId).toBe(workspaceId);
+      const org = await readOrganization(workspaceId);
+      expect(org.deletedAt).toBeNull();
+    });
+
+    it("purge wins: once first_destructive_batch_at is set and a row is gone, restore refuses with a non-zero CLI exit and touches neither deletedAt nor the deleted row", async () => {
+      const workspaceId = await freshWorkspaceId("race-purge-wins");
+      const deletedAt = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000);
+      await pool.query(`UPDATE organization SET "deletedAt" = $2 WHERE id = $1`, [workspaceId, deletedAt]);
+      const [contactIdA, contactIdB] = await seedContacts(workspaceId, 2);
+
+      // Simulate the purge's own beginDestructivePhase plus one destroyed batch.
+      await insertPurgeRecord(workspaceId, {
+        status: "purging",
+        softDeletedAt: deletedAt,
+        eligibleAt: new Date(),
+        firstDestructiveBatchAt: new Date(),
+      });
+      await withWorkspace(workspaceId, (client) => client.query(`DELETE FROM contacts WHERE id = $1`, [contactIdA]));
+
+      await expect(restoreWorkspace(workspaceId, { pool })).rejects.toThrow(WorkspacePurgeStartedError);
+
+      const org = await readOrganization(workspaceId);
+      expect(org.deletedAt).not.toBeNull();
+
+      const remainingIds = await withWorkspace(workspaceId, async (client) => {
+        const { rows } = await client.query<{ id: string }>(`SELECT id FROM contacts WHERE workspace_id = $1`, [workspaceId]);
+        return rows.map((r) => r.id);
+      });
+      expect(remainingIds).toEqual([contactIdB]);
+
+      // The CLI wrapper's own exit code, not only the thrown error type.
+      const { exitCode, stderr } = spawnRestoreCli([workspaceId]);
+      expect(exitCode).not.toBe(0);
+      expect(stderr).toMatch(/WorkspacePurgeStartedError/);
+    });
+
+    it("restore after a refused purge that already destroyed rows: still refuses -- the boundary is the first destroyed row, not the failure", async () => {
+      const workspaceId = await freshWorkspaceId("race-failed-past-boundary");
+      await softDeleteWorkspace(workspaceId, 40);
+      await insertPurgeRecord(workspaceId, {
+        status: "failed",
+        softDeletedAt: new Date(),
+        eligibleAt: new Date(),
+        firstDestructiveBatchAt: new Date(),
+      });
+
+      await expect(restoreWorkspace(workspaceId, { pool })).rejects.toThrow(WorkspacePurgeStartedError);
+      const org = await readOrganization(workspaceId);
+      expect(org.deletedAt).not.toBeNull();
+    });
+
+    it("restore after a refused purge that never destroyed anything: succeeds -- a failed report-only record is not past the boundary", async () => {
+      const workspaceId = await freshWorkspaceId("race-failed-before-boundary");
+      await softDeleteWorkspace(workspaceId, 40);
+      await insertPurgeRecord(workspaceId, {
+        status: "failed",
+        softDeletedAt: new Date(),
+        eligibleAt: new Date(),
+        firstDestructiveBatchAt: null,
+      });
+
+      const result = await restoreWorkspace(workspaceId, { pool });
+      expect(result.workspaceId).toBe(workspaceId);
+      const org = await readOrganization(workspaceId);
+      expect(org.deletedAt).toBeNull();
     });
   });
 });
