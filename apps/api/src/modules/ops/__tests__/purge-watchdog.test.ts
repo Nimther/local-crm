@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
@@ -289,5 +291,31 @@ describe("checkWorkspacePurgeHealthAndAlert (fake client, spy sendMail)", () => 
     expect(body).not.toContain(plantedWorkspaceName);
     expect(body).not.toContain(plantedContactEmail);
     expect(body).not.toMatch(/[^\s@]+@[^\s@]+\.[^\s@]+/);
+  });
+});
+
+/**
+ * Task 2 additions (plan 22-08): the boot-registration assertion, matching
+ * this task's own <behavior> text.
+ *
+ * The task's own second case -- calling `checkRunbookCoverage` from
+ * `scripts/check-runbook-coverage.mjs` directly inside this suite -- is
+ * DELIBERATELY DROPPED per this task's own escape hatch: `apps/api`'s
+ * `tsconfig.json` has `rootDir: "src"` and no `allowJs`, so importing a
+ * `.mjs` file from outside `src` makes `npm run build -w apps/api` fail with
+ * TS7016 ("implicitly has an 'any' type") even though `vitest` itself (an
+ * esbuild-transformed runtime, not a type-checked one) resolves and runs it
+ * fine. `npm run check:runbook-coverage` in this task's own `<verify>` step
+ * already asserts the exact same thing from the repository root, so the gate
+ * itself is not weakened by dropping the in-suite duplicate.
+ */
+
+describe("server.ts registration", () => {
+  it("test 11: startWorkspacePurgeWatchdog is imported and called from apps/api/src/server.ts, alongside the other watchdogs", () => {
+    const serverPath = fileURLToPath(new URL("../../../server.ts", import.meta.url));
+    const source = readFileSync(serverPath, "utf8");
+
+    expect(source).toMatch(/from ["']\.\/modules\/ops\/purge-watchdog\.js["']/);
+    expect(source).toMatch(/startWorkspacePurgeWatchdog\(\{/);
   });
 });
