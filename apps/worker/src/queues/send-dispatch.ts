@@ -636,6 +636,26 @@ export async function processSendJob(
     if (!testTo) {
       throw new Error("testTo is required for kind='test'");
     }
+
+    // T-22-02-01 (PRG-06, D-01/D-03): the SAME fail-closed quiesce check as
+    // the campaign/flow branches above, but this branch NEVER calls
+    // recordExcluded -- D-12 means a test send has no `sends` row to attach
+    // an exclusion to in the first place (RESEARCH.md Pitfall 4), so the
+    // refusal is a structured log line naming the workspace and reason
+    // instead of a ledger write. Positioned before the unsubscribe-token
+    // build and before readSendPrereqs -- the earliest point this branch can
+    // check anything. Returns the branch's normal non-error outcome
+    // (`"skipped"`, the same "nothing happened, not an error" outcome a
+    // redelivered-onto-a-terminal-row job returns elsewhere in this file) so
+    // BullMQ completes the job rather than retrying it.
+    const testSendWorkspaceDeleted = await withTenantTransaction((client) =>
+      isWorkspaceSoftDeleted(client, workspaceId)
+    );
+    if (testSendWorkspaceDeleted) {
+      logger.info({ kind: "test", workspaceId, reason: WORKSPACE_DELETED_EXCLUSION_REASON }, "test send refused: workspace soft-deleted");
+      return { outcome: "skipped" };
+    }
+
     const sendId = randomUUID();
 
     // Phase 15 plan 19 (OPS-11, G-15-1): binds this test send's own

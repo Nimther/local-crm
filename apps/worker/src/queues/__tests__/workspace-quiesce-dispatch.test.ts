@@ -1,11 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Pool } from "pg";
 import { Redis } from "ioredis";
 import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { isWorkspaceSoftDeleted, WORKSPACE_DELETED_EXCLUSION_REASON } from "@mega-crm/delivery-core";
 import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool, createFixtureFlowRun } from "../../test/db-fixture.js";
 import { processSendJob, type SendJobResult } from "../send-dispatch.js";
+import { processCampaignKickoffJob } from "../campaign-kickoff.worker.js";
+import { emailBroadcastQueue } from "../campaign-broadcast-producer.js";
 import {
   freshWorkspaceId,
   connectFixtureSendgridKey,
@@ -253,5 +255,121 @@ describe("dispatch-time workspace quiesce (PRG-06, SC1, plan 22-02)", () => {
     const flowAfter = await flowRunState(flowWorkspaceId, flowRunId);
     expect(flowAfter).toEqual(flowBefore);
     expect(flowCounting.callCount()).toBe(0);
+  });
+
+  // --- Task 2: the two paths with no send row -----------------------------
+
+  async function createCampaignWithSegment(workspaceId: string, segmentDefinition: unknown): Promise<string> {
+    return withTenant(workspaceId, () =>
+      withTenantTransaction(async (client) => {
+        const { rows: segmentRows } = await client.query<{ id: string }>(
+          `INSERT INTO segments (workspace_id, name, definition, created_by_user_id)
+           VALUES ($1, 'Quiesce fixture segment', $2, 'test-user') RETURNING id`,
+          [workspaceId, segmentDefinition]
+        );
+        const { rows: campaignRows } = await client.query<{ id: string }>(
+          `INSERT INTO campaigns (workspace_id, name, status, segment_id, template_id, from_email, created_by_user_id)
+           VALUES ($1, 'Quiesce fixture campaign', 'sending', $2, 'd-fixture-template', 'sender@fixture.test', 'test-user')
+           RETURNING id`,
+          [workspaceId, segmentRows[0].id]
+        );
+        return campaignRows[0].id;
+      })
+    );
+  }
+
+  const ALWAYS_MATCH_DEFINITION = {
+    version: 1,
+    groups: [
+      { conditions: [{ type: "attribute", source: "standard", field: "country", operator: "is_not_empty" }] },
+    ],
+  };
+
+  async function seedMatchingContacts(workspaceId: string, count: number): Promise<void> {
+    await withTenant(workspaceId, () =>
+      withTenantTransaction(async (client) => {
+        for (let i = 0; i < count; i += 1) {
+          await client.query(
+            `INSERT INTO contacts (workspace_id, email, country) VALUES ($1, $2, 'US')`,
+            [workspaceId, `kickoff-${i}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@fixture.test`]
+          );
+        }
+      })
+    );
+  }
+
+  it("PRG-06: test-send refuses for a deleted workspace without writing any sends row", async () => {
+    const workspaceId = await freshWorkspaceId(pool, "quiesce-test-send-refuse");
+    await connectFixtureSendgridKey(workspaceId);
+    const campaignId = await createFixtureCampaign(workspaceId);
+    await softDeleteWorkspace(workspaceId);
+
+    const counting = countingSendMail(202);
+    const result = await processSendJob(
+      { workspaceId, campaignId, kind: "test", testTo: "marketer@fixture.test" },
+      { sendMail: counting.fn, redisClient }
+    );
+
+    expect(counting.callCount(), "SendGrid must never be called for a soft-deleted workspace's test send").toBe(0);
+    expect(result).toEqual({ outcome: "skipped" });
+
+    const rowCount = await withTenant(workspaceId, () =>
+      withTenantTransaction(async (client) => {
+        const { rows } = await client.query(`SELECT id FROM sends WHERE workspace_id = $1 AND campaign_id = $2`, [
+          workspaceId,
+          campaignId,
+        ]);
+        return rows.length;
+      })
+    );
+    expect(rowCount, "the test-send path never inserts a sends row, quiesced or not").toBe(0);
+  });
+
+  it("test-send still succeeds for a live workspace", async () => {
+    const workspaceId = await freshWorkspaceId(pool, "quiesce-test-send-live");
+    await connectFixtureSendgridKey(workspaceId);
+    const campaignId = await createFixtureCampaign(workspaceId);
+
+    const counting = countingSendMail(202);
+    const result = await processSendJob(
+      { workspaceId, campaignId, kind: "test", testTo: "marketer@fixture.test" },
+      { sendMail: counting.fn, redisClient }
+    );
+
+    expect(result.outcome).toBe("sent");
+    expect(counting.callCount()).toBe(1);
+  });
+
+  it("PRG-06/D-01: campaign kickoff enqueues zero per-recipient jobs for a soft-deleted workspace", async () => {
+    const workspaceId = await freshWorkspaceId(pool, "quiesce-kickoff-refuse");
+    await seedMatchingContacts(workspaceId, 3);
+    const campaignId = await createCampaignWithSegment(workspaceId, ALWAYS_MATCH_DEFINITION);
+    await softDeleteWorkspace(workspaceId);
+
+    const statusBefore = await campaignStatus(workspaceId, campaignId);
+    const addSpy = vi.spyOn(emailBroadcastQueue, "add");
+    try {
+      await processCampaignKickoffJob({ workspaceId, campaignId });
+      expect(addSpy, "a deleted workspace's kickoff must fan out nothing at all").not.toHaveBeenCalled();
+    } finally {
+      addSpy.mockRestore();
+    }
+
+    const statusAfter = await campaignStatus(workspaceId, campaignId);
+    expect(statusAfter).toBe(statusBefore);
+  });
+
+  it("campaign kickoff for a live workspace enqueues one job per sendable recipient (unaffected)", async () => {
+    const workspaceId = await freshWorkspaceId(pool, "quiesce-kickoff-live");
+    await seedMatchingContacts(workspaceId, 3);
+    const campaignId = await createCampaignWithSegment(workspaceId, ALWAYS_MATCH_DEFINITION);
+
+    const addSpy = vi.spyOn(emailBroadcastQueue, "add");
+    try {
+      await processCampaignKickoffJob({ workspaceId, campaignId });
+      expect(addSpy).toHaveBeenCalledTimes(3);
+    } finally {
+      addSpy.mockRestore();
+    }
   });
 });
