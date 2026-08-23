@@ -174,3 +174,7 @@ None - no external service configuration required.
 ---
 *Phase: 21-per-contact-dsr-export*
 *Completed: 2026-08-23*
+
+## Self-Check: PASSED
+
+All created/modified files found on disk (apps/web/src/lib/api.ts, apps/web/src/lib/__tests__/api.test.ts, apps/web/e2e/helpers/workspace-setup.ts, apps/web/e2e/contact-delete.spec.ts, this SUMMARY.md). All task commits found in git log (0b78770, 9b7b5fd, 0d27c68, 128c0fc, 3c8253d).
