@@ -255,4 +255,74 @@ describe("workspace purge: discover, report, destroy, tombstone (Task 1)", () =>
     expect(firstContactsIdx).toBeGreaterThan(lastHistoryIdx);
     expect(PURGE_TABLE_ORDER.indexOf("subscription_status_history")).toBeLessThan(PURGE_TABLE_ORDER.indexOf("contacts"));
   });
+
+  /**
+   * Task 2 (PRG-02, D-10, migration 0069): erasure evidence must survive the
+   * purge's destruction of the contacts it references.
+   */
+  async function seedFixtureErasureRecord(workspaceId: string, contactId: string): Promise<string> {
+    return withTenant(workspaceId, () =>
+      withTenantTransaction(async (client) => {
+        const { rows } = await client.query<{ id: string }>(
+          `INSERT INTO erasure_records (workspace_id, contact_id, anonymized_at, status)
+           VALUES ($1, $2, now(), 'pending') RETURNING id`,
+          [workspaceId, contactId],
+        );
+        return rows[0].id;
+      }),
+    );
+  }
+
+  interface ErasureRecordRow {
+    id: string;
+    workspaceId: string;
+    contactId: string | null;
+    status: string;
+    requestedAt: Date;
+    anonymizedAt: Date;
+  }
+
+  async function readErasureRecord(workspaceId: string, erasureRecordId: string): Promise<ErasureRecordRow | null> {
+    return withTenant(workspaceId, () =>
+      withTenantTransaction(async (client) => {
+        const { rows } = await client.query<ErasureRecordRow>(
+          `SELECT id, workspace_id AS "workspaceId", contact_id AS "contactId", status,
+                  requested_at AS "requestedAt", anonymized_at AS "anonymizedAt"
+             FROM erasure_records WHERE workspace_id = $1 AND id = $2`,
+          [workspaceId, erasureRecordId],
+        );
+        return rows[0] ?? null;
+      }),
+    );
+  }
+
+  it("erasure evidence survives the purge: the erasure_records row outlives its purged contact, with contact_id set to NULL", async () => {
+    const workspaceId = await freshWorkspaceId("purge-erasure-evidence");
+    await softDeleteWorkspace(workspaceId, 40);
+    const [contactIdA, contactIdB] = await seedContacts(workspaceId, 2);
+    const erasureRecordId = await seedFixtureErasureRecord(workspaceId, contactIdA);
+    const before = await readErasureRecord(workspaceId, erasureRecordId);
+
+    await processWorkspacePurge(); // report
+    await processWorkspacePurge(); // destroy
+
+    expect(await countContacts(workspaceId)).toBe(0);
+    void contactIdB;
+
+    const after = await readErasureRecord(workspaceId, erasureRecordId);
+    expect(after).not.toBeNull();
+    expect(after!.contactId).toBeNull();
+    expect(after!.workspaceId).toBe(workspaceId);
+    expect(after!.status).toBe(before!.status);
+    expect(after!.requestedAt).toEqual(before!.requestedAt);
+    expect(after!.anonymizedAt).toEqual(before!.anonymizedAt);
+  });
+
+  it("erasure_records is a declared evidence table, disjoint from the destructive walk order", async () => {
+    const { PURGE_EVIDENCE_TABLES } = await import("@mega-crm/db");
+    expect(PURGE_EVIDENCE_TABLES).toContain("erasure_records");
+    for (const table of PURGE_TABLE_ORDER) {
+      expect(PURGE_EVIDENCE_TABLES as readonly string[]).not.toContain(table);
+    }
+  });
 });

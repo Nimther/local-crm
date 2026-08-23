@@ -62,17 +62,28 @@ describe("checkEmptyDiff against the real repository (the CI-enforced copy of db
     // Diagnosable on failure: which snapshot, how many shipped migrations.
     // 0066 (Phase 20 plan 20-01, TMPL-02/D-05) adds `campaigns.version` --
     // a real packages/db/src/schema/*.ts change, so it DOES ship its own
-    // snapshot (0066_snapshot.json is now the newest, chaining from
-    // 0064_snapshot.json since 0065 was grants-only and shipped none).
+    // snapshot (0066_snapshot.json, chaining from 0064_snapshot.json since
+    // 0065 was grants-only and shipped none).
     // 0067 (Phase 21 plan 21-06, DSR-02/DSR-03) is SQL-only (three plain
     // CREATE INDEX statements, no packages/db/src/schema/*.ts change) --
-    // same precedent as 0065, so it ships NO snapshot of its own;
-    // comparedAgainstSnapshot and snapshotFileCount stay exactly what 0066
-    // left them at. shippedMigrationCount grows to 68 (one more shipped tag
-    // in the journal); snapshotFileCount stays 15 (no new snapshot file).
-    expect(result.comparedAgainstSnapshot).toBe("0066_snapshot.json");
-    expect(result.shippedMigrationCount).toBe(68);
-    expect(result.snapshotFileCount).toBe(15);
+    // same precedent as 0065, so it ships NO snapshot of its own.
+    // Phase 22 (plan 22-01): 0068_workspace_purge_records DOES change
+    // packages/db/src/schema/*.ts (purge-records.ts's new table, plus
+    // organization.purgedAt), and 0069_erasure_records_contact_fk_relax
+    // also does (erasure-records.ts's contactId becomes nullable/SET NULL)
+    // -- rather than one snapshot per migration, both are folded into ONE
+    // new snapshot (0069_snapshot.json, chaining from 0066_snapshot.json)
+    // attached to the newest of the two, mirroring the existing precedent
+    // that a SQL-only migration between two schema-changing ones (0067
+    // between 0066 and this pair) never gets a snapshot of its own -- what
+    // this check actually requires is that the NEWEST snapshot equal
+    // current schema.ts, not a 1:1 migration-to-snapshot mapping.
+    // comparedAgainstSnapshot and snapshotFileCount move to that new file;
+    // shippedMigrationCount grows to 70 (two more shipped tags in the
+    // journal); snapshotFileCount grows to 16 (one new snapshot file).
+    expect(result.comparedAgainstSnapshot).toBe("0069_snapshot.json");
+    expect(result.shippedMigrationCount).toBe(70);
+    expect(result.snapshotFileCount).toBe(16);
 
     // Never touches the repository -- proven, not assumed: the directory
     // listing (every file under packages/db/migrations, recursively) is
@@ -88,14 +99,13 @@ describe("checkEmptyDiff against the real repository (the CI-enforced copy of db
     // preceded it (0034), and its filename must match the newest SCHEMA-
     // CHANGING migration's tag prefix -- a mismatch here would mean
     // db:check-empty-diff is silently comparing against the wrong point in
-    // history. 0066 (Phase 20 plan 20-01, TMPL-02/D-05) remains the newest
-    // SCHEMA-CHANGING migration (asserted separately above via
-    // `comparedAgainstSnapshot`), but 0067 (Phase 21 plan 21-06) is now the
-    // newest SHIPPED migration overall -- SQL-only, no schema-file change,
-    // so it ships no snapshot of its own (same precedent as 0065). This
-    // assertion tracks the JOURNAL's newest tag, which is now 0067.
+    // history. Phase 22 (plan 22-01): 0069_erasure_records_contact_fk_relax
+    // is both the newest SCHEMA-CHANGING migration (asserted separately
+    // above via `comparedAgainstSnapshot`) AND the newest SHIPPED migration
+    // overall. This assertion tracks the JOURNAL's newest tag, which is now
+    // 0069.
     const newestTag = journal.entries[journal.entries.length - 1]?.tag;
-    expect(newestTag).toBe("0067_dsr_export_contact_indexes");
+    expect(newestTag).toBe("0069_erasure_records_contact_fk_relax");
   });
 });
 
@@ -158,6 +168,6 @@ describe("listSnapshotFiles", () => {
     const files = listSnapshotFiles(path.join(REAL_MIGRATIONS_DIR, "meta"));
     expect(files).not.toContain("_journal.json");
     expect(files).toEqual([...files].sort());
-    expect(files[files.length - 1]).toBe("0066_snapshot.json");
+    expect(files[files.length - 1]).toBe("0069_snapshot.json");
   });
 });
