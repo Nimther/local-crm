@@ -264,6 +264,10 @@ None — no external service configuration required. `WORKSPACE_PURGE_RETENTION_
 - The `failed` → `purging` manual-recovery contract (destructive selector matches `reported`/`purging` only, operator-only exit from `failed`) is implemented and tested; 22-08's runbook can document this exact statement verbatim.
 - No blockers for 22-02 through 22-10.
 
+## Self-Check: PASSED
+
+All 10 created files confirmed present via `git ls-files`; all 7 commits (6 task commits + this summary) confirmed present via `git log`.
+
 ---
 *Phase: 22-workspace-quiesce-physical-purge*
 *Completed: 2026-08-23*
