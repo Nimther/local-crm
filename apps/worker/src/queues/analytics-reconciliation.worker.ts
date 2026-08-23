@@ -293,18 +293,46 @@ export async function reconcileWorkspace(workspaceId: string, windowDays: number
 }
 
 /**
- * Constructs the repeatable analytics-reconciliation Worker (07-06, ANLT-04;
- * Phase 10 SEC-01/SEC-02, D-01/D-02): enumerates known workspaces via
- * `SELECT id FROM organization`, read through `withCrossWorkspaceScan` on
- * the dedicated `mega_crm_scan` login role -- the SAME single audited
+ * Phase 22 (PRG-06, plan 22-04, RESEARCH Open Question 3): enumerates
+ * workspaces via `SELECT id FROM organization`, narrowed to
+ * `"deletedAt" IS NULL` -- read through `withCrossWorkspaceScan` on the
+ * dedicated `mega_crm_scan` login role, the SAME single audited
  * cross-workspace read entry point every other cross-tenant discovery scan
- * in this codebase now uses, regardless of how sensitive the underlying
- * data is. `organization` carries no RLS of its own (it is the top-level
- * tenant identity table), so migration 0042 grants SELECT on it with no
- * accompanying policy; the boundary that matters here is role identity, not
- * a per-table predicate. Reconciles each workspace's recent window from a
- * fresh scan of its own `sends`, overwriting (never adding to) the
- * incrementally-maintained rollup rows. Self-healing/restart-safe by
+ * in this codebase uses. `organization` carries no RLS of its own (it is
+ * the top-level tenant identity table), so migration 0042 grants select on
+ * it with no accompanying policy -- the deletedAt filter below is an
+ * application-level WHERE clause, not a row-security predicate, mirroring
+ * every other scan consumer's own discovery query shape
+ * (`findDueCampaignCandidates`/`findLiveSegmentTriggeredFlows`/
+ * `findDueFlowRunCandidates`).
+ *
+ * `workspace_daily_rollup` is one of the four evidence sets D-10 keeps past
+ * a purge, and an evidence row whose modification timestamp keeps advancing
+ * after the tenant was frozen is a question a compliance reviewer will
+ * eventually ask -- this narrowing stops a soft-deleted (or later purged;
+ * `deletedAt` is never cleared by the purge itself) workspace's rollup rows
+ * from accruing `updated_at`/`dirtied_at` churn for the rest of the
+ * retention window. In the common case the re-write was idempotent (no new
+ * sends or events exist to change the counts once a workspace is frozen),
+ * so this is cheap insurance rather than a bug fix -- exactly why RESEARCH
+ * flagged it as a decision to make explicitly rather than pass over.
+ *
+ * Exported (mirrors every sibling scan consumer's own exported-query
+ * convention) so `workspace-quiesce-scan.test.ts` can drive discovery
+ * directly, without a live BullMQ worker.
+ */
+export async function findLiveWorkspaceIds(): Promise<WorkspaceRow[]> {
+  return withCrossWorkspaceScan(async (client) => {
+    const { rows } = await client.query<WorkspaceRow>(`SELECT id FROM organization WHERE "deletedAt" IS NULL`);
+    return rows;
+  });
+}
+
+/**
+ * Constructs the repeatable analytics-reconciliation Worker (07-06, ANLT-04;
+ * Phase 10 SEC-01/SEC-02, D-01/D-02): reconciles each workspace's recent
+ * window from a fresh scan of its own `sends`, overwriting (never adding to)
+ * the incrementally-maintained rollup rows. Self-healing/restart-safe by
  * construction, mirroring `createCampaignSchedulerWorker`'s repeatable-tick
  * shape: a worker restart's next tick simply re-scans and re-corrects, with
  * no separate delayed-job state to lose.
@@ -356,10 +384,7 @@ export function createAnalyticsReconciliationWorker(
   const worker = new Worker(
     ANALYTICS_RECONCILE_QUEUE,
     wrapProcessor(ANALYTICS_RECONCILE_QUEUE, async () => {
-      const rows = await withCrossWorkspaceScan(async (client) => {
-        const { rows: workspaceRows } = await client.query<WorkspaceRow>(`SELECT id FROM organization`);
-        return workspaceRows;
-      });
+      const rows = await findLiveWorkspaceIds();
       for (const row of rows) {
         await reconcileWorkspace(row.id, RECONCILE_WINDOW_DAYS);
       }
