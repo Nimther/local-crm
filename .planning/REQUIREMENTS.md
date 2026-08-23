@@ -18,7 +18,7 @@ Requirements for this milestone. Each maps to roadmap phases (continuing from Ph
 - [x] **DSR-01**: Owner/Admin может из карточки контакта скачать machine-readable файл с персональными данными контакта: профиль, custom properties, consent history
 - [x] **DSR-02**: Выгрузка включает события контакта и связанные с отправками персональные данные (send-факты, статусы доставки), ограниченные данными этого субъекта
 - [x] **DSR-03**: Все данные выгрузки ограничены workspace_id + contact_id; правила включения и редактирования freeform JSONB (events.properties, send_events.payload) определяются отдельным решением после анализа возможных данных других субъектов
-- [ ] **DSR-04**: Member без Owner/Admin-роли не может запустить выгрузку (ролевой гейт на API и в UI)
+- [x] **DSR-04**: Member без Owner/Admin-роли не может запустить выгрузку (ролевой гейт на API и в UI)
 
 ### Workspace Purge
 
@@ -81,7 +81,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DSR-01 | Phase 21 | Complete |
 | DSR-02 | Phase 21 | Complete |
 | DSR-03 | Phase 21 | Complete |
-| DSR-04 | Phase 21 | Pending |
+| DSR-04 | Phase 21 | Complete |
 | PRG-01 | Phase 22 | Pending |
 | PRG-02 | Phase 22 | Pending |
 | PRG-03 | Phase 22 | Pending |

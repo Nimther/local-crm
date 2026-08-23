@@ -1,7 +1,7 @@
 ---
 phase: 21-per-contact-dsr-export
 verified: 2026-08-23T08:25:09Z
-status: human_needed
+status: passed
 score: 18/18 must-haves verified
 behavior_unverified: 0
 overrides_applied: 0
@@ -10,11 +10,13 @@ re_verification:
   previous_score: 16/16
   basis_for_original_16: "Not re-run from scratch. Regression basis: (1) orchestrator's full workspace test suite ran green immediately before this session, apart from two documented machine-environmental sentry.test.ts failures and a known advisory-lock flake that passes in isolation, both pre-existing and unrelated to this phase; (2) this session live-re-ran the two test files touched by the gap-closure round plus the pre-existing web UI markup test (api.test.ts, contact-dsr-export.test.tsx = 21/21 passing); (3) direct re-read of every source file touched by 21-07/21-08 confirms the DSR export route/repository/schema/access-control code from the original 16 truths is untouched by this round (`git diff 99f6c10..HEAD` confined to apps/web client/e2e/shell files only, per 21-REVIEW.md's own file list)."
   gaps_closed:
+
     - "G-21-2: bodyless UI deletes (contact, team, segment, campaign, flow) returned 400 FST_ERR_CTP_EMPTY_JSON_BODY — fixed by making apiFetch's Content-Type header conditional on init.body being present"
     - "G-21-3: contact-card header overflowed the page at 375px (scrollWidth 1029-1220px vs clientWidth 375px), Delete button rendered off-screen — fixed by a responsive AppShell (sidebar hidden below md behind a Sheet drawer) plus header/message wrap classes"
   gaps_remaining: []
   regressions: []
 human_verification:
+
   - test: "Mobile drawer interaction: at a viewport below the md breakpoint, tap the «Меню» trigger, confirm the drawer lists all eleven destinations the desktop sidebar lists, tap one and confirm it navigates and the drawer closes, then confirm the drawer dismisses on Escape and on outside click."
     expected: "Drawer opens/closes/dismisses correctly and every destination is reachable and unique in the accessibility tree at all times."
     why_human: "This is 21-08's own deferred item (D5, human_judgment: true, never performed by the executor — 'autonomous plan, no interactive browser session available'). It has not been picked up by any UAT round since. While testing this, also exercise two edge cases the phase's own code-review (21-REVIEW.md WR-01, WR-02) found are NOT mechanically guarded: (a) open the drawer below md, then resize/rotate the viewport past md while the drawer is still open — the desktop aside uses CSS `hidden md:flex` (always mounted, not conditionally rendered, despite the AppShell docstring and 21-08-SUMMARY both claiming it is 'removed from rendering'), so it can become visible while the still-open, portaled Sheet drawer is also visible, producing two identically-named nav links in the accessibility tree; (b) open the drawer below md and pick a different workspace (or 'Создать воркспейс') from the WorkspaceSwitcher inside it — WorkspaceSwitcher's onSelect is not wired to the drawer's onNavigate close callback (confirmed: WorkspaceSwitcher is called as `<WorkspaceSwitcher activeSlug={slug} />` with no onNavigate prop), so the drawer is expected to stay open after that navigation."
