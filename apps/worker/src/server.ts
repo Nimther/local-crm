@@ -40,6 +40,7 @@ import { createReputationTickWorker } from "./queues/reputation-tick.worker.js";
 import { createErasureScrubWorker } from "./queues/erasure-scrub.worker.js";
 import { createErasureScrubReclaimWorker } from "./queues/erasure-scrub-reclaim.worker.js";
 import { createWorkspacePurgeWorker } from "./queues/workspace-purge.worker.js";
+import { closeAuthPurgePool } from "./queues/workspace-purge-auth.js";
 
 /**
  * The worker process's runtime handle: a standalone shared ioredis
@@ -109,6 +110,13 @@ export async function closeWorkerRuntime(
   // rather than by anything downstream. A no-op (resolves immediately) when
   // Sentry was never initialized (no DSN configured).
   await flushSentry(SENTRY_FLUSH_TIMEOUT_MS);
+  // Phase 22 (PRG-02, D-12, plan 22-07): closes the workspace-purge worker's
+  // dedicated mega_crm_auth pool alongside the other dedicated pools, so a
+  // rolling deploy does not leak connections. A no-op when the pool was
+  // never created -- the common case, since most worker processes never
+  // purge a workspace in their lifetime (see `closeAuthPurgePool`'s own doc
+  // comment in workspace-purge-auth.ts).
+  await closeAuthPurgePool();
   connection.disconnect();
   if (healthServer) {
     await healthServer.close();

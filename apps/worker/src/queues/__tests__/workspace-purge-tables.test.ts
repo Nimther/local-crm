@@ -517,7 +517,11 @@ describe("workspace purge tables: full FK order, secrets, evidence (plan 22-05)"
     expect(record!.status).toBe("complete");
     expect(record!.tableCounts.campaigns).toBe(0);
     expect(record!.tableCounts.flow_runs).toBe(0);
-    expect([...record!.completedTables].sort()).toEqual([...PURGE_TABLE_ORDER].sort());
+    // Phase 22 (PRG-02, D-12, plan 22-07): completed_tables now also carries
+    // the synthetic "auth" marker once the auth step (member/invitation
+    // deletion through the dedicated mega_crm_auth pool) completes -- see
+    // workspace-purge.worker.ts's own AUTH_STEP_MARKER doc comment.
+    expect([...record!.completedTables].sort()).toEqual([...PURGE_TABLE_ORDER, "auth"].sort());
     expect(await countTable(workspaceId, "contacts")).toBe(0);
     expect(await countTable(workspaceId, "segments")).toBe(0);
   });
