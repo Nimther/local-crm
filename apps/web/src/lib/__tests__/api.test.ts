@@ -21,7 +21,7 @@ function makeResponse(body: unknown, init: { ok?: boolean; status?: number } = {
     headers: {
       get: (name: string) => (name.toLowerCase() === "content-type" ? "application/json" : null),
     },
-    json: async () => body,
+    json: () => Promise.resolve(body),
   } as unknown as Response;
 }
 
