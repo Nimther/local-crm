@@ -1,8 +1,8 @@
 ---
-status: diagnosed
+status: resolved
 trigger: "UAT Phase 21 Test 2: Clicking 'Удалить контакт' sends DELETE with Content-Type: application/json but no body, so Fastify returns 400 FST_ERR_CTP_EMPTY_JSON_BODY and shows the generic error. Root cause per user: apiFetch always sets Content-Type: application/json, including bodyless apiDelete calls."
 created: 2026-08-23T00:00:00Z
-updated: 2026-08-23T00:40:00Z
+updated: 2026-08-23T08:27:39Z
 mode: find_root_cause_only, symptoms_prefilled
 ---
 

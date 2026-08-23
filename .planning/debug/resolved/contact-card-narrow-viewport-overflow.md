@@ -1,6 +1,6 @@
 # Debug Session: contact-card-narrow-viewport-overflow
 
-**Status:** root cause found
+**Status:** resolved (gap-closure plan 21-08, 2026-08-23)
 **Phase:** 21-per-contact-dsr-export (UAT Test 3, gap G-21-3)
 **Date:** 2026-08-23
 **Goal:** find_root_cause_only

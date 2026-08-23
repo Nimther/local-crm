@@ -1,14 +1,25 @@
 ---
-status: diagnosed
+status: testing
 phase: 21-per-contact-dsr-export
 source: [21-VERIFICATION.md]
 started: 2026-08-22T13:45:00Z
-updated: 2026-08-23T00:00:00Z
+updated: 2026-08-23T08:27:39Z
 ---
 
 ## Current Test
 
-[testing complete]
+number: 4
+name: Mobile drawer interaction (21-08 deferred human check D5 + review edge cases WR-01/WR-02)
+expected: |
+  At a viewport below the md breakpoint, the «Меню» trigger opens the drawer; it lists all
+  eleven destinations the desktop sidebar lists; tapping one navigates and closes the drawer;
+  the overlay dismisses on Escape and on outside click. Edge cases: (a) resize past md while
+  the drawer is open — check whether two identically-named nav renderings become visible
+  (WR-01: the desktop aside is CSS-hidden, not unmounted, and the Sheet portals to body);
+  (b) switch workspace from the WorkspaceSwitcher inside the drawer — the drawer is expected
+  to stay open (WR-02: onNavigate is not wired to WorkspaceSwitcher); record whether that is
+  acceptable.
+awaiting: user response
 
 ## Tests
 
@@ -28,12 +39,16 @@ result: issue
 reported: "The narrow-viewport backstop fails. The Export + Delete action row does not wrap: both containers use flex-wrap: nowrap. The page develops horizontal overflow (body clientWidth 375px, scrollWidth 1029px), and the Delete button is rendered outside the visible viewport. The inline error text itself wraps into multiple lines (200px height at 20px line-height), but its block begins beyond the viewport, so the message is effectively off-screen rather than usable. Expected: header/action containers wrap without horizontal page overflow, and the inline message remains inside the visible content width."
 severity: major
 
+### 4. Mobile drawer interaction (21-08 deferred human check D5 + review edge cases WR-01/WR-02)
+expected: Below md: «Меню» opens the drawer with all eleven sidebar destinations; tapping one navigates and closes the drawer; Escape and outside click dismiss it. Edge cases: resizing past md with the drawer open must not surface two identically-named nav renderings (WR-01); workspace switching from inside the drawer leaves it open (WR-02) — judge acceptability.
+result: [pending]
+
 ## Summary
 
-total: 3
+total: 4
 passed: 1
 issues: 2
-pending: 0
+pending: 1
 skipped: 0
 blocked: 0
 
@@ -41,7 +56,8 @@ blocked: 0
 
 - gap_id: G-21-2
   truth: "Erasing/anonymizing a contact via the UI delete action ('Удалить контакт') succeeds, enabling the two-tab erasure race flow end-to-end"
-  status: failed
+  status: resolved
+  resolution: "Closed by plan 21-07 (commits 0b78770/9b7b5fd/0d27c68/128c0fc, 2026-08-23): apiFetch attaches Content-Type: application/json only when the request carries a body; per-verb request-shape matrix in apps/web/src/lib/__tests__/api.test.ts; apps/web/e2e/contact-delete.spec.ts ran RED with the exact 400 FST_ERR_CTP_EMPTY_JSON_BODY, then GREEN after the fix; segments.spec.ts delete step green for the first time. Re-verified 2026-08-23 (21-VERIFICATION.md, 18/18)."
   reason: "User reported: Clicking 'Удалить контакт' sends DELETE with Content-Type: application/json but no body, so Fastify returns 400 FST_ERR_CTP_EMPTY_JSON_BODY and shows the generic error. The 410 race handling itself passes when the DELETE is performed correctly via the API. Root cause: apiFetch always sets Content-Type: application/json, including bodyless apiDelete calls."
   severity: major
   test: 2
@@ -67,7 +83,8 @@ blocked: 0
 
 - gap_id: G-21-3
   truth: "At narrow viewport widths the contact-card header actions row (Export + Delete) wraps onto a new line without horizontal page overflow, and the inline reason/error paragraph stays within the visible content width"
-  status: failed
+  status: resolved
+  resolution: "Closed by plan 21-08 (commits f6cb341/cf18ffe/badb8f8, 2026-08-23): responsive shell (sidebar out of layout below md behind a Sheet drawer via new WorkspaceNav), wrapping header/actions/message rows, min-w-0 on main and title cluster, single-column ContactForm grid below sm. apps/web/e2e/contact-card-narrow-viewport.spec.ts measured RED scrollWidth 1220 vs clientWidth 375, GREEN 375 == 375 after the fix; desktop corpus unchanged. Re-verified 2026-08-23 (21-VERIFICATION.md, 18/18). Follow-up human check on the new drawer recorded as Test 4."
   reason: "User reported: The Export + Delete action row does not wrap — both containers use flex-wrap: nowrap. Body clientWidth 375px vs scrollWidth 1029px (horizontal overflow); Delete button rendered outside the visible viewport. The inline error text wraps internally but its block begins beyond the viewport, so the message is effectively off-screen."
   severity: major
   test: 3
