@@ -436,7 +436,22 @@ describe("workspace purge tables: full FK order, secrets, evidence (plan 22-05)"
     }
   });
 
-  it("inventory reconciliation: every table docs/PII-INVENTORY.md names is in the order or the evidence set", () => {
+  /**
+   * Gap-closure plan 22-12 (PRG-02): an explicit, documented exemption --
+   * never a silent loosening of the invariant below -- mirroring this
+   * repository's own `RLS_ACCEPT_EXEMPT` precedent
+   * (`migrate-from-empty.test.ts`'s allowlist for `reputation_alert_state`).
+   * `dead_letter_jobs` is named in `docs/PII-INVENTORY.md`'s Excluded tables
+   * (plan 22-12, Task 3) precisely BECAUSE it is platform-scoped and
+   * deliberately outside every purge list (migration 0054's own design,
+   * reaffirmed by 22-12's recorded decision, option (b)) -- its PII lifetime
+   * is bounded by its own `DEAD_LETTER_RETENTION_DAYS` sweep instead
+   * (`apps/worker/src/queues/dead-letter-retention.ts`), not by the purge
+   * walk this test otherwise reconciles against the inventory.
+   */
+  const INVENTORY_RECONCILIATION_EXEMPT_TABLES = new Set<string>(["dead_letter_jobs"]);
+
+  it("inventory reconciliation: every table docs/PII-INVENTORY.md names is in the order, the evidence set, or the documented exemption list", () => {
     const inventoryPath = path.resolve(
       path.dirname(fileURLToPath(import.meta.url)),
       "../../../../../docs/PII-INVENTORY.md",
@@ -461,7 +476,9 @@ describe("workspace purge tables: full FK order, secrets, evidence (plan 22-05)"
     const orderSet = new Set<string>(PURGE_TABLE_ORDER);
     const evidenceSet = new Set<string>(PURGE_EVIDENCE_TABLES);
     for (const name of names) {
-      expect(orderSet.has(name) || evidenceSet.has(name)).toBe(true);
+      expect(orderSet.has(name) || evidenceSet.has(name) || INVENTORY_RECONCILIATION_EXEMPT_TABLES.has(name)).toBe(
+        true,
+      );
     }
   });
 
