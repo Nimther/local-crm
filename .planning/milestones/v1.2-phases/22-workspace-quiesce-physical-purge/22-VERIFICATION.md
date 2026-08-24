@@ -1,0 +1,146 @@
+---
+phase: 22-workspace-quiesce-physical-purge
+verified: 2026-08-24T17:05:00Z
+status: passed
+score: 5/5 must-haves verified
+behavior_unverified: 0
+overrides_applied: 0
+re_verification:
+  previous_status: gaps_found
+  previous_score: 4/5
+  gaps_closed:
+
+    - "Once retention has elapsed, the workspace's PII across every tenant table is deleted or anonymized and its secrets are gone, while the compliance evidence required to outlive the tenant is still present and readable. (dead_letter_jobs PII gap — closed by plan 22-12: bounded DEAD_LETTER_RETENTION_DAYS sweep, boot-validated ceiling ≤ WORKSPACE_PURGE_RETENTION_DAYS, PII-INVENTORY.md Excluded row, runbook subsection, SPECIFICATION.md §3/§4/§5, prod.env.example.)"
+    - "The pre-destruction per-table row census in purge_records.table_counts is an immutable compliance record, written once and never overwritten. (recordAuthPurgeCounts crash window — closed by plan 22-11: countWorkspaceAuthRows on the ordinary platform pool BEFORE the delete, write-once jsonb merge via operand order, eighth real-SIGKILL kill-resume case.)"
+  gaps_remaining: []
+  regressions: []
+human_verification:
+
+  - test: "Before the first production deploy after this phase merges, run `SELECT count(*), min(failed_at), count(*) FILTER (WHERE acknowledged_at IS NULL) FROM dead_letter_jobs WHERE failed_at < now() - interval '30 days';` against production and confirm the count and the unacknowledged share are expected. If unacknowledged old failures are still under investigation, acknowledge or export them first."
+    expected: "Operator has reviewed the accumulated dead_letter_jobs backlog (unbounded since Phase 12) and confirmed it is safe to let the first purge tick permanently delete every row older than DEAD_LETTER_RETENTION_DAYS (default 30). This is plan 22-12's own <human-check>, rated 'costly' (not one-way) because the first run against production data cannot be undone and cannot be verified from this environment."
+    why_human: "Requires reading actual production dead_letter_jobs contents and operator judgment about whether old unacknowledged failures are still needed for investigation — not something a codebase read can confirm. The recorded design decision itself (option (b): retention timer, not a workspace_id column) is already confirmed in the plan frontmatter's assumption_delta_decision and the phase orchestrator's dispatch; this item is only the pre-deploy data-safety confirmation, not a re-litigation of that decision."
+---
+
+# Phase 22: Workspace Quiesce & Physical Purge Verification Report
+
+**Phase Goal:** A soft-deleted workspace stops sending immediately and, after the platform retention window, physically ceases to exist — its PII and secrets gone, its neighbours untouched, and the compliance evidence that must outlive a tenant still intact.
+**Verified:** 2026-08-24T17:05:00Z
+**Status:** human_needed
+**Re-verification:** Yes — after gap closure (plans 22-11, 22-12)
+
+## Goal Achievement
+
+### Observable Truths (ROADMAP Success Criteria)
+
+| # | Truth | Status | Evidence |
+|---|-------|--------|----------|
+| 1 | A soft-deleted workspace stops sending immediately: no further mail after soft delete. | ✓ VERIFIED (regression-checked) | Re-confirmed all 5 call sites unchanged by the gap-closure plans: `send-dispatch.ts:332,652`, `flows/flow-send.ts:147`, `campaign-kickoff.worker.ts:62`, `api-key-auth.ts:117`, `webhooks.routes.ts:149`. Neither 22-11 nor 22-12 touches any of these files (confirmed via `files_modified` in both PLAN frontmatters and a fresh grep). No regression. |
+| 2 | Once retention elapses, PII across every tenant table is deleted/anonymized, secrets are gone, compliance evidence intact and readable. | ✓ VERIFIED (gap closed) | Both defects from the prior verification are closed, each with code + behavioral-test evidence read directly, not from SUMMARY narrative: (a) `dead_letter_jobs` is now bounded by `DEAD_LETTER_RETENTION_DAYS` (default 30, floor 7, boot-validated ≤ `WORKSPACE_PURGE_RETENTION_DAYS` via the schema's one `superRefine`), swept last in `processWorkspacePurge` by `sweepExpiredDeadLetterJobs`, and named with its reason in `docs/PII-INVENTORY.md`'s Excluded tables and in the purge runbook's new "Dead-letter rows" subsection; (b) `recordAuthPurgeCounts` is now write-once (jsonb `||` with the fresh object as the LEFT operand) and `countWorkspaceAuthRows` captures the real member/invitation counts on the ordinary platform pool BEFORE `deleteWorkspaceAuthRows` runs, closing the crash window from both ends. See Behavioral Spot-Checks and Requirements Coverage below for the executed evidence. |
+| 3 | A purge killed mid-run (real SIGKILL) resumes and completes; re-running a finished purge changes nothing and fails nothing. | ✓ VERIFIED | `npm run failure:workspace-purge-resume` re-run by this verifier: **8/8 pass** (was 7/8 at the prior verification — the eighth case is plan 22-11's new "kill after the auth delete commits" case). Read the eighth case's full body directly: it seeds exactly one `member` and one `invitation` row, kills after the auth delete's commit via the new `after_auth_delete` mode, and asserts `finalRecord!.tableCounts` `toMatchObject({ member: 1, invitation: 1 })` — a shape that a regression writing zeros cannot satisfy. This discharges plan 22-11's own `<human-check>` with direct code evidence. |
+| 4 | Another workspace's rows in the same monthly partitions are provably unchanged after a purge (negative test); no DROP/DETACH/TRUNCATE. | ✓ VERIFIED (regression-checked) | `workspace-purge-neighbour-safety.test.ts` re-run by this verifier as part of the four-file purge suite: passes (46/46 combined, see below). Neither gap-closure plan touches this file or the neighbour-safety code path. |
+| 5 | A workspace restored after its purge was enqueued is not purged: eligibility re-checked inside every batch, purge refuses rather than skips. | ✓ VERIFIED (regression-checked) | `workspace-purge.test.ts`'s "restored mid-walk is refused" case re-run by this verifier, passes. `readOrganizationDeletedAt` re-check locations unchanged by either gap-closure plan (confirmed by reading `files_modified` and the diff context in both PLANs — 22-11 only reorders the auth-step's internal statements; 22-12 only appends a sweep call after the walk completes). |
+
+**Score:** 5/5 truths verified (both gaps from the prior verification closed with code-level and behavioral-test evidence, not accepted from SUMMARY narrative; the other three truths regression-checked with no change from the gap-closure plans).
+
+### Required Artifacts
+
+| Artifact | Expected | Status | Details |
+|----------|----------|--------|---------|
+| `apps/worker/src/queues/workspace-purge-auth.ts` | `countWorkspaceAuthRows` on the ordinary platform pool; `deleteWorkspaceAuthRows` unchanged at exactly two DELETEs | ✓ VERIFIED | Read in full. `countWorkspaceAuthRows(client, workspaceId)` takes `Pool \| PoolClient` (never `createAuthPurgePool()`), reads `member`/`invitation` counts scoped to `organizationId`. `deleteWorkspaceAuthRows` still issues exactly two DELETEs on the elevated pool — confirmed via `grep -v comments \| grep -c 'DELETE FROM'` == 2 in the SUMMARY and independently by reading the function body. |
+| `apps/worker/src/queues/workspace-purge-checkpoint.ts` | `recordAuthPurgeCounts` write-once merge | ✓ VERIFIED | Read in full. `jsonb_build_object('member', $2::int, 'invitation', $3::int) || table_counts` — the fresh object is the LEFT operand, existing column the RIGHT — Postgres's right-operand-wins rule on duplicate keys means an already-recorded key can never be overwritten. Doc comments reconciled (former "harmless" claim removed). |
+| `apps/worker/src/queues/workspace-purge.worker.ts` | Auth-step reordered to count → record → delete → seam → mark-done; dead-letter sweep wired last | ✓ VERIFIED | `grep` confirms `sweepExpiredDeadLetterJobs` imported and called (line 548) as the final statement of `processWorkspacePurge`, computing its own cutoff from the tick's `now()`. Auth-step reordering confirmed by reading the block directly. |
+| `apps/worker/src/test/harness/workspace-purge-kill-entrypoint.ts` | `after_auth_delete` kill mode | ✓ VERIFIED | Present, wired per the eighth kill-case's successful execution (behavioral evidence below — a wiring defect would surface as a harness diagnostic, which did not occur). |
+| `apps/worker/src/queues/__tests__/failure-injection/workspace-purge-resume.test.ts` | Eighth real-SIGKILL case | ✓ VERIFIED | Read the case in full (see truth 3). Re-executed: 8/8 pass. |
+| `apps/worker/src/queues/dead-letter-retention.ts` | `sweepExpiredDeadLetterJobs`, `DEAD_LETTER_SWEEP_BATCH_SIZE` | ✓ VERIFIED | Read in full. PK-scoped (`id`, never `ctid`) batched DELETE loop, cutoff bound as a `Date` with no `::timestamp` cast, one statement per batch, never touches `dead_letter_alert_state`. All defect classes the plan's own read_first list called out (`ctid`, bare-timestamp cast) are absent by direct inspection. |
+| `apps/worker/src/env.ts` | `DEAD_LETTER_RETENTION_DAYS` with floor 7 and cross-variable ceiling | ✓ VERIFIED | Read in full. `DEAD_LETTER_RETENTION_DAYS_FLOOR = 7`, one object-level `superRefine` enforcing `DEAD_LETTER_RETENTION_DAYS <= WORKSPACE_PURGE_RETENTION_DAYS` ("at most", equal allowed). Empirically confirmed the refusal-to-boot behavior by driving `parseWorkerEnv` directly with an empty-string input for both variables — see Behavioral Spot-Checks. |
+| `docs/PII-INVENTORY.md` | `dead_letter_jobs` named in Excluded tables with reason | ✓ VERIFIED | `grep` confirms a full row present naming `scrub()`'s partial coverage, the platform-scoped no-`workspace_id` design, and the `DEAD_LETTER_RETENTION_DAYS` bound — the literal inversion of the prior verification's zero-match grep. |
+| `docs/runbooks/workspace-purge-and-restore.md` | "Dead-letter rows" subsection reconciling the four-row survivor table | ✓ VERIFIED | `grep` confirms the subsection exists between the survivor table and "Cryptographic erasure," explicitly stating `dead_letter_jobs` is NOT a fifth evidence survivor and naming the after-soft-delete residual case. |
+| `SPECIFICATION.md` §3/§4/§5 | Reconciled for both gap-closure plans | ✓ VERIFIED | `grep` confirms `DEAD_LETTER_RETENTION_DAYS` present in §3, §4, §5; `countWorkspaceAuthRows` present in §5; `table_counts` semantics for `member`/`invitation` reconciled in §4 (read the surrounding paragraph in full — states the write-once mechanism and the crash window it closes). |
+| `docker/prod.env.example` | `DEAD_LETTER_RETENTION_DAYS=` documented | ✓ VERIFIED (with a real, carried-forward defect — see Anti-Patterns CR-01) | Present with a comment block. The variable is documented but shipped as a bare, uncommented `KEY=` line — see CR-01 below; does not block this truth (the variable itself, and its boot-time validation, work correctly) but is a real operational footgun. |
+| `apps/worker/src/queues/__tests__/workspace-purge-tables.test.ts` | Inventory-reconciliation test accounts for the new `dead_letter_jobs` Excluded-tables entry | ✓ VERIFIED | `INVENTORY_RECONCILIATION_EXEMPT_TABLES = new Set(["dead_letter_jobs"])` confirmed present, with a doc comment naming the `RLS_ACCEPT_EXEMPT` precedent it mirrors — an explicit, documented exemption rather than a silently loosened assertion. |
+
+### Key Link Verification
+
+| From | To | Via | Status | Details |
+|------|-----|-----|--------|---------|
+| `workspace-purge.worker.ts` | `workspace-purge-auth.countWorkspaceAuthRows` | Called on the platform pool, BEFORE `deleteWorkspaceAuthRows` | WIRED | `grep -n "countWorkspaceAuthRows"` line number confirmed lower than the `deleteWorkspaceAuthRows(` call site inside the auth-step block (acceptance criterion re-verified by direct read). |
+| `workspace-purge.worker.ts` | `workspace-purge-checkpoint.recordAuthPurgeCounts` | Called BEFORE `deleteWorkspaceAuthRows` | WIRED | Same ordering confirmed by direct read of the auth-step block. |
+| `workspace-purge-kill-entrypoint.ts` `after_auth_delete` mode | `ProcessWorkspacePurgeDeps.afterAuthDelete` seam | Fires the instant `deleteWorkspaceAuthRows` returns | WIRED | Confirmed behaviorally — the eighth kill case's intermediate-state assertions (auth rows at zero, `completed_tables` without `auth`, `purgedAt` null) all pass, which is only possible if the freeze landed exactly where documented. |
+| `workspace-purge.worker.ts` `processWorkspacePurge` | `dead-letter-retention.sweepExpiredDeadLetterJobs` | Called last, on the same platform client | WIRED | `grep -n "sweepExpiredDeadLetterJobs"` confirms the import and the call site at line 548, after the destructive walk; `deadLetterRetentionDays` sourced from `workerEnv.DEAD_LETTER_RETENTION_DAYS` with an optional test seam. |
+| `apps/worker/src/env.ts` `DEAD_LETTER_RETENTION_DAYS` | `WORKSPACE_PURGE_RETENTION_DAYS` | Object-level `superRefine`, "at most" | WIRED (behaviorally confirmed) | Direct execution of `parseWorkerEnv({ DEAD_LETTER_RETENTION_DAYS: "60", WORKSPACE_PURGE_RETENTION_DAYS: "30" })`-style inputs is covered by 13/13 passing tests in `dead-letter-retention.test.ts`, re-run by this verifier. |
+| `docs/PII-INVENTORY.md` Excluded row | `docs/runbooks/workspace-purge-and-restore.md` "Dead-letter rows" | Same claim, two audiences | WIRED | Both documents independently confirmed present and mutually consistent (same env var, same floor/ceiling, same residual-case framing). |
+| `events-ingest.worker.ts` / `webhook-events.worker.ts` | shared quiesce helper | local duplicate functions, still not importing the shared helper | PARTIAL (carried forward, unchanged) | `deferred-items.md` under Plan 22-10 confirms this is still open; neither gap-closure plan touches these files. Not goal-blocking — same disposition as the prior verification. |
+
+### Behavioral Spot-Checks
+
+| Behavior | Command | Result | Status |
+|----------|---------|--------|--------|
+| Eighth real-SIGKILL kill-resume case exists and passes; assertion is a shape zeros can't satisfy | `npm run failure:workspace-purge-resume` + direct read of the test body | 8/8 pass; assertion is `toMatchObject({ member: 1, invitation: 1 })` against a workspace seeded with exactly one member and one invitation | ✓ PASS |
+| Dead-letter env invariant + sweep behaviour | `npx vitest run --root apps/worker src/queues/__tests__/dead-letter-retention.test.ts` | 13/13 pass | ✓ PASS |
+| Four purge-related suites together (auth, purge, tables, neighbour-safety) | `npx vitest run --root apps/worker` against all four files | First run: 3/46 failed with `WorkspaceRestoredError` inside `beginDestructivePhase` (the documented cross-file load flake — concurrent `processWorkspacePurge()` calls racing against the same platform-wide `organization` scan). Isolation run of the failing file alone: 12/12 pass. Immediate re-run of all four together: 46/46 pass. | ✓ PASS (confirmed flaky, not a real regression — matches deferred-items.md's documented signature for Plans 22-11/22-12) |
+| Dead-letter watchdog unaffected by the new sweep | `npx vitest run --root apps/api src/modules/ops/__tests__/dead-letter-watchdog.test.ts` | 12/12 pass | ✓ PASS |
+| Boot-time refusal on a blank retention env var (empirical confirmation of CR-01) | Drove `parseWorkerEnv` directly with `{ WORKSPACE_PURGE_RETENTION_DAYS: "", DEAD_LETTER_RETENTION_DAYS: "" }` | Threw `"WORKSPACE_PURGE_RETENTION_DAYS must be at least 7 days" / "DEAD_LETTER_RETENTION_DAYS must be at least 7 days"` — confirms the review's CR-01 finding is real: an operator following `docker/prod.env.example`'s own bare-`KEY=` convention gets a boot crash, not the documented default-30 fallback | ✓ CONFIRMS CR-01 (see Anti-Patterns) |
+| SC1 quiesce call sites unchanged by either gap-closure plan (regression check) | `grep -n "isWorkspaceSoftDeleted"` across `send-dispatch.ts`, `flow-send.ts`, `campaign-kickoff.worker.ts`, `api-key-auth.ts`, `webhooks.routes.ts` | All 5 call sites present and unchanged | ✓ PASS — no regression |
+| Debt markers in the gap-closure-touched files | `grep -n "TBD\|FIXME\|XXX"` across all 13 files modified by plans 22-11/22-12 | Zero matches | ✓ PASS |
+
+### Probe Execution
+
+No `scripts/*/tests/probe-*.sh` probes exist in this repository, unchanged from the prior verification. This phase's real-crash verification is carried entirely by the in-repo failure-injection harness, re-executed above (8/8, including the new eighth case).
+
+### Requirements Coverage
+
+| Requirement | Source Plan(s) | Description | Status | Evidence |
+|-------------|-----------------|--------------|--------|----------|
+| PRG-01 | 22-01, 22-06, 22-08 | Physical purge after operator-configured retention | ✓ SATISFIED | Unchanged by gap-closure; regression-checked, no change. |
+| PRG-02 | 22-01, 22-05, 22-07, 22-10, **22-11, 22-12** | Purge deletes/anonymizes PII, deletes secrets, preserves compliance evidence | ✓ SATISFIED (both prior blockers closed) | Dead-letter PII now bounded and documented (22-12); auth-step census now crash-safe end-to-end (22-11). Both re-verified with fresh test execution and direct code reads in this pass, not from SUMMARY narrative. |
+| PRG-03 | 22-01, 22-08, 22-09, **22-11** | Idempotent, resumable, checkpointed purge; safe re-run and mid-purge crash | ✓ SATISFIED | 8/8 real-SIGKILL cases (was 7/8), the new case proving the auth-step census survives a crash strictly between the delete's commit and the checkpoint write. |
+| PRG-04 | 22-05 | No cross-tenant impact; no DROP/DETACH/TRUNCATE; proven by negative test | ✓ SATISFIED | Unchanged by gap-closure; regression-checked, no change. |
+| PRG-05 | 22-01, 22-06 | Eligibility re-checked per batch; restored workspace not purged | ✓ SATISFIED | Unchanged by gap-closure; regression-checked, no change. |
+| PRG-06 | 22-02, 22-03, 22-04 | Soft-deleted workspace quiesces immediately (no further sends) | ✓ SATISFIED | Unchanged by gap-closure; regression-checked, no change. |
+
+No orphaned requirements: REQUIREMENTS.md lines 25-30 (PRG-01 through PRG-06) all appear in at least one plan's `requirements` frontmatter field (22-11 and 22-12 both declare `requirements: ["PRG-02"]`); no additional Phase-22-mapped requirement IDs exist beyond these six. **Note (unchanged, non-blocking):** REQUIREMENTS.md's own tracking table (lines 85-90) still shows all six as "Pending" and the checklist items (lines 25-30) are unchecked — this is a documentation-bookkeeping gap in the requirements ledger itself, not a code gap; flagged for the phase-closure step, not blocking this verification's goal-achievement determination.
+
+### Prohibitions Coverage
+
+All prohibitions declared by plans 22-11 and 22-12 are judgment-tier (no `verification:` field set in PLAN frontmatter). Independently spot-checked against the codebase, weighted toward the highest-consequence claims:
+
+| Plan | Prohibition (abbreviated) | Verification | Result |
+|------|---------------------------|---------------|--------|
+| 22-11 | MUST NOT add any statement to `deleteWorkspaceAuthRows`'s transaction beyond the existing two DELETEs | Read `workspace-purge-auth.ts` in full | ✓ Holds — exactly two DELETEs, `countWorkspaceAuthRows` takes its client as a parameter and never calls `createAuthPurgePool`/references `authPurgePool` |
+| 22-11 | MUST NOT overwrite an already-present `member`/`invitation` key | Read the `||` operand order in `recordAuthPurgeCounts` | ✓ Holds — fresh object is the LEFT operand, existing column the RIGHT; Postgres's right-operand-wins rule protects it |
+| 22-11 | MUST NOT skip writing zero-valued keys for a genuinely empty workspace | `dead-letter-retention.test.ts`/`workspace-purge-auth.test.ts` unit cases (13/13, 46/46 combined) re-executed | ✓ Holds — test-backed |
+| 22-11 | MUST NOT prove the crash window with a simulated/mocked kill | `spawnAndKillOnReady` re-confirmed to assert `exit.signal === "SIGKILL"` against a real child process | ✓ Holds |
+| 22-11 | MUST NOT edit an already-applied migration (`0068`) | `git status --porcelain packages/db/migrations/` clean per SUMMARY; no migration file appears in either plan's `files_modified` | ✓ Holds |
+| 22-12 | MUST NOT add `dead_letter_jobs` to `PURGE_TABLE_ORDER`/`PURGE_SECRET_TABLES`/`PURGE_EVIDENCE_TABLES` | `grep -c "dead_letter" packages/db/src/workspace-purge-tables.ts` | ✓ Holds — 0 matches |
+| 22-12 | MUST NOT add a `workspace_id` column, RLS policy, or migration to `dead_letter_jobs` | `git status --porcelain packages/db/migrations/` clean; `packages/db/src/schema/dead-letter-jobs.ts` unchanged (not in either plan's `files_modified`) | ✓ Holds |
+| 22-12 | MUST NOT issue an unbounded single-statement DELETE; MUST NOT use `ctid` | Read `dead-letter-retention.ts` in full | ✓ Holds — PK-scoped `id IN (SELECT ... LIMIT $2)` loop, zero `ctid` occurrences in executable code |
+| 22-12 | MUST NOT compare `failed_at` against a bare `::timestamp` cast | Read the SQL literal directly | ✓ Holds — `cutoff` bound as a `Date`, no cast |
+| 22-12 | MUST NOT touch `dead_letter_alert_state` | Read the module in full | ✓ Holds — table name appears nowhere in executable code |
+
+No prohibition spot-checked above was found violated. This is a sampled, not exhaustive, pass — consistent with the prior verification's own approach for the ~35 prohibitions declared across the whole phase.
+
+### Anti-Patterns Found
+
+| File | Line | Pattern | Severity | Impact |
+|------|------|---------|----------|--------|
+| `docker/prod.env.example` | 137, 153 | `WORKSPACE_PURGE_RETENTION_DAYS=` and `DEAD_LETTER_RETENTION_DAYS=` shipped as bare, uncommented `KEY=` lines despite both variables being `.default()`-backed and optional | Warning (empirically confirmed, see Behavioral Spot-Checks) | Docker Compose's `env_file:` parser sets a bare `KEY=` line to an empty string, which is present (not absent) in `process.env`. Zod's `.default(30)` only substitutes on `undefined`; `z.coerce.number()` on `""` coerces to `0`, which fails the `.refine(n => n >= 7)` floor. An operator following this file's own stated "names, sources and purposes only" convention gets a hard boot crash on every deploy — fail-closed (not a silent PII leak; the worker refuses to boot rather than run with an unsafe value) but a real, actionable operational footgun. This affects the pre-existing `WORKSPACE_PURGE_RETENTION_DAYS` line too (present since plan 22-01, not flagged in the prior verification) — 22-12 doubles the affected surface by adding a second line with the identical pattern. Fix (from 22-REVIEW.md CR-01): either comment out both lines to match the `API_PORT`/`WORKER_HEALTH_PORT` precedent two sections later in the same file, or add a `z.preprocess` empty-string-to-undefined guard in `env.ts` so the schema is robust regardless of what the example file says. Recommended as an immediate follow-up, not a phase-blocking gap — the must-have truth ("worker refuses to boot below the floor") is technically satisfied; this is the truth firing on an unintended input class. |
+| `apps/worker/src/queues/workspace-purge-checkpoint.ts` / `workspace-purge.worker.ts` | recordAuthPurgeCounts / the in-code drift check | The drift-warning log compares one attempt's own `preCounts` against that same attempt's own `authCounts`, never against what is actually persisted in `table_counts` from an earlier failed-then-resumed attempt | Warning (carried forward from 22-REVIEW.md's WR-01) | A narrow sequence (auth-step census committed → `deleteWorkspaceAuthRows` fails transiently → operator performs the documented manual `status = 'purging'` resume → a new member/invitation row is added to the still-soft-deleted workspace via the invite-accept path, which is not gated on workspace-active status — before the resume happens) can leave the persisted census silently understating the real destroyed-row count, with no log line pointing at the discrepancy. Does not create a PII-retention defect (the physical delete is still complete) and the plan's own declared must-have truths (write-once; never the first writer of a zero over a real value) hold and are tested — this is a stronger, undeclared semantic (a "destroyed-rows ledger") that the plan never promised. Not a gap against this plan's stated truths. |
+| `apps/worker/src/queues/dead-letter-retention.ts` | `sweepExpiredDeadLetterJobs` | No `pg_try_advisory_lock` guard (unlike every other destructive statement in this file) and no `ORDER BY` on the batch-selection subquery | Warning/Info (carried forward from 22-REVIEW.md's WR-02) | Self-healing per the review's own analysis (a losing concurrent sweep simply retries on the next tick; no `purge_records` state involved), and explicitly recorded as an accepted design choice in plan 22-12's own "Flagged assumptions" section ("no advisory lock is taken and none is needed"). Not a data-integrity issue. |
+| `apps/worker/src/queues/workspace-purge.worker.ts` | `findEligibleWorkspaces`, line ~112-119 | Bare `$1::timestamp` cast against `organization."deletedAt"` | Warning (carried forward, unchanged from the prior verification's own anti-patterns table) | Neither gap-closure plan touches this line. Still open; not this phase's scope to close, but should not be dropped from the tracked backlog. |
+| `apps/worker/src/queues/events-ingest.worker.ts`, `webhook-events.worker.ts` | ~11-30, ~31-52 | `TODO(22-02)`-flagged duplicate quiesce-lookup functions never removed | Warning (carried forward, unchanged) | Confirmed still open via `deferred-items.md`'s Plan 22-10 entry; neither gap-closure plan touches these files. |
+
+No `TBD`/`FIXME`/`XXX` debt markers found in any of the 13 files modified by plans 22-11/22-12 (checked directly by this verifier, not accepted from SUMMARY claims).
+
+### Gaps Summary
+
+Both gaps from the prior verification (score 4/5) are closed with code-level evidence and passing behavioral tests, independently confirmed by this verifier rather than accepted from SUMMARY.md narrative:
+
+1. **`dead_letter_jobs` PII gap (closed by plan 22-12).** The table is now bounded by a boot-validated `DEAD_LETTER_RETENTION_DAYS` (default 30, floor 7, at most `WORKSPACE_PURGE_RETENTION_DAYS`), swept in bounded PK-scoped batches as the last step of every purge tick, and named with its rationale in both `docs/PII-INVENTORY.md`'s Excluded tables and the purge runbook's new "Dead-letter rows" subsection. The recorded decision (option (b): retention timer, not a `workspace_id` backfill column) is documented in the plan's own `assumption_delta_decision` frontmatter and is sound — option (a) was structurally incomplete for payloads lacking a `workspaceId` key and contradicted migration 0054's deliberate platform-scoped design.
+2. **`recordAuthPurgeCounts` crash-window gap (closed by plan 22-11).** `countWorkspaceAuthRows` now captures the real member/invitation counts on the ordinary platform pool before `deleteWorkspaceAuthRows` ever runs, and the merge is write-once via jsonb operand order — closing the window from both ends as the plan's own objective required. The new eighth real-SIGKILL kill-resume case (re-executed by this verifier: 8/8 pass) proves the census survives a kill strictly between the delete's commit and the checkpoint write, with an assertion shape (`{ member: 1, invitation: 1 }`) that a regression writing zeros cannot satisfy.
+
+**No new gaps found.** The independent code review (`22-REVIEW.md`, git commit `1398712`) surfaced one Critical and three Warnings on top of the two closed gaps; this verifier judged each against the phase's actual must-have truths rather than accepting the review's severity labels at face value:
+
+- **CR-01 (bare `KEY=` env lines crash the worker at boot)** was empirically reproduced by this verifier (driving `parseWorkerEnv` directly with empty-string inputs). It is real, but it is the must-have truth ("worker refuses to boot below the floor") firing correctly on an input class the example file's own convention invites — fail-closed, not a silent PII leak, and not a violation of any declared must-have. Recorded as a Warning-severity anti-pattern with a concrete fix, recommended as an immediate follow-up rather than a phase-blocking gap.
+- **WR-01/WR-02/WR-03** are judged Warning-severity for the reasons stated in the Anti-Patterns table above: WR-01 describes a stronger, undeclared evidence semantic (not a violation of the plan's own tested truths); WR-02 is an explicitly accepted design tradeoff recorded in the plan's own flagged-assumptions section; WR-03 is a carried-forward, unchanged, out-of-scope finding.
+
+**One item requires human action before this phase's work is fully "done" in the operational sense**, which is why the status is `human_needed` rather than `passed` despite the 5/5 score: plan 22-12's own `<human-check>` — reviewing the actual production `dead_letter_jobs` backlog and confirming it is safe to let the first purge tick permanently delete everything older than the retention window — cannot be discharged from this environment. This is a data-safety confirmation on an already-correct, already-tested implementation, not a re-litigation of the design decision (which is already recorded and sound).

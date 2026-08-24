@@ -10,7 +10,9 @@ Multi-tenant SaaS-платформа marketing automation для B2C-компа�
 
 ## Current State
 
-**v1.2 в работе (4/5 фаз):** Phase 18 (dependency hygiene), Phase 19 (unsubscribe-secret rotation), Phase 20 (campaign template correctness, завершена 2026-08-21) и Phase 21 (per-contact DSR export, завершена 2026-08-23) выполнены. Phase 21: `GET /w/:slug/contacts/:id/dsr-export` за гейтом `requirePermission("contact","export")` (Member — 403), весь экспорт в одном `REPEATABLE READ` снапшоте с fail-closed гейтом `anonymized_at` (стёртый контакт → типизированный 410), keyset-пагинация всех секций (профиль, custom properties, consent history, события, sends/send_events, journey-таблицы), JSONB-правило DSR-03 решено как два build-up allowlist'а в shared `@mega-crm/delivery-core` (`events.properties` исключён целиком, export-allowlist структурный superset erasure-evidence) + `docs/PII-INVENTORY.md` для Phase 22; UAT 4/4 (включая live 410-race и мобильный drawer), верификация 18/18, security 41/41 threats closed. Попутно закрыты два латентных дефекта: bodyless UI DELETE (Content-Type только при наличии body) и переполнение карточки контакта на 375px (responsive shell + wrap). Известный tracked defect: CR-01 из 20-REVIEW.md (false-dirty при whitespace в сохранённом имени — fail-safe направление). Далее: Phase 22 workspace quiesce & physical purge.
+**Shipped: v1.2 Data Lifecycle & Delivery Trust (2026-08-24)** — 5 фаз (18–22), 35 планов, 18/18 требований, все фазы `verification: passed`, milestone-аудит `passed` (23/23 интеграционных точек, 3/3 E2E-потока), security-регистры закрыты (`threats_open: 0` везде). Closeout: override_closeout — 2 acknowledged deferred items, оба перенесены с закрытия v1.1 (см. `.planning/MILESTONES.md`). Платформа теперь закрывает полный жизненный цикл данных: корректность шаблона на всех трёх send-путях (optimistic lock `campaigns.version`), DSR-выгрузка контакта в одном `REPEATABLE READ` снапшоте, quiesce + физический purge soft-deleted workspace (возобновляемый, доказан реальным SIGKILL, с compliance evidence), graceful rotation unsubscribe-secret (live rehearsal на production) и CI-контроль HIGH advisories с expiring accept-list.
+
+Известные хвосты v1.2 (не блокеры): Nyquist VALIDATION.md фаз 19/21/22 в `status: draft` (запустить `/gsd-validate-phase`), WR-01/WR-02 mobile-drawer edge cases (приняты в UAT), CR-01 из 20-REVIEW.md (false-dirty при whitespace — fail-safe направление), первый деплой dead-letter retention sweep необратимо удалит строки старше `DEAD_LETTER_RETENTION_DAYS` (census одобрен в UAT 2026-08-24).
 
 **Shipped: v1.1 Production Hardening (2026-08-20)** — 10 фаз (8–17), 128 планов, 95/95 требований, все фазы `verification: passed`, security-регистры полностью закрыты (`threats_open: 0` везде; T-14-58/T-14-73/T-14-88 закрыты re-run'ом gsd-security-auditor 2026-08-20). Closeout: override_closeout — причины и полный список принятого tech debt в `.planning/MILESTONES.md` (Phase 10 stale-проекция init.manager — timestamp-артефакт при passed-верификации; один acknowledged deferred item).
 
@@ -19,7 +21,14 @@ Multi-tenant SaaS-платформа marketing automation для B2C-компа�
 - **Кодовая база:** ~139k LOC TypeScript (после v1.0 было ~57k); 929 коммитов за milestone (2026-07-27 → 2026-08-20)
 - **Tech debt, принятый при закрытии v1.1** (полные формулировки в `.planning/MILESTONES.md` и `.planning/milestones/v1.1-MILESTONE-AUDIT.md`): live operator-alert email ни разу не наблюдался человеком; оставшиеся live compliance-walkthrough'ы Phase 13; quick task 260818-aqd Task 3 (production-провижининг file-backed KEK, operator-only); пороги алертов Phase 15 — flagged assumptions до реальной нагрузки; API-side Sentry `workspace_id` gap (~10 route-модулей); два UI follow-up'а (LaunchConfirmDialog, CsvImportWizard)
 
-## Current Milestone: v1.2 Data Lifecycle & Delivery Trust
+## Next Milestone Goals
+
+Следующий milestone ещё не определён — запустить `/gsd-new-milestone` (questioning → research → requirements → roadmap; нумерация фаз продолжается с 23).
+
+**Кандидаты в scope** (tracked как Future Requirements в архиве `milestones/v1.2-REQUIREMENTS.md`): SCALE-02 (PgBouncer при реальном давлении `max_connections`), SCALE-03 (бенчмарк сегментации на 100k–1M контактов), OPS-LIVE-01..03 (live operator-alert walkthrough, оставшиеся Phase 13 compliance-walkthrough'ы, KEK Task 3), OPS-UI-01 (UI follow-ups Phase 15 + tuning порогов алертов), плюс хвосты v1.2 из Current State выше.
+
+<details>
+<summary>v1.2 Data Lifecycle & Delivery Trust — milestone definition (shipped 2026-08-24, archived)</summary>
 
 **Goal:** Закрыть корректность выбора шаблона в кампаниях, добить GDPR-контур (DSR-выгрузка данных контакта, физический purge soft-deleted workspace), ввести graceful rotation unsubscribe-secret и поставить дисциплину по уязвимым зависимостям под CI-контроль.
 
@@ -34,6 +43,8 @@ Multi-tenant SaaS-платформа marketing automation для B2C-компа�
 **Границы:** не перепланировать уже реализованные подсистемы (RLS, CI, backups, contact erasure, event retention, KMS, очереди, observability) — новые требования интегрируются в существующие механизмы. Roadmap продолжается с Phase 18.
 
 **Кандидаты, осознанно НЕ вошедшие в v1.2** (остаются в tech debt): SCALE-02 (PgBouncer при реальном давлении `max_connections`), бенчмарк сегментации на 100k–1M контактов, live-walkthrough'ы (operator-alert email, compliance), UI follow-up'ы Phase 15, KEK quick-task Task 3.
+
+</details>
 
 <details>
 <summary>v1.1 execution history — per-phase notes (archived at milestone close 2026-08-20)</summary>
@@ -135,9 +146,11 @@ Multi-tenant SaaS-платформа marketing automation для B2C-компа�
 - [x] Campaign template correctness: launch/schedule/test-send используют подтверждённо сохранённый template ID — Validated in Phase 20: оптимистическая блокировка `campaigns.version` на всех трёх путях отправки (проверка внутри `FOR UPDATE`-транзакции), снапшот template/sender в test-send job, dirty-state блокировка с баннером несохранённых изменений, типизированный 409-конфликтный UX; верификация 4/4, ручной UAT пройден
 - [x] DSR-выгрузка персональных данных контакта: tenant-isolated экспорт (профиль, custom properties, consent history, события, send-данные) из UI карточки контакта в machine-readable файл — Validated in Phase 21 (DSR-01..04): ролевой гейт `contact:export` (Member — 403 на API и скрыто в UI), анти-enumeration 404, единый `REPEATABLE READ` снапшот с fail-closed 410 для стёртого контакта, JSONB build-up allowlist'ы в `@mega-crm/delivery-core` + `docs/PII-INVENTORY.md`; UAT 4/4, security 41/41 closed
 
+- [x] Физический purge soft-deleted workspace: удаление/обезличивание tenant PII + удаление tenant secrets после платформенного retention; идемпотентный, возобновляемый, безопасный для других workspace — Validated in Phase 22 (PRG-01..06): quiesce fail-closed на всех send/ingest/scan путях (dispatch-гейт + 3 RLS scan-политики), батчевый purge 27 tenant-таблиц в FK-порядке (`SKIP LOCKED`, advisory lock, `WorkspaceRestoredError`), tombstone `organization` UPDATE-only, `purge_records` compliance evidence с pre-destruction census, восстановление оператором CLI до point-of-no-return, kill-resume доказан реальным SIGKILL, dead-letter retention sweep (22-12); verification 5/5, UAT 1/1, security 79/79 closed
+
 ### Active
 
-- [ ] Физический purge soft-deleted workspace: удаление/обезличивание tenant PII + удаление tenant secrets после платформенного retention; идемпотентный, возобновляемый, безопасный для других workspace
+*(нет активных требований — milestone v1.2 закрыт)*
 
 ### Out of Scope
 
@@ -153,8 +166,8 @@ Multi-tenant SaaS-платформа marketing automation для B2C-компа�
 
 ## Context
 
-- После v1.1: ~139k LOC TypeScript, платформа задеплоена и эксплуатируется на production VPS (Docker/GHCR, pgBackRest, Grafana Cloud Loki, Sentry); стек Fastify + Drizzle/Postgres(RLS) + BullMQ/Redis + React 19/Vite + @xyflow/react подтверждён в бою двумя milestone'ами
-- v1.0 baseline: ~57k LOC, 616 коммитов за 13 дней (2026-07-02 → 2026-07-14); v1.1: 929 коммитов за 25 дней (2026-07-27 → 2026-08-20), 716 файлов изменено
+- После v1.2: ~136k LOC TypeScript (git-tracked .ts/.tsx), платформа задеплоена и эксплуатируется на production VPS (Docker/GHCR, pgBackRest, Grafana Cloud Loki, Sentry); стек Fastify + Drizzle/Postgres(RLS) + BullMQ/Redis + React 19/Vite + @xyflow/react подтверждён в бою тремя milestone'ами
+- v1.0 baseline: ~57k LOC, 616 коммитов за 13 дней (2026-07-02 → 2026-07-14); v1.1: 929 коммитов за 25 дней (2026-07-27 → 2026-08-20), 716 файлов изменено; v1.2: 339 коммитов за 5 дней (2026-08-20 → 2026-08-24), 146 source-файлов (+28k LOC)
 - Референс продуктовой модели — Klaviyo (flows, сегментация, событийная модель)
 - Целевой масштаб первого года: 100k–1M контактов суммарно по тенантам, сотни тысяч писем в день — сегментация и отправка спроектированы под этот объём (партиционирование, батчинг, изоляция очередей), но бенчмарк сегментации на реальном объёме ещё не проводился
 - Canvas-редактор цепочек (@xyflow/react) оказался ожидаемо самым дорогим UI-компонентом — Phase 6 заняла 24 плана из 96; ставка на TypeScript/React-экосистему оправдалась
@@ -216,6 +229,11 @@ Multi-tenant SaaS-платформа marketing automation для B2C-компа�
 | DSR-03 JSONB-правило: два явных build-up allowlist'а в одном shared-пакете (`@mega-crm/delivery-core`), `events.properties` исключён целиком | Tenant-supplied key space невозможно защищаемо allowlist'ить; export-allowlist объявлен spread'ом erasure-evidence списка, superset-отношение структурное и закреплено тестом — export и purge (Phase 22) не могут разойтись | ✓ Phase 21: build-up реконструкция `buildExportSendEventPayload` (никогда denylist/regex), set-difference тест падает на любом нерешённом добавлении; `docs/PII-INVENTORY.md` — авторитет per-table PII для Phase 22 |
 | DSR-экспорт целиком в одном `REPEATABLE READ` снапшоте, `anonymized_at` — первое чтение внутри него | Конкурентное erasure не должно дать полу-стёртый экспорт; клиентское состояние untrusted — типизированный 410 из route остаётся enforcement point | ✓ Phase 21: изоляционный тест против реального interleaved scrub (READ COMMITTED контроль падает на той же ассерции); live UAT two-tab race подтвердил 410 → invalidation → not-found состояние карточки |
 | Фикс bodyless DELETE на клиенте (Content-Type только при body), НЕ ослабление серверного JSON-парсера | Empty-JSON-tolerant парсер замаскировал бы malformed-запросы на всей платформе, включая public event-ingestion, и тронул бы parser-поведение, на которое опирается webhook signature verification | ✓ Phase 21 (gap G-21-2): условный заголовок в `apiFetch` закрыл все пять bodyless delete call sites; per-verb матрица тестов закрепила preflight-forcing свойство; e2e RED→GREEN на точном 400 |
+| Phase 22 privilege model (PT-01, option b): dedicated pool под существующей ролью `mega_crm_auth` только для `member`/`invitation`, без grant-расширения `mega_crm_app` | Реальный gap уже — `mega_crm_app` владеет всеми tenant-таблицами и имеет `UPDATE` на `organization`; grant-widening открыл бы app-роли мутацию identity-таблиц навсегда ради одного purge-пути | ✓ Phase 22 (22-07): `deleteWorkspaceAuthRows` — ровно два statement'а в одной транзакции, 42501-тест падает на любом новом grant'е; глобальные `user`/`session`/`account` не трогаются |
+| Phase 22 quiesce: чисто RLS policy-predicate изменение трёх scan-политик (включая незамеченный третий gap `flow_runs_scan`) + независимый fail-closed dispatch-гейт | Два независимых слоя: scheduler не находит замороженный workspace на discovery, а dispatch-гейт (re-read `deletedAt` перед транспортом) закрывает in-flight jobs; missing org row = отказ на всех поверхностях | ✓ Phase 22 (22-02/22-03/22-04): миграция 0070, `isWorkspaceSoftDeleted` на send/ingest/webhook путях, webhook 404-oracle закрыт response-equality тестом; D-02 freeze-never-cancel — quiesce не мутирует состояние тенанта |
+| Phase 22 purge: tombstone `organization` UPDATE-only + `purge_records` как RLS-free evidence с pre-destruction census; батчи 500 строк `SKIP LOCKED` в FK-порядке из frozen `PURGE_TABLE_SPECS` | Hard delete каскадировал бы по 27 таблицам одной небатчируемой транзакцией; compliance-запись должна пережить все таблицы, которые описывает; идентификаторы SQL никогда не из caller-строк | ✓ Phase 22 (22-01/22-05/22-09): neighbour-таблицы byte-identical после чужого purge, evidence-set (`purge_records`, suppression, erasure, journal tombstones) выживает, kill-resume под реальным SIGKILL без double-count census (22-11) |
+| Phase 22 restore: только operator CLI до `first_destructive_batch_at`, без override-параметра; общий advisory lock с purge закрывает check-then-act гонку | Частично-purged workspace, восстановленный в live, — наихудший исход (полу-удалённые данные выглядят как потеря); отсутствие force-флага доказывается zero-count grep'ом, обе стороны гонки тестируются | ✓ Phase 22 (22-06): `db:restore-workspace`, просроченные scheduled-кампании флипаются в draft в той же транзакции (D-15); purge-watchdog (22-08) — двухпроцессный dead-man's switch по `purge_records` |
+| Phase 22 dead-letter PII: bounded retention sweep вместо расширения `scrub()` на tenant-controlled key space | Widening `scrub()` на неперечислимые ключи — ровно тот подход, который PII-INVENTORY уже отверг для `events.properties`; ограниченное время жизни строки сильнее частичной редакции | ✓ Phase 22 (22-12): `DEAD_LETTER_RETENTION_DAYS` boot-validated ≤ purge-окна, PK-scoped батчи по 500, явная Excluded-строка в PII-инвентаре; pre-deploy census — единственный human UAT-чек фазы (passed) |
 
 This document evolves at phase transitions and milestone boundaries.
 
@@ -233,4 +251,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-23 after Phase 21*
+*Last updated: 2026-08-24 after v1.2 milestone*

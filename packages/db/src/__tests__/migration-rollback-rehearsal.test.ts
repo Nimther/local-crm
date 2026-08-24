@@ -78,6 +78,12 @@ interface InverseStep {
  *   bookkeeping this same migration introduced; every row and every
  *   pre-existing index on `flow_runs`/`campaign_recipients`/
  *   `flow_run_steps` is untouched.
+ * - 0068_workspace_purge_records (Phase 22 plan 22-01, PRG-01/PRG-02/PRG-03/
+ *   PRG-05): creates a brand-new table, `purge_records` (no FK, no other
+ *   object depends on it, no RLS to interact with), and adds one nullable,
+ *   defaulted column, `organization."purgedAt"`. Reverting means dropping
+ *   exactly those two objects -- nothing this migration's inverse touches
+ *   existed before this migration ran.
  */
 const MIGRATION_INVERSES: Record<string, InverseStep[]> = {
   "0062_member_unique_org_user": [
@@ -123,6 +129,16 @@ const MIGRATION_INVERSES: Record<string, InverseStep[]> = {
       sql: `DROP INDEX idx_flow_runs_workspace_contact;
 DROP INDEX idx_campaign_recipients_workspace_contact;
 DROP INDEX idx_flow_run_steps_flow_run_id;`,
+    },
+  ],
+  "0068_workspace_purge_records": [
+    {
+      description: "drop purge_records (no FK, no other object depends on it)",
+      sql: `DROP TABLE purge_records;`,
+    },
+    {
+      description: "drop the Phase 22 physical-purge tombstone marker this migration added to organization (purgedAt)",
+      sql: `ALTER TABLE organization DROP COLUMN "purgedAt";`,
     },
   ],
 };

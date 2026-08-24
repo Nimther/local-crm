@@ -122,6 +122,26 @@ horizon for anything the partition-drop retention tick removes. A dropped
 partition is recoverable only from a backup, and only until that backup
 expires — retention is one-way, and this is the number that bounds it.
 
+**PT-02 / Phase 22, plan 22-10 (workspace physical purge)**: the same
+retention window is also the ACTUAL recovery horizon for a workspace's own
+physical purge (`docs/runbooks/workspace-purge-and-restore.md`). A purge's
+own "point of no return" — the moment `packages/db/src/workspace-purge-tables.ts`'s
+FK-ordered walk destroys its first row for that workspace — is presented to
+an operator as final and irreversible: `restoreWorkspace` refuses
+unconditionally from that moment on, with no override parameter. That claim
+is correct in terms of this platform's own Postgres instance, but it is not
+the whole picture for a compliance answer. The purged rows remain
+recoverable from an encrypted pgBackRest backup — see `docker/pgbackrest/pgbackrest.conf`
+and `docker/pgbackrest/crontab` for the actual retention/cadence numbers,
+not restated here so the two files cannot drift — until the backup holding
+them ages out on the schedule those two files define. In plain terms: the
+platform's own copy of a purged workspace's data is gone the moment the
+purge tick destroys it, but the encrypted backup copy is not gone until it
+rolls off this same retention window. Anyone answering "is this data
+permanently and immediately unrecoverable" for a purged workspace must
+qualify the answer with this window, exactly as the D-08 note above already
+requires for a dropped partition — one horizon bounds both claims.
+
 ## Where the repository lives, and its encryption
 
 The repository is **off-host S3-compatible object storage** — never the VPS

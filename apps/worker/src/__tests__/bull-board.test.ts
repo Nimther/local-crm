@@ -32,6 +32,7 @@ import { PARTITION_MAINTENANCE_QUEUE } from "../queues/partition-maintenance.wor
 import { WEBHOOK_REPLAY_SWEEP_QUEUE } from "../queues/webhook-replay-sweep.worker.js";
 import { REPUTATION_TICK_QUEUE } from "../queues/reputation-tick.worker.js";
 import { ERASURE_SCRUB_RECLAIM_QUEUE } from "../queues/erasure-scrub-reclaim.worker.js";
+import { WORKSPACE_PURGE_QUEUE } from "../queues/workspace-purge.worker.js";
 import { boardQueues } from "../queues/board-queues.js";
 import { closeTrackedQueues, trackedQueueCount } from "../queues/queue-registry.js";
 import {
@@ -44,8 +45,9 @@ import { BULL_BOARD_BASE_PATH, mountBullBoard } from "../bull-board.js";
 
 /**
  * Phase 15 plan 16 (OPS-14), Task 2: read-only queue handles for Bull Board
- * introspection. `boardQueues` must cover exactly the 20 queue names the
- * worker registers a `Worker` for (`server.ts`'s `workers: Worker[]` array)
+ * introspection. `boardQueues` must cover exactly the 21 queue names (as of
+ * Phase 22 plan 22-01) the worker registers a `Worker` for (`server.ts`'s
+ * `workers: Worker[]` array)
  * -- neither a subset (a queue invisible on the board) nor a superset (a
  * phantom queue name nothing consumes).
  */
@@ -95,6 +97,7 @@ const EXPECTED_QUEUE_NAMES = [
   REPUTATION_TICK_QUEUE,
   ERASURE_SCRUB_QUEUE,
   ERASURE_SCRUB_RECLAIM_QUEUE,
+  WORKSPACE_PURGE_QUEUE,
 ];
 
 describe("board-queues.ts: read-only queue handles for Bull Board (OPS-14 Task 2)", () => {

@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { registerAndCreateWorkspace } from "./helpers/workspace-setup";
 
 /**
  * Gap-closure coverage for 03-08 (SEGM-01): the tags condition slice the
@@ -11,26 +12,6 @@ import { test, expect, type Page } from "@playwright/test";
  * left untouched.
  */
 
-/** Register a fresh owner, create a workspace, and land on `/w/:slug`. Returns the slug. */
-async function registerAndCreateWorkspace(page: Page): Promise<string> {
-  const email = `owner-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
-
-  await page.goto("/register");
-  await page.getByLabel(/имя/i).fill("Segments Tags Owner");
-  await page.getByLabel(/email/i).fill(email);
-  await page.getByLabel(/пароль/i).fill("correct horse battery staple 42");
-  await page.getByRole("button", { name: "Зарегистрироваться" }).click();
-
-  await page.waitForURL("**/create-workspace");
-  await page.getByLabel(/название/i).fill(`Tags Test ${Date.now()}`);
-  await page.getByRole("button", { name: "Создать воркспейс" }).click();
-
-  await page.waitForURL(/\/w\/[a-z0-9-]+/);
-  const slug = new URL(page.url()).pathname.match(/\/w\/([a-z0-9-]+)/)?.[1];
-  expect(slug).toBeTruthy();
-  return slug as string;
-}
-
 /** Navigate to the Сегменты section and open the create-segment builder. */
 async function openSegmentCreatePage(page: Page, slug: string): Promise<void> {
   await page.getByRole("link", { name: "Сегменты" }).click();
@@ -41,7 +22,7 @@ async function openSegmentCreatePage(page: Page, slug: string): Promise<void> {
 }
 
 test("build, save, and reopen a tags segment (SEGM-01 tags slice)", async ({ page }) => {
-  const slug = await registerAndCreateWorkspace(page);
+  const slug = await registerAndCreateWorkspace(page, "Segments Tags");
   await openSegmentCreatePage(page, slug);
 
   // Default first condition row -- open the field combobox and choose «Теги»
@@ -81,7 +62,7 @@ test("build, save, and reopen a tags segment (SEGM-01 tags slice)", async ({ pag
 });
 
 test("CR-01 regression: saving the default unconfigured condition fails loudly, not silently", async ({ page }) => {
-  const slug = await registerAndCreateWorkspace(page);
+  const slug = await registerAndCreateWorkspace(page, "Segments Tags");
   await openSegmentCreatePage(page, slug);
 
   // Fill only the name -- leave the default first condition's field

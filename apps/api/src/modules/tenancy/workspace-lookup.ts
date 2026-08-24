@@ -22,3 +22,21 @@ export async function findActiveWorkspaceBySlug(slug: string): Promise<ActiveWor
   });
   return org ? { id: org.id, name: org.name, slug: org.slug } : null;
 }
+
+/**
+ * Phase 22 (PRG-06, D-04): the single API-side soft-delete lookup shared by
+ * `apiKeyAuth` (every API-key-authed surface) and the SendGrid webhook route
+ * -- one fail-closed rule, not two hand-rolled queries that could drift.
+ *
+ * Fail-closed: returns `true` (refuse) both when the row's `deletedAt` is
+ * non-null AND when no `organization` row is found at all -- a workspace
+ * this lookup cannot resolve is treated exactly like a soft-deleted one,
+ * never admitted by default. Deliberately does not join `purge_records`:
+ * quiesce starts at soft delete, long before any purge record exists.
+ */
+export async function isWorkspaceSoftDeletedById(workspaceId: string): Promise<boolean> {
+  const org = await db.query.organization.findFirst({
+    where: eq(organization.id, workspaceId),
+  });
+  return !org || org.deletedAt !== null;
+}

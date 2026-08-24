@@ -209,15 +209,17 @@ export async function checkPartitions(
 }
 
 /**
- * Phase 13 (CMP-09, migration 0058, T-13-09-03, disposition: accept).
- * MUST mirror `src/__tests__/migrate-from-empty.test.ts`'s own
+ * Phase 13 (CMP-09, migration 0058, T-13-09-03, disposition: accept) and
+ * Phase 22 (PRG-01 through PRG-05, migration 0068, T-22-01-07, disposition:
+ * accept). MUST mirror `src/__tests__/migrate-from-empty.test.ts`'s own
  * `RLS_ACCEPT_EXEMPT` exactly -- see that file's header comment for the
- * full rationale (`reputation_alert_state` is platform-internal, never a
- * tenant-facing surface, reviewed and deliberate). Duplicated rather than
- * imported because that file is a `__tests__` module, not a shared library
- * -- if one changes, check the other.
+ * full rationale (`reputation_alert_state` and `purge_records` are both
+ * platform-internal, never a tenant-facing surface, reviewed and
+ * deliberate). Duplicated rather than imported because that file is a
+ * `__tests__` module, not a shared library -- if one changes, check the
+ * other.
  */
-export const RLS_ACCEPT_EXEMPT = new Set(["reputation_alert_state"]);
+export const RLS_ACCEPT_EXEMPT = new Set(["reputation_alert_state", "purge_records"]);
 
 export interface RlsCheckResult {
   ok: boolean;

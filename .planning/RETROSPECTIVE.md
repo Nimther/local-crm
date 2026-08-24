@@ -110,6 +110,57 @@
 
 ---
 
+## Milestone: v1.2 — Data Lifecycle & Delivery Trust
+
+**Shipped:** 2026-08-24
+**Phases:** 5 (18–22) | **Plans:** 35 | **Tasks:** 77 | **Commits:** 339 | **Timeline:** 5 days (2026-08-20 roadmap → 2026-08-24 shipped)
+
+### What Was Built
+
+- Dependency hygiene under CI control: advisory gate RED (9 HIGH) → GREEN via real upgrades, one script running byte-identical as a required PR check and a daily scheduled scan (drift-tested), self-enforcing accept-list with expiry that ships empty
+- Graceful unsubscribe-secret rotation: exhaustive timing-safe `[primary, ...previous]` verification with byte-identical responses on both redemption paths, boot validation at three env sites, a 5-year retention decision filed as an operator commitment — proven by a live production rotation rehearsal
+- Campaign template correctness: `campaigns.version` optimistic lock checked inside the locked transaction on launch/schedule/test-send, enqueue-time template/sender snapshot for test sends, blocking unsaved-changes UI, typed 409 conflict recovery
+- Per-contact DSR export: all eight PII sections in one REPEATABLE READ snapshot with a fail-closed `anonymized_at` first read (typed 410), shared JSONB build-up allowlists with a test-asserted export⊇erasure superset relation, `docs/PII-INVENTORY.md` as the per-table PII authority
+- Workspace quiesce & physical purge: three independent quiesce layers (dispatch gate, ingress refusal, RLS scan-policy exclusion), report-then-destroy purge of 27 tenant tables in frozen FK order with `SKIP LOCKED` batches, UPDATE-only tombstone, RLS-free `purge_records` census evidence, operator restore CLI with a point-of-no-return, kill-resume proven under real SIGKILL at 8 seams
+
+### What Worked
+
+- **Discovery-based build order paid off exactly as designed** — the advisory gate (18) protected every later phase's dependency changes; DSR export (21) landing before purge (22) let the purge consume `docs/PII-INVENTORY.md` and the allowlist package as settled authorities instead of parallel inventions
+- **Deferring the two architectural decisions to plan time was right** — both PT-01 (privilege model) and the quiesce mechanism resolved cheaper than discussed: the real privilege gap was two tables (no grant widening), and quiesce needed only RLS predicate changes (no new grants); plan-time research even found a third unnamed scan-policy gap (`flow_runs_scan`)
+- **The v1.1 "evidence-or-it-didn't-happen" lesson held** — Phase 22's only human UAT check (pre-deploy dead-letter census) ran as a blocking checkpoint with reviewed output; Phase 19's live rotation rehearsal redeemed both link generations on production
+- **Real-SIGKILL failure injection kept finding real bugs** — 22-11 closed a genuine crash window (census overwritten with zeros after the auth-step delete) that only an eighth kill-seam regression exposed
+- **Structural test assertions over documentation** — the export⊇erasure allowlist superset, the gate-invocation byte-equality drift test, and the 42501 grant guard each turn a cross-phase agreement into a failing test
+
+### What Was Inefficient
+
+- **Nyquist validation again ran behind the phases** — VALIDATION.md for 19/21/22 is still `status: draft` at close (same class as v1.1's same-day re-audits); validate-phase needs to run at verify:post, not be left for the milestone tail
+- **Gap-closure waves persisted** (G-21-2/G-21-3 → plans 21-07/21-08, two SC2 gaps → 22-11/22-12), though smaller than v1.1 — root causes were latent platform defects (bodyless DELETE Content-Type, 375px overflow) and genuinely new crash windows, not contract drift
+- **Verification prose vs frontmatter drift** — Phases 18 and 21 discuss `human_needed` in their verification bodies while frontmatter says `passed` (resolved later by UAT completion); the milestone audit had to reconcile the two by hand
+- **A subagent misread nearly polluted the audit** — the integration checker reported REQUIREMENTS.md rows as "Pending" that were verifiably "Complete"; direct re-verification of subagent claims against the file remains necessary
+
+### Patterns Established
+
+- Shared build-up allowlists live in one package with a test-asserted superset relation between consumers (export vs erasure) — cross-phase data contracts as failing tests
+- Tenant-supplied JSONB key spaces are never allowlisted or scrubbed key-by-key: exclude entirely (`events.properties`) or bound the row's lifetime (dead-letter retention sweep)
+- Irreversible platform operations follow report-then-destroy with an RLS-free evidence table, pre-destruction census, advisory-locked resume, and an operator-only restore path that refuses past the first destructive batch
+- Quiesce = policy-predicate change at discovery + independent fail-closed re-check at dispatch; freeze-never-cancel (no tenant-state mutation)
+- One script, many triggers: CI gate and scheduled scan invoke the identical command line, guarded by a string-equality drift test
+
+### Key Lessons
+
+1. **Plan-time research shrinks architecture.** Both "open architectural decisions" carried in STATE.md for weeks resolved smaller than any discussed option once the FK graph and grant matrix were actually mapped — and the mapping found a gap (third scan policy) the discussion never named.
+2. **Sequencing by consumption, not by size.** Purge could cite PII-INVENTORY.md table-by-table only because DSR export shipped first; the milestone's cheapest integration wins came from artifacts one phase deliberately produced for the next.
+3. **The kill-seam count is a coverage dial, not a formality.** The eighth SIGKILL seam (after auth delete commits) found the milestone's subtlest bug; each new checkpointed step deserves its own kill point.
+4. **Run validate-phase inside the phase loop.** Three of five phases closed with draft VALIDATION.md — the recurring v1.1 inefficiency, now twice confirmed: reconciliation left to milestone close always stays there.
+
+### Cost Observations
+
+- Model mix: not tracked (config `model_profile: adaptive`)
+- Sessions: not tracked
+- Notable: 35 plans in 5 calendar days — the fastest plan throughput of the three milestones; the long poles were the two live operator checkpoints (rotation rehearsal, dead-letter census), mirroring v1.1
+
+---
+
 ## Cross-Milestone Trends
 
 ### Process Evolution
@@ -118,6 +169,7 @@
 |-----------|--------|-------|------------|
 | v1.0 | 7 | 96 | Baseline: walking-skeleton phases + verifier/UAT gap-closure loops established |
 | v1.1 | 10 | 128 | Added: Nyquist validation, per-phase security registers with auditor-only status flips, milestone audit with 3-source cross-reference, blocking operator checkpoints for live actions, tech-debt closure as an appended phase |
+| v1.2 | 5 | 35 | Added: discovery-based build order (each phase produces artifacts the next consumes), plan-time resolution of deferred architectural decisions, cross-phase contracts as failing tests (allowlist superset, invocation drift test, grant guard) |
 
 ### Cumulative Quality
 
@@ -125,10 +177,12 @@
 |-----------|--------------|-----------------|---------------|
 | v1.0 | 49/49 | 7/7 | env/live-email UAT items (see v1.0-MILESTONE-AUDIT.md) |
 | v1.1 | 95/95 | 10/10 (Phase 10 stale-projection override, verification itself passed) | live operator-alert email; remaining Phase 13 live walkthroughs; KEK quick-task Task 3; Phase 15 threshold assumptions + Sentry workspace_id gap + 2 UI follow-ups |
+| v1.2 | 18/18 | 5/5 (audit passed, 23/23 integration points) | v1.1 carry-overs unchanged; Nyquist draft VALIDATION.md for phases 19/21/22; WR-01/WR-02 drawer edge cases; CR-01 false-dirty |
 
 ### Top Lessons (Verified Across Milestones)
 
 1. **Capture-real-payloads-first: verified.** v1.0's fictional `custom_args` wrapper → v1.1's committed genuinely-signed SendGrid fixture with frozen-clock CI regression. The pattern held and paid off.
 2. **Env checkers in phase 1: verified.** Phase 8 front-loaded the env resolver and fail-closed DSN guard; env-drift debug sessions dropped from 3 (v1.0) to effectively 0 — remaining gap-closures were infra-reality, not missing-var, failures.
 3. **Shared constants over parallel literals: verified.** Extended beyond values into behavior (`SEND_STATUS_TRANSITIONS` executable mirror, `@mega-crm/queue-core` cross-app single-definition tests).
-4. **New candidate for v1.2: approvals must carry pasted evidence** — the only false "confirmed" in two milestones was a checkpoint approval recorded without an artifact.
+4. **Approvals must carry pasted evidence: verified in v1.2.** Both live checkpoints (rotation rehearsal, dead-letter census) ran with reviewed output attached; no false "confirmed" this milestone.
+5. **New candidate for next milestone: validate-phase must run at verify:post per phase** — draft VALIDATION.md at close recurred in both v1.1 (same-day re-audits) and v1.2 (3 of 5 phases).

@@ -1,11 +1,12 @@
 import { Worker, type Job, type ConnectionOptions } from "bullmq";
 import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { CONTACT_COLUMNS, type ContactRow } from "@mega-crm/contacts-core";
-import { evaluatePreSendGate, recordExcluded, tryCompleteCampaign } from "@mega-crm/delivery-core";
+import { evaluatePreSendGate, recordExcluded, tryCompleteCampaign, isWorkspaceSoftDeleted } from "@mega-crm/delivery-core";
 import { CAMPAIGN_KICKOFF_QUEUE, campaignKickoffJobSchema, type CampaignKickoffJob } from "@mega-crm/shared-schemas";
 import { materializeCampaignSnapshot } from "./recipient-snapshot.js";
 import { emailBroadcastQueue } from "./campaign-broadcast-producer.js";
 import { wrapProcessor } from "../processor-wrapper.js";
+import { logger } from "../logger.js";
 
 /** Cursor page size for walking the frozen `campaign_recipients` snapshot (mirrors imports-csv.worker.ts's PAGE_SIZE convention). */
 const BREAKDOWN_PAGE_SIZE = 5_000;
@@ -50,6 +51,20 @@ export async function processCampaignKickoffJob(data: CampaignKickoffJob): Promi
   const { workspaceId, campaignId } = campaignKickoffJobSchema.parse(data);
 
   await withTenant(workspaceId, async () => {
+    // T-22-02-04 (PRG-06, D-01/D-02): the fan-out guard -- checked BEFORE the
+    // audience walk (materializeCampaignSnapshot below) so a kickoff job
+    // already sitting in the queue at soft-delete time enqueues ZERO
+    // per-recipient jobs, rather than fanning out a broadcast the dispatch
+    // gate (send-dispatch.ts's claimCampaignSend) would then have to exclude
+    // one row at a time. Freeze, never cancel (D-02): no status transition,
+    // no completion attempt -- the campaign is left exactly as the tenant's
+    // last action left it, so a later restore finds it untouched.
+    const workspaceDeleted = await withTenantTransaction((client) => isWorkspaceSoftDeleted(client, workspaceId));
+    if (workspaceDeleted) {
+      logger.info({ workspaceId, campaignId }, "campaign kickoff refused: workspace soft-deleted");
+      return;
+    }
+
     const state = await withTenantTransaction(async (client) => {
       const { rows } = await client.query<CampaignKickoffStateRow>(
         `SELECT status, fan_out_complete as "fanOutComplete" FROM campaigns WHERE id = $1`,

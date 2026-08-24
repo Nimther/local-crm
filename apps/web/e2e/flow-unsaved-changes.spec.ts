@@ -57,7 +57,7 @@ test.describe("OPS-19: unsaved canvas changes guard", () => {
   test("in-app navigation with unsaved changes opens the dialog; stay cancels, discard navigates", async ({
     page,
   }) => {
-    const slug = await registerAndCreateWorkspace(page, "Unsaved Test");
+    const slug = await registerAndCreateWorkspace(page, "Unsaved Changes");
     await createFlowAndOpenCanvas(page, slug);
     await dirtyCanvas(page);
 
@@ -81,7 +81,7 @@ test.describe("OPS-19: unsaved canvas changes guard", () => {
   });
 
   test("with everything saved, the same nav click navigates with no dialog", async ({ page }) => {
-    const slug = await registerAndCreateWorkspace(page, "Unsaved Test");
+    const slug = await registerAndCreateWorkspace(page, "Unsaved Changes");
     const flowId = await createFlowAndOpenCanvas(page, slug);
     await dirtyCanvas(page);
 
@@ -108,7 +108,7 @@ test.describe("OPS-19: unsaved canvas changes guard", () => {
   test("a failed draft save shows a persistent banner with Retry; toolbar never reads saved; Retry clears it", async ({
     page,
   }) => {
-    const slug = await registerAndCreateWorkspace(page, "Unsaved Test");
+    const slug = await registerAndCreateWorkspace(page, "Unsaved Changes");
     const flowId = await createFlowAndOpenCanvas(page, slug);
 
     const draftPatchUrl = `**/api/workspaces/${slug}/flows/${flowId}`;
@@ -142,7 +142,7 @@ test.describe("OPS-19: unsaved canvas changes guard", () => {
   });
 
   test("beforeunload fires on reload while dirty and does not fire when clean", async ({ page }) => {
-    const slug = await registerAndCreateWorkspace(page, "Unsaved Test");
+    const slug = await registerAndCreateWorkspace(page, "Unsaved Changes");
     await createFlowAndOpenCanvas(page, slug);
 
     // --- Dirty case: the debounce has not settled, edit is unsaved. ---

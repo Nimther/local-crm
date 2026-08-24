@@ -6,6 +6,7 @@ import { verifyWebhookSignature, isWebhookTimestampFresh } from "./signature-ver
 import { enqueueWebhookBatch } from "./enqueue.js";
 import { env } from "../../env.js";
 import { logger } from "../../logger.js";
+import { isWorkspaceSoftDeletedById } from "../tenancy/workspace-lookup.js";
 
 /**
  * Phase 16 (D-09): the fixed, greppable marker the capture log line below
@@ -118,6 +119,34 @@ export async function registerWebhookRoutes(fastify: FastifyInstance): Promise<v
         // Generic 404 -- covers both "no such pathToken" and "provisioned but
         // no public key yet" identically, so neither state is distinguishable
         // from the outside (T-05-03).
+        return reply.code(404).send();
+      }
+
+      // Phase 22 (PRG-06, D-04): a soft-deleted workspace's endpoint is
+      // dropped as the SAME bare 404 as an unknown pathToken -- not a
+      // distinguishable body, code or header. This surface is anonymous and
+      // unauthenticated (unlike apiKeyAuth's 403 above), so any response
+      // difference would turn it into a workspace-state oracle for anyone
+      // holding a guessed token (T-05-03's existing no-enumeration
+      // discipline). The check consumes ONLY `endpoint.workspaceId`, which
+      // the token lookup already produced -- no body read, no parse, and no
+      // re-ordering relative to `verifyWebhookSignature` below for any live
+      // workspace: this branch runs strictly BEFORE signature verification
+      // is even reached, so the raw bytes are still untouched for every
+      // request that gets here. A later reader must not "fix" this by moving
+      // the check after verification -- the check is deliberately placed
+      // ahead of it, at zero cost to the raw-body-untouched rule, because a
+      // deleted workspace's key material deserves no signature-verification
+      // work at all.
+      //
+      // Deliberate consequence (recorded here, not accidental): late
+      // delivery evidence for mail sent before the delete is discarded
+      // rather than journalled -- the drop happens BEFORE the journal write,
+      // never after it. `ingress_journal` exists to prove delivery
+      // accountability for a tenant that no longer has standing to receive
+      // it; full quiesce over evidence completion is the trade CONTEXT.md's
+      // D-04 made knowingly.
+      if (await isWorkspaceSoftDeletedById(endpoint.workspaceId)) {
         return reply.code(404).send();
       }
 

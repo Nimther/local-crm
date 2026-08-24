@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Worker, type Job, type ConnectionOptions } from "bullmq";
 import type { PoolClient } from "pg";
+import { db } from "@mega-crm/db";
 import { scrubbedConsole } from "@mega-crm/redaction";
 import { withCorrelation, withCrossWorkspaceScan, withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import {
@@ -26,6 +27,29 @@ import { wrapProcessor } from "../processor-wrapper.js";
 import { logger } from "../logger.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Phase 22 (PRG-06, RESEARCH Open Question 1, zero-tolerance resolution):
+ * closes the queue-drain window on the webhook-events side -- a batch
+ * already sitting in the queue when its workspace was soft-deleted must not
+ * write a send_events row.
+ *
+ * TODO(22-02): `packages/delivery-core/src/workspace-quiesce.ts` (plan
+ * 22-02, same wave) is meant to be the ONE shared fail-closed lookup every
+ * dispatch/ingest path uses. This is a deliberate local duplicate of that
+ * exact rule (SELECT "deletedAt" FROM organization WHERE id = $1; refuse on
+ * both a non-null deletedAt AND a missing row) added because 22-02 had not
+ * yet landed on this branch when this task ran. Whichever of 22-02/22-03
+ * merges second MUST delete this local copy in favour of importing the
+ * shared helper -- do not leave two lookups with two rules on the branch
+ * past the wave boundary.
+ */
+async function isWorkspaceSoftDeletedForWebhookEvents(workspaceId: string): Promise<boolean> {
+  const org = await db.query.organization.findFirst({
+    where: (fields, { eq }) => eq(fields.id, workspaceId),
+  });
+  return !org || org.deletedAt !== null;
+}
 
 interface ExtractedEventRow {
   id: string;
@@ -668,6 +692,21 @@ export async function processWebhookEventBatch(data: unknown): Promise<{ inserte
     throw parsed.error;
   }
   const { workspaceId, events, journalId } = parsed.data;
+
+  // Phase 22 (PRG-06): resolved once per job, before any extraction, tenant
+  // write or queue fan-out. Not a failure: returns the processor's normal
+  // success value so BullMQ never retries or dead-letters work that must
+  // simply never happen. Deliberately does NOT call markJournalCompleteIfPresent
+  // here -- a soft-deleted workspace's journal row (if any) is left exactly
+  // as it was; this guard only stops NEW send_events writes, it does not
+  // touch the journal.
+  if (await isWorkspaceSoftDeletedForWebhookEvents(workspaceId)) {
+    logger.info(
+      { workspaceId },
+      "webhook-events job dropped -- workspace soft-deleted (PRG-06 drain-window guard)"
+    );
+    return { inserted: 0 };
+  }
 
   const now = new Date();
   const outcomes = events.map((raw) => extractEventRow(raw, now));
