@@ -2,13 +2,13 @@
 status: verifying
 trigger: "PR #28 CI run 32733613756 fails in static, test, and e2e jobs before merge"
 created: 2026-08-24T14:00:00Z
-updated: 2026-08-24T15:25:00Z
+updated: 2026-08-24T16:10:00Z
 mode: fix_and_verify
 ---
 
 ## Current Focus
 
-hypothesis: "CONFIRMED — three independent deterministic causes: a connection-scoped timeout in a pooled test connection; three actionable-looking bare purge fixtures for live workspaces leaking into later global-scan tests; and an E2E sign-up helper that ignores the production-shaped shared auth rate limit."
+hypothesis: "CONFIRMED — three independent deterministic causes: a connection-scoped timeout in a pooled test connection; three actionable-looking bare purge fixtures for live workspaces leaking into later global-scan tests; and legacy E2E specs that bypass the production-shaped auth-rate-limit-aware sign-up helper."
 test: "Static audit + four-file purge suite locally; full E2E on GitHub after push because the developer's long-running API/Web processes occupy the two hard-coded local E2E ports."
 expecting: "Session-state audit clean, 47/47 purge tests pass together, and remote E2E handles a 429 by honoring Retry-After without consuming the test's application-work timeout."
 next_action: "Commit and push the fix, wait for PR #28 checks, then resolve this session and merge in dependency order."
@@ -50,10 +50,15 @@ reproduction: "GitHub Actions CI run 32733613756 on PR #28 head 2c14a32ace40df66
   found: "The run provisioned an ephemeral database but could not start its isolated servers because long-running developer processes already occupy ports 4000 and 5173; Playwright failed with EADDRINUSE before collecting tests."
   implication: "This is an environment-only local verification blocker; the clean GitHub runner remains the authoritative full-corpus E2E check."
 
+- timestamp: 2026-08-24T16:10:00Z
+  checked: "GitHub Actions CI run 32748450082 after the first fix push"
+  found: "Static and failure-injection jobs passed; E2E reached 16/17 passing, then segments.spec.ts hit the same direct-sign-up timeout because it was one more legacy spec not routed through the shared helper."
+  implication: "The application fix is holding; the remaining failure is the same classified fixture defect in another call site, now routed through the shared helper as well."
+
 ## Resolution
 
-root_cause: "(1) neighbour-safety used SET statement_timeout before BEGIN, leaking session state on a pooled connection and tripping the required audit; (2) three JSONB unit fixtures inserted purge_records as purging for live organizations, so later global purge tests attempted them and failed closed; (3) two legacy E2E specs performed sign-up directly, and flow-unsaved-changes hit the shared 20/min auth bucket without honoring the returned Retry-After. The worker also had no non-error terminal path for the documented report-only restore history row."
-fix: "Use BEGIN + SET LOCAL; make bare JSONB fixtures terminal/non-actionable; preserve a reported/no-destruction purge record when the same-lock restore has already cleared deletedAt; add a regression test; route the affected E2E specs through the shared registration helper and extend only the current test budget by the server-mandated retry delay."
+root_cause: "(1) neighbour-safety used SET statement_timeout before BEGIN, leaking session state on a pooled connection and tripping the required audit; (2) three JSONB unit fixtures inserted purge_records as purging for live organizations, so later global purge tests attempted them and failed closed; (3) legacy E2E specs performed sign-up directly, and the serial corpus eventually exhausted the shared 20/min auth bucket without honoring the returned Retry-After. The worker also had no non-error terminal path for the documented report-only restore history row."
+fix: "Use BEGIN + SET LOCAL; make bare JSONB fixtures terminal/non-actionable; preserve a reported/no-destruction purge record when the same-lock restore has already cleared deletedAt; add a regression test; route every observed affected E2E spec through the shared registration helper and extend only the current test budget by the server-mandated retry delay."
 verification: "Local: session-state 559 files clean; all workspace builds + ESLint pass; four purge files 47/47 pass. Remote full CI pending after push because local E2E ports are occupied by the developer's existing stack."
 files_changed:
   - "apps/worker/src/queues/__tests__/workspace-purge-neighbour-safety.test.ts"
@@ -63,3 +68,4 @@ files_changed:
   - "apps/web/e2e/helpers/workspace-setup.ts"
   - "apps/web/e2e/flow-unsaved-changes.spec.ts"
   - "apps/web/e2e/segments-tags.spec.ts"
+  - "apps/web/e2e/segments.spec.ts"

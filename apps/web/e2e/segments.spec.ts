@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { registerAndCreateWorkspace } from "./helpers/workspace-setup";
 
 /**
  * MVP happy-path test for 03-03 (SEGM-01/02/04): register -> create
@@ -6,21 +7,7 @@ import { test, expect } from "@playwright/test";
  * watch the live count -> name and save -> segment appears in the list.
  */
 test("build, preview, and save a segment from the Сегменты section", async ({ page }) => {
-  const email = `owner-${Date.now()}@example.com`;
-
-  await page.goto("/register");
-  await page.getByLabel(/имя/i).fill("Segments Owner");
-  await page.getByLabel(/email/i).fill(email);
-  await page.getByLabel(/пароль/i).fill("correct horse battery staple 42");
-  await page.getByRole("button", { name: "Зарегистрироваться" }).click();
-
-  await page.waitForURL("**/create-workspace");
-  await page.getByLabel(/название/i).fill(`Segments Test ${Date.now()}`);
-  await page.getByRole("button", { name: "Создать воркспейс" }).click();
-
-  await page.waitForURL(/\/w\/[a-z0-9-]+/);
-  const slug = new URL(page.url()).pathname.match(/\/w\/([a-z0-9-]+)/)?.[1];
-  expect(slug).toBeTruthy();
+  const slug = await registerAndCreateWorkspace(page, "Segments Test");
 
   await page.getByRole("link", { name: "Сегменты" }).click();
   await page.waitForURL(`**/w/${slug}/segments`);
