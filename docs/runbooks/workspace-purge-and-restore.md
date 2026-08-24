@@ -126,7 +126,10 @@ drift), plus:
 **State this prominently: an operator or auditor finding these rows after a
 purge must be able to tell "correct by design" from "purge incomplete" at a
 glance.** Four evidence sets survive every completed purge, on purpose, each
-proving something that must outlive the tenant:
+proving something that must outlive the tenant -- `dead_letter_jobs`
+(discussed in its own subsection just below) is a fifth thing an operator
+may find rows in, but it is not a fifth D-10 evidence survivor: it is a
+platform table the purge never walks, expiring on its own timer instead.
 
 | Survivor | What it proves |
 |---|---|
@@ -138,6 +141,37 @@ proving something that must outlive the tenant:
 Plus the **tombstoned `organization` row** itself, described above — every
 FK from the four evidence sets above (and from any table this platform ever
 adds that references `organization`) continues to resolve, forever.
+
+## Dead-letter rows
+
+`dead_letter_jobs` (migration `0054`) is **not** a fifth evidence survivor.
+It is a platform-operations table the purge never walks — no `workspace_id`,
+never in `PURGE_TABLE_ORDER`, deliberately outside every list this runbook
+otherwise cares about. Its rows are deleted on their own timer, by the same
+daily `workspace-purge` tick, gap-closure plan 22-12 (PRG-02):
+
+- **The env var and its default:** `DEAD_LETTER_RETENTION_DAYS`, default
+  30, floor 7 (`apps/worker/src/env.ts`'s `DEAD_LETTER_RETENTION_DAYS_FLOOR`),
+  boot-validated to be at most `WORKSPACE_PURGE_RETENTION_DAYS` — so any
+  dead-letter row that existed when a workspace was soft-deleted has already
+  expired before that workspace's own purge becomes eligible.
+- **The honest residual:** a dead-letter row created *after* a workspace's
+  soft-delete — an infrastructure failure hit before the quiesce check could
+  refuse the job — is bounded from its own `failed_at`, not from the
+  soft-delete. It can therefore outlive that workspace's purge by up to
+  `DEAD_LETTER_RETENTION_DAYS`. This is not a purge defect; it is the sweep's
+  own retention window running its normal course on a row that happened to
+  land late.
+- **The watchdog interaction:** `readDeadLetterHealth`
+  (`apps/api/src/modules/ops/dead-letter-watchdog.ts`) counts unacknowledged
+  rows and alerts on them. A chronically unacknowledged row stops alerting
+  the instant it is swept — after having alerted on every tick for the whole
+  retention window beforehand. A row disappearing from the watchdog's count
+  is not, by itself, proof the underlying failure was resolved.
+
+So at 3am: if you find `dead_letter_jobs` rows for a purged workspace, that
+is expected up to `DEAD_LETTER_RETENTION_DAYS` after the row's own
+`failed_at` — not a sign the purge missed anything.
 
 ## Cryptographic erasure
 
