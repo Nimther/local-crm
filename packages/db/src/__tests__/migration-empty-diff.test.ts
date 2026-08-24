@@ -64,10 +64,14 @@ describe("checkEmptyDiff against the real repository (the CI-enforced copy of db
     // a real packages/db/src/schema/*.ts change, so it DOES ship its own
     // snapshot (0066_snapshot.json is now the newest, chaining from
     // 0064_snapshot.json since 0065 was grants-only and shipped none).
-    // shippedMigrationCount grows to 67 (one more shipped tag in the
-    // journal); snapshotFileCount grows to 15 (one more snapshot file).
+    // 0067 (Phase 21 plan 21-06, DSR-02/DSR-03) is SQL-only (three plain
+    // CREATE INDEX statements, no packages/db/src/schema/*.ts change) --
+    // same precedent as 0065, so it ships NO snapshot of its own;
+    // comparedAgainstSnapshot and snapshotFileCount stay exactly what 0066
+    // left them at. shippedMigrationCount grows to 68 (one more shipped tag
+    // in the journal); snapshotFileCount stays 15 (no new snapshot file).
     expect(result.comparedAgainstSnapshot).toBe("0066_snapshot.json");
-    expect(result.shippedMigrationCount).toBe(67);
+    expect(result.shippedMigrationCount).toBe(68);
     expect(result.snapshotFileCount).toBe(15);
 
     // Never touches the repository -- proven, not assumed: the directory
@@ -84,13 +88,14 @@ describe("checkEmptyDiff against the real repository (the CI-enforced copy of db
     // preceded it (0034), and its filename must match the newest SCHEMA-
     // CHANGING migration's tag prefix -- a mismatch here would mean
     // db:check-empty-diff is silently comparing against the wrong point in
-    // history. 0066 (Phase 20 plan 20-01, TMPL-02/D-05) is now the newest
-    // SHIPPED migration overall, AND the newest schema-changing one -- it
-    // ships its own snapshot (asserted separately above via
-    // `comparedAgainstSnapshot`). This assertion tracks the JOURNAL's newest
-    // tag, which is now 0066.
+    // history. 0066 (Phase 20 plan 20-01, TMPL-02/D-05) remains the newest
+    // SCHEMA-CHANGING migration (asserted separately above via
+    // `comparedAgainstSnapshot`), but 0067 (Phase 21 plan 21-06) is now the
+    // newest SHIPPED migration overall -- SQL-only, no schema-file change,
+    // so it ships no snapshot of its own (same precedent as 0065). This
+    // assertion tracks the JOURNAL's newest tag, which is now 0067.
     const newestTag = journal.entries[journal.entries.length - 1]?.tag;
-    expect(newestTag).toBe("0066_campaigns_version");
+    expect(newestTag).toBe("0067_dsr_export_contact_indexes");
   });
 });
 

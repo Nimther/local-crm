@@ -59,7 +59,7 @@ Full phase details: [milestones/v1.1-ROADMAP.md](milestones/v1.1-ROADMAP.md)
 - [x] **Phase 18: Dependency Hygiene & Advisory Gate** - Vulnerable runtime deps fixed; new untriaged HIGH advisories blocked by CI with an expiring accept-list (completed 2026-08-20)
 - [x] **Phase 19: Unsubscribe Secret Graceful Rotation** - Operator rotates the signing secret without invalidating a single already-sent link (completed 2026-08-21)
 - [x] **Phase 20: Campaign Template Correctness** - The template shown as selected is the template that actually sends, on all three send paths (completed 2026-08-21)
-- [ ] **Phase 21: Per-Contact DSR Export** - Owner/Admin hands a data subject their own data as one downloadable, tenant-isolated file
+- [x] **Phase 21: Per-Contact DSR Export** - Owner/Admin hands a data subject their own data as one downloadable, tenant-isolated file (completed 2026-08-23)
 - [ ] **Phase 22: Workspace Quiesce & Physical Purge** - A soft-deleted workspace stops sending and physically disappears after retention, leaving neighbours and compliance evidence intact
 
 ## Phase Details
@@ -181,8 +181,38 @@ Plans:
   4. An export request naming a contact id from another workspace returns nothing (negative cross-tenant test), and freeform JSONB (`events.properties`, `send_events.payload`) reaches the file only through an explicit allowlist — a synthetic field holding another subject's data is provably absent from the export.
   5. Exporting an already-anonymized (erased) contact behaves predictably — a typed response describing the state, never a silently empty file.
 
-**Plans**: TBD
-**Plan-time decisions**: the JSONB inclusion/redaction rule (DSR-03) must be resolved as an explicit allowlist decision, shared with Phase 22's PII inventory so export and purge never diverge on what counts as a contact's personal data.
+**Plans**: 8/8 plans executed
+
+Plans:
+**Wave 1**
+
+- [x] 21-01-PLAN.md — Tracer: end-to-end DSR export of one contact's profile — new `contact:export` permission, `withTenantTransactionRepeatableRead`, the anonymizedAt-first gate, `Content-Disposition` attachment response, the 403/404/410/400 refusal triad, and the role-gated Export button with blob download (DSR-01, DSR-04)
+- [x] 21-02-PLAN.md — Shared allowlist package: relocate the evidence allowlist and build-up functions into `@mega-crm/delivery-core`, add the export superset (`ip`, `useragent`, `url`, `reason`) with a test-asserted superset relation, and write `docs/PII-INVENTORY.md` for Phase 22 (DSR-03)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [x] 21-03-PLAN.md — Consent-history and events sections: keyset walks to exhaustion, `events.properties` provably never read, multi-page completeness proven (DSR-01, DSR-02)
+- [x] 21-04-PLAN.md — SC5 courtesy half: `anonymizedAt` on the contact response and the visible-but-disabled Export button with inline reason, without weakening any Phase 13 visibility filter (DSR-01)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [x] 21-05-PLAN.md — Sends with nested send events through the export allowlist, SC4's synthetic other-subject-field proof, and the REPEATABLE READ mid-scrub race test with its READ COMMITTED negative control (DSR-02, DSR-03)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [x] 21-06-PLAN.md — Journey sections (`flowParticipation` with steps, `campaignMemberships`), migration 0067's three contact-scoped indexes, and the as-built record in SPECIFICATION.md + COVERAGE.md (DSR-02, DSR-03)
+
+**Wave 5** *(gap closure — UAT gap G-21-2)*
+
+- [x] 21-07-PLAN.md — Bodyless UI deletes: `apiFetch` attaches the JSON content type only when a body is present, pinned by a per-verb request-shape matrix, plus the contact-card delete path as a Playwright spec (unblocks UAT Test 2's two-tab erasure race; fixes team/segments/campaigns/flows deletes by the same change)
+
+**Wave 6** *(gap closure — UAT gap G-21-3; blocked on Wave 5: imports its e2e preamble helper and the Playwright lane's fixed ports are exclusive)*
+
+- [x] 21-08-PLAN.md — Narrow-viewport contact card: responsive shell (fixed sidebar leaves the layout below `md`, drawer replaces it), wrapping header/actions/message, content-column fit, proven by a 375px measurement spec that reproduces the UAT numbers
+
+**Gap-closure decisions**: the G-21-2 fix is client-side only — a server-side empty-JSON-tolerant content-type parser was rejected in diagnosis (it would relax the contract platform-wide, including the public event-ingestion and webhook surfaces). For G-21-3 the planner settled the shell-layer choice the diagnosis handed over: make `AppShell` responsive rather than re-scope the "no horizontal page overflow" criterion to the content column, because header wrapping alone provably cannot clear page overflow at 375px while the 256px sidebar stands.
+
+**Plan-time decisions**: RESOLVED at planning — the JSONB rule is two explicit build-up allowlists in one shared package (`@mega-crm/delivery-core`), consumed by both the API export path and the worker erasure path: `events.properties` is excluded entirely (D-01, mirroring the Phase 13 erasure ruling — the whole key space is tenant-supplied, so no allowlist over it can be defended), and `send_events.payload` passes an export allowlist that is structurally a superset of the erasure evidence allowlist, adding only the subject's own single-recipient fields `ip`, `useragent`, `url`, `reason` (D-02). The superset relation is asserted by a test, not just documented, and the per-table definition of a contact's personal data lives in `docs/PII-INVENTORY.md` (D-03/D-04) for Phase 22's purge to consume. Also resolved: RESEARCH.md Pitfall 2's verified index gap is closed in this phase by migration 0067 rather than deferred, since Phase 22 scans the same tables by contact.
 **UI hint**: yes
 
 ### Phase 22: Workspace Quiesce & Physical Purge
@@ -229,7 +259,7 @@ Plans:
 | 18. Dependency Hygiene & Advisory Gate | v1.2 | 4/4 | Complete    | 2026-08-20 |
 | 19. Unsubscribe Secret Graceful Rotation | v1.2 | 5/5 | Complete    | 2026-08-21 |
 | 20. Campaign Template Correctness | v1.2 | 6/6 | Complete    | 2026-08-21 |
-| 21. Per-Contact DSR Export | v1.2 | 0/TBD | Not started | - |
+| 21. Per-Contact DSR Export | v1.2 | 8/8 | Complete    | 2026-08-23 |
 | 22. Workspace Quiesce & Physical Purge | v1.2 | 0/TBD | Not started | - |
 
 ---

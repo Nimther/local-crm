@@ -2,38 +2,38 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Data Lifecycle & Delivery Trust
-current_phase: 21
-current_phase_name: Per-Contact DSR Export
-status: "Phase 20 shipped — PR #26"
-stopped_at: Phase 20 context gathered
-last_updated: "2026-08-21T15:05:29.949Z"
-last_activity: 2026-08-21
+current_phase: 22
+current_phase_name: Workspace Quiesce & Physical Purge
+status: "Phase 21 shipped — PR #27"
+stopped_at: Phase 21 complete (UAT 4/4, verification passed, security 41/41 closed), ready to plan Phase 22
+last_updated: "2026-08-23T14:23:51.682Z"
+last_activity: 2026-08-23
 progress:
   total_phases: 5
-  completed_phases: 3
-  total_plans: 15
-  completed_plans: 15
-  percent: 60
-last_activity_desc: Phase 20 complete, transitioned to Phase 21
+  completed_phases: 4
+  total_plans: 23
+  completed_plans: 23
+  percent: 80
+last_activity_desc: Phase 21 complete, transitioned to Phase 22
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-08-21 after Phase 19)
+See: .planning/PROJECT.md (updated 2026-08-23 after Phase 21)
 
 **Core value:** Маркетолог настраивает триггерную цепочку или кампанию — и письма надёжно и вовремя доходят до нужных контактов, со сквозным отслеживанием статусов (delivered/opened/clicked/bounced).
-**Current focus:** Phase 20 — campaign-template-correctness
+**Current focus:** Phase 22 — Workspace Quiesce & Physical Purge
 
 ## Current Position
 
-Phase: 21 — Per-Contact DSR Export
+Phase: 22 — Workspace Quiesce & Physical Purge
 Plan: Not started
-Status: Phase 20 shipped — PR #26
-Last activity: 2026-08-21
+Status: Phase 21 shipped — PR #27
+Last activity: 2026-08-23
 
-Progress: [████░░░░░░] 40% (2/5 v1.2 phases complete)
+Progress: [████████░░] 80% (4/5 v1.2 phases complete)
 
 ### Milestone v1.2 phase map
 
@@ -41,8 +41,8 @@ Progress: [████░░░░░░] 40% (2/5 v1.2 phases complete)
 |-------|------|--------------|--------|
 | 18 | Dependency Hygiene & Advisory Gate | DEP-01..03 | ✅ Complete (2026-08-20) |
 | 19 | Unsubscribe Secret Graceful Rotation | ROT-01..02 | ✅ Complete (2026-08-21) |
-| 20 | Campaign Template Correctness | TMPL-01..03 | Not started |
-| 21 | Per-Contact DSR Export | DSR-01..04 | Not started |
+| 20 | Campaign Template Correctness | TMPL-01..03 | ✅ Complete (2026-08-21) |
+| 21 | Per-Contact DSR Export | DSR-01..04 | ✅ Complete (2026-08-23) |
 | 22 | Workspace Quiesce & Physical Purge | PRG-01..06 | Not started |
 
 Execution order: 18 → 19 → 20 → 21 → 22 (dependency gate first protects every later phase's dependency changes; purge last — largest surface, irreversible, two plan-time architectural decisions).
@@ -53,17 +53,29 @@ Execution order: 18 → 19 → 20 → 21 → 22 (dependency gate first protects 
 - v1.1: 929 commits, 716 files changed, ~139k LOC TypeScript total (was ~57k after v1.0)
 - Per-plan execution metrics for v1.1 live in the archived phase summaries (`milestones/v1.1-phases/`)
 
+**Per-Plan Metrics:**
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 21 P07 | 15min | 3 tasks | 4 files |
+| Phase 21 P08 | 25min | 3 tasks | 6 files |
+
 ## Accumulated Context
 
 ### Decisions
 
 Full decision log lives in PROJECT.md (Key Decisions) and the archived phase summaries/CONTEXT files in `.planning/milestones/v1.0-phases/` and `.planning/milestones/v1.1-phases/`.
 
+- [Phase 21]: DSR-03 JSONB rule resolved as two build-up allowlists in shared `@mega-crm/delivery-core` — `events.properties` excluded entirely, export allowlist a test-asserted structural superset of the erasure evidence list; `docs/PII-INVENTORY.md` is the per-table PII authority Phase 22's purge must consume
+- [Phase 21]: Entire DSR export runs in one `REPEATABLE READ` snapshot with fail-closed `anonymized_at` gate as the first read (erased contact → typed 410); proven against a real interleaved erasure scrub
+- [Phase 21]: Fixed apiFetch to attach Content-Type: application/json only when a body is present (keyed on init?.body !== undefined), closing gap G-21-2 for all five bodyless UI delete actions without touching the server's content-type parser
+- [Phase 21]: Made AppShell responsive (sidebar hidden below md, mobile drawer) instead of re-scoping the 375px no-overflow criterion to the content column, closing gap G-21-3
+
 ### Open decisions to resolve at plan time (v1.2)
 
 | Phase | Decision | Why it cannot be settled now |
 |-------|----------|------------------------------|
-| 21 | JSONB inclusion/redaction rule for `events.properties` / `send_events.payload` (DSR-03) | Requires analysis of what other-subject data tenant-defined JSON can hold; must be shared with Phase 22's PII inventory so export and purge never diverge |
+| ~~21~~ | ~~JSONB inclusion/redaction rule (DSR-03)~~ | RESOLVED at Phase 21 planning: two build-up allowlists in `@mega-crm/delivery-core` (D-01/D-02), `docs/PII-INVENTORY.md` binds Phase 22 |
 | 22 | Privilege model for cross-tenant deletion: grant migration on `organization` vs dedicated elevated DSN | Architectural tradeoff (privilege surface vs code volume); project has precedent for both |
 | 22 | Exact quiesce mechanism closing the `campaigns_scan`/`flows_scan` gap (neither checks `organization.deletedAt` today) | Scope call: part of PRG-06 or separate fix — research demands it be explicit to avoid a half-measure |
 
@@ -115,12 +127,12 @@ Items acknowledged and deferred at milestone close on 2026-08-20 (open-artifact 
 
 ## Session Continuity
 
-Last session: 2026-08-21T05:50:13.538Z
-Stopped at: Phase 20 context gathered
-Resume file: .planning/phases/20-campaign-template-correctness/20-CONTEXT.md
+Last session: 2026-08-23T11:57:00Z
+Stopped at: Phase 21 complete, ready to plan Phase 22
+Resume file: None
 
 ## Operator Next Steps
 
-- **Plan the next phase:** `/clear` then `/gsd-discuss-phase 20` (Campaign Template Correctness) to gather context — or `/gsd-plan-phase 20` to plan directly.
+- **Plan the next phase:** `/clear` then `/gsd-discuss-phase 22` (Workspace Quiesce & Physical Purge) to gather context — or `/gsd-plan-phase 22` to plan directly. Note STATE research flag: Phase 22 needs deeper research at plan time (multi-table FK ordering, privilege model, PITR-backup caveat); two open plan-time decisions remain (privilege model, quiesce mechanism for `campaigns_scan`/`flows_scan`).
 - Deferred candidates explicitly NOT in v1.2 (still tech debt): SCALE-02 (PgBouncer), segmentation benchmark at target volume, remaining live walkthroughs (operator-alert email, Phase 13 compliance), Phase 15 UI follow-ups + threshold tuning, KEK quick-task 260818-aqd Task 3.
 - Branch note: v1.1 closed on `gsd/phase-17-address-tech-debt-wr-06-medium-security-follow-ups` (planning-history lineage); code was merged to master via PR #17, tag `v1.1` points at the close commit on that branch. v1.2 phase branches follow `gsd/phase-{phase}-{slug}` — cut from an up-to-date `origin/master` (the local `master` ref is permanently stale in this repo).

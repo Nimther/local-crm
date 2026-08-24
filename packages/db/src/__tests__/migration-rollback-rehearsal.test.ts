@@ -71,6 +71,13 @@ interface InverseStep {
  *   one column, `campaigns.version`, with a constant default (`1`) and no
  *   backfill. Dropping it removes only rows' version counters -- data this
  *   same migration created -- and touches no pre-existing campaign field.
+ * - 0067_dsr_export_contact_indexes (Phase 21 plan 21-06, DSR-02/DSR-03):
+ *   adds exactly three plain `CREATE INDEX` statements (plus three
+ *   `COMMENT ON INDEX`, which carry no data and need no inverse) -- no
+ *   table, column, or constraint. Dropping the three indexes removes only
+ *   bookkeeping this same migration introduced; every row and every
+ *   pre-existing index on `flow_runs`/`campaign_recipients`/
+ *   `flow_run_steps` is untouched.
  */
 const MIGRATION_INVERSES: Record<string, InverseStep[]> = {
   "0062_member_unique_org_user": [
@@ -108,6 +115,14 @@ const MIGRATION_INVERSES: Record<string, InverseStep[]> = {
     {
       description: "drop the Phase 20 optimistic-lock token this migration added to campaigns (version)",
       sql: `ALTER TABLE campaigns DROP COLUMN version;`,
+    },
+  ],
+  "0067_dsr_export_contact_indexes": [
+    {
+      description: "drop the three Phase 21 DSR-export contact-scoped indexes this migration added",
+      sql: `DROP INDEX idx_flow_runs_workspace_contact;
+DROP INDEX idx_campaign_recipients_workspace_contact;
+DROP INDEX idx_flow_run_steps_flow_run_id;`,
     },
   ],
 };

@@ -14,6 +14,7 @@ import {
   updateContact,
   type ContactEventRow,
   type ContactRow,
+  type ContactRowWithAnonymizedAt,
 } from "./contact.repository.js";
 import { listPropertyRegistry } from "./property-registry.js";
 
@@ -31,7 +32,16 @@ function toContactEventResponse(row: ContactEventRow) {
   };
 }
 
+/**
+ * DSR-01/D-14 (plan 21-04): `anonymizedAt` is always present on the wire,
+ * never omitted -- `null` for the list/create/patch routes (their selects
+ * never fetch the column, so `row.anonymizedAt` is `undefined` there) and
+ * `null` for the single-contact GET too, since `getContact` still filters
+ * `anonymized_at IS NULL` (Phase 13 CMP-04 unchanged). One response shape
+ * serves every contact route; no consumer branches on the field's presence.
+ */
 function toContactResponse(row: ContactRow) {
+  const anonymizedAt = (row as ContactRowWithAnonymizedAt).anonymizedAt;
   return {
     id: row.id,
     workspaceId: row.workspaceId,
@@ -48,6 +58,7 @@ function toContactResponse(row: ContactRow) {
     subscriptionStatus: row.subscriptionStatus,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    anonymizedAt: anonymizedAt ? anonymizedAt.toISOString() : null,
   };
 }
 

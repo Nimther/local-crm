@@ -124,7 +124,7 @@ describe("newestAutoReversibleTier", () => {
     }
   });
 
-  it("returns the current repository's trailing run as exactly [\"0066_campaigns_version\"] -- 0066 is the newest shipped migration and is itself auto-reversible", () => {
+  it("returns the current repository's trailing run as exactly [\"0066_campaigns_version\", \"0067_dsr_export_contact_indexes\"] -- 0067 is the newest shipped migration and is itself auto-reversible", () => {
     // Phase 15 (OPS-13, plan 15-14, Task 1): 0065 is a grants-only migration
     // (column-level GRANT + CREATE POLICY on workspace_webhook_endpoints,
     // human-approved override of this plan's own "no new migration"
@@ -135,13 +135,21 @@ describe("newestAutoReversibleTier", () => {
     //
     // Phase 20 (TMPL-02/D-05, plan 20-01, Task 2): 0066_campaigns_version
     // adds exactly one column (`campaigns.version`, constant default, no
-    // backfill) and is classified auto-reversible. Because it is the newest
-    // shipped migration and sits directly after the still-forward-only
-    // 0065, the trailing run becomes a one-element run starting after 0065
-    // rather than extending any earlier run. Pinned explicitly so a future
-    // migration silently changing this fails loudly here rather than only
-    // inside the rehearsal test.
-    expect(newestAutoReversibleTier(MIGRATIONS_DIR)).toEqual(["0066_campaigns_version"]);
+    // backfill) and is classified auto-reversible.
+    //
+    // Phase 21 (DSR-02/DSR-03, plan 21-06, Task 2): 0067_dsr_export_contact_indexes
+    // adds exactly three plain CREATE INDEX statements (no table/column/
+    // constraint) and is classified auto-reversible too, extending the
+    // trailing run one tag further -- it is now the newest shipped
+    // migration, directly after 0066, so the run grows to
+    // ["0066_campaigns_version", "0067_dsr_export_contact_indexes"] rather
+    // than resetting. Pinned explicitly so a future migration silently
+    // changing this fails loudly here rather than only inside the
+    // rehearsal test.
+    expect(newestAutoReversibleTier(MIGRATIONS_DIR)).toEqual([
+      "0066_campaigns_version",
+      "0067_dsr_export_contact_indexes",
+    ]);
   });
 
   it("returns an empty run when the newest migration is forward-only", () => {

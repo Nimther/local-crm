@@ -28,6 +28,11 @@ export const statement = {
   // D-21: Owner/Admin create and revoke workspace API keys independently;
   // Member has neither (02-03).
   apiKeys: ["create", "revoke"],
+  // Phase 21 (DSR-04/D-16): a dedicated resource for the per-contact DSR
+  // export -- deliberately NOT reusing `campaign`/`flow`, so narrowing
+  // either of those permissions later cannot silently open or close DSR
+  // export access.
+  contact: ["export"],
 } as const;
 
 export const ac = createAccessControl(statement);
@@ -45,6 +50,8 @@ export const member = ac.newRole({
   campaign: [],
   flow: [],
   apiKeys: [],
+  // Phase 21 (DSR-04): Member has no export permission.
+  contact: [],
 });
 
 /**
@@ -65,6 +72,8 @@ export const admin = ac.newRole({
   campaign: ["launch"],
   flow: ["publish"],
   apiKeys: ["create", "revoke"],
+  // Phase 21 (DSR-04): Admin may export a contact's personal data.
+  contact: ["export"],
 });
 
 /** D-18/D-19/D-20: Owner has every gated permission, including organization delete. */
@@ -76,4 +85,6 @@ export const owner = ac.newRole({
   campaign: ["launch"],
   flow: ["publish"],
   apiKeys: ["create", "revoke"],
+  // Phase 21 (DSR-04): Owner may export a contact's personal data.
+  contact: ["export"],
 });
