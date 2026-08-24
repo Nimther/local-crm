@@ -1,5 +1,36 @@
 # Milestones
 
+## v1.2 Data Lifecycle & Delivery Trust (Shipped: 2026-08-24)
+
+**Delivered:** Closed the data-lifecycle and delivery-trust gaps of the production platform: what the marketer selects is what actually sends (optimistic-locked campaigns on all three send paths), a data subject's personal data is exportable on demand (per-contact DSR export in one REPEATABLE READ snapshot), a deleted workspace actually disappears (immediate quiesce + resumable physical purge that spares neighbours and preserves compliance evidence), unsubscribe links survive secret rotation, and vulnerable dependencies are under CI control with an expiring accept-list.
+
+**Stats:** 5 phases (18–22), 35 plans, 77 tasks · 339 commits · 146 source files changed (+28,236/−544 LOC, ~136k LOC TypeScript total) · 2026-08-20 (roadmap) → 2026-08-24 (5 days)
+**Closeout:** override_closeout — 18/18 v1.2 requirements complete, 5/5 phases `verification: passed`, milestone audit `passed` (23/23 cross-phase integration points wired, 3/3 E2E flows complete — `.planning/milestones/v1.2-MILESTONE-AUDIT.md`), security registers fully closed per phase (Phase 19: 24/24, Phase 21: 41/41, Phase 22: 79/79 — `threats_open: 0` everywhere). Known verification overrides: 2 (see STATE.md Deferred Items) — both carried from the v1.1 close: `debug/knowledge-base.md` (audit false positive — it is the resolved-sessions knowledge base, not an open session) and quick task 260818-aqd Task 3 (operator-only production KEK provisioning, intentionally not executed).
+
+**Key accomplishments:**
+
+1. **Dependency hygiene & advisory gate (Phase 18)** — advisory gate turned RED (9 blocking HIGH findings across 7 packages) → GREEN purely through upgrades; one gate script (`check-dependency-advisories.mjs`) runs byte-identical as a required PR check and a daily scheduled scan (drift-tested), with a self-enforcing accept-list (5 mandatory fields, ≥80-char justification, ≤90-day expiry) that ships empty; live dispatch exercise proved the deduplicated labelled-issue path (issue #21).
+2. **Graceful unsubscribe-secret rotation (Phase 19)** — `verifyUnsubscribeToken` became an ordered, exhaustively-evaluated `[primary, ...previous]` loop (timing-safe per candidate, byte-identical responses, no oracle in logs), boot validation at all three env sites (max 5 previous secrets), the D-06 5-year retention decision filed as an operator commitment, and a two-step rotation runbook — proven by a live production rotation rehearsal with both link generations redeemed.
+3. **Campaign template correctness (Phase 20)** — `campaigns.version` optimistic lock checked inside the same `FOR UPDATE` transaction on launch, schedule and test-send (typed 409 `version_conflict`, zero mail on conflict); test-send jobs carry an enqueue-time template/sender snapshot so a save can never redirect an in-flight test; unsaved edits surface as a blocking amber banner, and conflict dialogs recover with refetch, never auto-resend.
+4. **Per-contact DSR export (Phase 21)** — Owner/Admin-gated (`contact:export`) machine-readable export of all eight PII sections in one REPEATABLE READ snapshot with a fail-closed `anonymized_at` first read (erased contact → typed 410, proven against a real interleaved scrub); the DSR-03 JSONB rule landed as two shared build-up allowlists in `@mega-crm/delivery-core` (export a test-asserted structural superset of erasure evidence) plus `docs/PII-INVENTORY.md` as the per-table PII authority; en route fixed bodyless UI deletes and made the shell responsive at 375px.
+5. **Workspace quiesce & physical purge (Phase 22)** — soft-delete quiesces immediately on three independent layers (dispatch-time gate on all send paths, ingress refusal, RLS scan-policy exclusion via migration 0070); after retention, a report-then-destroy state machine purges all 27 tenant tables in frozen FK order (500-row `SKIP LOCKED` batches, secrets included), tombstones `organization` by UPDATE, and keeps `purge_records` census evidence — kill-resume proven under real SIGKILL at 8 seams, restore CLI refuses past the first destructive batch, and dead-letter PII is bounded by a boot-validated retention sweep.
+
+**Tech debt accepted at close** (full detail in `.planning/milestones/v1.2-MILESTONE-AUDIT.md`):
+
+- Nyquist VALIDATION.md for Phases 19/21/22 still `status: draft` — seeded but never reconciled by validate-phase (coverage TODO: `/gsd-validate-phase`; each phase independently passed verification and UAT).
+- Phase 21 mobile-drawer edge cases WR-01/WR-02 (desktop aside CSS-hidden rather than unmounted below `md`; WorkspaceSwitcher leaves the drawer open) — judged acceptable in UAT scenario 4.
+- Phase 22 operational note: the first production deploy of the dead-letter retention sweep permanently deletes `dead_letter_jobs` rows older than `DEAD_LETTER_RETENTION_DAYS` (default 30) on its first purge tick — pre-deploy census reviewed and approved during UAT 2026-08-24.
+- Carried unchanged from v1.1 (now tracked as Future Requirements OPS-LIVE-01..03/OPS-UI-01/SCALE-02..03): live operator-alert email walkthrough, remaining Phase 13 live compliance walkthroughs, KEK quick-task 260818-aqd Task 3, Phase 15 alert-threshold tuning + two UI follow-ups + API-side Sentry `workspace_id` gap, PgBouncer, segmentation benchmark at target volume.
+
+**Archived:**
+
+- `.planning/milestones/v1.2-ROADMAP.md`
+- `.planning/milestones/v1.2-REQUIREMENTS.md`
+- `.planning/milestones/v1.2-MILESTONE-AUDIT.md`
+- `.planning/milestones/v1.2-phases/` (5 phase directories, 35 plans + summaries)
+
+---
+
 ## v1.1 Production Hardening (Shipped: 2026-08-20)
 
 **Delivered:** Took the v1.0 MVP to a production-operable system: correct sends at every failure boundary (crash, timeout, ambiguous provider outcome), tenant isolation enforced by database identity and fail-closed RLS, honest compliance and analytics (atomic unsubscribe, erasure with retained evidence, UTC day semantics), bounded fault-tolerant background work with per-tenant fairness, an automated partition lifecycle closed ahead of the 2026-09-01 deadline, reproducible GHCR-image deploys with a rehearsed PITR restore, full observability (correlated logs to Loki, Sentry with CI-proven redaction, alert watchdogs + runbooks, honest frontend states), and every delivery guarantee confirmed live against real SendGrid. No new product functionality.
@@ -24,6 +55,7 @@
 - Phase 15 carried flags: OPS-13 alert thresholds and `STALE_DATA_LAG_THRESHOLD_MINUTES` are assumptions pending real load; API-side Sentry `workspace_id` gap inside route-level `withTenant` (~10 route modules, documented with an executable test); two UI follow-ups (LaunchConfirmDialog hides a failed audience breakdown, CsvImportWizard conflates loading with a dead fetch).
 
 **Archived:**
+
 - `.planning/milestones/v1.1-ROADMAP.md`
 - `.planning/milestones/v1.1-REQUIREMENTS.md`
 - `.planning/milestones/v1.1-MILESTONE-AUDIT.md`

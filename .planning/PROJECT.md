@@ -10,7 +10,9 @@ Multi-tenant SaaS-платформа marketing automation для B2C-компа�
 
 ## Current State
 
-**v1.2 в работе (4/5 фаз):** Phase 18 (dependency hygiene), Phase 19 (unsubscribe-secret rotation), Phase 20 (campaign template correctness, завершена 2026-08-21) и Phase 21 (per-contact DSR export, завершена 2026-08-23) выполнены. Phase 21: `GET /w/:slug/contacts/:id/dsr-export` за гейтом `requirePermission("contact","export")` (Member — 403), весь экспорт в одном `REPEATABLE READ` снапшоте с fail-closed гейтом `anonymized_at` (стёртый контакт → типизированный 410), keyset-пагинация всех секций (профиль, custom properties, consent history, события, sends/send_events, journey-таблицы), JSONB-правило DSR-03 решено как два build-up allowlist'а в shared `@mega-crm/delivery-core` (`events.properties` исключён целиком, export-allowlist структурный superset erasure-evidence) + `docs/PII-INVENTORY.md` для Phase 22; UAT 4/4 (включая live 410-race и мобильный drawer), верификация 18/18, security 41/41 threats closed. Попутно закрыты два латентных дефекта: bodyless UI DELETE (Content-Type только при наличии body) и переполнение карточки контакта на 375px (responsive shell + wrap). Известный tracked defect: CR-01 из 20-REVIEW.md (false-dirty при whitespace в сохранённом имени — fail-safe направление). Далее: Phase 22 workspace quiesce & physical purge.
+**Shipped: v1.2 Data Lifecycle & Delivery Trust (2026-08-24)** — 5 фаз (18–22), 35 планов, 18/18 требований, все фазы `verification: passed`, milestone-аудит `passed` (23/23 интеграционных точек, 3/3 E2E-потока), security-регистры закрыты (`threats_open: 0` везде). Closeout: override_closeout — 2 acknowledged deferred items, оба перенесены с закрытия v1.1 (см. `.planning/MILESTONES.md`). Платформа теперь закрывает полный жизненный цикл данных: корректность шаблона на всех трёх send-путях (optimistic lock `campaigns.version`), DSR-выгрузка контакта в одном `REPEATABLE READ` снапшоте, quiesce + физический purge soft-deleted workspace (возобновляемый, доказан реальным SIGKILL, с compliance evidence), graceful rotation unsubscribe-secret (live rehearsal на production) и CI-контроль HIGH advisories с expiring accept-list.
+
+Известные хвосты v1.2 (не блокеры): Nyquist VALIDATION.md фаз 19/21/22 в `status: draft` (запустить `/gsd-validate-phase`), WR-01/WR-02 mobile-drawer edge cases (приняты в UAT), CR-01 из 20-REVIEW.md (false-dirty при whitespace — fail-safe направление), первый деплой dead-letter retention sweep необратимо удалит строки старше `DEAD_LETTER_RETENTION_DAYS` (census одобрен в UAT 2026-08-24).
 
 **Shipped: v1.1 Production Hardening (2026-08-20)** — 10 фаз (8–17), 128 планов, 95/95 требований, все фазы `verification: passed`, security-регистры полностью закрыты (`threats_open: 0` везде; T-14-58/T-14-73/T-14-88 закрыты re-run'ом gsd-security-auditor 2026-08-20). Closeout: override_closeout — причины и полный список принятого tech debt в `.planning/MILESTONES.md` (Phase 10 stale-проекция init.manager — timestamp-артефакт при passed-верификации; один acknowledged deferred item).
 
@@ -19,7 +21,14 @@ Multi-tenant SaaS-платформа marketing automation для B2C-компа�
 - **Кодовая база:** ~139k LOC TypeScript (после v1.0 было ~57k); 929 коммитов за milestone (2026-07-27 → 2026-08-20)
 - **Tech debt, принятый при закрытии v1.1** (полные формулировки в `.planning/MILESTONES.md` и `.planning/milestones/v1.1-MILESTONE-AUDIT.md`): live operator-alert email ни разу не наблюдался человеком; оставшиеся live compliance-walkthrough'ы Phase 13; quick task 260818-aqd Task 3 (production-провижининг file-backed KEK, operator-only); пороги алертов Phase 15 — flagged assumptions до реальной нагрузки; API-side Sentry `workspace_id` gap (~10 route-модулей); два UI follow-up'а (LaunchConfirmDialog, CsvImportWizard)
 
-## Current Milestone: v1.2 Data Lifecycle & Delivery Trust
+## Next Milestone Goals
+
+Следующий milestone ещё не определён — запустить `/gsd-new-milestone` (questioning → research → requirements → roadmap; нумерация фаз продолжается с 23).
+
+**Кандидаты в scope** (tracked как Future Requirements в архиве `milestones/v1.2-REQUIREMENTS.md`): SCALE-02 (PgBouncer при реальном давлении `max_connections`), SCALE-03 (бенчмарк сегментации на 100k–1M контактов), OPS-LIVE-01..03 (live operator-alert walkthrough, оставшиеся Phase 13 compliance-walkthrough'ы, KEK Task 3), OPS-UI-01 (UI follow-ups Phase 15 + tuning порогов алертов), плюс хвосты v1.2 из Current State выше.
+
+<details>
+<summary>v1.2 Data Lifecycle & Delivery Trust — milestone definition (shipped 2026-08-24, archived)</summary>
 
 **Goal:** Закрыть корректность выбора шаблона в кампаниях, добить GDPR-контур (DSR-выгрузка данных контакта, физический purge soft-deleted workspace), ввести graceful rotation unsubscribe-secret и поставить дисциплину по уязвимым зависимостям под CI-контроль.
 
@@ -34,6 +43,8 @@ Multi-tenant SaaS-платформа marketing automation для B2C-компа�
 **Границы:** не перепланировать уже реализованные подсистемы (RLS, CI, backups, contact erasure, event retention, KMS, очереди, observability) — новые требования интегрируются в существующие механизмы. Roadmap продолжается с Phase 18.
 
 **Кандидаты, осознанно НЕ вошедшие в v1.2** (остаются в tech debt): SCALE-02 (PgBouncer при реальном давлении `max_connections`), бенчмарк сегментации на 100k–1M контактов, live-walkthrough'ы (operator-alert email, compliance), UI follow-up'ы Phase 15, KEK quick-task Task 3.
+
+</details>
 
 <details>
 <summary>v1.1 execution history — per-phase notes (archived at milestone close 2026-08-20)</summary>
@@ -155,8 +166,8 @@ Multi-tenant SaaS-платформа marketing automation для B2C-компа�
 
 ## Context
 
-- После v1.1: ~139k LOC TypeScript, платформа задеплоена и эксплуатируется на production VPS (Docker/GHCR, pgBackRest, Grafana Cloud Loki, Sentry); стек Fastify + Drizzle/Postgres(RLS) + BullMQ/Redis + React 19/Vite + @xyflow/react подтверждён в бою двумя milestone'ами
-- v1.0 baseline: ~57k LOC, 616 коммитов за 13 дней (2026-07-02 → 2026-07-14); v1.1: 929 коммитов за 25 дней (2026-07-27 → 2026-08-20), 716 файлов изменено
+- После v1.2: ~136k LOC TypeScript (git-tracked .ts/.tsx), платформа задеплоена и эксплуатируется на production VPS (Docker/GHCR, pgBackRest, Grafana Cloud Loki, Sentry); стек Fastify + Drizzle/Postgres(RLS) + BullMQ/Redis + React 19/Vite + @xyflow/react подтверждён в бою тремя milestone'ами
+- v1.0 baseline: ~57k LOC, 616 коммитов за 13 дней (2026-07-02 → 2026-07-14); v1.1: 929 коммитов за 25 дней (2026-07-27 → 2026-08-20), 716 файлов изменено; v1.2: 339 коммитов за 5 дней (2026-08-20 → 2026-08-24), 146 source-файлов (+28k LOC)
 - Референс продуктовой модели — Klaviyo (flows, сегментация, событийная модель)
 - Целевой масштаб первого года: 100k–1M контактов суммарно по тенантам, сотни тысяч писем в день — сегментация и отправка спроектированы под этот объём (партиционирование, батчинг, изоляция очередей), но бенчмарк сегментации на реальном объёме ещё не проводился
 - Canvas-редактор цепочек (@xyflow/react) оказался ожидаемо самым дорогим UI-компонентом — Phase 6 заняла 24 плана из 96; ставка на TypeScript/React-экосистему оправдалась
@@ -240,4 +251,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-24 after Phase 22*
+*Last updated: 2026-08-24 after v1.2 milestone*

@@ -2,38 +2,36 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Data Lifecycle & Delivery Trust
-current_phase: 22
-status: "Phase 22 shipped — PR #28"
-stopped_at: Phase 22 context gathered
-last_updated: "2026-08-24T13:15:08.191Z"
+status: Awaiting next milestone
+stopped_at: Phase 22 complete — milestone v1.2 100% (all 5 phases, 35/35 plans), ready to archive
+last_updated: "2026-08-24T13:27:30.477Z"
 last_activity: 2026-08-24
+last_activity_desc: Milestone v1.2 completed and archived
 progress:
   total_phases: 5
   completed_phases: 5
   total_plans: 35
   completed_plans: 35
   percent: 100
+current_phase: 22
 current_phase_name: workspace-quiesce-physical-purge
-last_activity_desc: Phase 22 complete
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-08-24 after Phase 22)
+See: .planning/PROJECT.md (updated 2026-08-24 after v1.2 milestone)
 
 **Core value:** Маркетолог настраивает триггерную цепочку или кампанию — и письма надёжно и вовремя доходят до нужных контактов, со сквозным отслеживанием статусов (delivered/opened/clicked/bounced).
-**Current focus:** Milestone v1.2 complete — ready to archive (`/gsd-complete-milestone v1.2`)
+**Current focus:** Planning next milestone (`/gsd-new-milestone`) — v1.2 shipped and archived 2026-08-24, tag v1.2
 
 ## Current Position
 
-Phase: 22
-Plan: Not started
-Status: Phase 22 shipped — PR #28
-Last activity: 2026-08-24
-
-Progress: [████████████████████] 35/35 plans (100%) — all 5 v1.2 phases complete
+Phase: Milestone v1.2 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-08-24 — Milestone v1.2 completed and archived
 
 ### Milestone v1.2 phase map
 
@@ -49,9 +47,10 @@ Execution order: 18 → 19 → 20 → 21 → 22 (dependency gate first protects 
 
 ## Performance Metrics
 
-- Total plans completed across milestones: 224 (v1.0: 96, v1.1: 128)
-- v1.1: 929 commits, 716 files changed, ~139k LOC TypeScript total (was ~57k after v1.0)
-- Per-plan execution metrics for v1.1 live in the archived phase summaries (`milestones/v1.1-phases/`)
+- Total plans completed across milestones: 259 (v1.0: 96, v1.1: 128, v1.2: 35)
+- v1.2: 339 commits, 146 source files changed (+28,236/−544), ~136k LOC TypeScript total (git-tracked .ts/.tsx)
+- v1.1: 929 commits, 716 files changed (was ~57k LOC after v1.0)
+- Per-plan execution metrics live in the archived phase summaries (`milestones/v1.1-phases/`, `milestones/v1.2-phases/`)
 
 **Per-Plan Metrics:**
 
@@ -123,6 +122,13 @@ Research flag: RESOLVED — Phase 22's plan-time research mapped the full FK gra
 
 ## Deferred Items
 
+Items acknowledged and deferred at milestone close on 2026-08-24 (v1.2 open-artifact audit — both items carried unchanged from the 2026-08-20 v1.1 close):
+
+| Category | Item | Status | Disposition |
+|----------|------|--------|-------------|
+| debug | knowledge-base | false positive | `debug/knowledge-base.md` is the resolved-sessions knowledge base gsd-debugger reads, not an open session |
+| quick_task | 260818-aqd-add-a-production-safe-file-backed-kek-pr | incomplete | Task 3 (production KEK provisioning, deploy, live SendGrid UAT) is operator-only and intentionally not executed — tracked as OPS-LIVE-03 in Future Requirements |
+
 Items acknowledged and deferred at milestone close on 2026-08-20 (open-artifact audit):
 
 | Category | Item | Status | Disposition |
@@ -135,12 +141,11 @@ Items acknowledged and deferred at milestone close on 2026-08-20 (open-artifact 
 ## Session Continuity
 
 Last session: 2026-08-24
-Stopped at: Phase 22 complete — milestone v1.2 100% (all 5 phases, 35/35 plans), ready to archive
+Stopped at: Milestone v1.2 completed, audited (passed) and archived; tag v1.2 created
 Resume file: None
 
 ## Operator Next Steps
 
-- **Complete the milestone:** `/clear` then `/gsd-complete-milestone v1.2` — archive v1.2 (Data Lifecycle & Delivery Trust) and prepare the next cycle. Phase 22 closed with verification 5/5, UAT 1/1 (pre-deploy dead-letter census passed), security 79/79 threats closed.
-- **Pre-deploy operational note (Phase 22):** the first production deploy of the dead-letter retention sweep permanently deletes `dead_letter_jobs` rows older than `DEAD_LETTER_RETENTION_DAYS` (default 30) on its first purge tick — the pre-deploy census was reviewed and approved during UAT 2026-08-24.
-- Deferred candidates explicitly NOT in v1.2 (still tech debt): SCALE-02 (PgBouncer), segmentation benchmark at target volume, remaining live walkthroughs (operator-alert email, Phase 13 compliance), Phase 15 UI follow-ups + threshold tuning, KEK quick-task 260818-aqd Task 3.
-- Branch note: v1.2 Phase 22 work lives on `gsd/phase-22-workspace-quiesce-physical-purge`; merge to master via PR per project convention. The local `master` ref is permanently stale in this repo — always compare against `origin/master`.
+- **Merge the open PRs:** PR #27 (Phase 21) and PR #28 (Phase 22) are still open against master. The v1.2 close commits and the v1.2 tag live on `gsd/phase-22-workspace-quiesce-physical-purge` and reach master when PR #28 merges (repo uses true merge commits). Push the tag only after the merge: `git push origin v1.2`.
+- **Pre-deploy operational note (Phase 22):** the first production deploy of the dead-letter retention sweep permanently deletes `dead_letter_jobs` rows older than `DEAD_LETTER_RETENTION_DAYS` (default 30) on its first purge tick — census reviewed and approved during UAT 2026-08-24.
+- **Start the next milestone:** `/clear` then `/gsd-new-milestone` (phase numbering continues from 23). Candidate scope: Future Requirements in `milestones/v1.2-REQUIREMENTS.md` (SCALE-02/03, OPS-LIVE-01..03, OPS-UI-01) + v1.2 tails (Nyquist reconciliation for phases 19/21/22 via `/gsd-validate-phase`, WR-01/WR-02, CR-01 false-dirty).

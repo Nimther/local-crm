@@ -4,7 +4,7 @@
 
 - ✅ **v1.0 MVP** — Phases 1-7 (shipped 2026-07-14) — [archive](milestones/v1.0-ROADMAP.md)
 - ✅ **v1.1 Production Hardening** — Phases 8-17 (shipped 2026-08-20) — [archive](milestones/v1.1-ROADMAP.md)
-- 🚧 **v1.2 Data Lifecycle & Delivery Trust** — Phases 18-22 (in progress)
+- ✅ **v1.2 Data Lifecycle & Delivery Trust** — Phases 18-22 (shipped 2026-08-24) — [archive](milestones/v1.2-ROADMAP.md)
 
 ## Phases
 
@@ -46,231 +46,26 @@ Full phase details: [milestones/v1.1-ROADMAP.md](milestones/v1.1-ROADMAP.md)
 
 </details>
 
-### 🚧 v1.2 Data Lifecycle & Delivery Trust (Phases 18-22)
+<details>
+<summary>✅ v1.2 Data Lifecycle & Delivery Trust (Phases 18-22) — SHIPPED 2026-08-24</summary>
 
 **Milestone Goal:** Close the data-lifecycle and delivery-trust gaps of a shipped production platform: what the marketer selects is what actually goes out, a data subject's personal data can be handed over on demand, a deleted workspace actually disappears without harming its neighbours, unsubscribe links survive a secret rotation, and vulnerable dependencies stop accumulating silently.
 
-**Character:** Compliance and correctness on top of already-shipped subsystems. No re-planning of RLS, CI, backups, contact erasure, event retention, KMS, queues or observability — every new requirement integrates into the existing mechanism.
+- [x] Phase 18: Dependency Hygiene & Advisory Gate (4/4 plans) — completed 2026-08-20
+- [x] Phase 19: Unsubscribe Secret Graceful Rotation (5/5 plans) — completed 2026-08-21
+- [x] Phase 20: Campaign Template Correctness (6/6 plans) — completed 2026-08-21
+- [x] Phase 21: Per-Contact DSR Export (8/8 plans) — completed 2026-08-23
+- [x] Phase 22: Workspace Quiesce & Physical Purge (12/12 plans) — completed 2026-08-24
 
-**Source of scope:** `.planning/REQUIREMENTS.md` (18 v1.2 requirements) informed by `.planning/research/SUMMARY.md` (5 features, 17 enumerated pitfalls, discovery-based build order).
+Full phase details: [milestones/v1.2-ROADMAP.md](milestones/v1.2-ROADMAP.md)
 
-**Build order rationale:** dependency hygiene first (the CI gate protects every subsequent phase's own dependency changes), then the two small self-contained fixes (rotation, template correctness), then DSR export (must exist and be stable before anything is physically purged, and its keyset discipline informs the purge batching), then workspace purge last (largest surface, irreversible, two architectural decisions resolvable only at plan time).
+</details>
 
-- [x] **Phase 18: Dependency Hygiene & Advisory Gate** - Vulnerable runtime deps fixed; new untriaged HIGH advisories blocked by CI with an expiring accept-list (completed 2026-08-20)
-- [x] **Phase 19: Unsubscribe Secret Graceful Rotation** - Operator rotates the signing secret without invalidating a single already-sent link (completed 2026-08-21)
-- [x] **Phase 20: Campaign Template Correctness** - The template shown as selected is the template that actually sends, on all three send paths (completed 2026-08-21)
-- [x] **Phase 21: Per-Contact DSR Export** - Owner/Admin hands a data subject their own data as one downloadable, tenant-isolated file (completed 2026-08-23)
-- [x] **Phase 22: Workspace Quiesce & Physical Purge** - A soft-deleted workspace stops sending and physically disappears after retention, leaving neighbours and compliance evidence intact (completed 2026-08-24)
+### 📋 Next Milestone (not yet planned)
 
-## Phase Details
-
-### Phase 18: Dependency Hygiene & Advisory Gate
-
-**Goal**: Vulnerable runtime dependencies are fixed, and a new untriaged HIGH advisory can no longer reach master unnoticed — while findings proven unreachable are accepted explicitly, with an owner and an expiry, instead of being ignored.
-**Depends on**: Nothing (first phase of v1.2; builds on the shipped v1.1 CI quality-gate machinery from Phase 8)
-**Requirements**: DEP-01, DEP-02, DEP-03
-**Success Criteria** (what must be TRUE):
-
-  1. Every applicable HIGH advisory in a reachable production path is fixed by an actual upgrade; each one still present carries a written reachability analysis explaining why it cannot be reached.
-  2. A pull request that introduces a dependency with a new untriaged HIGH advisory fails CI, naming the package and the advisory id — proven by a fail-first run against the pre-fix state.
-  3. A scheduled full scan surfaces an advisory newly published against an already-installed dependency, with no code change on the branch, through the same reporting path.
-  4. An accept-list entry without justification, owner or expiry — or one whose expiry has passed — is rejected by the gate, so an acceptance cannot silently become permanent.
-
-**Plans**: 4/4 plans executed
-
-Plans:
-**Wave 1**
-
-- [x] 18-01-PLAN.md — Advisory gate tracer: `scripts/check-dependency-advisories.mjs` + npm script + empty accept-list + ci.yml `static` step, proven RED against the live pre-fix tree (fail-first evidence for SC2)
-
-**Wave 2** *(blocked on Wave 1 completion)*
-
-- [x] 18-02-PLAN.md — Accept-list schema validation: mandatory fields, email owner, minimum justification, inclusive expiry capped at 90 days (SC4)
-
-**Wave 3** *(blocked on Wave 2 completion)*
-
-- [x] 18-03-PLAN.md — Upgrade every blocking advisory out of the tree (3 direct pins + `npm audit fix`), gate turns GREEN, SPECIFICATION.md §2/§8 filed (SC1)
-
-**Wave 4** *(blocked on Wave 3 completion)*
-
-- [x] 18-04-PLAN.md — Daily `advisory-scan.yml` running the same gate script, deduplicated labelled GitHub issue on failure, SPECIFICATION.md §7 (SC3)
-
-**Plan-time decisions**: RESOLVED at planning — `drizzle-kit` needs neither reclassification nor an accept-list entry. It already sits in `devDependencies` of `packages/db`; its apparent production-tree presence via `better-auth` is an OPTIONAL peerDependency satisfied by workspace hoisting (better-auth's shipped `dist/` never references it), and its own advisory is MODERATE, below the HIGH/CRITICAL blocking threshold. The reachability finding is recorded in the gate script's header comment (D-10); no accept-list entry is manufactured for a non-blocking finding.
-**UI hint**: no
-
-### Phase 19: Unsubscribe Secret Graceful Rotation
-
-**Goal**: The operator can put a new unsubscribe signing secret into service without breaking a single link that has already been mailed out.
-**Depends on**: Phase 18 (advisory gate active before further dependency-touching work; no functional dependency)
-**Requirements**: ROT-01, ROT-02
-**Success Criteria** (what must be TRUE):
-
-  1. After the operator introduces a new primary secret, newly sent mail is signed with it, and an unsubscribe link from mail sent before the rotation still unsubscribes the contact.
-  2. Old and new links verify identically on both redemption paths — the GET link in the email and the RFC 8058 one-click urlencoded POST.
-  3. A forged or expired-secret token produces a byte-identical response to a valid one (the no-token-oracle invariant survives rotation), with a timing-safe comparison performed per candidate secret.
-  4. The retention window for previous secrets is an explicit, documented decision tied to the real lifetime of already-sent links (5-year token TTL) — not an unstated default, and not an unbounded list.
-
-**Plans**: 5/5 plans executed
-
-Plans:
-**Wave 1**
-
-- [x] 19-01-PLAN.md — Tracer: `verifyUnsubscribeToken` extended to an ordered, exhaustively-evaluated `[primary, ...previous]` candidate loop + package-local pino logger for the D-05 match line; both link eras proven end-to-end through the real RFC 8058 one-click POST route (SC1)
-
-**Wave 2** *(blocked on Wave 1 completion)*
-
-- [x] 19-02-PLAN.md — Env-validation triple in one plan (zod / worker boot assertion / predev check-env): optional `UNSUBSCRIBE_TOKEN_SECRET_PREVIOUS` with length, empty, duplicate and max-5 rules, D-03 charset tightening on the primary too, plus a three-site parity guard (SC4's code half)
-- [x] 19-03-PLAN.md — Redaction rules for both signing-secret variable names in the single rule table, spelled as env-var names because the scrub matcher is exact-match (D-02)
-- [x] 19-04-PLAN.md — ROT-02 closure: GET path + confirm-form POST for previous-secret links, four-way byte-identical POST responses, and executable gates on exhaustive loop evaluation and the D-05 log shape (SC2, SC3)
-
-**Wave 3** *(blocked on Wave 2 completion)*
-
-- [x] 19-05-PLAN.md — Retention decision filed (SPECIFICATION.md), deployment template + README entries under `check:spec-env-coverage`, and the two-step rotation runbook ending in a both-eras canary smoke (SC4, D-06 through D-09)
-
-**Plan-time decisions**: RESOLVED at planning — a previous secret is retained until **5 years after its last use as primary** (the TTL of the last token it ever signed), the only window that provably breaks zero links (D-06). Recording and enforcement are deliberately split (D-07): the 5-year rule and each secret's retirement date live in SPECIFICATION.md §3 and the rotation runbook's rotation log, while code enforces exactly one structural bound — a maximum of 5 retained previous secrets, rejected at boot at all three validation sites — satisfying SC4's "not an unbounded list" without dates-in-env machinery.
-**UI hint**: no
-
-### Phase 20: Campaign Template Correctness
-
-**Goal**: What the marketer sees selected in a campaign is exactly what SendGrid receives — on launch, on schedule and on test-send — and an unsaved or conflicting change is refused loudly instead of sending the old template.
-**Depends on**: Phase 18 (no functional dependency on Phase 19)
-**Requirements**: TMPL-01, TMPL-02, TMPL-03
-**Success Criteria** (what must be TRUE):
-
-  1. A marketer who changes the template in the dropdown and has not saved sees an explicit unsaved-changes state, and launch, schedule and test-send are all blocked until the campaign is saved.
-  2. A test send delivers exactly the template confirmed as saved on the campaign — the original bug scenario ("pick a new template, then send") is reproduced on all three send paths and yields the new template, never the previous one.
-  3. Launch and schedule act only on the confirmed-saved campaign version; a concurrent or stale change produces a typed conflict error and no mail is dispatched at all.
-  4. After a save, all three send paths agree on the same template id — none of them can fall back to local client form state.
-
-**Plans**: 6/6 plans executed
-
-Plans:
-**Wave 1**
-
-- [x] 20-01-PLAN.md — `campaigns.version` optimistic-lock column: migration `0066` with its snapshot, reversibility tier + hand-verified inverse + re-pinned trailing-run test, applied to the dev DB, filed in SPECIFICATION.md §4 (D-05)
-
-**Wave 2** *(blocked on Wave 1 completion)*
-
-- [x] 20-02-PLAN.md — Tracer: the launch path end-to-end — required `expectedVersion`, compared inside the existing `FOR UPDATE` transaction, typed 409 `version_conflict` with `currentVersion`, `code` on every campaign-state error body, the launch route's first-ever body parse, and the sender-resolution split that stops the primary `fromSenderId` path self-conflicting (RESEARCH Pitfall #1)
-
-**Wave 3** *(blocked on Wave 2 completion)*
-
-- [x] 20-03-PLAN.md — Schedule/cancel parity plus test-send precondition and the D-12 enqueue-time template/sender snapshot (additive-optional job fields, no `schemaVersion` bump); the persisting sender resolver retired
-
-**Wave 4** *(blocked on Wave 3 completion; the two plans touch disjoint files and run in parallel)*
-
-- [x] 20-04-PLAN.md — The dispatch worker honours the test-send snapshot (row-read fallback for in-flight jobs) and SC2's three-path template-correctness proof lands as executable assertions
-- [x] 20-05-PLAN.md — TMPL-01: pure dirty comparison + one shared context above all three consumers, the amber unsaved-changes banner with a one-click save, and launch/schedule/test-send all blocked with inline reasons (D-01 through D-04)
-
-**Wave 5** *(blocked on Wave 4 completion)*
-
-- [x] 20-06-PLAN.md — Typed conflict recovery in both dialogs and the test-send panel (dialog stays open, copy names the real state, refetch, never an auto-retry), the Playwright proof of SC1 and SC3, and the human verification against a real SendGrid template (D-08 through D-10)
-
-**UI hint**: yes
-
-### Phase 21: Per-Contact DSR Export
-
-**Goal**: An Owner or Admin can hand a data subject their own personal data in one action — a machine-readable file scoped strictly to that contact in that workspace, containing no other subject's data.
-**Depends on**: Phase 18 (no functional dependency on Phases 19-20; must precede Phase 22 so exports exist before anything is physically purged)
-**Requirements**: DSR-01, DSR-02, DSR-03, DSR-04
-**Success Criteria** (what must be TRUE):
-
-  1. An Owner or Admin downloads, from the contact card, a machine-readable file containing the contact's profile, custom properties and consent history.
-  2. The file also contains the contact's events and the send-related personal data (send facts, delivery statuses) belonging to that subject.
-  3. A Member without the Owner/Admin role does not see the export action in the UI and is refused by the API.
-  4. An export request naming a contact id from another workspace returns nothing (negative cross-tenant test), and freeform JSONB (`events.properties`, `send_events.payload`) reaches the file only through an explicit allowlist — a synthetic field holding another subject's data is provably absent from the export.
-  5. Exporting an already-anonymized (erased) contact behaves predictably — a typed response describing the state, never a silently empty file.
-
-**Plans**: 8/8 plans executed
-
-Plans:
-**Wave 1**
-
-- [x] 21-01-PLAN.md — Tracer: end-to-end DSR export of one contact's profile — new `contact:export` permission, `withTenantTransactionRepeatableRead`, the anonymizedAt-first gate, `Content-Disposition` attachment response, the 403/404/410/400 refusal triad, and the role-gated Export button with blob download (DSR-01, DSR-04)
-- [x] 21-02-PLAN.md — Shared allowlist package: relocate the evidence allowlist and build-up functions into `@mega-crm/delivery-core`, add the export superset (`ip`, `useragent`, `url`, `reason`) with a test-asserted superset relation, and write `docs/PII-INVENTORY.md` for Phase 22 (DSR-03)
-
-**Wave 2** *(blocked on Wave 1 completion)*
-
-- [x] 21-03-PLAN.md — Consent-history and events sections: keyset walks to exhaustion, `events.properties` provably never read, multi-page completeness proven (DSR-01, DSR-02)
-- [x] 21-04-PLAN.md — SC5 courtesy half: `anonymizedAt` on the contact response and the visible-but-disabled Export button with inline reason, without weakening any Phase 13 visibility filter (DSR-01)
-
-**Wave 3** *(blocked on Wave 2 completion)*
-
-- [x] 21-05-PLAN.md — Sends with nested send events through the export allowlist, SC4's synthetic other-subject-field proof, and the REPEATABLE READ mid-scrub race test with its READ COMMITTED negative control (DSR-02, DSR-03)
-
-**Wave 4** *(blocked on Wave 3 completion)*
-
-- [x] 21-06-PLAN.md — Journey sections (`flowParticipation` with steps, `campaignMemberships`), migration 0067's three contact-scoped indexes, and the as-built record in SPECIFICATION.md + COVERAGE.md (DSR-02, DSR-03)
-
-**Wave 5** *(gap closure — UAT gap G-21-2)*
-
-- [x] 21-07-PLAN.md — Bodyless UI deletes: `apiFetch` attaches the JSON content type only when a body is present, pinned by a per-verb request-shape matrix, plus the contact-card delete path as a Playwright spec (unblocks UAT Test 2's two-tab erasure race; fixes team/segments/campaigns/flows deletes by the same change)
-
-**Wave 6** *(gap closure — UAT gap G-21-3; blocked on Wave 5: imports its e2e preamble helper and the Playwright lane's fixed ports are exclusive)*
-
-- [x] 21-08-PLAN.md — Narrow-viewport contact card: responsive shell (fixed sidebar leaves the layout below `md`, drawer replaces it), wrapping header/actions/message, content-column fit, proven by a 375px measurement spec that reproduces the UAT numbers
-
-**Gap-closure decisions**: the G-21-2 fix is client-side only — a server-side empty-JSON-tolerant content-type parser was rejected in diagnosis (it would relax the contract platform-wide, including the public event-ingestion and webhook surfaces). For G-21-3 the planner settled the shell-layer choice the diagnosis handed over: make `AppShell` responsive rather than re-scope the "no horizontal page overflow" criterion to the content column, because header wrapping alone provably cannot clear page overflow at 375px while the 256px sidebar stands.
-
-**Plan-time decisions**: RESOLVED at planning — the JSONB rule is two explicit build-up allowlists in one shared package (`@mega-crm/delivery-core`), consumed by both the API export path and the worker erasure path: `events.properties` is excluded entirely (D-01, mirroring the Phase 13 erasure ruling — the whole key space is tenant-supplied, so no allowlist over it can be defended), and `send_events.payload` passes an export allowlist that is structurally a superset of the erasure evidence allowlist, adding only the subject's own single-recipient fields `ip`, `useragent`, `url`, `reason` (D-02). The superset relation is asserted by a test, not just documented, and the per-table definition of a contact's personal data lives in `docs/PII-INVENTORY.md` (D-03/D-04) for Phase 22's purge to consume. Also resolved: RESEARCH.md Pitfall 2's verified index gap is closed in this phase by migration 0067 rather than deferred, since Phase 22 scans the same tables by contact.
-**UI hint**: yes
-
-### Phase 22: Workspace Quiesce & Physical Purge
-
-**Goal**: A soft-deleted workspace stops sending immediately and, after the platform retention window, physically ceases to exist — its PII and secrets gone, its neighbours untouched, and the compliance evidence that must outlive a tenant still intact.
-**Depends on**: Phase 21 (DSR export must be available and stable before data is irreversibly destroyed; its per-contact keyset discipline informs the batched-delete design)
-**Requirements**: PRG-01, PRG-02, PRG-03, PRG-04, PRG-05, PRG-06
-**Success Criteria** (what must be TRUE):
-
-  1. A soft-deleted workspace stops sending immediately: scheduled and in-flight campaigns and flow dispatches produce no further mail after the soft delete.
-  2. Once the operator-configured platform retention has elapsed, the workspace's PII across every tenant table is deleted or anonymized and its secrets (SendGrid key ciphertext, DEK, webhook endpoints) are gone — while the compliance evidence required to outlive the tenant is still present and readable.
-  3. A purge killed mid-run (real SIGKILL) resumes and completes on the next run, and re-running a finished purge changes nothing and fails nothing.
-  4. Another workspace's rows in the same monthly partitions are provably unchanged after a purge — demonstrated by a negative test — and the purge performs no DROP, DETACH or TRUNCATE.
-  5. A workspace restored after its purge was enqueued is not purged: eligibility is re-checked inside every batch and the purge refuses rather than silently skipping.
-
-**Plans**: 12/12 plans executed
-
-Plans:
-**Wave 1**
-
-- [x] 22-01-PLAN.md — Tracer: purge state machine end-to-end on one workspace — `purge_records` (platform table, no RLS, no FK), the worker's first env module with the retention floor, discover → report-only tick → checkpointed two-table walk → anonymized `organization` tombstone, plus the `erasure_records` FK relax that keeps evidence alive (PRG-01, PRG-02, PRG-03, PRG-05)
-- [x] 22-02-PLAN.md — Dispatch-time quiesce kill on all three send paths, recorded as an `excluded` send fact with the new `workspace_deleted` reason, plus the kickoff fan-out guard and the test-send path that has no ledger row (PRG-06)
-- [x] 22-03-PLAN.md — Ingestion quiesce: typed 403 in the shared `apiKeyAuth` hook, indistinguishable generic 404 on the anonymous webhook route before signature verification, and drain-window guards on both ingest workers (PRG-06)
-
-**Wave 2** *(blocked on Wave 1)*
-
-- [x] 22-04-PLAN.md — Migration 0070: `campaigns_scan`, `flows_scan` and `flow_runs_scan` exclude soft-deleted workspaces (three policies, not the two originally named), plus the analytics-reconciliation enumeration filter, proven by a negative discovery test per policy (PRG-06)
-- [x] 22-05-PLAN.md — Full FK-ordered table coverage incl. both partitioned tables and the three secret tables, `docs/PII-INVENTORY.md` reconciled table-by-table, and the SC4 neighbour-safety negative test (PRG-02, PRG-04)
-- [x] 22-06-PLAN.md — Operator restore CLI (point-of-no-return refusal under the purge's own advisory lock, overdue campaigns flipped to draft) and the on-demand eligibility report CLI (PRG-01, PRG-05)
-
-**Wave 3** *(blocked on Wave 2)*
-
-- [x] 22-07-PLAN.md — `member`/`invitation` deletion through a scoped `mega_crm_auth` pool, with a real 42501 proving the Phase 10 trust boundary still refuses the ordinary pool (PRG-02)
-- [x] 22-08-PLAN.md — Stuck/failed-purge watchdog on the `ops_alert_state` dedup claim, its runbook, and four healthy-state controls so the report-only window never alerts (PRG-01, PRG-03)
-
-**Wave 4** *(blocked on Wave 3)*
-
-- [x] 22-09-PLAN.md — Real-SIGKILL kill-and-resume proof at three seams, with destroyed-row counts compared against an uninterrupted control run (PRG-03)
-
-**Wave 5** *(blocked on Wave 4: 22-10's end-of-phase `failure:all` regression runs the `failure:workspace-purge-resume` script 22-09 adds to the root `package.json`)*
-
-- [x] 22-10-PLAN.md — As-built filing: SPECIFICATION.md §3-§8, `prod.env.example`, the PT-02 backup-horizon caveat, and the workspace-lifecycle operator runbook (PRG-01, PRG-02)
-
-**Wave 6** *(gap closure: verification found 2 gaps against SC2)*
-
-- [x] 22-11-PLAN.md — Gap 2: the auth-step census is made crash-safe — counts captured on the ordinary platform pool BEFORE the elevated-pool delete and merged write-once, plus an eighth real-SIGKILL case freezing after the auth delete commits (PRG-02)
-
-**Wave 7** *(blocked on Wave 6: shares `workspace-purge.worker.ts` and SPECIFICATION.md)*
-
-- [x] 22-12-PLAN.md — Gap 1: `dead_letter_jobs` PII lifetime bounded by an explicit, boot-validated retention policy swept from the purge tick, and the table finally recorded in `docs/PII-INVENTORY.md`, the purge runbook, SPECIFICATION.md and `prod.env.example` (PRG-02)
-
-**Research flag**: RESOLVED at planning — RESEARCH.md mapped the full FK graph (27 tenant tables, three RESTRICT edges) and the deletion order; no separate architecture spike is needed.
-**Plan-time decisions**: RESOLVED at planning. (a) Privilege model → a dedicated pool authenticated as the **existing** `mega_crm_auth` role (22-07), not a grant widening: the real gap is narrower than framed — `mega_crm_app` already owns every tenant table and already has `UPDATE` on `organization`, and only `member`/`invitation` are out of reach (migration 0045). (b) Quiesce mechanism → a pure RLS policy-predicate change to **three** scan policies (`flow_runs_scan` is a third gap the discussion did not name), with no new grant, since migration 0042 already gives `mega_crm_scan` table-level `SELECT` on `organization`; the discussion's assumption that a column-level grant was needed is incorrect. (c) Backup caveat → a note in `docs/runbooks/backups.md` beside the structurally identical Phase 14 D-08 note, plus a one-line pointer in SPECIFICATION.md (22-10).
-**UI hint**: no
+Run `/gsd-new-milestone` to define requirements and roadmap. Phase numbering continues from 23.
 
 ## Progress
-
-**Execution Order:** 18 → 19 → 20 → 21 → 22
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -291,11 +86,11 @@ Plans:
 | 15. Observability, Alerting & Frontend Resilience | v1.1 | 22/22 | Complete | 2026-08-17 |
 | 16. Live SendGrid Verification | v1.1 | 7/7 | Complete | 2026-08-19 |
 | 17. Address tech debt: WR-06 + security follow-ups | v1.1 | 6/6 | Complete | 2026-08-20 |
-| 18. Dependency Hygiene & Advisory Gate | v1.2 | 4/4 | Complete    | 2026-08-20 |
-| 19. Unsubscribe Secret Graceful Rotation | v1.2 | 5/5 | Complete    | 2026-08-21 |
-| 20. Campaign Template Correctness | v1.2 | 6/6 | Complete    | 2026-08-21 |
-| 21. Per-Contact DSR Export | v1.2 | 8/8 | Complete    | 2026-08-23 |
-| 22. Workspace Quiesce & Physical Purge | v1.2 | 12/12 | Complete    | 2026-08-24 |
+| 18. Dependency Hygiene & Advisory Gate | v1.2 | 4/4 | Complete | 2026-08-20 |
+| 19. Unsubscribe Secret Graceful Rotation | v1.2 | 5/5 | Complete | 2026-08-21 |
+| 20. Campaign Template Correctness | v1.2 | 6/6 | Complete | 2026-08-21 |
+| 21. Per-Contact DSR Export | v1.2 | 8/8 | Complete | 2026-08-23 |
+| 22. Workspace Quiesce & Physical Purge | v1.2 | 12/12 | Complete | 2026-08-24 |
 
 ---
-*v1.2 roadmap created 2026-08-20 — 18/18 requirements mapped, no orphans. Next: `/gsd-plan-phase 18`.*
+*v1.2 archived 2026-08-24 — 18/18 requirements satisfied, milestone audit passed. Next: `/gsd-new-milestone`.*
