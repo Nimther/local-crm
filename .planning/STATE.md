@@ -3,11 +3,10 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Data Lifecycle & Delivery Trust
 current_phase: 22
-status: completed
+status: "Phase 22 shipped — PR #28"
 stopped_at: Phase 22 context gathered
-last_updated: "2026-08-24T13:05:14.629Z"
+last_updated: "2026-08-24T13:15:08.191Z"
 last_activity: 2026-08-24
-last_activity_desc: Phase 22 complete
 progress:
   total_phases: 5
   completed_phases: 5
@@ -15,6 +14,7 @@ progress:
   completed_plans: 35
   percent: 100
 current_phase_name: workspace-quiesce-physical-purge
+last_activity_desc: Phase 22 complete
 ---
 
 # Project State
@@ -30,8 +30,8 @@ See: .planning/PROJECT.md (updated 2026-08-24 after Phase 22)
 
 Phase: 22
 Plan: Not started
-Status: All phases complete
-Last activity: 2026-08-24 — Phase 22 complete
+Status: Phase 22 shipped — PR #28
+Last activity: 2026-08-24
 
 Progress: [████████████████████] 35/35 plans (100%) — all 5 v1.2 phases complete
 
