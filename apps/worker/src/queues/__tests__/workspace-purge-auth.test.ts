@@ -5,7 +5,8 @@ import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { PURGE_TABLE_ORDER } from "@mega-crm/db";
 import { ensureTestDbMigrated, getTestDatabaseUrl, createTestPool } from "../../test/db-fixture.js";
 import { insertFixtureOrganization } from "../../test/failure-fixtures.js";
-import { createAuthPurgePool, closeAuthPurgePool, deleteWorkspaceAuthRows } from "../workspace-purge-auth.js";
+import { createAuthPurgePool, closeAuthPurgePool, countWorkspaceAuthRows, deleteWorkspaceAuthRows } from "../workspace-purge-auth.js";
+import { recordAuthPurgeCounts } from "../workspace-purge-checkpoint.js";
 import { processWorkspacePurge } from "../workspace-purge.worker.js";
 
 /**
@@ -431,5 +432,76 @@ describe("workspace-purge-auth: the mega_crm_auth boundary and its wiring into t
 
     const organization = await readOrganization(workspaceId);
     expect(organization.purgedAt).not.toBeNull();
+  });
+
+  // ---------------------------------------------------------------------
+  // Gap-closure plan 22-11: countWorkspaceAuthRows on the ordinary pool, and
+  // recordAuthPurgeCounts's write-once merge.
+  // ---------------------------------------------------------------------
+
+  /** Minimal direct insert -- the write-once cases assert on the merge itself, not a whole purge. */
+  async function insertBarePurgeRecord(workspaceId: string, tableCounts: Record<string, number> = {}): Promise<void> {
+    await appPool.query(
+      `INSERT INTO purge_records (workspace_id, soft_deleted_at, eligible_at, status, table_counts)
+       VALUES ($1, now(), now(), 'purging', $2::jsonb)`,
+      [workspaceId, JSON.stringify(tableCounts)],
+    );
+  }
+
+  it("countWorkspaceAuthRows reads member/invitation on the ordinary pool, scoped to the workspace", async () => {
+    const workspaceId = await freshWorkspaceId("purge-auth-count-ordinary-pool");
+    const inviter = await createUser("count-inviter");
+    const memberUserOne = await createUser("count-member-1");
+    const memberUserTwo = await createUser("count-member-2");
+    await createMember(workspaceId, memberUserOne);
+    await createMember(workspaceId, memberUserTwo);
+    await createInvitation(workspaceId, inviter, "count-invitee@fixture.test");
+
+    const counts = await countWorkspaceAuthRows(appPool, workspaceId);
+
+    expect(counts).toEqual({ memberCount: 2, invitationCount: 1 });
+  });
+
+  it("countWorkspaceAuthRows returns zeros for a genuinely empty workspace", async () => {
+    const workspaceId = await freshWorkspaceId("purge-auth-count-empty");
+
+    const counts = await countWorkspaceAuthRows(appPool, workspaceId);
+
+    expect(counts).toEqual({ memberCount: 0, invitationCount: 0 });
+  });
+
+  it("recordAuthPurgeCounts is write-once: a second call with different numbers never overwrites the first-written counts", async () => {
+    const workspaceId = await freshWorkspaceId("purge-auth-write-once");
+    await insertBarePurgeRecord(workspaceId);
+
+    await recordAuthPurgeCounts(appPool, workspaceId, { memberCount: 3, invitationCount: 2 });
+    await recordAuthPurgeCounts(appPool, workspaceId, { memberCount: 0, invitationCount: 0 });
+
+    const record = await readPurgeRecord(workspaceId);
+    expect(
+      record!.tableCounts,
+      "the second call's zeros must never replace the first call's real destroyed counts",
+    ).toMatchObject({ member: 3, invitation: 2 });
+  });
+
+  it("recordAuthPurgeCounts on a genuinely empty workspace still records both keys present at zero", async () => {
+    const workspaceId = await freshWorkspaceId("purge-auth-zero-still-recorded");
+    await insertBarePurgeRecord(workspaceId);
+
+    await recordAuthPurgeCounts(appPool, workspaceId, { memberCount: 0, invitationCount: 0 });
+
+    const record = await readPurgeRecord(workspaceId);
+    expect(record!.tableCounts).toHaveProperty("member", 0);
+    expect(record!.tableCounts).toHaveProperty("invitation", 0);
+  });
+
+  it("recordAuthPurgeCounts never disturbs an existing tenant-table census key", async () => {
+    const workspaceId = await freshWorkspaceId("purge-auth-census-untouched");
+    await insertBarePurgeRecord(workspaceId, { contacts: 42, flows: 7 });
+
+    await recordAuthPurgeCounts(appPool, workspaceId, { memberCount: 1, invitationCount: 1 });
+
+    const record = await readPurgeRecord(workspaceId);
+    expect(record!.tableCounts).toMatchObject({ contacts: 42, flows: 7, member: 1, invitation: 1 });
   });
 });
