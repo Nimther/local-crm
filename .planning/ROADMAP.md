@@ -228,7 +228,7 @@ Plans:
   4. Another workspace's rows in the same monthly partitions are provably unchanged after a purge — demonstrated by a negative test — and the purge performs no DROP, DETACH or TRUNCATE.
   5. A workspace restored after its purge was enqueued is not purged: eligibility is re-checked inside every batch and the purge refuses rather than silently skipping.
 
-**Plans**: 12 plans (10/10 executed; 2 gap-closure plans added after verification found 2 gaps against SC2)
+**Plans**: 11/12 plans executed
 
 Plans:
 **Wave 1**
@@ -258,7 +258,7 @@ Plans:
 
 **Wave 6** *(gap closure: verification found 2 gaps against SC2)*
 
-- [ ] 22-11-PLAN.md — Gap 2: the auth-step census is made crash-safe — counts captured on the ordinary platform pool BEFORE the elevated-pool delete and merged write-once, plus an eighth real-SIGKILL case freezing after the auth delete commits (PRG-02)
+- [x] 22-11-PLAN.md — Gap 2: the auth-step census is made crash-safe — counts captured on the ordinary platform pool BEFORE the elevated-pool delete and merged write-once, plus an eighth real-SIGKILL case freezing after the auth delete commits (PRG-02)
 
 **Wave 7** *(blocked on Wave 6: shares `workspace-purge.worker.ts` and SPECIFICATION.md)*
 
@@ -295,7 +295,7 @@ Plans:
 | 19. Unsubscribe Secret Graceful Rotation | v1.2 | 5/5 | Complete    | 2026-08-21 |
 | 20. Campaign Template Correctness | v1.2 | 6/6 | Complete    | 2026-08-21 |
 | 21. Per-Contact DSR Export | v1.2 | 8/8 | Complete    | 2026-08-23 |
-| 22. Workspace Quiesce & Physical Purge | v1.2 | 10/10 | In Progress|  |
+| 22. Workspace Quiesce & Physical Purge | v1.2 | 11/12 | In Progress|  |
 
 ---
 *v1.2 roadmap created 2026-08-20 — 18/18 requirements mapped, no orphans. Next: `/gsd-plan-phase 18`.*
