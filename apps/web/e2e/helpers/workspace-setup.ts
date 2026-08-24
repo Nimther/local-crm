@@ -1,4 +1,4 @@
-import { type Page, expect } from "@playwright/test";
+import { type Page, expect, test } from "@playwright/test";
 
 /**
  * Shared e2e preamble (21-07/21-08): register a fresh owner and create a
@@ -15,20 +15,33 @@ export async function registerAndCreateWorkspace(page: Page, namePrefix: string)
   await page.getByLabel(/email/i).fill(email);
   await page.getByLabel(/пароль/i).fill("correct horse battery staple 42");
 
-  const signUpResponse = page.waitForResponse(
-    (response) => response.url().endsWith("/api/auth/sign-up/email") && response.request().method() === "POST",
-  );
-  await page.getByRole("button", { name: "Зарегистрироваться" }).click();
+  const submitSignUp = async () => {
+    const signUpResponse = page.waitForResponse(
+      (response) => response.url().endsWith("/api/auth/sign-up/email") && response.request().method() === "POST",
+    );
+    await page.getByRole("button", { name: "Зарегистрироваться" }).click();
+    return signUpResponse;
+  };
 
-  const response = await signUpResponse;
+  let response = await submitSignUp();
   if (response.status() === 429) {
     // The full serial E2E corpus legitimately exercises enough /api/auth/*
     // requests to reach the production-shaped shared bucket. Respect the
     // server's own backoff contract rather than weakening rate limiting in
-    // test mode or sleeping unconditionally on every registration.
+    // test mode or sleeping unconditionally on every registration. Extend
+    // only this test's budget by the server-mandated wait so the default 30s
+    // timeout still measures application work rather than the rate-limit
+    // window shared by earlier specs.
     const retryAfterSeconds = Number(response.headers()["retry-after"] ?? "1");
-    await page.waitForTimeout((Number.isFinite(retryAfterSeconds) ? retryAfterSeconds + 1 : 2) * 1_000);
-    await page.getByRole("button", { name: "Зарегистрироваться" }).click();
+    const retryDelayMs = (Number.isFinite(retryAfterSeconds) ? retryAfterSeconds + 1 : 2) * 1_000;
+    const testInfo = test.info();
+    testInfo.setTimeout(testInfo.timeout + retryDelayMs);
+    await page.waitForTimeout(retryDelayMs);
+    response = await submitSignUp();
+  }
+
+  if (!response.ok()) {
+    throw new Error(`E2E sign-up failed with HTTP ${response.status()}: ${await response.text()}`);
   }
 
   await page.waitForURL("**/create-workspace");

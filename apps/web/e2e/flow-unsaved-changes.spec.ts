@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { registerAndCreateWorkspace } from "./helpers/workspace-setup";
 
 /**
  * OPS-19/D-13 end-to-end proof of both unsaved-canvas guards (15-09):
@@ -19,26 +20,6 @@ import { test, expect, type Page } from "@playwright/test";
  * fixture shape from segments-behavior.spec.ts, same fail-closed provisioned
  * database via run-e2e.ts/provision-database.ts -- no new test harness).
  */
-
-/** Register a fresh owner, create a workspace, and land on `/w/:slug`. Returns the slug. */
-async function registerAndCreateWorkspace(page: Page): Promise<string> {
-  const email = `owner-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
-
-  await page.goto("/register");
-  await page.getByLabel(/имя/i).fill("Unsaved Changes Owner");
-  await page.getByLabel(/email/i).fill(email);
-  await page.getByLabel(/пароль/i).fill("correct horse battery staple 42");
-  await page.getByRole("button", { name: "Зарегистрироваться" }).click();
-
-  await page.waitForURL("**/create-workspace");
-  await page.getByLabel(/название/i).fill(`Unsaved Test ${Date.now()}`);
-  await page.getByRole("button", { name: "Создать воркспейс" }).click();
-
-  await page.waitForURL(/\/w\/[a-z0-9-]+/);
-  const slug = new URL(page.url()).pathname.match(/\/w\/([a-z0-9-]+)/)?.[1];
-  expect(slug).toBeTruthy();
-  return slug as string;
-}
 
 /** Create a new flow via the list-page dialog and land on its canvas. Returns the flow id. */
 async function createFlowAndOpenCanvas(page: Page, slug: string): Promise<string> {
@@ -76,7 +57,7 @@ test.describe("OPS-19: unsaved canvas changes guard", () => {
   test("in-app navigation with unsaved changes opens the dialog; stay cancels, discard navigates", async ({
     page,
   }) => {
-    const slug = await registerAndCreateWorkspace(page);
+    const slug = await registerAndCreateWorkspace(page, "Unsaved Changes");
     await createFlowAndOpenCanvas(page, slug);
     await dirtyCanvas(page);
 
@@ -100,7 +81,7 @@ test.describe("OPS-19: unsaved canvas changes guard", () => {
   });
 
   test("with everything saved, the same nav click navigates with no dialog", async ({ page }) => {
-    const slug = await registerAndCreateWorkspace(page);
+    const slug = await registerAndCreateWorkspace(page, "Unsaved Changes");
     const flowId = await createFlowAndOpenCanvas(page, slug);
     await dirtyCanvas(page);
 
@@ -127,7 +108,7 @@ test.describe("OPS-19: unsaved canvas changes guard", () => {
   test("a failed draft save shows a persistent banner with Retry; toolbar never reads saved; Retry clears it", async ({
     page,
   }) => {
-    const slug = await registerAndCreateWorkspace(page);
+    const slug = await registerAndCreateWorkspace(page, "Unsaved Changes");
     const flowId = await createFlowAndOpenCanvas(page, slug);
 
     const draftPatchUrl = `**/api/workspaces/${slug}/flows/${flowId}`;
@@ -161,7 +142,7 @@ test.describe("OPS-19: unsaved canvas changes guard", () => {
   });
 
   test("beforeunload fires on reload while dirty and does not fire when clean", async ({ page }) => {
-    const slug = await registerAndCreateWorkspace(page);
+    const slug = await registerAndCreateWorkspace(page, "Unsaved Changes");
     await createFlowAndOpenCanvas(page, slug);
 
     // --- Dirty case: the debounce has not settled, edit is unsaved. ---

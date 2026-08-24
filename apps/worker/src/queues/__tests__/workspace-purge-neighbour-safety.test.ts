@@ -238,9 +238,10 @@ describe("workspace purge: neighbour partition safety (plan 22-05, Task 3)", () 
     try {
       // A short statement timeout: if the purge's batches were somehow
       // blocking B's writer, this query fails fast instead of hanging the
-      // whole suite.
-      await writeClient.query("SET statement_timeout = '2000'");
+      // whole suite. Keep it transaction-local so the pooled connection
+      // cannot leak the timeout into its next checkout.
       await writeClient.query("BEGIN");
+      await writeClient.query("SET LOCAL statement_timeout = '2000'");
       await writeClient.query("SELECT set_config('app.current_workspace_id', $1, true)", [workspaceB]);
       await writeClient.query(
         `INSERT INTO events (id, workspace_id, contact_id, name, properties, occurred_at)

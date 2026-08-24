@@ -126,6 +126,21 @@ async function readOrganizationDeletedAt(client: PlatformClient, workspaceId: st
 }
 
 /**
+ * A `reported` record with no destructive timestamp is deliberately kept as
+ * history when an operator restores the workspace (D-14/T-22-06-06). Once
+ * that restore commits, the record is no longer actionable. Distinguish the
+ * legitimate `deletedAt = NULL` row from a missing organization row: the
+ * latter must continue through the fail-closed guard below rather than being
+ * mistaken for a successful restore.
+ */
+async function wasRestoredBeforeDestruction(client: PlatformClient, workspaceId: string): Promise<boolean> {
+  const { rows } = await client.query<{ deletedAt: Date | null }>(`SELECT "deletedAt" FROM organization WHERE id = $1`, [
+    workspaceId,
+  ]);
+  return rows.length > 0 && rows[0].deletedAt === null;
+}
+
+/**
  * D-09: retires the workspace by an anonymizing UPDATE -- NEVER a DELETE
  * against `organization`. All 27 tenant tables cascade from this row; one
  * delete statement would fire an unbounded, uncheckpointed cascade across
@@ -348,6 +363,25 @@ async function runWorkspacePurgeWalk(
 
     const progress = await loadWorkspacePurgeProgress(platformClient, workspaceId);
     if (!progress || progress.status === "complete" || progress.status === "failed") {
+      return;
+    }
+
+    // D-14: restore is allowed throughout the report-only window and keeps
+    // the `purge_records` row as PII-free history. The restore path takes the
+    // same advisory lock held here, so observing `deletedAt = NULL` under this
+    // lock proves restore won before the point of no return. Leave the record
+    // unchanged and do no destructive work. A restore after destruction has
+    // started still reaches the per-batch fail-closed guard and is marked
+    // failed/re-thrown below.
+    if (
+      progress.status === "reported" &&
+      progress.firstDestructiveBatchAt === null &&
+      (await wasRestoredBeforeDestruction(platformClient, workspaceId))
+    ) {
+      logger.info(
+        { workspaceId },
+        "workspace-purge: restored during report-only window -- preserving historical purge record",
+      );
       return;
     }
 

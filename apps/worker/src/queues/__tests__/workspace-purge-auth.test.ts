@@ -439,11 +439,15 @@ describe("workspace-purge-auth: the mega_crm_auth boundary and its wiring into t
   // recordAuthPurgeCounts's write-once merge.
   // ---------------------------------------------------------------------
 
-  /** Minimal direct insert -- the write-once cases assert on the merge itself, not a whole purge. */
+  /**
+   * Minimal non-actionable record -- the write-once cases assert on the JSONB
+   * merge itself, not a whole purge. Keep it terminal so a later test file's
+   * global purge tick cannot mistake this live workspace for resumable work.
+   */
   async function insertBarePurgeRecord(workspaceId: string, tableCounts: Record<string, number> = {}): Promise<void> {
     await appPool.query(
       `INSERT INTO purge_records (workspace_id, soft_deleted_at, eligible_at, status, table_counts)
-       VALUES ($1, now(), now(), 'purging', $2::jsonb)`,
+       VALUES ($1, now(), now(), 'failed', $2::jsonb)`,
       [workspaceId, JSON.stringify(tableCounts)],
     );
   }

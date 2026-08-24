@@ -184,6 +184,25 @@ describe("workspace purge: discover, report, destroy, tombstone (Task 1)", () =>
     expect(await countSubscriptionStatusHistory(workspaceId)).toBe(5);
   });
 
+  it("a workspace restored during the report-only window stays live and its purge record remains historical", async () => {
+    const workspaceId = await freshWorkspaceId("purge-report-only-restored");
+    await softDeleteWorkspace(workspaceId, 40);
+    const [contactId] = await seedContacts(workspaceId, 2);
+    await seedSubscriptionStatusHistory(workspaceId, contactId, 2);
+
+    await processWorkspacePurge(); // report
+    await pool.query(`UPDATE organization SET "deletedAt" = NULL WHERE id = $1`, [workspaceId]);
+
+    await expect(processWorkspacePurge()).resolves.toBeUndefined();
+
+    expect(await countContacts(workspaceId)).toBe(2);
+    expect(await countSubscriptionStatusHistory(workspaceId)).toBe(2);
+    const record = await readPurgeRecord(workspaceId);
+    expect(record!.status).toBe("reported");
+    expect(record!.firstDestructiveBatchAt).toBeNull();
+    expect(record!.purgedAt).toBeNull();
+  });
+
   it("second tick destroys: the following tick removes every row and completes the record with ordered timestamps", async () => {
     const workspaceId = await freshWorkspaceId("purge-second-tick");
     await softDeleteWorkspace(workspaceId, 40);
