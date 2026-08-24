@@ -515,6 +515,57 @@ describe("failure injection: workspace-purge kill-resume (PRG-03, SC3, plan 22-0
   );
 
   it(
+    "kill after the auth delete commits: the resumed run records the REAL member/invitation counts, never zeros",
+    async () => {
+      const subjectId = await freshWorkspaceId("wp-kill-after-auth-delete");
+      const contactId = await seedManyContacts(subjectId, ROWS_PER_TABLE);
+      await seedManySubscriptionHistory(subjectId, contactId, ROWS_PER_TABLE);
+      await seedManyPropertyRegistryEntries(subjectId, ROWS_PER_TABLE);
+      await softDeleteWorkspace(subjectId, 40);
+
+      const userId = await createAuthUser("wp-kill-after-auth-delete");
+      await createMember(subjectId, userId);
+      await createInvitation(subjectId, userId, `invitee-${Date.now().toString(36)}@fixture.test`);
+
+      await processWorkspacePurge(); // report
+
+      // Freezes the INSTANT deleteWorkspaceAuthRows returns -- the two auth
+      // DELETEs have already committed on the elevated mega_crm_auth pool,
+      // but neither the platform-pool checkpoint write nor the "auth"
+      // completed_tables marker has happened yet.
+      await spawnAndKillOnReady({
+        WPK_MODE: "after_auth_delete",
+        WPK_TARGET_WORKSPACE_ID: subjectId,
+      });
+
+      // --- immediately after the kill: auth rows already gone, step not marked done ---
+      expect(await memberCount(subjectId), "the auth delete already committed before the freeze").toBe(0);
+      expect(await invitationCount(subjectId), "the auth delete already committed before the freeze").toBe(0);
+
+      const midKillRecord = await readPurgeRecord(subjectId);
+      expect(midKillRecord!.completedTables, "the auth step is not yet marked complete").not.toContain("auth");
+      expect(midKillRecord!.status, "the tail never finished").not.toBe("complete");
+
+      const midKillOrg = await readOrganization(subjectId);
+      expect(midKillOrg.purgedAt, "the organization is not tombstoned").toBeNull();
+
+      // --- resume: the census must survive the crash window ------------------
+      await processWorkspacePurge();
+
+      const finalRecord = await readPurgeRecord(subjectId);
+      expect(finalRecord!.status).toBe("complete");
+      expect(
+        finalRecord!.tableCounts,
+        "the census must survive the crash window -- the REAL destroyed counts, never zeros",
+      ).toMatchObject({ member: 1, invitation: 1 });
+
+      const finalOrg = await readOrganization(subjectId);
+      expect(finalOrg.purgedAt).not.toBeNull();
+    },
+    60_000,
+  );
+
+  it(
     "resume does not re-walk: the resumed run issues zero deletePurgeBatch calls against a table already in completed_tables",
     async () => {
       const subjectId = await freshWorkspaceId("wp-kill-no-rewalk");

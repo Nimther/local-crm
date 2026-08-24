@@ -21,7 +21,7 @@ import {
   markPurgeTableDone,
   recordAuthPurgeCounts,
 } from "./workspace-purge-checkpoint.js";
-import { deleteWorkspaceAuthRows } from "./workspace-purge-auth.js";
+import { deleteWorkspaceAuthRows, type WorkspaceAuthPurgeCounts } from "./workspace-purge-auth.js";
 
 /**
  * Phase 22 (PRG-01/PRG-02/PRG-03/PRG-05, D-05/D-07/D-09/D-14, plan 22-01):
@@ -330,6 +330,7 @@ async function runWorkspacePurgeWalk(
   batchSize: number,
   deleteBatchFn: DeletePurgeBatchFn,
   afterTableWalk?: (workspaceId: string) => Promise<void> | void,
+  afterAuthDelete?: (workspaceId: string, counts: WorkspaceAuthPurgeCounts) => Promise<void> | void,
 ): Promise<void> {
   const lockConn = await platformClient.connect();
   let locked = false;
@@ -398,6 +399,24 @@ async function runWorkspacePurgeWalk(
       // the auth step again.
       if (!progress.completedTables.includes(AUTH_STEP_MARKER)) {
         const authCounts = await deleteWorkspaceAuthRows(workspaceId);
+
+        // Gap-closure plan 22-11 (PRG-02): test-only seam, invoked the
+        // INSTANT `deleteWorkspaceAuthRows` returns -- the two auth DELETEs
+        // have already committed on the elevated pool, but neither the
+        // platform-pool checkpoint write nor the `auth` completed-tables
+        // marker has happened yet. This is the ONLY way to land a real kill
+        // inside that window. A no-op unless a caller supplies one --
+        // production never does. Its position is stable across plan 22-11's
+        // own count-ordering change: under the CURRENT code (this commit)
+        // it sits between the delete's commit and `recordAuthPurgeCounts`;
+        // once Task 2 moves the count/record pair ahead of the delete, it
+        // sits between the delete's commit and `markPurgeTableDone` instead
+        // -- the same window, and by then the last unmarked step in the
+        // auth block.
+        if (afterAuthDelete) {
+          await afterAuthDelete(workspaceId, authCounts);
+        }
+
         await recordAuthPurgeCounts(platformClient, workspaceId, authCounts);
         await markPurgeTableDone(platformClient, workspaceId, AUTH_STEP_MARKER);
       }
@@ -442,6 +461,15 @@ export interface ProcessWorkspacePurgeDeps {
    * own call site comment. Never set in production.
    */
   afterTableWalk?: (workspaceId: string) => Promise<void> | void;
+  /**
+   * Gap-closure plan 22-11 test-only seam: called once per workspace the
+   * instant `deleteWorkspaceAuthRows` returns -- the two auth DELETEs have
+   * already committed on the elevated pool, but the platform-pool checkpoint
+   * write and the `auth` completed-tables marker have not happened yet. See
+   * `runWorkspacePurgeWalk`'s own call site comment for why this is the ONLY
+   * way to land a real kill inside that window. Never set in production.
+   */
+  afterAuthDelete?: (workspaceId: string, counts: WorkspaceAuthPurgeCounts) => Promise<void> | void;
 }
 
 /**
@@ -457,7 +485,7 @@ export async function processWorkspacePurge(deps: ProcessWorkspacePurgeDeps = {}
 
   const destructible = await loadDestructiblePurgeRecords(client);
   for (const record of destructible) {
-    await runWorkspacePurgeWalk(client, record.workspaceId, batchSize, deleteBatchFn, deps.afterTableWalk);
+    await runWorkspacePurgeWalk(client, record.workspaceId, batchSize, deleteBatchFn, deps.afterTableWalk, deps.afterAuthDelete);
   }
 
   const nowValue = now();

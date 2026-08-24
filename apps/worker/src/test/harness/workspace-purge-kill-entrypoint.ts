@@ -3,6 +3,7 @@ import type { PoolClient } from "pg";
 import type { PurgeTable } from "@mega-crm/db";
 import { deletePurgeBatch as deletePurgeBatchDefault } from "@mega-crm/db";
 import { processWorkspacePurge, type ProcessWorkspacePurgeDeps } from "../../queues/workspace-purge.worker.js";
+import type { WorkspaceAuthPurgeCounts } from "../../queues/workspace-purge-auth.js";
 
 /**
  * Plan 22-09 (PRG-03, SC3) -- the real-process-kill harness for
@@ -36,6 +37,16 @@ import { processWorkspacePurge, type ProcessWorkspacePurgeDeps } from "../../que
  *   once every table is confirmed empty and marked done but strictly
  *   before the auth step and the tombstone -- the one boundary the table
  *   loop's own checkpoint cannot reach.
+ * - `after_auth_delete`: freezes inside
+ *   `ProcessWorkspacePurgeDeps.afterAuthDelete` (gap-closure plan 22-11's
+ *   own addition), which fires the instant `deleteWorkspaceAuthRows`
+ *   returns -- the two auth DELETEs have already COMMITTED on the elevated
+ *   `mega_crm_auth` pool, so `member`/`invitation` rows for the target
+ *   workspace are genuinely gone, but the platform-pool checkpoint write
+ *   (`recordAuthPurgeCounts`) and the `auth` completed-tables marker
+ *   (`markPurgeTableDone`) never happen. This is the last unmarked window
+ *   inside the auth step, and the one this plan's regression case proves is
+ *   crash-safe.
  *
  * Every freeze is scoped to `WPK_TARGET_WORKSPACE_ID` so a neighbour
  * workspace processed in the SAME tick (`processWorkspacePurge` scans every
@@ -47,7 +58,7 @@ import { processWorkspacePurge, type ProcessWorkspacePurgeDeps } from "../../que
 export const WORKSPACE_PURGE_KILL_HARNESS_READY = "workspace-purge-kill-harness:ready";
 export const WORKSPACE_PURGE_KILL_HARNESS_RUN = "run";
 
-type KillMode = "mid_batch" | "between_tables" | "before_tail";
+type KillMode = "mid_batch" | "between_tables" | "before_tail" | "after_auth_delete";
 
 function fail(message: string): never {
   scrubbedConsole.error(`workspace-purge-kill-entrypoint: ${message}`);
@@ -56,7 +67,7 @@ function fail(message: string): never {
 
 function readMode(): KillMode {
   const raw = process.env.WPK_MODE;
-  if (raw !== "mid_batch" && raw !== "between_tables" && raw !== "before_tail") {
+  if (raw !== "mid_batch" && raw !== "between_tables" && raw !== "before_tail" && raw !== "after_auth_delete") {
     fail(`WPK_MODE is not a recognized kill mode: "${String(raw)}"`);
   }
   return raw;
@@ -128,6 +139,15 @@ process.on("message", (message: unknown) => {
 
   if (mode === "before_tail") {
     deps.afterTableWalk = async (workspaceId: string) => {
+      if (workspaceId !== targetWorkspaceId || frozen) return;
+      frozen = true;
+      process.send?.(WORKSPACE_PURGE_KILL_HARNESS_READY);
+      await freeze<void>();
+    };
+  }
+
+  if (mode === "after_auth_delete") {
+    deps.afterAuthDelete = async (workspaceId: string, _counts: WorkspaceAuthPurgeCounts) => {
       if (workspaceId !== targetWorkspaceId || frozen) return;
       frozen = true;
       process.send?.(WORKSPACE_PURGE_KILL_HARNESS_READY);
