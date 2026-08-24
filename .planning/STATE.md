@@ -3,37 +3,37 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Data Lifecycle & Delivery Trust
 current_phase: 22
-current_phase_name: workspace-quiesce-physical-purge
-status: executing
+status: completed
 stopped_at: Phase 22 context gathered
-last_updated: "2026-08-24T10:41:35.726Z"
+last_updated: "2026-08-24T13:05:14.629Z"
 last_activity: 2026-08-24
-last_activity_desc: Phase 22 execution started
+last_activity_desc: Phase 22 complete
 progress:
   total_phases: 5
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 35
-  completed_plans: 33
-  percent: 80
+  completed_plans: 35
+  percent: 100
+current_phase_name: workspace-quiesce-physical-purge
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-08-23 after Phase 21)
+See: .planning/PROJECT.md (updated 2026-08-24 after Phase 22)
 
 **Core value:** Маркетолог настраивает триггерную цепочку или кампанию — и письма надёжно и вовремя доходят до нужных контактов, со сквозным отслеживанием статусов (delivered/opened/clicked/bounced).
-**Current focus:** Phase 22 — workspace-quiesce-physical-purge
+**Current focus:** Milestone v1.2 complete — ready to archive (`/gsd-complete-milestone v1.2`)
 
 ## Current Position
 
-Phase: 22 (workspace-quiesce-physical-purge) — EXECUTING
-Plan: 1 of 12
-Status: Executing Phase 22
-Last activity: 2026-08-24 — Phase 22 execution started
+Phase: 22
+Plan: Not started
+Status: All phases complete
+Last activity: 2026-08-24 — Phase 22 complete
 
-Progress: [████████░░] 80% (4/5 v1.2 phases complete)
+Progress: [████████████████████] 35/35 plans (100%) — all 5 v1.2 phases complete
 
 ### Milestone v1.2 phase map
 
@@ -43,7 +43,7 @@ Progress: [████████░░] 80% (4/5 v1.2 phases complete)
 | 19 | Unsubscribe Secret Graceful Rotation | ROT-01..02 | ✅ Complete (2026-08-21) |
 | 20 | Campaign Template Correctness | TMPL-01..03 | ✅ Complete (2026-08-21) |
 | 21 | Per-Contact DSR Export | DSR-01..04 | ✅ Complete (2026-08-23) |
-| 22 | Workspace Quiesce & Physical Purge | PRG-01..06 | Not started |
+| 22 | Workspace Quiesce & Physical Purge | PRG-01..06 | ✅ Complete (2026-08-24) |
 
 Execution order: 18 → 19 → 20 → 21 → 22 (dependency gate first protects every later phase's dependency changes; purge last — largest surface, irreversible, two plan-time architectural decisions).
 
@@ -70,16 +70,23 @@ Full decision log lives in PROJECT.md (Key Decisions) and the archived phase sum
 - [Phase 21]: Entire DSR export runs in one `REPEATABLE READ` snapshot with fail-closed `anonymized_at` gate as the first read (erased contact → typed 410); proven against a real interleaved erasure scrub
 - [Phase 21]: Fixed apiFetch to attach Content-Type: application/json only when a body is present (keyed on init?.body !== undefined), closing gap G-21-2 for all five bodyless UI delete actions without touching the server's content-type parser
 - [Phase 21]: Made AppShell responsive (sidebar hidden below md, mobile drawer) instead of re-scoping the 375px no-overflow criterion to the content column, closing gap G-21-3
+- [Phase 22]: Privilege model (PT-01, option b) — dedicated pool under the existing `mega_crm_auth` role for `member`/`invitation` deletes only; no grant widening of `mega_crm_app`, 42501 test guards against future grants
+- [Phase 22]: Quiesce = pure RLS policy-predicate change to three scan policies (incl. the unnamed third gap `flow_runs_scan`, migration 0070) + independent fail-closed `isWorkspaceSoftDeleted` dispatch/ingest gates; D-02 freeze-never-cancel
+- [Phase 22]: Purge = batched 500-row `SKIP LOCKED` deletes in frozen FK order (`PURGE_TABLE_SPECS`), tombstone `organization` UPDATE-only, `purge_records` RLS-free compliance evidence with pre-destruction census; kill-resume proven under real SIGKILL (22-09/22-11)
+- [Phase 22]: Restore = operator CLI only (`db:restore-workspace`) refused unconditionally after `first_destructive_batch_at`; shared advisory lock closes the race; overdue scheduled campaigns flip to draft in the restore transaction (D-15)
+- [Phase 22]: Dead-letter PII bounded by retention sweep (`DEAD_LETTER_RETENTION_DAYS`, boot-validated ≤ purge window) instead of widening `scrub()` to tenant-controlled keys (22-12); pre-deploy census was the phase's single human UAT check (passed)
 
 ### Open decisions to resolve at plan time (v1.2)
 
 | Phase | Decision | Why it cannot be settled now |
 |-------|----------|------------------------------|
 | ~~21~~ | ~~JSONB inclusion/redaction rule (DSR-03)~~ | RESOLVED at Phase 21 planning: two build-up allowlists in `@mega-crm/delivery-core` (D-01/D-02), `docs/PII-INVENTORY.md` binds Phase 22 |
-| 22 | Privilege model for cross-tenant deletion: grant migration on `organization` vs dedicated elevated DSN | Architectural tradeoff (privilege surface vs code volume); project has precedent for both |
-| 22 | Exact quiesce mechanism closing the `campaigns_scan`/`flows_scan` gap (neither checks `organization.deletedAt` today) | Scope call: part of PRG-06 or separate fix — research demands it be explicit to avoid a half-measure |
+| ~~22~~ | ~~Privilege model for cross-tenant deletion~~ | RESOLVED at Phase 22 planning (PT-01, option b): dedicated pool under existing `mega_crm_auth` role; no grant widening |
+| ~~22~~ | ~~Exact quiesce mechanism for the scan-policy gap~~ | RESOLVED at Phase 22 planning: RLS predicate change to three scan policies (incl. `flow_runs_scan`), migration 0070; no new grant needed |
 
-Research flag: **Phase 22 needs deeper research at plan time** (multi-table FK ordering, privilege model, PITR-backup caveat for compliance claims). Phase 21 reuses proven patterns (Fastify file download); Phase 20 is a localized product fix. (Phase 18 done: drizzle-kit question closed. Phase 19 done: retention window settled as D-06 — retired secret kept 5 years from when it was last primary, recorded in the rotation runbook + SPECIFICATION.md; code enforces only `MAX_UNSUBSCRIBE_PREVIOUS_SECRETS = 5` at the three boot validators (D-07); live production rotation rehearsal passed, security review 24/24 threats closed.)
+*(all v1.2 plan-time decisions resolved — table retained for milestone history)*
+
+Research flag: RESOLVED — Phase 22's plan-time research mapped the full FK graph (27 tenant tables, three RESTRICT edges) and the deletion order; the PITR-backup caveat shipped in `docs/runbooks/backups.md` + SPECIFICATION.md (22-10). Phase 21 reused proven patterns (Fastify file download); Phase 20 was a localized product fix. (Phase 18 done: drizzle-kit question closed. Phase 19 done: retention window settled as D-06 — retired secret kept 5 years from when it was last primary, recorded in the rotation runbook + SPECIFICATION.md; code enforces only `MAX_UNSUBSCRIBE_PREVIOUS_SECRETS = 5` at the three boot validators (D-07); live production rotation rehearsal passed, security review 24/24 threats closed.)
 
 ### Open Items Carried Forward (not blockers)
 
@@ -127,12 +134,13 @@ Items acknowledged and deferred at milestone close on 2026-08-20 (open-artifact 
 
 ## Session Continuity
 
-Last session: 2026-08-23T15:00:58.700Z
-Stopped at: Phase 22 context gathered
-Resume file: .planning/phases/22-workspace-quiesce-physical-purge/22-CONTEXT.md
+Last session: 2026-08-24
+Stopped at: Phase 22 complete — milestone v1.2 100% (all 5 phases, 35/35 plans), ready to archive
+Resume file: None
 
 ## Operator Next Steps
 
-- **Plan the next phase:** `/clear` then `/gsd-discuss-phase 22` (Workspace Quiesce & Physical Purge) to gather context — or `/gsd-plan-phase 22` to plan directly. Note STATE research flag: Phase 22 needs deeper research at plan time (multi-table FK ordering, privilege model, PITR-backup caveat); two open plan-time decisions remain (privilege model, quiesce mechanism for `campaigns_scan`/`flows_scan`).
+- **Complete the milestone:** `/clear` then `/gsd-complete-milestone v1.2` — archive v1.2 (Data Lifecycle & Delivery Trust) and prepare the next cycle. Phase 22 closed with verification 5/5, UAT 1/1 (pre-deploy dead-letter census passed), security 79/79 threats closed.
+- **Pre-deploy operational note (Phase 22):** the first production deploy of the dead-letter retention sweep permanently deletes `dead_letter_jobs` rows older than `DEAD_LETTER_RETENTION_DAYS` (default 30) on its first purge tick — the pre-deploy census was reviewed and approved during UAT 2026-08-24.
 - Deferred candidates explicitly NOT in v1.2 (still tech debt): SCALE-02 (PgBouncer), segmentation benchmark at target volume, remaining live walkthroughs (operator-alert email, Phase 13 compliance), Phase 15 UI follow-ups + threshold tuning, KEK quick-task 260818-aqd Task 3.
-- Branch note: v1.1 closed on `gsd/phase-17-address-tech-debt-wr-06-medium-security-follow-ups` (planning-history lineage); code was merged to master via PR #17, tag `v1.1` points at the close commit on that branch. v1.2 phase branches follow `gsd/phase-{phase}-{slug}` — cut from an up-to-date `origin/master` (the local `master` ref is permanently stale in this repo).
+- Branch note: v1.2 Phase 22 work lives on `gsd/phase-22-workspace-quiesce-physical-purge`; merge to master via PR per project convention. The local `master` ref is permanently stale in this repo — always compare against `origin/master`.

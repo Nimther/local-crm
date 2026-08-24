@@ -1,7 +1,7 @@
 ---
 phase: 22-workspace-quiesce-physical-purge
 verified: 2026-08-24T17:05:00Z
-status: human_needed
+status: passed
 score: 5/5 must-haves verified
 behavior_unverified: 0
 overrides_applied: 0
@@ -9,11 +9,13 @@ re_verification:
   previous_status: gaps_found
   previous_score: 4/5
   gaps_closed:
+
     - "Once retention has elapsed, the workspace's PII across every tenant table is deleted or anonymized and its secrets are gone, while the compliance evidence required to outlive the tenant is still present and readable. (dead_letter_jobs PII gap — closed by plan 22-12: bounded DEAD_LETTER_RETENTION_DAYS sweep, boot-validated ceiling ≤ WORKSPACE_PURGE_RETENTION_DAYS, PII-INVENTORY.md Excluded row, runbook subsection, SPECIFICATION.md §3/§4/§5, prod.env.example.)"
     - "The pre-destruction per-table row census in purge_records.table_counts is an immutable compliance record, written once and never overwritten. (recordAuthPurgeCounts crash window — closed by plan 22-11: countWorkspaceAuthRows on the ordinary platform pool BEFORE the delete, write-once jsonb merge via operand order, eighth real-SIGKILL kill-resume case.)"
   gaps_remaining: []
   regressions: []
 human_verification:
+
   - test: "Before the first production deploy after this phase merges, run `SELECT count(*), min(failed_at), count(*) FILTER (WHERE acknowledged_at IS NULL) FROM dead_letter_jobs WHERE failed_at < now() - interval '30 days';` against production and confirm the count and the unacknowledged share are expected. If unacknowledged old failures are still under investigation, acknowledge or export them first."
     expected: "Operator has reviewed the accumulated dead_letter_jobs backlog (unbounded since Phase 12) and confirmed it is safe to let the first purge tick permanently delete every row older than DEAD_LETTER_RETENTION_DAYS (default 30). This is plan 22-12's own <human-check>, rated 'costly' (not one-way) because the first run against production data cannot be undone and cannot be verified from this environment."
     why_human: "Requires reading actual production dead_letter_jobs contents and operator judgment about whether old unacknowledged failures are still needed for investigation — not something a codebase read can confirm. The recorded design decision itself (option (b): retention timer, not a workspace_id column) is already confirmed in the plan frontmatter's assumption_delta_decision and the phase orchestrator's dispatch; this item is only the pre-deploy data-safety confirmation, not a re-litigation of that decision."
@@ -142,4 +144,3 @@ Both gaps from the prior verification (score 4/5) are closed with code-level evi
 - **WR-01/WR-02/WR-03** are judged Warning-severity for the reasons stated in the Anti-Patterns table above: WR-01 describes a stronger, undeclared evidence semantic (not a violation of the plan's own tested truths); WR-02 is an explicitly accepted design tradeoff recorded in the plan's own flagged-assumptions section; WR-03 is a carried-forward, unchanged, out-of-scope finding.
 
 **One item requires human action before this phase's work is fully "done" in the operational sense**, which is why the status is `human_needed` rather than `passed` despite the 5/5 score: plan 22-12's own `<human-check>` — reviewing the actual production `dead_letter_jobs` backlog and confirming it is safe to let the first purge tick permanently delete everything older than the retention window — cannot be discharged from this environment. This is a data-safety confirmation on an already-correct, already-tested implementation, not a re-litigation of the design decision (which is already recorded and sound).
-

@@ -60,7 +60,7 @@ Full phase details: [milestones/v1.1-ROADMAP.md](milestones/v1.1-ROADMAP.md)
 - [x] **Phase 19: Unsubscribe Secret Graceful Rotation** - Operator rotates the signing secret without invalidating a single already-sent link (completed 2026-08-21)
 - [x] **Phase 20: Campaign Template Correctness** - The template shown as selected is the template that actually sends, on all three send paths (completed 2026-08-21)
 - [x] **Phase 21: Per-Contact DSR Export** - Owner/Admin hands a data subject their own data as one downloadable, tenant-isolated file (completed 2026-08-23)
-- [ ] **Phase 22: Workspace Quiesce & Physical Purge** - A soft-deleted workspace stops sending and physically disappears after retention, leaving neighbours and compliance evidence intact
+- [x] **Phase 22: Workspace Quiesce & Physical Purge** - A soft-deleted workspace stops sending and physically disappears after retention, leaving neighbours and compliance evidence intact (completed 2026-08-24)
 
 ## Phase Details
 
@@ -295,7 +295,7 @@ Plans:
 | 19. Unsubscribe Secret Graceful Rotation | v1.2 | 5/5 | Complete    | 2026-08-21 |
 | 20. Campaign Template Correctness | v1.2 | 6/6 | Complete    | 2026-08-21 |
 | 21. Per-Contact DSR Export | v1.2 | 8/8 | Complete    | 2026-08-23 |
-| 22. Workspace Quiesce & Physical Purge | v1.2 | 12/12 | In Progress|  |
+| 22. Workspace Quiesce & Physical Purge | v1.2 | 12/12 | Complete    | 2026-08-24 |
 
 ---
 *v1.2 roadmap created 2026-08-20 — 18/18 requirements mapped, no orphans. Next: `/gsd-plan-phase 18`.*
