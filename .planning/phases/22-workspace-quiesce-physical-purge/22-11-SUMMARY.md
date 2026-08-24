@@ -165,6 +165,10 @@ None - no external service configuration required.
 - `purge_records.table_counts` is now provably crash-safe end to end for the auth step, closing verification gap 2 from `22-VERIFICATION.md`/`22-REVIEW.md`.
 - No blockers for gap-closure plan 22-12 or the phase's overall completion.
 
+## Self-Check: PASSED
+
+All 7 code/spec files and both `.planning` artifact files confirmed present on disk; all 4 commits (`c70e15b`, `62307c7`, `4c008e2`, plus this SUMMARY's own `30e4f3e`) confirmed present in `git log`.
+
 ---
 *Phase: 22-workspace-quiesce-physical-purge*
 *Completed: 2026-08-24*
