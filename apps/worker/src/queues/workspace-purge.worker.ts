@@ -22,6 +22,7 @@ import {
   recordAuthPurgeCounts,
 } from "./workspace-purge-checkpoint.js";
 import { countWorkspaceAuthRows, deleteWorkspaceAuthRows, type WorkspaceAuthPurgeCounts } from "./workspace-purge-auth.js";
+import { sweepExpiredDeadLetterJobs } from "./dead-letter-retention.js";
 
 /**
  * Phase 22 (PRG-01/PRG-02/PRG-03/PRG-05, D-05/D-07/D-09/D-14, plan 22-01):
@@ -501,6 +502,13 @@ export interface ProcessWorkspacePurgeDeps {
    * way to land a real kill inside that window. Never set in production.
    */
   afterAuthDelete?: (workspaceId: string, counts: WorkspaceAuthPurgeCounts) => Promise<void> | void;
+  /**
+   * Gap-closure plan 22-12 (PRG-02): days a `dead_letter_jobs` row survives
+   * before the tick's own bounded sweep deletes it. Defaults to
+   * `workerEnv.DEAD_LETTER_RETENTION_DAYS`, mirroring the existing
+   * `retentionDays` seam above.
+   */
+  deadLetterRetentionDays?: number;
 }
 
 /**
@@ -527,6 +535,21 @@ export async function processWorkspacePurge(deps: ProcessWorkspacePurgeDeps = {}
     const eligibleAt = new Date(ws.deletedAt.getTime() + retentionDays * 24 * 60 * 60 * 1000);
     await reportWorkspaceForPurge(client, ws.id, ws.deletedAt, eligibleAt);
   }
+
+  // Gap-closure plan 22-12 (PRG-02): the dead-letter retention sweep runs
+  // LAST in the tick, on the same platform `client`, deliberately outside
+  // any try/catch -- this tick has none anywhere by design, and a sweep
+  // failure must surface as a visibly failed BullMQ job. Placing it last
+  // means a sweep throw can NEVER prevent the destructive walk or the
+  // reporting phase above from running; a thrown sweep simply fails this
+  // one job, and the next scheduled tick retries it.
+  const deadLetterRetentionDays = deps.deadLetterRetentionDays ?? workerEnv.DEAD_LETTER_RETENTION_DAYS;
+  const deadLetterCutoff = new Date(nowValue.getTime() - deadLetterRetentionDays * 24 * 60 * 60 * 1000);
+  const deletedCount = await sweepExpiredDeadLetterJobs(client, deadLetterCutoff);
+  logger.info(
+    { deletedCount, retentionDays: deadLetterRetentionDays, cutoff: deadLetterCutoff.toISOString() },
+    "workspace-purge: dead-letter retention sweep complete",
+  );
 }
 
 /**
