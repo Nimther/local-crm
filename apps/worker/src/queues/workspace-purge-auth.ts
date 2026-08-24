@@ -1,4 +1,4 @@
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 import { createPgPool } from "@mega-crm/db/src/pool.js";
 
 /**
@@ -70,6 +70,43 @@ export async function closeAuthPurgePool(): Promise<void> {
 export interface WorkspaceAuthPurgeCounts {
   memberCount: number;
   invitationCount: number;
+}
+
+/**
+ * Gap-closure plan 22-11 (PRG-02): counts `member`/`invitation` rows for a
+ * workspace on the ORDINARY platform client -- a plain `Pool | PoolClient`
+ * from `pg`, the SAME `workspacePurgePool` `workspace-purge.worker.ts`
+ * already uses for everything else, NEVER `createAuthPurgePool()`. Migration
+ * 0045 grants `mega_crm_app` `SELECT` on `member`/`invitation` (the same
+ * grant `workspace-purge-auth.test.ts`'s and
+ * `workspace-purge-resume.test.ts`'s own `memberCount`/`invitationCount`
+ * fixture helpers already rely on), so no new grant and no migration is
+ * needed to read these counts before the destructive delete.
+ *
+ * This function must NEVER be moved onto the elevated `mega_crm_auth` pool.
+ * `deleteWorkspaceAuthRows` below issues EXACTLY TWO statements against
+ * EXACTLY TWO tables on that connection -- that narrowness is the entire
+ * justification for holding the elevated credential in the first place.
+ * Adding a third statement (even a read-only `count(*)`) to that pool would
+ * silently widen the audited blast radius this module's own header comment
+ * exists to bound.
+ */
+export async function countWorkspaceAuthRows(
+  client: Pool | PoolClient,
+  workspaceId: string,
+): Promise<WorkspaceAuthPurgeCounts> {
+  const { rows: memberRows } = await client.query<{ count: string }>(
+    `SELECT count(*) AS count FROM member WHERE "organizationId" = $1`,
+    [workspaceId],
+  );
+  const { rows: invitationRows } = await client.query<{ count: string }>(
+    `SELECT count(*) AS count FROM invitation WHERE "organizationId" = $1`,
+    [workspaceId],
+  );
+  return {
+    memberCount: Number(memberRows[0]?.count ?? 0),
+    invitationCount: Number(invitationRows[0]?.count ?? 0),
+  };
 }
 
 /**
