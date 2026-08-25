@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-08-24 after v1.2 milestone)
 Phase: Milestone v1.2 complete
 Plan: —
 Status: Awaiting next milestone
-Last activity: 2026-08-24 — Milestone v1.2 completed and archived
+Last activity: 2026-08-25 — Completed quick task 260825-qhm: Evidence-based audit of .planning/WINDOWS.md open items before next milestone
 
 ### Milestone v1.2 phase map
 
@@ -119,6 +119,7 @@ Research flag: RESOLVED — Phase 22's plan-time research mapped the full FK gra
 | 260809-eqr | Close Phase 10 residual review findings WR-06/WR-07 + sync STATE.md to Phase 11 | 2026-08-09 | ebc754c | Complete | [260809-eqr-close-phase-10-residual-review-findings-](./quick/260809-eqr-close-phase-10-residual-review-findings-/) |
 | 260811-qit | Append Codex follow-up review section to Phase 13 REVIEWS.md | 2026-08-11 | b37e7bd | Verified | [260811-qit-append-codex-follow-up-review-section-to](./quick/260811-qit-append-codex-follow-up-review-section-to/) |
 | 260821-p8i | Зафиксировать изменение .planning/debug/knowledge-base.md как документационное | 2026-08-21 | ccc23ba | Complete | [260821-p8i-planning-debug-knowledge-base-md](./quick/260821-p8i-planning-debug-knowledge-base-md/) |
+| 260825-qhm | Evidence-based audit of .planning/WINDOWS.md open items before next milestone | 2026-08-25 | 8489c0c | Complete | [260825-qhm-evidence-based-audit-of-planning-windows](./quick/260825-qhm-evidence-based-audit-of-planning-windows/) |
 
 ## Deferred Items
 
