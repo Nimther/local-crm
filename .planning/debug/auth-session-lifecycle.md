@@ -390,8 +390,23 @@ verification: |
   Not run: the full suite (per operating instructions — advisory-lock / flow-run-advance / temp-redis
   flake under full-suite load, and api+worker `sentry.test.ts` "no DSN" tests fail deterministically on
   this machine because of real DSNs in ~/.config/mega-crm/.env).
-  NOT YET HUMAN-VERIFIED — session stops at the human-verify checkpoint; nothing archived, nothing
-  pushed, no PR, knowledge-base.md untouched.
+  INDEPENDENT MANAGER RE-VERIFICATION (2026-08-25T18:45:00Z, clean context, not the fixing agent —
+  same discipline applied to GREEN as to RED, so no lane is green only on the implementer's word):
+    API lane re-run => "Test Files 1 passed (1) | Tests 4 passed (4)", 6.46s. Confirmed.
+    Browser lane re-run => "4 passed (14.6s)" — T1 3.9s, T2 1.8s, T3 998ms, T4 1.4s. Confirmed.
+    plugin.ts diff read directly: CREDENTIAL_BUCKET_MAX stays 20/min (ceiling NOT loosened);
+      SESSION_READ_BUCKET_MAX 120/min is finite; the read bucket is reachable only by GET/HEAD on an
+      explicit 2-path allow-list (/api/auth/get-session, /api/auth/ok) with the query string stripped,
+      so no POST credential route and no token-carrying GET can land in the roomier bucket — the split
+      cannot widen the brute-force surface.
+    Hard project rule verified: commit 8e5c153 contains SPECIFICATION.md AND plugin.ts together.
+    Git verified: branch fix/auth-session-lifecycle, 3 commits ahead of origin/master, working tree
+      clean, NOT present on the remote (`git ls-remote --heads origin 'fix/*'` shows only two unrelated
+      older branches), knowledge-base.md untouched per git status after the last git operation.
+  NOT YET HUMAN-VERIFIED — session stops at the human-verify checkpoint. This gate cannot be satisfied
+  by machine: it needs the user to exercise the real browser flow and to authorize archiving/pushing.
+  The manager session has no AskUserQuestion tool, so the checkpoint is reported upward OPEN rather than
+  assumed. Nothing archived, nothing pushed, no PR, knowledge-base.md untouched.
 behavioral_deltas_to_disclose:
   - "RootRedirect's undecided state renders the route skeleton instead of `null`, so '/' now shows a brief skeleton during the first get-session (previously a blank screen). Required by the unknown != anonymous constraint."
   - "/login now issues one get-session on load (the guard subscribes the session store) — in the roomier auth-read bucket."
