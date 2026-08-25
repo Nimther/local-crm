@@ -92,6 +92,18 @@ const OPERATORS_BY_KIND: Record<FieldKind, { value: ConditionOperator; label: st
 
 const HIDDEN_VALUE_OPERATORS = new Set<ConditionOperator>(["is_empty", "is_not_empty", "is_true", "is_false"]);
 
+/** D-01 as amended: the combinator BETWEEN groups is chosen by the user. */
+type GroupCombinator = "and" | "or";
+
+const GROUP_COMBINATOR_OPTIONS: { value: GroupCombinator; label: string }[] = [
+  { value: "and", label: "И" },
+  { value: "or", label: "ИЛИ" },
+];
+
+function groupCombinatorLabel(combinator: GroupCombinator): string {
+  return combinator === "or" ? "ИЛИ" : "И";
+}
+
 function kindForAttributeCondition(cond: AttributeCondition, registry: PropertyRegistryItem[]): FieldKind {
   if (cond.source === "standard") {
     return STANDARD_FIELDS.find((f) => f.field === cond.field)?.kind ?? "string";
@@ -127,9 +139,15 @@ export function newBehavioralCondition(): BehavioralCondition {
   return { type: "behavioral", eventName: "", countOperator: "at_least", count: 1, timeframe: { kind: "all_time" } };
 }
 
-/** SEGM-01/02: the empty starting definition a new segment's builder opens with. */
+/**
+ * SEGM-01/02: the empty starting definition a new segment's builder opens
+ * with. `groupCombinator: "and"` is spelled out rather than left absent so the
+ * draft matches what the API returns after parse; the two are equivalent by
+ * construction (an absent combinator compiles identically to an explicit
+ * "and" -- pinned by compile.test.ts).
+ */
 export function createEmptySegmentDefinition(): SegmentDefinition {
-  return { version: 1, groups: [{ conditions: [newAttributeCondition()] }] };
+  return { version: 1, groupCombinator: "and", groups: [{ conditions: [newAttributeCondition()] }] };
 }
 
 function recapForCondition(cond: SegmentCondition, registry: PropertyRegistryItem[]): string {
@@ -315,6 +333,47 @@ function EventCombobox({ eventName, eventNames, onSelect }: { eventName: string;
         </Command>
       </PopoverContent>
     </Popover>
+  );
+}
+
+/**
+ * D-01 as amended: the user-selected combinator between groups, replacing the
+ * static "И" badge. ONE combinator governs the WHOLE definition (the flat
+ * `groups[]` model has nowhere to store a per-pair choice), so this control is
+ * rendered in every gap between groups and every instance reads and writes the
+ * same `definition.groupCombinator` -- flipping any one of them flips all of
+ * them. The OR *within* a group is a separate, unchanged tier.
+ */
+function GroupCombinatorToggle({
+  value,
+  onChange,
+}: {
+  value: GroupCombinator;
+  onChange: (next: GroupCombinator) => void;
+}) {
+  return (
+    <div
+      role="group"
+      aria-label="Связка между группами"
+      className="inline-flex items-center gap-1 rounded-md border bg-muted/40 p-1"
+    >
+      {GROUP_COMBINATOR_OPTIONS.map((option) => {
+        const selected = value === option.value;
+        return (
+          <Button
+            key={option.value}
+            type="button"
+            size="sm"
+            variant={selected ? "secondary" : "ghost"}
+            aria-pressed={selected}
+            className={cn("h-7 px-3 text-xs font-medium", !selected && "text-muted-foreground")}
+            onClick={() => onChange(option.value)}
+          >
+            {option.label}
+          </Button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -504,7 +563,8 @@ function BehavioralConditionRow({
 }
 
 /**
- * D-01..D-09: two-tier AND/OR segment builder -- groups AND'd together, OR'd
+ * D-01..D-09: two-tier AND/OR segment builder -- groups combined by the
+ * user-selected `groupCombinator` (one for the whole definition), OR'd
  * conditions within a group. Controlled component: emits the exact
  * SegmentDefinition JSON (version 1) via onChange on every edit. No inline
  * member list here (D-09) -- only the group recap + (Task 3) live count.
@@ -557,8 +617,17 @@ export function SegmentBuilder({
 
   const isDegraded = Boolean(previewQuery.data && "degraded" in previewQuery.data && previewQuery.data.degraded);
 
+  // Read defensively: the type says required (Zod's `.default("and")` fills it
+  // on parse), but a segment persisted before the combinator existed arrives
+  // from the API without the key at runtime.
+  const groupCombinator: GroupCombinator = value.groupCombinator ?? "and";
+
   function updateGroup(groupIndex: number, nextGroup: SegmentGroup) {
     onChange({ ...value, groups: value.groups.map((g, i) => (i === groupIndex ? nextGroup : g)) });
+  }
+
+  function setGroupCombinator(next: GroupCombinator) {
+    onChange({ ...value, groupCombinator: next });
   }
 
   function addGroup() {
@@ -591,9 +660,7 @@ export function SegmentBuilder({
         <div key={groupIndex} className="space-y-2">
           {groupIndex > 0 ? (
             <div className="flex justify-center">
-              <Badge variant="secondary" className="text-muted-foreground">
-                И
-              </Badge>
+              <GroupCombinatorToggle value={groupCombinator} onChange={setGroupCombinator} />
             </div>
           ) : null}
           <Card className={cn(group.conditions.length === 0 && "border-destructive")}>
@@ -658,7 +725,7 @@ export function SegmentBuilder({
       ))}
 
       <Button type="button" variant="outline" onClick={addGroup}>
-        Добавить группу (И)
+        Добавить группу ({groupCombinatorLabel(groupCombinator)})
       </Button>
 
       <Card>

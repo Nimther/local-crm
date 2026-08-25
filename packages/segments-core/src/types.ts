@@ -69,9 +69,20 @@ export interface SegmentGroup {
   conditions: SegmentCondition[]; // min 1, enforced by Zod at the boundary
 }
 
-/** D-01: groups are AND'd together. Arbitrary nesting is out of scope (v1). */
+/**
+ * D-01 as amended: the combinator BETWEEN groups is user-selected -- ONE
+ * combinator for the whole definition (not pairwise), matching the flat
+ * `groups[]` model. Arbitrary nesting is out of scope (v1).
+ *
+ * `groupCombinator` is OPTIONAL here on purpose, unlike the Zod boundary type
+ * where `.default("and")` makes it present in the parsed output: workers read
+ * `segments.definition` straight out of jsonb with no Zod re-parse, so
+ * already-persisted rows genuinely arrive without the key. An absent
+ * combinator means "and" (compile.ts applies that default itself).
+ */
 export interface SegmentDefinition {
   version: 1;
+  groupCombinator?: "and" | "or";
   groups: SegmentGroup[]; // min 1, enforced by Zod at the boundary
 }
 
