@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Link, useNavigate } from "react-router";
+import { Link } from "react-router";
 import { loginSchema, type LoginInput } from "@mega-crm/shared-schemas";
-import { authClient } from "@/lib/authClient";
+import { authClient, useSession } from "@/lib/authClient";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -16,9 +16,36 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 
+/**
+ * Maps a sign-in failure to user-facing copy BY THE SHAPE OF THE FAILURE
+ * (debug session `auth-session-lifecycle`).
+ *
+ * This used to be a blanket `if (error)` -> "wrong email or password", which
+ * reported every failure as bad credentials — including the 429 the auth
+ * rate-limit bucket returns. Users whose credentials were perfectly correct
+ * were told their password was wrong. The server has always exposed the
+ * discriminator this reads: a genuine credential failure is 401 with
+ * `code: "INVALID_EMAIL_OR_PASSWORD"`, while a throttle is a 429 carrying no
+ * better-auth code at all (pinned by
+ * apps/api/src/modules/auth/__tests__/auth-rate-limit-buckets.test.ts).
+ *
+ * Only the credential shape may blame the credentials; nothing else mentions
+ * them.
+ */
+function signInErrorMessage(error: { status?: number; code?: string }): string {
+  if (error.status === 401 || error.code === "INVALID_EMAIL_OR_PASSWORD") {
+    return "Неверный email или пароль. Проверьте данные и попробуйте ещё раз.";
+  }
+  if (error.status === 429) {
+    return "Слишком много попыток входа. Подождите минуту и войдите снова.";
+  }
+  return "Не удалось выполнить вход — сервис недоступен. Попробуйте позже.";
+}
+
 export default function LoginPage() {
-  const navigate = useNavigate();
+  const { refetch: refetchSession } = useSession();
   const [serverError, setServerError] = useState<string | null>(null);
+  const [awaitingSession, setAwaitingSession] = useState(false);
 
   const form = useForm<LoginInput>({
     resolver: zodResolver(loginSchema),
@@ -35,13 +62,26 @@ export default function LoginPage() {
     });
 
     if (error) {
-      setServerError("Неверный email или пароль. Проверьте данные и попробуйте ещё раз.");
+      setServerError(signInErrorMessage(error));
       return;
     }
 
-    // Root route (Task 3 / App.tsx) resolves whether the user has a
-    // workspace and routes to /w/:slug or /create-workspace accordingly.
-    void navigate("/");
+    // Deliberately NO navigate() here. The credentials are accepted, but the
+    // auth client's session store does not hold the new session yet — it
+    // refreshes itself on a deferred signal — so navigating to "/" now made
+    // RootRedirect read the store's retained logged-out value and bounce
+    // straight back here (the "the page just reloaded" symptom).
+    //
+    // Instead: ask the store to refresh, and let the RequireAnonymous guard
+    // around this route perform the redirect the moment the store actually
+    // HOLDS the session. Gated on the data being present, never on elapsed
+    // time — and asking explicitly rather than relying on the auth client's
+    // own deferred signal, so a successful sign-in can never be a silent
+    // no-op. `awaitingSession` keeps the button in its pending state for the
+    // gap until the guard takes over, so a successful submit can never look
+    // submittable again (no double submit).
+    setAwaitingSession(true);
+    void refetchSession();
   }
 
   return (
@@ -83,8 +123,8 @@ export default function LoginPage() {
               {serverError ? (
                 <p className="text-sm font-medium text-destructive">{serverError}</p>
               ) : null}
-              <Button type="submit" className="w-full" disabled={isSubmitting}>
-                {isSubmitting ? "Входим…" : "Войти"}
+              <Button type="submit" className="w-full" disabled={isSubmitting || awaitingSession}>
+                {isSubmitting || awaitingSession ? "Входим…" : "Войти"}
               </Button>
             </form>
           </Form>

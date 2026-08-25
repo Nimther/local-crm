@@ -1272,13 +1272,28 @@ Repeatable-скан `flow-segment-sweep` (15 мин, §5.1/§5.2) — перио
 
 | METHOD | Путь | Защита | Rate limit |
 |---|---|---|---|
-| ALL | `/api/auth/*` | внутренняя, better-auth | **20 / 1 мин** (scope-global) |
+| ALL | `/api/auth/*` | внутренняя, better-auth | **два независимых бакета на IP** — read 120 / 1 мин, credential 20 / 1 мин (см. ниже) |
 | GET | `/unsubscribe/:token` | **токен не проверяется и ничего не мутирует** (сознательно: защита от prefetch-мутации и enumeration) | нет |
 | POST | `/unsubscribe/:token` | подписанный HMAC-токен в пути — единственный authz-вход | **нет** |
 | POST | `/webhooks/sendgrid/:pathToken` | секретный path token + ECDSA-подпись | **100 / 10 сек** (Phase 10, план 10-12, SEC-08/T-10-12-02 — собственный бакет, независимый от остальных роутов, см. §6.8) |
 | GET | `/api/invites/:invitationId` | **ничего** — отдаёт `email`, `role`, `organizationName`, `organizationSlug`, `status` | **нет** |
 | POST | `/api/invites/:invitationId/register` | публично, создаёт аккаунт; email берётся из строки инвайта, не из тела | 10 / 1 мин |
 | POST | `/api/invites/:invitationId/accept` | требует сессию (better-auth сверяет email) | 10 / 1 мин |
+
+**Rate limit `/api/auth/*` (`modules/auth/plugin.ts:82-87`, константы и allow-list — `:9-47`) — ДВА бакета на IP, а не один общий.** Один `scope.register(rateLimit, …)` внутри инкапсулированного auth-скоупа, но счётчики разделены `keyGenerator` (`auth-read:<ip>` / `auth-credential:<ip>`), а `max` вычисляется на каждый запрос:
+
+| Бакет | Что попадает | `max` / `timeWindow` |
+|---|---|---|
+| `auth-read` | **только** `GET`/`HEAD` по allow-list `/api/auth/get-session` и `/api/auth/ok` (liveness-проба, её же поллит E2E `webServer` — `apps/web/playwright.config.ts:79`) | **120 / 1 мин** |
+| `auth-credential` | **всё остальное** `/api/auth/*` — sign-in, sign-up, сброс пароля, приём инвайта, а также любой другой `GET` с токеном (например верификация email) | **20 / 1 мин** |
+
+Причина разделения (debug-сессия `auth-session-lifecycle`): раньше это была одна регистрация `{ max: 20 }` на весь скоуп, поэтому **сессионные READ-запросы better-auth тратили именно тот бюджет, который защищает креденшелы**. better-auth-клиент перезапрашивает `/get-session` по focus окна (пол — один раз в 5 с, ~12/мин), visibility, online-событиям, cross-tab broadcast и на каждый свежий mount стора (в dev удваивается React StrictMode) — поэтому аутентифицированный пользователь, просто поработав в приложении пару минут, вычерпывал бакет, и его следующий sign-in с ВЕРНЫМИ креденшелами получал 429. Доказано `apps/api/src/modules/auth/__tests__/auth-rate-limit-buckets.test.ts`: 30 `get-session` + корректный sign-in. Тот же файл фиксирует, что порог credential-бакета фиксом не ослаблен и что read-бакет остаётся **конечным** (не «исключить `/get-session` из лимитера»).
+
+Per-route `config.rateLimit` здесь неприменим: скоуп отдаёт better-auth через ОДИН catch-all роут `scope.all("/api/auth/*")`, различить пути можно только в `keyGenerator`/`max`.
+
+⚠️ **Store этого лимитера — in-memory по умолчанию (@fastify/rate-limit `LocalStore`), т.е. счётчик per-process, а не общий Redis из §6.1.** Redis-store относится к app-wide регистрации в `server.ts`, которая сделана с `{ global: false }` и на этот инкапсулированный скоуп не распространяется. Следствие: N реплик API вместе пропускают N×`max` по обоим auth-бакетам. Фиксом не менялось (было так же и до разделения).
+
+⚠️ **`x-ratelimit-limit` / `-remaining` / `-reset` на успешных ответах `/api/auth/*` не выставляются** — скоуп вызывает `reply.hijack()` и пишет в `reply.raw`, поэтому Fastify не применяет `onSend`-хуки лимитера. `retry-after: 60` приходит только на 429 (короткое замыкание в `onRequest`, до hijack). Проверено пробой; тесты этого бакета опираются на статус-коды, не на заголовки.
 
 ### 6.3 Роуты по bearer API-ключу
 
