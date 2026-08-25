@@ -1,5 +1,5 @@
 ---
-status: awaiting_human_verify
+status: resolved
 trigger: "auth-session-lifecycle"
 created: 2026-08-25T00:00:00Z
 updated: 2026-08-25T18:40:00Z
@@ -403,10 +403,14 @@ verification: |
     Git verified: branch fix/auth-session-lifecycle, 3 commits ahead of origin/master, working tree
       clean, NOT present on the remote (`git ls-remote --heads origin 'fix/*'` shows only two unrelated
       older branches), knowledge-base.md untouched per git status after the last git operation.
-  NOT YET HUMAN-VERIFIED — session stops at the human-verify checkpoint. This gate cannot be satisfied
-  by machine: it needs the user to exercise the real browser flow and to authorize archiving/pushing.
-  The manager session has no AskUserQuestion tool, so the checkpoint is reported upward OPEN rather than
-  assumed. Nothing archived, nothing pushed, no PR, knowledge-base.md untouched.
+  HUMAN-VERIFY CHECKPOINT DISPOSITION (answered by the user, relayed via the coordinator):
+  the user replied "Push + PR сразу" — they explicitly TRUSTED the green API/e2e lanes and CHOSE TO
+  SKIP the manual browser walkthrough, authorizing archive + push + PR (explicitly NOT merge).
+  So the manual steps below were never executed by a human, and the three behavioral deltas in
+  `behavioral_deltas_to_disclose` were accepted unseen rather than eyeballed — recorded here honestly
+  because the fix's UX-visible surface (a brief skeleton on "/" and between submit and workspace) has
+  machine proof of correctness but no human confirmation of feel. Automated evidence stands on its own:
+  both lanes double-verified, guards green, credential ceiling unchanged.
 behavioral_deltas_to_disclose:
   - "RootRedirect's undecided state renders the route skeleton instead of `null`, so '/' now shows a brief skeleton during the first get-session (previously a blank screen). Required by the unknown != anonymous constraint."
   - "/login now issues one get-session on load (the guard subscribes the session store) — in the roomier auth-read bucket."
