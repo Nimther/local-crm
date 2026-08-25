@@ -10,9 +10,11 @@ import type {
 /**
  * The single source every count/list/point-check call mode compiles a
  * SegmentDefinition through (SEGM-03's structural "identical membership"
- * guarantee). D-01: conditions within a group are OR'd, groups are AND'd,
- * every group is always parenthesized (Pitfall 7) so SQL's tighter-binding
- * AND can never silently invert the intended precedence.
+ * guarantee). D-01 as amended: conditions within a group are OR'd, groups are
+ * combined by the user-selected `def.groupCombinator` (one combinator for the
+ * whole definition, default "and"), and every group is always parenthesized
+ * (Pitfall 7) so SQL's tighter-binding AND can never silently invert the
+ * intended precedence.
  *
  * CMP-04 (plan 13-10, Task 3): `c.anonymized_at IS NULL` is baked into the
  * base predicate here rather than patched into every call site -- every
@@ -32,8 +34,27 @@ export function compileSegmentDefinition(def: SegmentDefinition, workspaceId: st
     // OR within group -- always parenthesized, even a single-condition group.
     return `(${conditionClauses.join(" OR ")})`;
   });
-  // AND across groups.
-  const whereSql = ["c.workspace_id = $1", "c.anonymized_at IS NULL", ...groupClauses].join(" AND ");
+  // User-selected combinator ACROSS groups. The `?? "and"` default is applied
+  // HERE, not only at the Zod boundary: the workers (recipient-snapshot,
+  // branch-node, exit-conditions, segment-sweep, enroll-existing) read
+  // `segments.definition` straight out of jsonb without a Zod re-parse, so a
+  // schema-level `.default()` never reaches already-persisted rows.
+  const combinator = def.groupCombinator ?? "and";
+  // SECURITY-CRITICAL (CMP-04): `c.workspace_id = $1` and
+  // `c.anonymized_at IS NULL` must NEVER end up inside the OR. SQL binds AND
+  // tighter than OR, so joining a bare `... OR (g1) OR (g2)` onto them would
+  // read as `(ws AND anon) OR g1 OR g2` -- a contact of ANY workspace matching
+  // g1 would pass, and anonymized_at would be bypassed, across all 8+
+  // membership-evaluation call sites at once. So the OR'd groups get their own
+  // enclosing paren and the base predicates are AND'ed on from OUTSIDE it.
+  //
+  // The extra paren is CONDITIONAL, and deliberately so: the "field absent",
+  // "explicit and" and "single group" paths must stay byte-for-byte identical
+  // to the pre-combinator output, or every existing segment's membership
+  // shifts on deploy. A single group has nothing to combine either way.
+  const grouped =
+    combinator === "or" && groupClauses.length > 1 ? [`(${groupClauses.join(" OR ")})`] : groupClauses;
+  const whereSql = ["c.workspace_id = $1", "c.anonymized_at IS NULL", ...grouped].join(" AND ");
   return { whereSql, params };
 }
 

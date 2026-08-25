@@ -141,3 +141,53 @@ describe("segmentDefinitionSchema -- boundary integration", () => {
     expect(result.success).toBe(true);
   });
 });
+
+/**
+ * The user-selectable group combinator has to survive the API boundary, not
+ * just the compiler. `segmentDefinitionSchema` declares neither `.strict()`
+ * nor `.passthrough()`, so Zod's default behavior STRIPS unknown keys: a
+ * combinator wired only into the UI would be silently dropped here and the
+ * segment saved as AND with no error anywhere -- "the toggle exists but does
+ * nothing", with no diagnosable signal. These tests are the boundary guard
+ * for that failure mode. The same schema is embedded in
+ * `segmentResponseSchema`, so it closes the strip in both directions.
+ */
+describe("segmentDefinitionSchema -- groupCombinator at the API boundary", () => {
+  const GROUPS = [
+    { conditions: [{ type: "attribute", source: "standard", field: "country", operator: "eq", value: "RU" }] },
+    { conditions: [{ type: "attribute", source: "standard", field: "city", operator: "eq", value: "Moscow" }] },
+  ];
+
+  /**
+   * Reads the key structurally rather than off the inferred type, so these
+   * tests compile BEFORE the schema carries the field and stay valid after.
+   */
+  function combinatorOf(data: unknown): unknown {
+    return (data as { groupCombinator?: unknown } | undefined)?.groupCombinator;
+  }
+
+  it("preserves groupCombinator 'or' through parse instead of silently stripping it", () => {
+    const result = segmentDefinitionSchema.safeParse({ version: 1, groupCombinator: "or", groups: GROUPS });
+    expect(result.success).toBe(true);
+    expect(combinatorOf(result.data)).toBe("or");
+  });
+
+  it("preserves an explicit groupCombinator 'and' through parse", () => {
+    const result = segmentDefinitionSchema.safeParse({ version: 1, groupCombinator: "and", groups: GROUPS });
+    expect(result.success).toBe(true);
+    expect(combinatorOf(result.data)).toBe("and");
+  });
+
+  it("defaults a definition with no groupCombinator to 'and' (backwards-compatible with stored version:1 rows)", () => {
+    const result = segmentDefinitionSchema.safeParse({ version: 1, groups: GROUPS });
+    expect(result.success).toBe(true);
+    expect(combinatorOf(result.data)).toBe("and");
+  });
+
+  it("fails closed on an out-of-enum groupCombinator instead of stripping it and defaulting to and", () => {
+    for (const bogus of ["xor", "AND", "", "nand", 1, null]) {
+      const result = segmentDefinitionSchema.safeParse({ version: 1, groupCombinator: bogus, groups: GROUPS });
+      expect(result.success, `groupCombinator ${JSON.stringify(bogus)} must be rejected`).toBe(false);
+    }
+  });
+});

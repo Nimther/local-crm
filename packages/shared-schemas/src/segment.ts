@@ -121,11 +121,27 @@ export const segmentGroupSchema = z.object({
 export type SegmentGroup = z.infer<typeof segmentGroupSchema>;
 
 /**
- * Versioned segment definition (SEGM-01/02/03). D-01: groups are AND'd
- * together; arbitrary group nesting is out of scope (v1).
+ * Versioned segment definition (SEGM-01/02/03). D-01 as amended: conditions
+ * within a group are OR'd, and the combinator BETWEEN groups is now chosen by
+ * the user -- ONE combinator for the whole definition (not pairwise), matching
+ * the flat `groups[]` model. Arbitrary group nesting remains out of scope (v1).
+ *
+ * `groupCombinator` is optional-with-default rather than required precisely so
+ * already-persisted `segments.definition` jsonb rows (which have no such key)
+ * keep parsing AND keep their exact membership -- absence means "and", so no
+ * jsonb backfill is needed and `version` stays 1.
+ *
+ * It must live on THIS schema, not just in the UI: neither `.strict()` nor
+ * `.passthrough()` is declared, so Zod's default behavior strips unknown keys
+ * -- a combinator wired only into the builder would be silently dropped here
+ * and the segment saved as AND with no error anywhere. The same schema is
+ * embedded in `segmentResponseSchema`, so declaring it here closes that strip
+ * in both directions. Out-of-enum values fail closed (400) instead of quietly
+ * degrading to "and".
  */
 export const segmentDefinitionSchema = z.object({
   version: z.literal(1),
+  groupCombinator: z.enum(["and", "or"]).optional().default("and"),
   groups: z.array(segmentGroupSchema).min(1),
 });
 export type SegmentDefinition = z.infer<typeof segmentDefinitionSchema>;

@@ -292,3 +292,84 @@ describe("compileSegmentDefinition -- two-tier AND/OR parenthesization (Pitfall 
     expect(result.whereSql).toContain("AND (c.country = $2)");
   });
 });
+
+/**
+ * User-selectable group combinator (replaces the hardcoded AND between
+ * groups). The `& { groupCombinator?: ... }` intersection is what lets these
+ * tests be written BEFORE `SegmentDefinition` gains the field -- it stays
+ * assignable to `compileSegmentDefinition`'s parameter and remains valid once
+ * types.ts carries the field natively.
+ */
+type CombinableDefinition = SegmentDefinition & { groupCombinator?: "and" | "or" };
+
+/**
+ * Absent combinator is modelled as a MISSING KEY, never `groupCombinator:
+ * undefined` -- a missing key is exactly what the already-persisted
+ * `segments.definition` jsonb rows contain, and those rows' membership must
+ * not shift.
+ */
+function comboDef(groups: SegmentDefinition["groups"], groupCombinator?: "and" | "or"): CombinableDefinition {
+  return groupCombinator === undefined ? { version: 1, groups } : { version: 1, groups, groupCombinator };
+}
+
+const G_COUNTRY: SegmentDefinition["groups"][number] = {
+  conditions: [{ type: "attribute", source: "standard", field: "country", operator: "eq", value: "RU" }],
+};
+const G_CITY: SegmentDefinition["groups"][number] = {
+  conditions: [{ type: "attribute", source: "standard", field: "city", operator: "eq", value: "Moscow" }],
+};
+
+/** Byte-for-byte current output, captured empirically before any change. */
+const FLAT_TWO_GROUPS = "c.workspace_id = $1 AND c.anonymized_at IS NULL AND (c.country = $2) AND (c.city = $3)";
+const FLAT_ONE_GROUP = "c.workspace_id = $1 AND c.anonymized_at IS NULL AND (c.country = $2)";
+
+describe("compileSegmentDefinition -- user-selected group combinator (AND/OR between groups)", () => {
+  it("combines groups with OR inside ONE shared paren, keeping workspace_id/anonymized_at OUTSIDE it (CMP-04)", () => {
+    const result = compileSegmentDefinition(comboDef([G_COUNTRY, G_CITY], "or"), WSID);
+
+    // The security-critical invariant: SQL's AND binds tighter than OR, so
+    // the tenant + anonymized predicates MUST be AND'ed onto a single
+    // parenthesized OR-of-groups. If they ever land inside the OR paren the
+    // filter degrades to `(ws AND anon) OR g1 OR g2` -- a contact of ANY
+    // workspace matching g1 passes, and anonymized_at is bypassed.
+    expect(result.whereSql).toBe(
+      "c.workspace_id = $1 AND c.anonymized_at IS NULL AND ((c.country = $2) OR (c.city = $3))"
+    );
+    expect(result.whereSql.startsWith("c.workspace_id = $1 AND c.anonymized_at IS NULL AND ((")).toBe(true);
+    expect(result.whereSql).not.toContain("IS NULL OR");
+    expect(result.whereSql).not.toContain("c.workspace_id = $1 OR");
+    expect(result.params).toEqual([WSID, "RU", "Moscow"]);
+  });
+
+  it("keeps the tenant/anonymized predicates outside the OR paren with three groups too", () => {
+    const result = compileSegmentDefinition(comboDef([G_COUNTRY, G_CITY, G_COUNTRY], "or"), WSID);
+    expect(result.whereSql).toBe(
+      "c.workspace_id = $1 AND c.anonymized_at IS NULL AND ((c.country = $2) OR (c.city = $3) OR (c.country = $4))"
+    );
+    expect(result.whereSql).not.toContain("IS NULL OR");
+    expect(result.params).toEqual([WSID, "RU", "Moscow", "RU"]);
+  });
+
+  it("compiles a definition WITHOUT groupCombinator byte-for-byte as it does today (existing segments keep their membership)", () => {
+    const result = compileSegmentDefinition(comboDef([G_COUNTRY, G_CITY]), WSID);
+    expect(result.whereSql).toBe(FLAT_TWO_GROUPS);
+    expect(result.params).toEqual([WSID, "RU", "Moscow"]);
+  });
+
+  it("treats an explicit groupCombinator 'and' as identical to the absent field", () => {
+    const explicitAnd = compileSegmentDefinition(comboDef([G_COUNTRY, G_CITY], "and"), WSID);
+    const absent = compileSegmentDefinition(comboDef([G_COUNTRY, G_CITY]), WSID);
+    expect(explicitAnd.whereSql).toBe(absent.whereSql);
+    expect(explicitAnd.whereSql).toBe(FLAT_TWO_GROUPS);
+    expect(explicitAnd.params).toEqual(absent.params);
+  });
+
+  it("adds no extra paren for a single group -- the combinator has nothing to combine", () => {
+    const or = compileSegmentDefinition(comboDef([G_COUNTRY], "or"), WSID);
+    const and = compileSegmentDefinition(comboDef([G_COUNTRY], "and"), WSID);
+    const absent = compileSegmentDefinition(comboDef([G_COUNTRY]), WSID);
+    expect(or.whereSql).toBe(FLAT_ONE_GROUP);
+    expect(and.whereSql).toBe(FLAT_ONE_GROUP);
+    expect(absent.whereSql).toBe(FLAT_ONE_GROUP);
+  });
+});
