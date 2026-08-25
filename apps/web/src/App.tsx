@@ -62,29 +62,117 @@ function withSuspense(element: ReactNode) {
   );
 }
 
+type SessionState = ReturnType<typeof useSession>;
+
+/**
+ * Collapses the auth client's session store into the only three states a
+ * routing decision may be made from (debug session `auth-session-lifecycle`).
+ *
+ * The store's `data: null` conflates THREE different situations — never
+ * fetched, fetched-and-logged-out, and fetch-failed — and reading it as a bare
+ * boolean is the shared flaw behind both reported symptoms. A rate-limited
+ * (429) `get-session` leaves `{ data: null, error, isPending: false }`, which
+ * the old `if (!session)` read as "definitively signed out" and bounced a
+ * still-authenticated user to /login; and the store's RETAINED logged-out
+ * value made a just-succeeded sign-in look like a signed-out one.
+ *
+ * `unknown` therefore means "the session is not decided yet" — pending, in
+ * flight, or the read failed — and must never be routed on. The one exception
+ * is a 401: that is better-auth's definitive "this session is gone", so an
+ * expired session still reaches the login form instead of a state that never
+ * resolves.
+ */
+function resolveSessionStatus(session: SessionState): "authenticated" | "anonymous" | "unknown" {
+  if (session.data) return "authenticated";
+  if (session.error) return session.error.status === 401 ? "anonymous" : "unknown";
+  if (session.isPending || session.isRefetching) return "unknown";
+  return "anonymous";
+}
+
+/**
+ * What to render while the session is `unknown`. Never the login page and
+ * never a bare redirect — but never an unresolvable spinner either: a failed
+ * session read (429 from the auth bucket, a 5xx, a dropped connection) gets an
+ * explicit retry instead of a page that hangs.
+ */
+function SessionUnknownState({ session }: { session: SessionState }) {
+  if (session.error) {
+    return (
+      <div className="flex min-h-screen items-center justify-center p-8">
+        <QueryErrorState
+          title="Не удалось проверить сессию"
+          detail="Попробуйте ещё раз — если ошибка повторится, обновите страницу."
+          className="max-w-md"
+          isFetching={session.isRefetching}
+          onRetry={() => void session.refetch()}
+        />
+      </div>
+    );
+  }
+  return <RouteSuspenseFallback />;
+}
+
+/**
+ * Guards the routes that only make sense for a signed-out visitor. An
+ * authenticated visitor is sent to "/" (which resolves on to their workspace),
+ * and — per the debug session's Symptoms.expected — the login page is NOT
+ * rendered while the session is still unknown.
+ *
+ * This is also what completes a successful sign-in: `login.tsx` deliberately
+ * does not navigate itself (it cannot — the auth client's session store does
+ * not hold the new session until its own refresh lands, so navigating on
+ * `signIn.email()` resolving raced the store and bounced straight back here).
+ * The single owner of the transition is this guard, and it fires only once the
+ * store actually HOLDS the session.
+ *
+ * Scope note: only /login is guarded. /register and /reset are structurally
+ * unguarded too, but they are not reachable into this defect — register.tsx
+ * navigates to /create-workspace, not "/" — so they stay out of this fix.
+ */
+function RequireAnonymous({ children }: { children: ReactNode }) {
+  const session = useSession();
+  const status = resolveSessionStatus(session);
+
+  if (status === "authenticated") {
+    return <Navigate to="/" replace />;
+  }
+  if (status === "unknown") {
+    return <SessionUnknownState session={session} />;
+  }
+  return <>{children}</>;
+}
+
 /**
  * Resolves "/" for a signed-in user: no workspace yet -> /create-workspace
  * (D-14); has a workspace -> the first one at /w/{slug}. Signed-out users
  * fall through to /login.
  */
 function RootRedirect() {
-  const { data: session, isPending: sessionPending } = useSession();
+  const session = useSession();
+  const sessionStatus = resolveSessionStatus(session);
 
   const workspacesQuery = useQuery({
     queryKey: ["workspaces"],
     // D-20: /api/workspaces (not better-auth's own organization.list) so a
     // soft-deleted workspace never gets redirected into.
     queryFn: () => apiGet<WorkspaceListItem[]>("/api/workspaces"),
-    enabled: Boolean(session),
+    enabled: sessionStatus === "authenticated",
   });
   const { data: workspaces, isPending: workspacesPending, isError: workspacesIsError } = workspacesQuery;
 
-  if (sessionPending || (session && workspacesPending)) {
-    return null;
+  // An undecided session must not be routed on in either direction — that
+  // conflation is what let a throttled/failed `get-session` masquerade as
+  // "signed out" and send an authenticated user to the login form.
+  if (sessionStatus === "unknown") {
+    return <SessionUnknownState session={session} />;
   }
 
-  if (!session) {
+  if (sessionStatus === "anonymous") {
     return <Navigate to="/login" replace />;
+  }
+
+  if (workspacesPending) {
+    return null;
   }
 
   // WR-01/OPS-17/D-11: a rejected fetch must not be treated as "no
@@ -122,7 +210,7 @@ const router = createBrowserRouter(
     <>
       <Route path="/" element={<RootRedirect />} />
       <Route path="/register" element={withSuspense(<RegisterPage />)} />
-      <Route path="/login" element={withSuspense(<LoginPage />)} />
+      <Route path="/login" element={<RequireAnonymous>{withSuspense(<LoginPage />)}</RequireAnonymous>} />
       <Route path="/create-workspace" element={withSuspense(<CreateWorkspacePage />)} />
       <Route path="/reset" element={withSuspense(<ResetRequestPage />)} />
       <Route path="/reset-password" element={withSuspense(<ResetPasswordPage />)} />
