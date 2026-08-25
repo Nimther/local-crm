@@ -25,9 +25,10 @@ const KINDS_BY_TYPE_FILTER: Record<Exclude<TimelineTypeFilter, "all">, TimelineR
  * D-10/D-11/D-12/ANLT-03: unions `events`, `sends`, `subscription_status_history`,
  * and `flow_runs` into one `{ kind, occurredAt, label, detail }` shape,
  * newest first, paginated with the codebase's existing page/pageSize offset
- * convention. Repeated opens/clicks collapse to a single send row for free
- * (D-11) -- the send branch reads `sends.open_count`/`click_count` (O(1) per
- * row), never a per-row send_events aggregate subquery. The send
+ * convention. The first open is its own chronological activity at
+ * `first_opened_at`; repeated opens collapse into that row's `openCount`
+ * (D-11). Both send branches read aggregate columns from `sends` (O(1) per
+ * row), never a per-row send_events aggregate subquery. The base send
  * branch's `status` mirrors `@mega-crm/delivery-core`'s `deriveCurrentStatus`
  * D-06 priority chain (bounced/dropped/spam > clicked > opened > delivered >
  * the ledger's own `status`), expressed in SQL, with `excluded` taking
@@ -95,6 +96,25 @@ export async function listContactTimeline(
            ) AS detail
          FROM sends s
          WHERE s.workspace_id = $1 AND s.contact_id = $2
+
+         UNION ALL
+
+         SELECT
+           'send'::text AS kind,
+           s.first_opened_at AS occurred_at,
+           'Письмо открыто'::text AS label,
+           jsonb_build_object(
+             'sendId', s.id,
+             'campaignId', s.campaign_id,
+             'flowRunId', s.flow_run_id,
+             'nodeId', s.node_id,
+             'activityType', 'open',
+             'openCount', s.open_count
+           ) AS detail
+         FROM sends s
+         WHERE s.workspace_id = $1
+           AND s.contact_id = $2
+           AND s.first_opened_at IS NOT NULL
 
          UNION ALL
 

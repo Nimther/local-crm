@@ -43,3 +43,13 @@ Resolved debug sessions. Used by `gsd-debugger` to surface known-pattern hypothe
 - **Why not caught:** Гейта для самой отсутствующей возможности не существовало: прежние типы и тесты корректно защищали сознательно заявленную AND-only семантику. Security-риск наивного расширения частично прикрывал существующий тест приоритета SQL-операторов, но отдельного OR-сценария не было.
 - **Recurrence guard:** `packages/segments-core/src/__tests__/compile.test.ts` проверяет CMP-04, OR для двух/трёх групп, одногрупповую границу и байт-в-байт AND-совместимость; `packages/shared-schemas/src/__tests__/segment.test.ts` проверяет сохранение/default/fail-closed для `groupCombinator`. Все 7/7 проверочных мутантов убиты; human UAT пройден.
 ---
+
+## contact-open-events — Первое открытие письма не было отдельной активностью в карточке контакта
+- **Date:** 2026-08-25
+- **Error patterns:** нет открытий в событиях контакта, first_opened_at существует, open_count существует, current status superseded by click or bounce, ContactEventFeed, timeline API
+- **Root cause(s):** AND-gate: `timeline.repository.ts` сворачивал все факты отправки в одну строку на времени `sent_at`, поэтому `first_opened_at` не имел собственной хронологической активности; `ContactEventFeed` трактовал любую send-строку как current-status row и показывал `openCount` только при значении больше одного, поэтому единичное или перекрытое кликом/bounce открытие становилось невидимым или ошибочно маркировалось.
+- **Fix:** Коммит `cf570ba`: timeline добавляет ровно одну производную send-активность на `first_opened_at` с `activityType=open` и агрегированным `openCount`; UI явно отображает «Письмо открыто», а `×N` — только для повторных открытий, без ложного badge «Отправлено».
+- **Files changed:** apps/api/src/modules/analytics/timeline.repository.ts, apps/api/src/modules/analytics/__tests__/contact-timeline.test.ts, apps/web/src/features/contacts/ContactEventFeed.tsx, apps/web/src/features/contacts/__tests__/contact-open-activity.test.tsx
+- **Why not caught:** Исходные API-тесты закрепляли только одну current-status строку письма и не требовали отдельного `occurredAt=first_opened_at`; компонентного теста на открытие, перекрытое последующим click/bounce, не было.
+- **Recurrence guard:** API-регрессия `shows the first open as an explicit activity and collapses repeat opens into its counter` проверяет отдельную строку первого открытия, хронологию, агрегирование повторов и сохранение открытия после click/bounce; web-тест `contact-open-activity.test.tsx` проверяет singleton/repeat presentation без ложного sent badge. Revert-and-reconfirm доказал причинность: без двух production-hunk оба driving-теста RED, после возврата GREEN.
+---

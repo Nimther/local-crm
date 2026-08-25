@@ -6,9 +6,10 @@ import { ensureTestDbMigrated, getTestDatabaseUrl } from "../../../test/db-fixtu
 /**
  * 07-02/ANLT-03: the contact-timeline endpoint unions events + sends +
  * subscription_status_history + flow_runs into one { kind, occurredAt,
- * label, detail } shape, newest first, with repeated opens/clicks collapsed
- * via sends.open_count/click_count (D-11) rather than a per-row
- * `send_events` subquery. Also asserts the IDOR double-gate: a contact id
+ * label, detail } shape, newest first. The first opening is an explicit
+ * chronological row while repeat opens remain collapsed via
+ * sends.open_count (D-11), never a per-webhook `send_events` expansion.
+ * Also asserts the IDOR double-gate: a contact id
  * that belongs to another workspace 404s (never an empty 200).
  */
 describe("Contact timeline (07-02, ANLT-03)", () => {
@@ -147,13 +148,14 @@ describe("Contact timeline (07-02, ANLT-03)", () => {
 
     const t0 = new Date("2026-01-01T00:00:00Z");
     const t1 = new Date("2026-01-02T00:00:00Z");
+    const t1Open = new Date("2026-01-02T01:00:00Z");
     const t2 = new Date("2026-01-03T00:00:00Z");
 
     await insertEvent(workspace.id, contact.id, "purchase", t0);
     await insertSend(workspace.id, contact.id, {
       sentAt: t1,
-      firstOpenedAt: t1,
-      firstClickedAt: t1,
+      firstOpenedAt: t1Open,
+      firstClickedAt: t1Open,
       openCount: 5,
       clickCount: 3,
     });
@@ -167,15 +169,62 @@ describe("Contact timeline (07-02, ANLT-03)", () => {
     expect(res.statusCode, `timeline failed: ${res.body}`).toBe(200);
     const rows = res.json<Array<{ kind: string; occurredAt: string; label: string; detail: Record<string, unknown> }>>();
 
-    expect(rows).toHaveLength(3);
+    expect(rows).toHaveLength(4);
     // Newest first.
-    expect(rows.map((r) => r.kind)).toEqual(["status_change", "send", "event"]);
+    expect(rows.map((r) => r.kind)).toEqual(["status_change", "send", "send", "event"]);
 
-    const sendRow = rows.find((r) => r.kind === "send")!;
+    const sendRow = rows.find((r) => r.kind === "send" && r.detail.activityType !== "open")!;
     expect(sendRow.detail).toMatchObject({ status: "clicked", openCount: 5, clickCount: 3 });
+
+    const openRow = rows.find((r) => r.kind === "send" && r.detail.activityType === "open")!;
+    expect(openRow).toMatchObject({
+      occurredAt: t1Open.toISOString(),
+      label: "Письмо открыто",
+      detail: { openCount: 5 },
+    });
 
     const statusRow = rows.find((r) => r.kind === "status_change")!;
     expect(statusRow.detail).toMatchObject({ oldStatus: "subscribed", newStatus: "unsubscribed" });
+  });
+
+  it("shows the first open as an explicit activity and collapses repeat opens into its counter", async () => {
+    const { cookie, workspace } = await owner("timeline-open-activity");
+    const contact = await createContact(cookie, workspace.slug, {
+      email: `timeline-open-activity-${Date.now()}@example.com`,
+    });
+
+    const sentAt = new Date("2026-02-01T10:00:00Z");
+    const firstOpenedAt = new Date("2026-02-01T11:00:00Z");
+    const firstClickedAt = new Date("2026-02-01T12:00:00Z");
+    const sendId = await insertSend(workspace.id, contact.id, {
+      sentAt,
+      firstOpenedAt,
+      firstClickedAt,
+      openCount: 3,
+      clickCount: 1,
+    });
+
+    const res = await app.inject({
+      method: "GET",
+      url: timelineUrl(workspace.slug, contact.id, "type=emails"),
+      headers: { cookie },
+    });
+    expect(res.statusCode, `timeline failed: ${res.body}`).toBe(200);
+    const rows = res.json<Array<{ kind: string; occurredAt: string; label: string; detail: Record<string, unknown> }>>();
+
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({
+      kind: "send",
+      occurredAt: firstOpenedAt.toISOString(),
+      label: "Письмо открыто",
+      detail: { sendId, activityType: "open", openCount: 3 },
+    });
+    expect(rows[1]).toMatchObject({
+      kind: "send",
+      occurredAt: sentAt.toISOString(),
+      label: "Письмо",
+      detail: { sendId, status: "clicked" },
+    });
   });
 
   it("collapses a bounced send's status via the D-06 priority chain, not opened/clicked facts", async () => {
@@ -197,9 +246,12 @@ describe("Contact timeline (07-02, ANLT-03)", () => {
       headers: { cookie },
     });
     expect(res.statusCode, `timeline failed: ${res.body}`).toBe(200);
-    const rows = res.json<Array<{ kind: string; detail: Record<string, unknown> }>>();
-    expect(rows).toHaveLength(1);
-    expect(rows[0].detail).toMatchObject({ status: "bounced", reason: "mailbox_full" });
+    const rows = res.json<Array<{ kind: string; label: string; detail: Record<string, unknown> }>>();
+    expect(rows).toHaveLength(2);
+    const sendRow = rows.find((row) => row.detail.activityType !== "open")!;
+    expect(sendRow.detail).toMatchObject({ status: "bounced", reason: "mailbox_full" });
+    const openRow = rows.find((row) => row.detail.activityType === "open")!;
+    expect(openRow.label).toBe("Письмо открыто");
   });
 
   it("404s for a contact id belonging to another workspace (IDOR double-gate)", async () => {
