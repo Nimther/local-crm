@@ -152,12 +152,27 @@ function EventRow({ row }: { row: TimelineRow }) {
   );
 }
 
-/** kind='send' row -- current status badge (D-06 priority chain, computed server-side), «×N» repeat opens/clicks (D-11), and the bounce/drop/exclusion reason when present. */
+/** kind='send' row -- either an explicit first-open activity or the base send/current-status row. */
 function SendRow({ row }: { row: TimelineRow }) {
+  const activityType = typeof row.detail.activityType === "string" ? row.detail.activityType : "send";
+  const openCount = Number(row.detail.openCount ?? 0);
+
+  if (activityType === "open") {
+    return (
+      <div className="flex w-full items-center gap-3 rounded-md border p-3">
+        <Mail className="h-4 w-4 shrink-0 text-muted-foreground" />
+        <div className="flex flex-1 flex-wrap items-center gap-2">
+          <span className="text-sm font-semibold">{row.label}</span>
+          {openCount > 1 && <span className="text-sm text-muted-foreground">открыто ×{openCount}</span>}
+        </div>
+        <span className="shrink-0 text-sm text-muted-foreground">{relativeTime(row.occurredAt)}</span>
+      </div>
+    );
+  }
+
   // detail is a freeform JSONB bag, so `status` is unknown — String() on an
   // object here would render "[object Object]" into the badge.
   const status = typeof row.detail.status === "string" ? row.detail.status : "sent";
-  const openCount = Number(row.detail.openCount ?? 0);
   const clickCount = Number(row.detail.clickCount ?? 0);
   const reason = row.detail.reason as string | null | undefined;
 
