@@ -146,6 +146,65 @@ Two distinct failure points here, both already logged with which one hit:
   queue processing until this is resolved. Check the new worker's logs and
   its own readiness checks (postgres/redis/migrations) directly.
 
+### Loki credential preflight fails
+
+The message names the exact `GRAFANA_*` key that is missing, empty, or (for
+the push URL) not `https`. **Nothing has been touched** — this runs before
+the first `docker` invocation, so no image was pulled, no container was
+replaced, and the previous SHA is still on record.
+
+The three keys live in your `$MEGA_CRM_ENV_FILE`, not in the deploy shell:
+
+```
+GRAFANA_LOKI_PUSH_URL=https://logs-prod-XXX.grafana.net/loki/api/v1/push
+GRAFANA_LOKI_USER=<numeric Loki user id>
+GRAFANA_CLOUD_API_TOKEN=<token>
+```
+
+`docker/prod.env.example` ships all three **blank on purpose**, so a copied
+but unfilled env file is the shape this preflight exists to catch. Nothing
+else in the stack ever will: the `alloy` service's `env_file:` is declared
+`required: false`, and Alloy's own `env()` returns an empty string rather
+than failing — so without this check the deploy would happily start a
+sidecar that pushes nowhere and reports nothing wrong. See
+`docs/runbooks/log-shipping-and-backstop-alerts.md` for where to read these
+values out of Grafana Cloud.
+
+### Alloy convergence fails
+
+The deploy reached its last stage. **`api`, `web` and `worker` are already
+serving the new SHA** — this is a log-shipping outage, not an application
+outage. The SHA is deliberately *not* recorded as deployed (same late-leg
+semantics as the worker-healthy timeout), so re-running the same command
+re-attempts this leg.
+
+The check fails in one of two ways:
+
+- **The container is not running.** Read `docker compose -f
+  docker/docker-compose.prod.yml logs alloy` — this is usually a config
+  Alloy refused to load. Run `npm run verify:alloy-config`, which parses
+  the committed `docker/alloy/config.alloy` with the same pinned Alloy
+  binary the sidecar itself uses.
+- **The container is restart-looping** (running at every glance, but its
+  `RestartCount` climbs between samples). This is G-15-4's exact signature:
+  `restart: unless-stopped` re-creating a container whose config is
+  rejected, forever, while every application service stays healthy and not
+  one log line reaches Loki. Same two commands as above.
+
+The check accepts a container whose `RestartCount` is non-zero but stable —
+a sidecar that restarted once months ago because the host rebooted is
+healthy, and failing your deploy on that historical count would be worse
+than the bug this leg exists to catch.
+
+> **Note on running `docker compose up -d alloy` by hand.** `deploy.sh`
+> exports `ALLOY_CONFIG_HASH` (a sha256 of `docker/alloy/config.alloy`) so
+> that editing the bind-mounted config actually recreates the container —
+> compose compares resolved service config, not file bytes, so without this
+> a config change would never take effect. A manual `up -d alloy` without
+> that variable resolves it to the empty default and therefore recreates
+> the container once. Harmless for a stateless sidecar — just don't be
+> surprised by it. Prefer re-running `deploy.sh`.
+
 ## How to roll back
 
 ```bash

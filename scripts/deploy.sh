@@ -109,6 +109,26 @@ WORKER_STOP_CONFIRM_MARGIN_SECONDS="${WORKER_STOP_CONFIRM_MARGIN_SECONDS:-15}"
 WORKER_READY_MARGIN_SECONDS="${WORKER_READY_MARGIN_SECONDS:-90}"
 WORKER_POLL_INTERVAL_SECONDS="${WORKER_POLL_INTERVAL_SECONDS:-1}"
 
+# The alloy sidecar declares NO healthcheck in docker/docker-compose.prod.yml
+# (deliberately -- see that service's own comment), so unlike `worker` there
+# is no Docker-visible health status to wait on. The only signal available is
+# the container's own State.Running plus its RestartCount, sampled more than
+# once: G-15-4 was a container that answered "running" at every single glance
+# while `restart: unless-stopped` re-created it in a tight loop and not one
+# log line ever reached Loki. 60s across a 5s interval samples 12 times --
+# comfortably inside Docker's own restart backoff (100ms doubling) for the
+# tight-loop signature that incident actually produced, while still costing a
+# healthy deploy only one interval (two consecutive stable samples is the
+# acceptance condition).
+ALLOY_STABLE_TIMEOUT_SECONDS="${ALLOY_STABLE_TIMEOUT_SECONDS:-60}"
+ALLOY_STABLE_POLL_INTERVAL_SECONDS="${ALLOY_STABLE_POLL_INTERVAL_SECONDS:-5}"
+
+# The three names docker/alloy/config.alloy reads with `env()` -- the
+# complete "required Loki configuration" set. They live in
+# $MEGA_CRM_ENV_FILE, NOT in this script's own shell environment, so the
+# preflight below reads that FILE rather than testing shell variables.
+ALLOY_REQUIRED_ENV_KEYS=(GRAFANA_LOKI_PUSH_URL GRAFANA_LOKI_USER GRAFANA_CLOUD_API_TOKEN)
+
 # --- Argument parsing ----------------------------------------------------
 
 DRY_RUN=0
@@ -268,6 +288,115 @@ wait_for_worker_healthy() {
   return 1
 }
 
+# Waits for the alloy sidecar to be running AND to have stopped restarting.
+#
+# The acceptance condition is deliberately a DELTA (two consecutive running
+# samples whose RestartCount is unchanged), never `RestartCount == 0`: a
+# sidecar that restarted once months ago because the host rebooted or the
+# Docker daemon was upgraded is perfectly healthy, and failing every
+# subsequent deploy on that historical count would be a worse bug than the
+# one this leg exists to catch. `prev_count` is tracked only from samples
+# where the container was actually running, so a container that is merely
+# stopped (State.Running=false, a frozen RestartCount) can never satisfy the
+# "unchanged" half of the condition by standing still.
+wait_for_alloy_stable() {
+  local waited=0
+  local prev_count=""
+  while (( waited < ALLOY_STABLE_TIMEOUT_SECONDS )); do
+    local cid state running count
+    cid="$(compose ps -q alloy || true)"
+    if [[ -n "$cid" ]]; then
+      state="$(docker inspect --format '{{.State.Running}} {{.RestartCount}}' "$cid" 2>/dev/null || true)"
+      running="${state%% *}"
+      count="${state##* }"
+      if [[ "$running" == "true" ]]; then
+        if [[ -n "$prev_count" && "$count" == "$prev_count" ]]; then
+          return 0
+        fi
+        prev_count="$count"
+      else
+        # Not running: any earlier stable reading is stale evidence now.
+        prev_count=""
+      fi
+    fi
+    sleep "$ALLOY_STABLE_POLL_INTERVAL_SECONDS"
+    waited=$(( waited + ALLOY_STABLE_POLL_INTERVAL_SECONDS ))
+  done
+  return 1
+}
+
+# Reads ONE key's value out of a `KEY=value` env file, tolerating the shapes
+# an operator's real secrets file actually takes: leading whitespace, an
+# `export ` prefix, surrounding single/double quotes, a trailing CR from a
+# file that once passed through Windows, and duplicate assignments (last one
+# wins, matching how a shell and compose's own env_file layering both
+# resolve a repeated key). Prints the empty string when the key is absent --
+# which the caller treats identically to a present-but-blank value, because
+# docker/prod.env.example ships all three of these keys blank and both
+# shapes push exactly nowhere.
+read_env_file_value() {
+  local key="$1" file="$2"
+  local line value
+  line="$(grep -E "^[[:space:]]*(export[[:space:]]+)?${key}[[:space:]]*=" "$file" | tail -n 1 || true)"
+  if [[ -z "$line" ]]; then
+    printf '%s' ""
+    return 0
+  fi
+  value="${line#*=}"
+  value="${value%$'\r'}"
+  # trim surrounding whitespace
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  # strip a matched surrounding quote pair
+  if (( ${#value} >= 2 )); then
+    if [[ "${value:0:1}" == '"' && "${value: -1}" == '"' ]]; then
+      value="${value:1:${#value}-2}"
+    elif [[ "${value:0:1}" == "'" && "${value: -1}" == "'" ]]; then
+      value="${value:1:${#value}-2}"
+    fi
+  fi
+  printf '%s' "$value"
+}
+
+# The credential half of the alloy deploy contract.
+#
+# docker-compose.prod.yml declares the sidecar's `env_file:` with
+# `required: false`, and Alloy's own `env()` returns an empty string rather
+# than failing for an unset name -- so a deploy with NO Loki credentials at
+# all produces a container that starts, stays running, reports nothing wrong,
+# and ships nowhere. Compose is contractually forbidden from catching this;
+# nothing else in the stack looks. This is the only place it can fail loudly,
+# so it runs before ANY mutation (no image pulled, no container touched, no
+# SHA recorded) and names the offending key.
+check_loki_credentials() {
+  local key value
+  for key in "${ALLOY_REQUIRED_ENV_KEYS[@]}"; do
+    value="$(read_env_file_value "$key" "$MEGA_CRM_ENV_FILE")"
+    if [[ -z "$value" ]]; then
+      echo "deploy.sh: $key is missing or empty in MEGA_CRM_ENV_FILE=$MEGA_CRM_ENV_FILE -- the alloy log-shipping sidecar reads it with env() in docker/alloy/config.alloy, and its env_file is declared 'required: false', so compose would start a container that pushes NOTHING to Grafana Cloud Loki without a single error. Fill it in (see docs/runbooks/log-shipping-and-backstop-alerts.md) and re-run. Aborting before touching anything." >&2
+      exit 1
+    fi
+  done
+
+  local push_url
+  push_url="$(read_env_file_value "GRAFANA_LOKI_PUSH_URL" "$MEGA_CRM_ENV_FILE")"
+  if [[ "$push_url" != https://* ]]; then
+    echo "deploy.sh: GRAFANA_LOKI_PUSH_URL in MEGA_CRM_ENV_FILE=$MEGA_CRM_ENV_FILE must be an https:// endpoint (T-15-64, docker/alloy/config.alloy's own header) -- got '$push_url'. Log shipping carries a Grafana Cloud API token in a basic-auth header; a plaintext endpoint would put it on the wire. Aborting before touching anything." >&2
+    exit 1
+  fi
+}
+
+# docker/alloy/config.alloy is BIND-MOUNTED into the container, so editing it
+# changes nothing compose can see: `up -d` compares its own resolved service
+# config, and a bind-mount's CONTENT is not part of that. Hashing the file
+# into an environment value the alloy service reads makes the content part of
+# compose's config hash, which is what turns `up -d --no-deps alloy` into a
+# genuine UPDATE (recreate on a changed config or a changed image) rather
+# than merely a start-if-absent.
+compute_alloy_config_hash() {
+  node -e "const{createHash}=require('node:crypto');const{readFileSync}=require('node:fs');process.stdout.write(createHash('sha256').update(readFileSync(process.argv[1])).digest('hex'))" "$REPO_ROOT/docker/alloy/config.alloy"
+}
+
 # --- Dry run ---------------------------------------------------------------
 #
 # Machine-readable: one command per line, execution order, NO side effects.
@@ -290,8 +419,12 @@ EOF
 
   cat <<EOF
 printf '%s' "\$PREV_SHA" > "$RECORD_FILE"
+# preflight: the three Grafana Cloud keys config.alloy reads with env(),
+# checked in \$MEGA_CRM_ENV_FILE before anything is touched
+grep -E '^(GRAFANA_LOKI_PUSH_URL|GRAFANA_LOKI_USER|GRAFANA_CLOUD_API_TOKEN)=' "\$MEGA_CRM_ENV_FILE"
 node scripts/validate-kek-file.mjs /etc/mega-crm/kek
-docker compose -f $COMPOSE_FILE pull api worker web
+export ALLOY_CONFIG_HASH=\$(sha256 of docker/alloy/config.alloy)
+docker compose -f $COMPOSE_FILE pull api worker web alloy
 npm run build -w apps/worker && node scripts/print-stop-grace-period.mjs
 docker compose -f $COMPOSE_FILE run --rm --no-deps migrate
 docker compose -f $COMPOSE_FILE up -d --no-deps web api
@@ -301,6 +434,10 @@ docker compose -f $COMPOSE_FILE stop --timeout \$WORKER_STOP_GRACE_PERIOD_SECOND
 docker compose -f $COMPOSE_FILE ps -q --status=running worker
 docker compose -f $COMPOSE_FILE up -d --no-deps worker
 docker inspect --format '{{.State.Health.Status}}' \$(docker compose -f $COMPOSE_FILE ps -q worker)
+# the log-shipping sidecar is converged UNCONDITIONALLY -- outside the
+# same-SHA skip, so re-running this deploy is a working repair path
+docker compose -f $COMPOSE_FILE up -d --no-deps alloy
+docker inspect --format '{{.State.Running}} {{.RestartCount}}' \$(docker compose -f $COMPOSE_FILE ps -q alloy)
 printf '%s' "$target" > "$RECORD_FILE"
 EOF
 }
@@ -329,6 +466,7 @@ run_real_deploy() {
 
   check_required_env
   validate_host_kek
+  check_loki_credentials
 
   mkdir -p "$(dirname "$RECORD_FILE")"
   local prev_sha
@@ -354,8 +492,15 @@ run_real_deploy() {
   export MEGA_CRM_ENV_FILE
   export IMAGE_TAG="$target"
 
-  echo "deploy.sh: pulling api/worker/web images for $target"
-  compose pull api worker web
+  # Exported before the FIRST compose invocation so every call in this
+  # deploy resolves the alloy service to the same config hash -- a value
+  # that changed mid-deploy would make compose disagree with itself about
+  # whether the sidecar needs recreating.
+  export ALLOY_CONFIG_HASH
+  ALLOY_CONFIG_HASH="$(compute_alloy_config_hash)"
+
+  echo "deploy.sh: pulling api/worker/web images for $target (and the pinned alloy sidecar image)"
+  compose pull api worker web alloy
 
   echo "deploy.sh: resolving worker stop-grace-period"
   local worker_stop_grace_period_seconds
@@ -403,6 +548,19 @@ run_real_deploy() {
       print_rollback_command "$prev_sha"
       exit 1
     fi
+  fi
+
+  # UNCONDITIONAL -- deliberately outside the skip_worker_replace guard
+  # above. An operator who notices logs stopped re-runs this script for the
+  # SAME SHA; if alloy convergence sat inside that guard, the obvious repair
+  # would silently do nothing. Both `up` and the check below are idempotent.
+  echo "deploy.sh: converging the alloy log-shipping sidecar"
+  compose up -d --no-deps alloy
+
+  if ! wait_for_alloy_stable; then
+    echo "deploy.sh: CONVERGENCE FAILURE for service 'alloy' -- it did not reach a running, non-restarting state within ${ALLOY_STABLE_TIMEOUT_SECONDS}s. The container existing is NOT evidence it is shipping: G-15-4 was a config Alloy's lexer rejected, restart-looping forever under 'restart: unless-stopped' while every application service stayed healthy and no log line reached Loki. Check 'docker compose -f $COMPOSE_FILE logs alloy' and run 'npm run verify:alloy-config'. api/web/worker are already serving $target; this is a log-shipping outage, not an application outage." >&2
+    print_rollback_command "$prev_sha"
+    exit 1
   fi
 
   printf '%s' "$target" > "$RECORD_FILE"
