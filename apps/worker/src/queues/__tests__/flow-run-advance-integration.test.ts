@@ -9,6 +9,7 @@ import { createFlowRunAdvanceWorker } from "../flows/flow-run-advance.worker.js"
 import { emailTriggeredQueue, enqueueFlowRunAdvance, flowRunAdvanceQueue } from "../flows/flow-queues.js";
 import { buildRedisConnectionOptions } from "@mega-crm/queue-core";
 import { insertFixtureOrganization } from "../../test/failure-fixtures.js";
+import { isolateFlowRunAdvanceQueueForTest } from "../../test/queue-fixture.js";
 
 /**
  * CR-01 regression coverage (06-12): a REAL BullMQ `Queue`/`Worker` pair
@@ -34,6 +35,36 @@ describe("flow-run-advance CR-01 integration: real Queue/Worker multi-step advan
     if (!redisUrl) {
       throw new Error("REDIS_URL is required for the flow-run-advance-integration test (see vitest.config.ts)");
     }
+
+    // Redis isolation, and it MUST stay above the `createFlowRunAdvanceWorker`
+    // line below (debug session `flow-run-advance-shared-redis`, 2026-08-28).
+    // This file's Worker is the only real consumer of the globally-shared
+    // flow-run-advance queue in the whole suite, and it runs at BullMQ's
+    // default concurrency of 1 -- so every job a previous run or a sibling file
+    // left on the shared logical Redis DB (which nothing in the harness ever
+    // cleans) becomes this suite's own serial workload, queued AHEAD of its own
+    // hops in the FIFO wait list, against the 10s `waitFor` budget below. That
+    // was the mechanism behind this file's load-dependent flake. Draining
+    // before the Worker exists is what matters: a constructed Worker starts
+    // consuming immediately and may already have moved jobs into `active`,
+    // which `drain()` does not remove.
+    await isolateFlowRunAdvanceQueueForTest();
+
+    // Self-enforcing, deliberately here at the CALL SITE rather than inside the
+    // helper: without it, deleting the line above would leave the isolation
+    // test green (it drains for itself) while silently resurrecting this file's
+    // flake. Deterministic -- `fileParallelism: false` means no other file runs
+    // concurrently, and `drain(true)` takes delayed jobs too, so nothing can
+    // repopulate the queue between the drain and this sample.
+    const residualDepth = await flowRunAdvanceQueue.getWaitingCount();
+    if (residualDepth !== 0) {
+      throw new Error(
+        `flow-run-advance queue isolation failed: ${residualDepth} foreign jobs remain on the shared Redis DB ` +
+          `after the drain. This file's Worker runs at concurrency 1, so those jobs become its own serial ` +
+          `workload ahead of its 10s waitFor budget. Do not delete the isolateFlowRunAdvanceQueueForTest() call above.`
+      );
+    }
+
     worker = createFlowRunAdvanceWorker(buildRedisConnectionOptions(redisUrl));
   });
 
