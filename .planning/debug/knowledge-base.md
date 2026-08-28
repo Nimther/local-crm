@@ -102,3 +102,12 @@ Resolved debug sessions. Used by `gsd-debugger` to surface known-pattern hypothe
 - **Production verification:** Штатный deploy master SHA `f59bf1ab0d654a64ca634ef257d821e74d7aea55` завершён на реальном VPS. API/web/worker healthy, `/healthz` и `/readyz` вернули 200, Alloy пересоздан dedicated leg, `running=true`, `RestartCount=0`. После конечного отбрасывания просроченного Docker backlog внутренние метрики зафиксировали `loki_write_sent_entries_total=201` и `loki_write_sent_bytes_total=35220` — свежие записи реально приняты Grafana Cloud Loki.
 - **Recurrence guard:** 36 deploy-script тестов, включая credential preflight, unconditional same-SHA repair path, `--no-deps`, restart-delta stability и mutation proof 3/3; compose validator 8 services / 61 invariants; реальный production UAT закрывает daemon/credentials слой, недоступный sandbox-тестам.
 ---
+
+## workspace-purge-resume-load-flake — Resume tick иногда пропускал workspace сразу после SIGKILL
+- **Date:** 2026-08-28
+- **Error patterns:** `expected 'purging' to be 'complete'`, workspace-purge-resume, aggregate coverage fails while dedicated failure-injection passes, real SIGKILL, advisory lock cleanup
+- **Root cause(s):** `killAndAwaitExit()` подтверждал завершение дочернего OS-процесса, но PostgreSQL мог ещё не обработать закрытый socket и продолжал держать session advisory lock. Immediate resume tick видел `pg_try_advisory_lock=false` и корректно для production пропускал workspace без ошибки; тест ошибочно принимал завершение процесса за завершение cleanup базы.
+- **Fix:** После SIGKILL harness создаёт отдельную DB-сессию, ставит server-side `statement_timeout=5s`, блокируется на том же `pg_advisory_lock(namespace, hashtext(workspaceId))`, сразу освобождает его и только затем разрешает resume tick. Это causal event barrier, а не sleep и не ослабление assertion.
+- **Verification:** Исходный RED — PR #37 run 33177671540 job 98870409442. GREEN — локальный real-SIGKILL suite 8/8; PR #37 dedicated failure-injection job 98873557273; aggregate coverage job 98873557478 успешно завершён за 5:45 со всеми 2,553 тестами.
+- **Recurrence guard:** Все восемь реальных SIGKILL-сценариев проходят через общий barrier; assertion `status === 'complete'` сохранён без изменения. Aggregate CI остаётся обязательным и воспроизводит нагрузочную среду исходного падения.
+---

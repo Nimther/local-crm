@@ -1,5 +1,5 @@
 ---
-status: verifying
+status: resolved
 trigger: "PR #37 aggregate CI: workspace-purge double-resume remains purging"
 created: 2026-08-28
 updated: 2026-08-28
@@ -17,7 +17,7 @@ updated: 2026-08-28
 hypothesis: the test harness mistakes child-process exit for PostgreSQL advisory-lock release; aggregate load widens that cleanup window.
 test: add a bounded PostgreSQL-native barrier after SIGKILL that blocks on the exact purge advisory lock, immediately unlocks it, and only then permits the resume tick.
 expecting: the existing unchanged `status === 'complete'` assertion passes under aggregate CI; the dedicated 8-case real-SIGKILL suite remains green.
-next_action: GREEN locally — the PostgreSQL-native advisory-lock barrier is implemented and the dedicated real-SIGKILL suite passes 8/8. Push to PR #37 and require the full aggregate CI rerun that produced the original failure; resolve only when that job is green.
+next_action: RESOLVED — PostgreSQL-native advisory-lock barrier implemented; dedicated real-SIGKILL lane and the aggregate coverage job that produced the original failure are both green on PR #37 head d40e0df6d11d3f139fa8d18f5d7ee00833e7aa8d.
 
 ## Resolution
 
@@ -27,4 +27,5 @@ verification:
   - original RED: PR #37 aggregate CI run 33177671540 job 98870409442, `status` received `purging` instead of `complete` at line 633.
   - local GREEN: `npm run failure:workspace-purge-resume` against a throwaway Redis DB1 — 1 file, 8/8 tests passed in 6.59s.
   - lint: touched test file passed ESLint.
-  - pending: PR #37 aggregate CI `test` rerun.
+  - aggregate GREEN: PR #37 run 33178577191 job 98873557478 completed successfully in 5m45s; all 2,553 aggregate tests and coverage gates passed.
+  - dedicated GREEN: PR #37 failure-injection job 98873557273 completed successfully.
