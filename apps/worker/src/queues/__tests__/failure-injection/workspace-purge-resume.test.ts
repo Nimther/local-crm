@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Pool } from "pg";
 import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
-import { PURGE_BATCH_SIZE, deletePurgeBatch } from "@mega-crm/db";
+import { PURGE_ADVISORY_LOCK_NAMESPACE, PURGE_BATCH_SIZE, deletePurgeBatch } from "@mega-crm/db";
 import {
   createTestPool,
   ensureTestDbMigrated,
@@ -231,6 +231,36 @@ describe("failure injection: workspace-purge kill-resume (PRG-03, SC3, plan 22-0
     // nothing -- this must be a real, uncatchable kill.
     expect(exit.signal, "the child must have been killed with a real SIGKILL, not have exited on its own").toBe("SIGKILL");
     expect(exit.code).toBeNull();
+
+    const targetWorkspaceId = env.WPK_TARGET_WORKSPACE_ID;
+    expect(targetWorkspaceId, "every purge kill scenario must name the workspace whose advisory lock needs a release barrier").toBeTruthy();
+
+    // `killAndAwaitExit` proves the OS process is gone, but not that
+    // PostgreSQL has already noticed the closed socket and released that
+    // backend's session advisory lock. Under aggregate coverage load the
+    // next purge tick could reach pg_try_advisory_lock first, treat the
+    // still-held lock as a successful skip, and leave the record `purging`.
+    // Block on the SAME lock with a server-side timeout, then release it
+    // immediately. This is an event barrier, never a guessed sleep.
+    const barrier = await pool.connect();
+    let barrierLocked = false;
+    try {
+      await barrier.query("BEGIN");
+      await barrier.query("SET LOCAL statement_timeout = '5000ms'");
+      await barrier.query(`SELECT pg_advisory_lock($1, hashtext($2))`, [PURGE_ADVISORY_LOCK_NAMESPACE, targetWorkspaceId]);
+      barrierLocked = true;
+      await barrier.query(`SELECT pg_advisory_unlock($1, hashtext($2))`, [PURGE_ADVISORY_LOCK_NAMESPACE, targetWorkspaceId]);
+      barrierLocked = false;
+      await barrier.query("COMMIT");
+    } finally {
+      if (barrierLocked) {
+        await barrier
+          .query(`SELECT pg_advisory_unlock($1, hashtext($2))`, [PURGE_ADVISORY_LOCK_NAMESPACE, targetWorkspaceId])
+          .catch(() => undefined);
+      }
+      await barrier.query("ROLLBACK").catch(() => undefined);
+      barrier.release();
+    }
   }
 
   /**
