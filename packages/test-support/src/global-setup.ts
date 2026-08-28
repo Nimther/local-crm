@@ -8,6 +8,7 @@ import {
   dropEphemeralDatabase,
   SCAN_ROLE,
 } from "./provision-db.js";
+import { prepareTestRedisOnce } from "./redis-guard.js";
 
 /**
  * 08-01 / 08-02 (QG-04) — vitest `globalSetup`: provision, guard, tear down.
@@ -81,6 +82,17 @@ interface GlobalSetupProject {
 
 export default async function setup(project?: GlobalSetupProject): Promise<() => Promise<void>> {
   const workspace = project?.name?.trim() || path.basename(process.cwd());
+
+  // WINDOWS id 14: BullMQ queues live outside the per-project ephemeral
+  // Postgres boundary. Clear the dedicated test Redis DB once per Vitest
+  // parent process before any project starts, but only after the fail-closed
+  // guard proves the URL names an explicit logical DB >= 1. Never read the
+  // ordinary REDIS_URL here: on a developer machine it is the live DB-0 URL.
+  const testRedisUrl =
+    project?.config?.env?.REDIS_URL ??
+    process.env.TEST_REDIS_URL ??
+    "redis://localhost:6379/1";
+  await prepareTestRedisOnce(testRedisUrl);
 
   const { databaseName, dsn, adminDsn } = await createEphemeralDatabase({ workspace });
 
