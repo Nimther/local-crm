@@ -93,3 +93,21 @@ Resolved debug sessions. Used by `gsd-debugger` to surface known-pattern hypothe
 - **Why not caught:** Изоляция Postgres создавала ложную модель «каждый run чистый», а Redis не имел ни очистки, ни namespace. Большинство очередей не имело тестового consumer и оставалось инертным, поэтому дефект становился видим только там, где реальный Worker начинал последовательно разгребать накопленный backlog.
 - **Recurrence guard:** 11 детерминированных unit-проверок фиксируют fail-closed URL, one-shot и URL-drift; integration-тест запускает одноразовый Redis на случайном порту, доказывает очистку DB 1 и байт-независимую сохранность DB 0. Полный PR #36 CI прошёл на отдельном Redis service-контейнере. **Переиспользуемый паттерн: любой destructive test cleanup сначала обязан доказать test-only namespace; если один parent инициализирует несколько проектов, cleanup должен быть promise-coalesced и fail-closed при расхождении target.**
 ---
+
+## alloy-not-durable-in-deploy — Routine deploy не управлял production Alloy
+- **Date:** 2026-08-28
+- **Error patterns:** Alloy отсутствует после deploy, приложение healthy, логов в Loki нет, deploy.sh не содержит alloy, blank GRAFANA_* проходит молча, compose recreate, config hash
+- **Root cause(s):** Deployment contract и compose contract расходились: `docker-compose.prod.yml` объявлял Alloy, но `scripts/deploy.sh` никогда не создавал и не обновлял этот сервис. Одновременно `env_file.required: false` и пустотерпимый `env()` Alloy превращали отсутствующие Loki credentials в тихий no-op.
+- **Fix:** Deploy теперь до любых мутаций проверяет три GRAFANA_* значения и https push URL, включает Alloy в pull, вычисляет `ALLOY_CONFIG_HASH`, безусловно выполняет `compose up -d --no-deps alloy` и принимает sidecar только после двух последовательных running-сэмплов с неизменным RestartCount. PR #35, merge `8e7ea12`.
+- **Production verification:** Штатный deploy master SHA `f59bf1ab0d654a64ca634ef257d821e74d7aea55` завершён на реальном VPS. API/web/worker healthy, `/healthz` и `/readyz` вернули 200, Alloy пересоздан dedicated leg, `running=true`, `RestartCount=0`. После конечного отбрасывания просроченного Docker backlog внутренние метрики зафиксировали `loki_write_sent_entries_total=201` и `loki_write_sent_bytes_total=35220` — свежие записи реально приняты Grafana Cloud Loki.
+- **Recurrence guard:** 36 deploy-script тестов, включая credential preflight, unconditional same-SHA repair path, `--no-deps`, restart-delta stability и mutation proof 3/3; compose validator 8 services / 61 invariants; реальный production UAT закрывает daemon/credentials слой, недоступный sandbox-тестам.
+---
+
+## workspace-purge-resume-load-flake — Resume tick иногда пропускал workspace сразу после SIGKILL
+- **Date:** 2026-08-28
+- **Error patterns:** `expected 'purging' to be 'complete'`, workspace-purge-resume, aggregate coverage fails while dedicated failure-injection passes, real SIGKILL, advisory lock cleanup
+- **Root cause(s):** `killAndAwaitExit()` подтверждал завершение дочернего OS-процесса, но PostgreSQL мог ещё не обработать закрытый socket и продолжал держать session advisory lock. Immediate resume tick видел `pg_try_advisory_lock=false` и корректно для production пропускал workspace без ошибки; тест ошибочно принимал завершение процесса за завершение cleanup базы.
+- **Fix:** После SIGKILL harness создаёт отдельную DB-сессию, ставит server-side `statement_timeout=5s`, блокируется на том же `pg_advisory_lock(namespace, hashtext(workspaceId))`, сразу освобождает его и только затем разрешает resume tick. Это causal event barrier, а не sleep и не ослабление assertion.
+- **Verification:** Исходный RED — PR #37 run 33177671540 job 98870409442. GREEN — локальный real-SIGKILL suite 8/8; PR #37 dedicated failure-injection job 98873557273; aggregate coverage job 98873557478 успешно завершён за 5:45 со всеми 2,553 тестами.
+- **Recurrence guard:** Все восемь реальных SIGKILL-сценариев проходят через общий barrier; assertion `status === 'complete'` сохранён без изменения. Aggregate CI остаётся обязательным и воспроизводит нагрузочную среду исходного падения.
+---
