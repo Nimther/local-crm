@@ -479,6 +479,28 @@ services:
     env_file:
       - path: ${MEGA_CRM_ENV_FILE}
         required: false
+    # NOT read by config.alloy -- Alloy never looks at this name. It exists
+    # so the CONTENT of the bind-mounted config.alloy participates in
+    # compose's own service config hash: a bind mount's content is invisible
+    # to `up -d` (compose compares resolved service config, not file bytes),
+    # so editing config.alloy alone would never recreate this container and
+    # `scripts/deploy.sh`'s alloy leg would be a start-if-absent rather than
+    # a genuine update. deploy.sh hashes the file and exports this before
+    # every compose invocation.
+    #
+    # This is the SECOND deliberate exception to plan 15-21's CR-01 rule
+    # (compose-level ${VAR} interpolation must not appear in an
+    # `environment:` block, because it resolves from the calling shell
+    # rather than from MEGA_CRM_ENV_FILE and silently blanks the operator's
+    # real value). It is correct here for exactly the reason IMAGE_TAG is:
+    # scripts/deploy.sh really does export it. It is not a secret and has no
+    # operator-provided value, so there is nothing in MEGA_CRM_ENV_FILE for
+    # it to overwrite. A manual `docker compose up -d alloy` run WITHOUT
+    # deploy.sh resolves it to the empty default and therefore recreates the
+    # container once -- harmless for a stateless sidecar, and noted in
+    # docs/runbooks/deploy-and-rollback.md so it is not a surprise.
+    environment:
+      ALLOY_CONFIG_HASH: ${ALLOY_CONFIG_HASH:-}
     mem_limit: ${ALLOY_MEM_LIMIT:-256m}
     volumes:
       # Read-only: config.alloy's own header explains why this mount is

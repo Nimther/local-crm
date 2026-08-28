@@ -66,6 +66,23 @@ echo "$*" >> "$DEPLOY_TEST_LOG"
 args="$*"
 
 if [[ "$1" == "inspect" ]]; then
+  # The alloy leg inspects State.Running + RestartCount (that service declares
+  # no healthcheck in docker-compose.prod.yml, so Docker health status is not
+  # available for it the way it is for worker). Disambiguated on the format
+  # string so one stub can serve both legs.
+  if [[ "$args" == *"State.Running"* ]]; then
+    if [[ "\${DEPLOY_TEST_ALLOY_RESTART_LOOP:-0}" == "1" ]]; then
+      # A restart-looping container: running at each glance, but RestartCount
+      # climbs between samples (the G-15-4 production signature).
+      n="\$(cat "\$DEPLOY_TEST_LOG.alloy-restarts" 2>/dev/null || echo 0)"
+      n=\$(( n + 1 ))
+      echo "\$n" > "\$DEPLOY_TEST_LOG.alloy-restarts"
+      echo "true \$n"
+    else
+      echo "\${DEPLOY_TEST_ALLOY_INSPECT:-true 0}"
+    fi
+    exit 0
+  fi
   echo "\${DEPLOY_TEST_WORKER_HEALTH_STATUS:-healthy}"
   exit 0
 fi
@@ -98,6 +115,11 @@ if [[ "$args" == *"ps -q worker"* ]]; then
   exit 0
 fi
 
+if [[ "$args" == *"ps -q alloy"* ]]; then
+  echo "fakecid-alloy"
+  exit 0
+fi
+
 exit 0
 `,
     { mode: 0o755 },
@@ -108,8 +130,36 @@ exit 0
   };
 }
 
+/**
+ * The three Grafana Cloud values docker/alloy/config.alloy reads with `env()`
+ * -- the complete set the alloy leg's preflight requires. Dummy values: the
+ * docker stub never dials anything, but the push URL is deliberately `https`
+ * so it satisfies T-15-64 (docker/alloy/config.alloy's own header) and the
+ * happy-path tests exercise the accepting branch, not the rejecting one.
+ */
+const LOKI_ENV_LINES = {
+  GRAFANA_LOKI_PUSH_URL: "https://logs-prod-000.grafana.test/loki/api/v1/push",
+  GRAFANA_LOKI_USER: "123456",
+  GRAFANA_CLOUD_API_TOKEN: "glc_fake_token_for_tests",
+};
+
+/**
+ * Renders a MEGA_CRM_ENV_FILE body. `overrides` may blank a key (empty
+ * string) or replace its value; `null` omits the line entirely -- the two
+ * distinct "operator forgot to provision Loki" shapes that must both fail.
+ */
+function renderEnvFile(overrides = {}) {
+  const merged = { ...LOKI_ENV_LINES, ...overrides };
+  const lines = ["# fake operator secrets file -- deploy-script.test.mjs"];
+  for (const [key, value] of Object.entries(merged)) {
+    if (value === null) continue;
+    lines.push(`${key}=${value}`);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
 /** A fresh scratch dir per test -- bin stub, log file, record file, fake env file. */
-function makeScratch() {
+function makeScratch(envOverrides = {}) {
   const dir = mkdtempSync(path.join(os.tmpdir(), "deploy-script-test-"));
   const binDir = path.join(dir, "bin");
   mkdirSync(binDir);
@@ -117,7 +167,7 @@ function makeScratch() {
   writeFileSync(logFile, "");
   const recordFile = path.join(dir, "current-sha");
   const envFile = path.join(dir, "fake.env");
-  writeFileSync(envFile, "# empty -- existence is all check_required_env verifies\n");
+  writeFileSync(envFile, renderEnvFile(envOverrides));
   return { dir, binDir, logFile, recordFile, envFile };
 }
 
@@ -137,6 +187,8 @@ function baseRealEnv(scratch, overrides = {}) {
     WORKER_STOP_CONFIRM_MARGIN_SECONDS: "1",
     WORKER_READY_MARGIN_SECONDS: "1",
     WORKER_POLL_INTERVAL_SECONDS: "1",
+    ALLOY_STABLE_TIMEOUT_SECONDS: "3",
+    ALLOY_STABLE_POLL_INTERVAL_SECONDS: "1",
     ...overrides,
   };
 }
@@ -461,9 +513,11 @@ describe("leg isolation: deploying apps never recreates db/redis", () => {
     expect(calls.some((l) => l.includes("up -d --no-deps web api"))).toBe(true);
     expect(calls.some((l) => l.trim().endsWith("up -d --no-deps worker"))).toBe(true);
     // no bare form may remain anywhere -- a single one reintroduces the hazard
+    expect(calls.some((l) => l.trim().endsWith("up -d --no-deps alloy"))).toBe(true);
     expect(calls.some((l) => l.includes("run --rm migrate"))).toBe(false);
     expect(calls.some((l) => l.includes("up -d web api"))).toBe(false);
     expect(calls.some((l) => l.trim().endsWith("up -d worker"))).toBe(false);
+    expect(calls.some((l) => l.trim().endsWith("up -d alloy"))).toBe(false);
   });
 
   it("the printed --dry-run plan tells the operator the same --no-deps truth", () => {
@@ -480,8 +534,188 @@ describe("leg isolation: deploying apps never recreates db/redis", () => {
     expect(lines.some((l) => l.includes("run --rm --no-deps migrate"))).toBe(true);
     expect(lines.some((l) => l.includes("up -d --no-deps web api"))).toBe(true);
     expect(lines.some((l) => l.trim().endsWith("up -d --no-deps worker"))).toBe(true);
+    expect(lines.some((l) => l.trim().endsWith("up -d --no-deps alloy"))).toBe(true);
     expect(lines.some((l) => l.includes("run --rm migrate"))).toBe(false);
     expect(lines.some((l) => l.includes("up -d web api"))).toBe(false);
     expect(lines.some((l) => l.trim().endsWith("up -d worker"))).toBe(false);
+    expect(lines.some((l) => l.trim().endsWith("up -d alloy"))).toBe(false);
+  });
+});
+
+// Found during the Phase 17 live checkpoint (2026-08-28), diagnosed in
+// .planning/debug/alloy-not-durable-in-deploy.md: docker-compose.prod.yml
+// declares the `alloy` log-shipping sidecar (and scripts/validate-prod-compose.mjs
+// already gates it as one of EXPECTED_SERVICES), but scripts/deploy.sh
+// contained ZERO references to it -- `grep -c -i alloy scripts/deploy.sh`
+// returned 0. A routine deploy therefore converged web/api/migrate/worker and
+// left Alloy exactly as it found it: absent on a fresh host, absent after any
+// manual removal, and never restarted when docker/alloy/config.alloy changed.
+// Every application service reported healthy while not one log line reached
+// Grafana Cloud Loki, and Alloy's existence in production depended entirely on
+// an out-of-band manual `docker compose up -d alloy`.
+//
+// The silence has a SECOND, independent cause that this suite pins alongside
+// the first: the service's `env_file: { required: false }` plus Alloy's own
+// empty-tolerant `env()` mean a missing/blank Loki credential fails nothing
+// anywhere in the stack. Convergence without a credential preflight would
+// still ship a container that pushes nowhere.
+describe("alloy convergence: the log-shipping sidecar is part of the deploy contract", () => {
+  it("converges alloy in the real deploy, after the worker leg", () => {
+    const scratch = makeScratch();
+    const run = runCli([VALID_SHA], { env: baseRealEnv(scratch) });
+    expect(run.exitCode).toBe(0);
+
+    const calls = callLines(scratch.logFile);
+    const idxUpWorker = calls.findIndex((l) => l.trim().endsWith("up -d --no-deps worker"));
+    const idxUpAlloy = calls.findIndex((l) => l.trim().endsWith("up -d --no-deps alloy"));
+
+    expect(idxUpAlloy).toBeGreaterThanOrEqual(0);
+    expect(idxUpWorker).toBeGreaterThanOrEqual(0);
+    expect(idxUpWorker).toBeLessThan(idxUpAlloy);
+  });
+
+  it("pulls the pinned alloy image alongside the application images", () => {
+    const scratch = makeScratch();
+    const run = runCli([VALID_SHA], { env: baseRealEnv(scratch) });
+    expect(run.exitCode).toBe(0);
+
+    const calls = callLines(scratch.logFile);
+    expect(calls.some((l) => l.includes("pull api worker web alloy"))).toBe(true);
+  });
+
+  it("the printed --dry-run plan tells the operator alloy is converged too", () => {
+    const scratch = makeScratch();
+    const run = runCli(["--dry-run", VALID_SHA], {
+      env: { MEGA_CRM_DEPLOY_STATE_FILE: scratch.recordFile },
+    });
+    expect(run.exitCode).toBe(0);
+
+    const lines = run.stdout
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0 && !l.startsWith("#"));
+    expect(lines.some((l) => l.trim().endsWith("up -d --no-deps alloy"))).toBe(true);
+    expect(lines.some((l) => l.includes("pull api worker web alloy"))).toBe(true);
+    // Still no fixed sleep anywhere in the plan -- the alloy leg polls, same
+    // discipline as every other readiness gate in this script (T-14-54).
+    expect(lines.some((l) => /\bsleep\b/.test(l))).toBe(false);
+  });
+
+  it("still converges alloy when re-running an already-deployed SHA -- the repair path", () => {
+    // The whole point: an operator who notices logs stopped re-runs the deploy
+    // for the SAME SHA. If alloy convergence sat inside the skip_worker_replace
+    // guard, that repair would do nothing at all.
+    const scratch = makeScratch();
+    const env = baseRealEnv(scratch);
+
+    const first = runCli([VALID_SHA], { env });
+    expect(first.exitCode).toBe(0);
+
+    writeFileSync(scratch.logFile, "");
+    const second = runCli([VALID_SHA], { env });
+    expect(second.exitCode).toBe(0);
+
+    const calls = callLines(scratch.logFile);
+    expect(second.stdout).toMatch(/already the recorded deployed SHA/);
+    expect(calls.some((l) => l.trim().endsWith("up -d --no-deps worker"))).toBe(false);
+    expect(calls.some((l) => l.trim().endsWith("up -d --no-deps alloy"))).toBe(true);
+  });
+
+  describe("Loki credential preflight: missing configuration fails loudly, before any mutation", () => {
+    for (const key of ["GRAFANA_LOKI_PUSH_URL", "GRAFANA_LOKI_USER", "GRAFANA_CLOUD_API_TOKEN"]) {
+      it(`aborts naming ${key} when that line is absent from MEGA_CRM_ENV_FILE`, () => {
+        const scratch = makeScratch({ [key]: null });
+        const run = runCli([VALID_SHA], { env: baseRealEnv(scratch) });
+
+        expect(run.exitCode).not.toBe(0);
+        expect(run.stderr).toMatch(new RegExp(key));
+        expect(callLines(scratch.logFile)).toEqual([]);
+        expect(existsSync(scratch.recordFile)).toBe(false);
+      });
+
+      it(`aborts naming ${key} when that line is present but blank`, () => {
+        // docker/prod.env.example ships all three blank on purpose -- an
+        // operator who copied it without filling them in is the exact
+        // production shape this must catch, and `required: false` means
+        // compose itself never will.
+        const scratch = makeScratch({ [key]: "" });
+        const run = runCli([VALID_SHA], { env: baseRealEnv(scratch) });
+
+        expect(run.exitCode).not.toBe(0);
+        expect(run.stderr).toMatch(new RegExp(key));
+        expect(callLines(scratch.logFile)).toEqual([]);
+      });
+    }
+
+    it("rejects a plaintext push endpoint (T-15-64)", () => {
+      const scratch = makeScratch({
+        GRAFANA_LOKI_PUSH_URL: "http://logs-prod-000.grafana.test/loki/api/v1/push",
+      });
+      const run = runCli([VALID_SHA], { env: baseRealEnv(scratch) });
+
+      expect(run.exitCode).not.toBe(0);
+      expect(run.stderr).toMatch(/GRAFANA_LOKI_PUSH_URL/);
+      expect(callLines(scratch.logFile)).toEqual([]);
+    });
+
+    it("does not run the preflight under --dry-run (that mode needs no environment at all)", () => {
+      const scratch = makeScratch({
+        GRAFANA_LOKI_PUSH_URL: null,
+        GRAFANA_LOKI_USER: null,
+        GRAFANA_CLOUD_API_TOKEN: null,
+      });
+      const run = runCli(["--dry-run", VALID_SHA], {
+        env: {
+          MEGA_CRM_ENV_FILE: scratch.envFile,
+          MEGA_CRM_DEPLOY_STATE_FILE: scratch.recordFile,
+        },
+      });
+      expect(run.exitCode).toBe(0);
+    });
+  });
+
+  describe("convergence verification: a container that exists is not evidence it is shipping", () => {
+    it("fails naming alloy when the container is not running after convergence", () => {
+      const scratch = makeScratch();
+      const run = runCli([VALID_SHA], {
+        env: baseRealEnv(scratch, { DEPLOY_TEST_ALLOY_INSPECT: "false 0" }),
+      });
+
+      expect(run.exitCode).not.toBe(0);
+      expect(run.stdout + run.stderr).toMatch(/alloy/i);
+      // late-leg failure semantics, same as the worker-healthy timeout: the
+      // SHA is NOT recorded as deployed
+      expect(readFileSync(scratch.recordFile, "utf8")).not.toBe(VALID_SHA);
+    });
+
+    it("fails naming alloy when the container is restart-looping", () => {
+      // G-15-4's exact production signature: `restart: unless-stopped` keeps
+      // re-creating a container whose config Alloy's lexer rejects, so it is
+      // "running" at any single glance while RestartCount climbs and not one
+      // log line is ever shipped.
+      const scratch = makeScratch();
+      const run = runCli([VALID_SHA], {
+        env: baseRealEnv(scratch, { DEPLOY_TEST_ALLOY_RESTART_LOOP: "1" }),
+      });
+
+      expect(run.exitCode).not.toBe(0);
+      expect(run.stdout + run.stderr).toMatch(/alloy/i);
+      expect(readFileSync(scratch.recordFile, "utf8")).not.toBe(VALID_SHA);
+    });
+
+    it("accepts a stable container whose RestartCount is non-zero but no longer climbing", () => {
+      // Boundary neighbour of the case above, and the reason the check must be
+      // a DELTA rather than `RestartCount == 0`: a sidecar that restarted once
+      // months ago (host reboot, docker daemon restart) and has been stable
+      // ever since is healthy. Failing deploys on its historical count would
+      // be a worse bug than the one being fixed.
+      const scratch = makeScratch();
+      const run = runCli([VALID_SHA], {
+        env: baseRealEnv(scratch, { DEPLOY_TEST_ALLOY_INSPECT: "true 4" }),
+      });
+
+      expect(run.exitCode).toBe(0);
+      expect(readFileSync(scratch.recordFile, "utf8")).toBe(VALID_SHA);
+    });
   });
 });
