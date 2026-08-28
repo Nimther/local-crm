@@ -1,5 +1,5 @@
 ---
-status: verifying
+status: resolved
 trigger: "WINDOWS id 14: test harness never clears the shared Redis logical DB"
 created: 2026-08-28
 updated: 2026-08-28
@@ -22,7 +22,7 @@ bug_class: Bohrbug (deterministic harness omission)
 hypothesis: CONFIRMED. The global test setup had no Redis boundary; the fix adds a once-per-process preparation step that first validates an explicit logical DB index >= 1 and then issues FLUSHDB only for that database.
 test: Add focused unit tests around a pure URL guard and an injected cleanup seam, plus an integration-style setup test proving cleanup happens once across multiple project setup calls.
 expecting: RED because neither the guard nor the once-per-run cleanup exists.
-next_action: Push the branch and let GitHub CI prove the full aggregate suite against its isolated Redis service. If green, mark WINDOWS id 14 fixed and archive this session.
+next_action: RESOLVED — archive the session and mark WINDOWS id 14 fixed; PR #36's isolated full CI passed all 10 checks.
 
 ## Evidence
 
@@ -56,6 +56,11 @@ next_action: Push the branch and let GitHub CI prove the full aggregate suite ag
   found: wiring tests 6/6 passed; TypeScript build passed; ESLint passed with zero errors.
   implication: globalSetup resolves TEST_REDIS_URL into the preparation boundary without regressing per-project Postgres isolation.
 
+- timestamp: 2026-08-28 (full isolated CI)
+  checked: GitHub PR #36 required checks on commit 62ad5aa
+  found: all 10 checks completed; 8 successful and 2 intentionally skipped. Required `static`, `failure-injection`, and the full aggregate `test` job all passed. The test job used GitHub Actions' dedicated Redis service with `TEST_REDIS_URL=redis://localhost:6379/1`.
+  implication: The complete multi-project globalSetup path, including the real guarded cleanup, passes in an isolated environment. WINDOWS id 14 can close.
+
 ## Eliminated
 
 - hypothesis: A Redis cleanup already exists elsewhere in the test harness.
@@ -66,7 +71,7 @@ next_action: Push the branch and let GitHub CI prove the full aggregate suite ag
 
 root_cause: "The shared test Redis logical DB survived across runs because global-setup guarded and recreated only Postgres; no Redis URL boundary or cleanup existed."
 fix: "Guard an explicit redis/rediss logical DB index >= 1, run FLUSHDB once per parent process, fail on URL drift, and wire it before Postgres provisioning."
-verification: "RED 11/11 -> GREEN 12/12 including an isolated real-Redis proof; wiring 6/6; TypeScript and ESLint green. Full aggregate CI pending."
+verification: "RED 11/11 -> GREEN 12/12 including an isolated real-Redis proof; wiring 6/6; TypeScript and ESLint green; PR #36 full aggregate CI and all 10 checks green."
 files_changed:
   - packages/test-support/src/redis-guard.ts
   - packages/test-support/src/global-setup.ts

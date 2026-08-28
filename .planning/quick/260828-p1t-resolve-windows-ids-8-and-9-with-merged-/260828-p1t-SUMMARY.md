@@ -34,4 +34,7 @@ Closed two stale broken-window entries without opening a milestone.
 ## Remaining Open Entries
 
 - id 10 — Alloy production deploy UAT; code is merged, live convergence still needs evidence.
-- id 14 — global test Redis isolation; implementation is on this branch and awaits isolated GitHub CI before ledger closure.
+
+## Post-Task Follow-up
+
+- id 14 closed after PR #36's isolated full CI passed all 10 checks; its GSD debug session is archived in `debug/resolved/` and the ledger now has one open entry total.
