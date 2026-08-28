@@ -1,6 +1,14 @@
 import { URL } from "node:url";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const { prepareTestRedisOnceMock } = vi.hoisted(() => ({
+  prepareTestRedisOnceMock: vi.fn(() => Promise.resolve()),
+}));
+
+vi.mock("../redis-guard.js", () => ({
+  prepareTestRedisOnce: prepareTestRedisOnceMock,
+}));
 
 import setup, { AMBIGUOUS_PROJECT_MARKER } from "../global-setup.js";
 
@@ -44,6 +52,7 @@ function stubProject(name: string): StubProject {
 
 /** Every environment variable the hook writes, so each test restores the process it borrowed. */
 const MUTATED_KEYS = [
+  "TEST_REDIS_URL",
   "TEST_DATABASE_URL",
   "DATABASE_URL",
   "GSD_DEV_DATABASE_URL",
@@ -61,6 +70,7 @@ describe("global-setup: per-project ephemeral database publication", () => {
   let saved: Partial<Record<(typeof MUTATED_KEYS)[number], string | undefined>>;
 
   beforeEach(() => {
+    prepareTestRedisOnceMock.mockClear();
     saved = {};
     for (const key of MUTATED_KEYS) saved[key] = process.env[key];
     // Every test here simulates the START of a run. This project registers no
@@ -184,6 +194,18 @@ describe("global-setup: per-project ephemeral database publication", () => {
     try {
       expect(databaseOf(process.env.TEST_DATABASE_URL)).toContain("iso_no_config");
       expect(databaseOf(process.env.DATABASE_URL)).toBe(databaseOf(process.env.TEST_DATABASE_URL));
+    } finally {
+      await teardown();
+    }
+  });
+
+  it("Test 6: setup routes the explicitly test-only Redis URL through the fail-closed preparation boundary", async () => {
+    process.env.TEST_REDIS_URL = "redis://localhost:6379/4";
+
+    const teardown = await setup(stubProject("@mega-crm/iso-redis-guard"));
+    try {
+      expect(prepareTestRedisOnceMock).toHaveBeenCalledTimes(1);
+      expect(prepareTestRedisOnceMock).toHaveBeenCalledWith("redis://localhost:6379/4");
     } finally {
       await teardown();
     }
