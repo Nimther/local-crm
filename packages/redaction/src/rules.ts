@@ -110,8 +110,9 @@ export const REDACTION_RULES: { keyRules: readonly KeyRule[]; valueRules: readon
     {
       name: "phone",
       // Requires a STANDALONE run of 10+ digits (E.164's floor), where "digits"
-      // may be separated by the usual phone punctuation. Both halves of that
-      // sentence are load-bearing, and each was learned from a live failure:
+      // may be separated by the usual phone punctuation, AND where the run is
+      // not itself a canonical UUID. All three halves of that sentence are
+      // load-bearing, and each was learned from a live failure:
       //
       //  - the digit FLOOR: the first version matched "7+ digit-ish
       //    characters", which hit substrings of most v4 UUIDs. UUIDs
@@ -129,12 +130,67 @@ export const REDACTION_RULES: { keyRules: readonly KeyRule[]; valueRules: readon
       //    and it is a production defect too -- SEC-09/WR-01's drop signal
       //    exists precisely to carry workspace ids.
       //
-      // Anchoring both ends against `[0-9A-Za-z-]` fixes it BY CONSTRUCTION
-      // rather than by probability: inside a canonical UUID every digit run is
-      // preceded either by a hex letter or by a `-`, so no legal start position
-      // exists anywhere in it. Realistic phone formats are unaffected, because
-      // their separators are INTERNAL to the match rather than at its edges:
+      //  - the UUID-SHAPE EXCLUSION: anchoring both ends against
+      //    `[0-9A-Za-z-]` did NOT fix this "by construction", as the previous
+      //    revision of this comment claimed. Work out what those anchors
+      //    actually admit inside a standalone canonical UUID. The lookbehind
+      //    `(?<![0-9A-Za-z-])` permits exactly ONE start position -- index 0,
+      //    because every other position follows a hex character or a `-`. The
+      //    closing lookahead `(?![0-9A-Za-z-])` permits exactly ONE end
+      //    position -- end of value, because every internal position is
+      //    followed by a digit, a hex letter or a `-`. A match therefore
+      //    requires EVERY character of the token to be a digit or a `-`. So
+      //    the anchors excluded a UUID only when it happened to contain a hex
+      //    LETTER -- not because it was UUID-shaped -- and an ALL-DECIMAL
+      //    canonical UUID (all 32 hex characters happening to be digits) was
+      //    still matched in full and redacted. That class has density
+      //    0.625^30 x 0.5 = 3.76e-7 of `randomUUID()` values (the version
+      //    nibble is a fixed `4`, the variant nibble is a digit in 2 of its 4
+      //    legal values, the other 30 characters are free), measured as 0 hits
+      //    in 3,000,000 samples -- which is exactly why the 5000-sample guard
+      //    written for this rule never reached it. But it is 100% for the nil
+      //    UUID `00000000-0000-0000-0000-000000000000`, a sentinel this
+      //    codebase can legitimately log. Debug session
+      //    `uuid-redacted-as-phone`; reported literal
+      //    `17240210-0546-4077-9954-207876832048`.
+      //
+      // The `(?!<uuid shape>)` lookahead in the pattern below replaces that
+      // INCIDENTAL criterion ("the token contains a hex letter") with the
+      // INTENDED one ("the token is UUID-shaped"). That closes the whole
+      // all-decimal residue rather than the one reported literal: 0 of 200,000
+      // all-decimal canonical UUIDs match, where the pattern it replaced
+      // matched 200,000 of 200,000. Realistic phone formats are unaffected,
+      // because their separators are INTERNAL to the match rather than at its
+      // edges and no phone number carries the 8-4-4-4-12 shape:
       // `+14155550199`, `+1 415-555-0199`, `(415) 555-0199`, `tel:+1-415-555-0199`.
+      //
+      // THREE properties of that lookahead are load-bearing. Two of them fail
+      // SILENTLY -- the rule keeps working for phones while quietly redacting
+      // UUIDs again, or quietly stops covering real PII -- so each is pinned by
+      // a named assertion in `__tests__/scrub-identifier-false-positive.test.ts`:
+      //
+      //  1. PLACEMENT -- it must sit AFTER the optional `\+?\(?` prefix, never
+      //     before it. Placed before, `(<uuid>)` and `+<uuid>` are redacted
+      //     anyway: the match simply begins one character earlier, on the `(`
+      //     or the `+`, at a position where the shape lookahead never fires.
+      //     Measured 2 of 23 discriminating probes still failing. Pinned by
+      //     Test 9's parenthesised and `+`-prefixed cases.
+      //
+      //  2. THE INNER `(?![0-9A-Za-z-])` -- it narrows the exclusion to tokens
+      //     that END right after the 12th character of the final group. Drop it
+      //     and `12345678-1234-1234-1234-1234567890123` (8-4-4-4-13: a 33-digit
+      //     run that is NOT a canonical UUID) stops matching, trading this
+      //     false positive for a false NEGATIVE on real PII. Pinned by Test 11.
+      //
+      //  3. `[0-9a-fA-F]` rather than `[0-9]` -- the two are provably
+      //     EQUIVALENT here, because a hex-lettered UUID cannot match the outer
+      //     pattern at all (see the BOUNDARIES bullet above), so excluding it
+      //     changes no behaviour. Full-hex is kept DELIBERATELY: it states the
+      //     intent ("this token is UUID-shaped") instead of encoding the
+      //     accident that only all-decimal UUIDs ever got this far. Unlike (1)
+      //     and (2) this one is NOT test-pinned -- no assertion can distinguish
+      //     the two spellings -- so do not "simplify" it to `[0-9]`; this
+      //     paragraph is the only thing preserving what the lookahead is for.
       //
       // The upper bound is open (`{9,}` = 10 or more) rather than the E.164
       // ceiling of 15. With a start anchor a capped pattern could no longer
@@ -142,7 +198,8 @@ export const REDACTION_RULES: { keyRules: readonly KeyRule[]; valueRules: readon
       // would have stopped matching 16+ digit runs (a card number being the
       // realistic case) that the previous pattern did catch. Open-ended keeps
       // this rule's effective coverage a superset of what it replaced.
-      pattern: /(?<![0-9A-Za-z-])\+?\(?\d(?:[\s().-]*\d){9,}(?![0-9A-Za-z-])/,
+      pattern:
+        /(?<![0-9A-Za-z-])\+?\(?(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?![0-9A-Za-z-]))\d(?:[\s().-]*\d){9,}(?![0-9A-Za-z-])/,
       protects: "phone number in value position under any field name -- the freeform-event-properties backstop",
     },
   ],
