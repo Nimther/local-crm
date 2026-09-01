@@ -28,6 +28,22 @@ describe("buildMailSendRequest (D-04 forced tracking, D-15 test marker)", () => 
     });
   });
 
+  it("emits the exact SendGrid from object with a non-empty From Name", () => {
+    const result = buildMailSendRequest(sampleParams({ fromName: "  Tenant Marketing  " }));
+    expect(result.from).toEqual({
+      email: "marketing@tenant.example.com",
+      name: "Tenant Marketing",
+    });
+  });
+
+  it.each([undefined, null, "", "   "])(
+    "retains the legacy email-only from object when From Name is %s",
+    (fromName) => {
+      const result = buildMailSendRequest(sampleParams({ fromName }));
+      expect(result.from).toEqual({ email: "marketing@tenant.example.com" });
+    }
+  );
+
   it("a campaign build (isTest omitted) has NO test custom_arg", () => {
     const result = buildMailSendRequest(sampleParams());
     const customArgs = result.personalizations[0].custom_args;
