@@ -30,6 +30,7 @@ key-files:
     - packages/delivery-core/src/send-mail.ts
     - packages/shared-schemas/src/queues.ts
     - packages/db/src/schema/campaigns.ts
+    - packages/db/src/__tests__/migration-rollback-rehearsal.test.ts
 
 key-decisions:
   - "Map SendGrid `from_name` independently from `nickname`; never use the account/UI nickname as the inbox-visible name"
@@ -46,7 +47,7 @@ coverage:
   - apps/api/src/modules/campaigns/__tests__/campaigns-routes.test.ts
   - apps/worker/src/queues/__tests__/test-send-template-snapshot.test.ts
 
-duration: ~25min
+duration: ~45min
 completed: 2026-09-01
 status: complete
 ---
@@ -57,10 +58,10 @@ status: complete
 
 ## Performance
 
-- **Duration:** ~25 min
-- **Completed:** 2026-09-01T11:02:45Z
+- **Duration:** ~45 min
+- **Completed:** 2026-09-01T11:23:56Z
 - **Tasks:** 3 completed
-- **Commits:** 2 source-code commits
+- **Commits:** 3 source-code commits
 
 ## Accomplishments
 
@@ -69,12 +70,13 @@ status: complete
 - Added optional, additive `fromName` to test-send queue payloads without a schema-version bump. Old jobs fall back to the campaign row; ordinary campaign jobs cannot override sender identity from queue data.
 - Built exact SendGrid `from: { email, name }` payloads only for non-blank names; null, empty, blank, manual, legacy, and unchanged flow callers continue to emit `from: { email }`.
 - Added regressions for mapping, persistence, snapshot immutability, old-job fallback, ordinary campaign dispatch, override rejection, and exact delivery payload shape.
+- Registered and rehearsed the exact safe inverse for migration `0071`: drop only `campaigns.from_name`, then roll forward through the production migration runner to an identical schema fingerprint.
 
 ## Task Commits
 
 1. **Task 1: Capture and persist verified sender From Name** — `dd6a6a6e` (`fix(quick-260901-lwg): persist verified sender From Name`)
 2. **Task 2: Carry From Name through dispatch and SendGrid payload** — `9bb896cc` (`fix(quick-260901-lwg): send campaign From Name to SendGrid`)
-3. **Task 3: Cross-package verification and diff inspection** — no source changes
+3. **Task 3: Register and verify migration `0071` rollback inverse** — `e5c0b4ed` (`test(quick-260901-lwg): register campaign From Name inverse`)
 
 **Branch:** `codex/fix-campaign-from-name`
 
@@ -85,19 +87,15 @@ Planning artifacts, including this SUMMARY, were intentionally not committed.
 Passed:
 
 - `npm run test -w packages/db -- src/__tests__/migration-tiers.test.ts src/__tests__/migration-empty-diff.test.ts` — 2 files, 14 tests passed.
+- `npm run test -w packages/db -- src/__tests__/migration-rollback-rehearsal.test.ts` — 1 file, 1 test passed; revert and production roll-forward produce identical schema fingerprints.
+- `npm run test:migrations` — full packages/db suite passed: 31 files, 263 tests passed, 1 skipped.
 - `npm run test -w packages/delivery-core -- src/__tests__/send-mail.test.ts` — 1 file, 18 tests passed.
+- Focused API tests (`sendgrid-key-connect`, `sender-resolution`, `campaigns-routes`) — 3 files, 48 tests passed.
+- Focused worker test (`test-send-template-snapshot`) — 1 file, 7 tests passed.
 - `npm run build` — all workspaces passed.
 - `npm run lint` — passed with zero lint warnings/errors (Node emitted the repository's existing module-type performance warning).
 - `git diff --check d73d183c..HEAD` — passed.
 - Final diff inspection confirmed no `nickname` fallback, no required queue field or schema-version bump, no per-recipient verified-sender lookup, and no unrelated product changes.
-
-Blocked by pre-existing migration deadline guard:
-
-- `npm run test:migrations` — exits 1 before DB-backed suites can bootstrap: migration `0038_partition_catchup_and_maintenance_runs.sql` deliberately raises `migration 0038 (partition catch-up) refuses to apply on/after 2026-09-01`. Final result: 25 failed files, 6 passed; 4 failed tests, 72 passed, 187 skipped. The focused `0071` static metadata/tier checks pass independently as recorded above.
-- Focused API tests — blocked in suite setup by the same migration `0038` exception; 48 tests skipped. The afterAll `app` errors are secondary to setup aborting before app creation.
-- Focused worker test — blocked in suite setup by the same migration `0038` exception; 7 tests skipped. The afterAll pool error is secondary to setup aborting before pool creation.
-
-The guard's cutoff is exactly the current date (`2026-09-01 00:00:00+00`). It is unrelated to this change and explicitly instructs operators not to bypass it without confirming/relocating DEFAULT-partition rows, so migration `0038` was not modified as part of this quick task.
 
 ## Deviations from Plan
 
@@ -109,19 +107,26 @@ The guard's cutoff is exactly the current date (`2026-09-01 00:00:00+00`). It is
 - **Files:** `packages/db/src/migration-tiers.ts`, `packages/db/src/__tests__/migration-tiers.test.ts`, `packages/db/src/__tests__/migration-empty-diff.test.ts`
 - **Commit:** `dd6a6a6e`
 
+### Auto-fixed missing rollback rehearsal registration
+
+- **Found during:** Follow-up full packages/db verification
+- **Issue:** Migration `0071` was correctly classified auto-reversible, but the repository's hand-verified `MIGRATION_INVERSES` registry had no entry for it, so the rollback rehearsal failed closed.
+- **Fix:** Added the exact inverse `ALTER TABLE campaigns DROP COLUMN from_name;`; the focused rehearsal now applies the full history, drops only that column, rolls forward with the production runner, and confirms an identical schema fingerprint.
+- **File:** `packages/db/src/__tests__/migration-rollback-rehearsal.test.ts`
+- **Commit:** `e5c0b4ed`
+
 ## Issues Encountered
 
-- The repository-wide DB-backed gates cannot currently apply the historical migration chain because migration `0038` reached its hard safety deadline on the current date. This is an operational migration issue outside the From Name path; no unsafe bypass or unrelated migration edit was made.
+- Initial DB-backed verification was blocked by migration `0038`'s date guard. After that independent repository issue was resolved on the branch, rerunning the full packages/db suite exposed the missing `0071` inverse registration; this task added the safe inverse and all affected gates now pass.
 
 ## User Setup Required
 
-None for the From Name feature. Separately, the repository's migration `0038` deadline requires operational review before DB-backed test environments can apply the full migration history again.
+None.
 
 ## Next Phase Readiness
 
 - Source implementation is committed and ready for parent-agent push/merge/deploy handling.
-- Build, lint, delivery-core tests, and new migration static checks are green.
-- API/worker/full migration runtime suites should be rerun after the migration `0038` safety guard is resolved through its prescribed operational process.
+- Full packages/db, focused API/worker/delivery-core, workspace build, and lint gates are green.
 
 ---
 *Quick task: 260901-lwg*
