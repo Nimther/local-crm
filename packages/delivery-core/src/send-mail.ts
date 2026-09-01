@@ -15,7 +15,7 @@ export interface SendGridMailSendRequest {
     // never breaks delivery-event processing.
     custom_args: { send_id: string; workspace_id: string; campaign_id?: string; test?: "true" };
   }>;
-  from: { email: string };
+  from: { email: string; name?: string };
   template_id: string;
   headers: {
     "List-Unsubscribe": string;
@@ -38,6 +38,8 @@ export interface BuildMailSendRequestParams {
   to: string;
   templateId: string;
   fromEmail: string;
+  /** Optional inbox-visible display name for the RFC 5322 From identity. */
+  fromName?: string | null;
   dynamicTemplateData: Record<string, unknown>;
   /** The fully-built `${PUBLIC_APP_URL}/unsubscribe/${token}` URL (see `buildListUnsubscribeUrl`). */
   listUnsubscribeUrl: string;
@@ -58,6 +60,7 @@ export interface BuildMailSendRequestParams {
 
 /** Builds the exact `mail/send` request shape for one recipient (SEND-05, D-15). */
 export function buildMailSendRequest(params: BuildMailSendRequestParams): SendGridMailSendRequest {
+  const fromName = params.fromName?.trim();
   return {
     personalizations: [
       {
@@ -71,7 +74,7 @@ export function buildMailSendRequest(params: BuildMailSendRequestParams): SendGr
         },
       },
     ],
-    from: { email: params.fromEmail },
+    from: fromName ? { email: params.fromEmail, name: fromName } : { email: params.fromEmail },
     template_id: params.templateId,
     headers: {
       "List-Unsubscribe": `<${params.listUnsubscribeUrl}>`,

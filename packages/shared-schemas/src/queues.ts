@@ -187,6 +187,10 @@ export type ImportsCsvJob = z.infer<typeof importsCsvJobSchema>;
  * without them, because a launched/scheduled campaign is no longer
  * editable (D-08) and the dispatch worker always re-derives from the
  * locked row for that kind.
+ *
+ * Quick 260901-lwg adds `fromName` under the same optional, additive
+ * snapshot contract. Old jobs omit it and fall back to `campaigns.from_name`;
+ * old workers strip/ignore it while processing new-shaped jobs.
  */
 export const emailBroadcastJobSchema = z.object({
   workspaceId: z.string().uuid(),
@@ -198,6 +202,7 @@ export const emailBroadcastJobSchema = z.object({
   requestId: z.string().optional(),
   templateId: z.string().optional(),
   fromEmail: z.string().email().optional(),
+  fromName: z.string().optional(),
 });
 export type EmailBroadcastJob = z.infer<typeof emailBroadcastJobSchema>;
 

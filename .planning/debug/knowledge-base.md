@@ -111,3 +111,13 @@ Resolved debug sessions. Used by `gsd-debugger` to surface known-pattern hypothe
 - **Verification:** Исходный RED — PR #37 run 33177671540 job 98870409442. GREEN — локальный real-SIGKILL suite 8/8; PR #37 dedicated failure-injection job 98873557273; aggregate coverage job 98873557478 успешно завершён за 5:45 со всеми 2,553 тестами.
 - **Recurrence guard:** Все восемь реальных SIGKILL-сценариев проходят через общий barrier; assertion `status === 'complete'` сохранён без изменения. Aggregate CI остаётся обязательным и воспроизводит нагрузочную среду исходного падения.
 ---
+
+## migration-0038-ci-deadline — Fresh migration chains stopped working when migration 0038's calendar cutoff arrived
+- **Date:** 2026-09-01
+- **Error patterns:** P0001 migration 0038 refuses to apply on/after 2026-09-01, fresh ephemeral database, CI fails before product tests, DEFAULT partition cutoff
+- **Root cause(s):** Migration 0038 used wall-clock time as a proxy for DEFAULT-partition data risk. Its unconditional post-cutoff `RAISE` rejected fresh databases even though both DEFAULT partitions were empty; the post-cutoff environment and time-only branch formed the failure AND-gate.
+- **Fix:** After the cutoff, lock `events_default` and `send_events_default` in `ACCESS EXCLUSIVE NOWAIT`, reject if either contains a row, and otherwise continue. Non-empty data and concurrent ingestion remain fail-closed.
+- **Files changed:** packages/db/migrations/0038_partition_catchup_and_maintenance_runs.sql, packages/db/src/__tests__/migration-0038-deadline-guard.test.ts
+- **Why not caught:** The prior test used the real clock and assumed it was before 2026-09-01, so the test itself expired; no stable post-cutoff fresh-chain oracle existed.
+- **Recurrence guard:** `migration-0038-deadline-guard.test.ts` forces a post-cutoff condition and covers both-empty success plus each DEFAULT partition independently non-empty. Revert-and-reconfirm proved the new predicate is causal.
+---

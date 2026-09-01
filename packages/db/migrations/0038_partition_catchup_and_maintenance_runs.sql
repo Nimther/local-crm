@@ -39,21 +39,29 @@
 -- sanctioned exception to "that sequence exists in exactly one function",
 -- precisely so it is not duplicated here. That makes this migration safe
 -- ONLY while `events_default`/`send_events_default` are still genuinely
--- empty -- true up to (but not on or after) 2026-09-01, the literal
--- boundary this migration's own partitions start at. If this migration is
--- applied on or after that date (a slipped deploy, a CI backlog, a
--- rollback-and-retry), DEFAULT may already hold real rows by then, and
+-- empty. Before 2026-09-01 that was guaranteed by the rollout schedule; on
+-- or after the boundary a slipped deploy, a CI backlog, or a
+-- rollback-and-retry means DEFAULT may already hold real rows, and
 -- these 20 plain `CREATE TABLE ... PARTITION OF` statements would each pay
 -- the exact "ACCESS EXCLUSIVE scan of DEFAULT" ingestion-outage cost this
 -- phase exists to avoid -- silently, twenty times, in one migration run.
 -- Rather than duplicate the CHECK-constraint-first sequence here (which
--- CONVENTIONS.md's rule above forbids), this migration refuses to run
--- unsafely: a hard, loud failure here is strictly better than a silent
--- twenty-partition lock storm on the live `events`/`send_events` tables.
+-- CONVENTIONS.md's rule above forbids), a post-deadline run first takes both
+-- DEFAULT relations ACCESS EXCLUSIVE NOWAIT: concurrent ingestion makes the
+-- migration fail closed rather than wait, and the locks keep the following
+-- emptiness check stable for the rest of this file's implicit transaction.
+-- A non-empty DEFAULT still raises loudly; a demonstrably empty fresh
+-- database can continue, which keeps ephemeral CI/bootstrap chains usable
+-- after the calendar boundary without weakening the production data guard.
 DO $$
 BEGIN
   IF now() >= TIMESTAMPTZ '2026-09-01 00:00:00+00' THEN
-    RAISE EXCEPTION 'migration 0038 (partition catch-up) refuses to apply on/after 2026-09-01: its 20 CREATE TABLE ... PARTITION OF statements are plain DDL (not CHECK-constraint-first) and are only safe while events_default/send_events_default are still empty. Confirm both DEFAULT partitions are empty (or relocate any rows first with npm run relocate:default-partition-rows), then apply this migration only after the operational risk has been reviewed -- do not simply retry it.';
+    LOCK TABLE events_default, send_events_default IN ACCESS EXCLUSIVE MODE NOWAIT;
+
+    IF EXISTS (SELECT 1 FROM events_default LIMIT 1)
+       OR EXISTS (SELECT 1 FROM send_events_default LIMIT 1) THEN
+      RAISE EXCEPTION 'migration 0038 (partition catch-up) refuses to apply on/after 2026-09-01 while events_default or send_events_default contains rows: its 20 CREATE TABLE ... PARTITION OF statements are plain DDL (not CHECK-constraint-first). Relocate all DEFAULT rows first with npm run relocate:default-partition-rows, then apply this migration only after the operational risk has been reviewed -- do not simply retry it.';
+    END IF;
   END IF;
 END $$;
 

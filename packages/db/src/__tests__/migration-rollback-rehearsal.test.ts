@@ -84,6 +84,10 @@ interface InverseStep {
  *   defaulted column, `organization."purgedAt"`. Reverting means dropping
  *   exactly those two objects -- nothing this migration's inverse touches
  *   existed before this migration ran.
+ * - 0071_campaign_from_name (quick 260901-lwg): adds exactly one nullable
+ *   column, `campaigns.from_name`, with no default or backfill. Dropping it
+ *   removes only sender-name data introduced after this migration and leaves
+ *   every pre-existing campaign field untouched.
  */
 const MIGRATION_INVERSES: Record<string, InverseStep[]> = {
   "0062_member_unique_org_user": [
@@ -139,6 +143,12 @@ DROP INDEX idx_flow_run_steps_flow_run_id;`,
     {
       description: "drop the Phase 22 physical-purge tombstone marker this migration added to organization (purgedAt)",
       sql: `ALTER TABLE organization DROP COLUMN "purgedAt";`,
+    },
+  ],
+  "0071_campaign_from_name": [
+    {
+      description: "drop the optional SendGrid From Name this migration added to campaigns (from_name)",
+      sql: `ALTER TABLE campaigns DROP COLUMN from_name;`,
     },
   ],
 };

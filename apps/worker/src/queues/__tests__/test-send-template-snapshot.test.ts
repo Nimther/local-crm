@@ -90,7 +90,23 @@ describe("test-send-template-snapshot (TMPL-03, D-12)", () => {
     );
   }
 
-  it("snapshot wins: a kind='test' job's templateId/fromEmail override the row's own values", async () => {
+  async function updateCampaignFromName(
+    workspaceId: string,
+    campaignId: string,
+    fromName: string | null
+  ): Promise<void> {
+    await withTenant(workspaceId, () =>
+      withTenantTransaction((client) =>
+        client.query(`UPDATE campaigns SET from_name = $1 WHERE id = $2 AND workspace_id = $3`, [
+          fromName,
+          campaignId,
+          workspaceId,
+        ])
+      )
+    );
+  }
+
+  it("snapshot wins: a kind='test' job's templateId/fromEmail/fromName override the row's own values", async () => {
     const { workspaceId, campaignId } = await seedFixtureCampaign("tmpl-snapshot-wins");
     const recording = recordingSendMail();
 
@@ -102,6 +118,7 @@ describe("test-send-template-snapshot (TMPL-03, D-12)", () => {
         testTo: "marketer@fixture.test",
         templateId: "d-snapshot-template",
         fromEmail: "snapshot-sender@fixture.test",
+        fromName: "Snapshot Sender",
       },
       { sendMail: recording.fn, redisClient }
     );
@@ -109,13 +126,14 @@ describe("test-send-template-snapshot (TMPL-03, D-12)", () => {
     expect(result.outcome).toBe("sent");
     const payload = recording.lastPayload();
     expect(payload?.template_id).toBe("d-snapshot-template");
-    expect(payload?.from.email).toBe("snapshot-sender@fixture.test");
+    expect(payload?.from).toEqual({ email: "snapshot-sender@fixture.test", name: "Snapshot Sender" });
   });
 
   it("the async-gap proof (D-12): a template change after enqueue does not redirect an already-queued test send", async () => {
     const { workspaceId, campaignId } = await seedFixtureCampaign("tmpl-async-gap");
     // Simulate a save landing on the row AFTER the job was enqueued with its snapshot.
     await updateCampaignTemplateId(workspaceId, campaignId, "d-fixture-template-CHANGED");
+    await updateCampaignFromName(workspaceId, campaignId, "Changed Sender Name");
     const recording = recordingSendMail();
 
     const result = await processSendJob(
@@ -126,6 +144,7 @@ describe("test-send-template-snapshot (TMPL-03, D-12)", () => {
         testTo: "marketer@fixture.test",
         templateId: "d-fixture-template", // the ORIGINAL snapshot, captured before the row changed
         fromEmail: "sender@fixture.test",
+        fromName: "Original Sender Name",
       },
       { sendMail: recording.fn, redisClient }
     );
@@ -133,10 +152,12 @@ describe("test-send-template-snapshot (TMPL-03, D-12)", () => {
     expect(result.outcome).toBe("sent");
     const payload = recording.lastPayload();
     expect(payload?.template_id, "the queued test send must not follow the row's later change").toBe("d-fixture-template");
+    expect(payload?.from).toEqual({ email: "sender@fixture.test", name: "Original Sender Name" });
   });
 
-  it("rolling-deploy fallback: a kind='test' job carrying neither snapshot field uses the row's current template/sender", async () => {
+  it("rolling-deploy fallback: an old-shaped kind='test' job uses the row's current template/sender/name", async () => {
     const { workspaceId, campaignId } = await seedFixtureCampaign("tmpl-rolling-deploy");
+    await updateCampaignFromName(workspaceId, campaignId, "Persisted Sender Name");
     const recording = recordingSendMail();
 
     const result = await processSendJob(
@@ -147,7 +168,7 @@ describe("test-send-template-snapshot (TMPL-03, D-12)", () => {
     expect(result.outcome).toBe("sent");
     const payload = recording.lastPayload();
     expect(payload?.template_id).toBe("d-fixture-template");
-    expect(payload?.from.email).toBe("sender@fixture.test");
+    expect(payload?.from).toEqual({ email: "sender@fixture.test", name: "Persisted Sender Name" });
   });
 
   it("effective-value prerequisite check: a snapshot rescues a test send even when the row's template_id is now null", async () => {
@@ -173,12 +194,33 @@ describe("test-send-template-snapshot (TMPL-03, D-12)", () => {
     expect(payload?.from.email).toBe("rescue-sender@fixture.test");
   });
 
+  it("a blank test-send snapshot produces the legacy email-only From payload", async () => {
+    const { workspaceId, campaignId } = await seedFixtureCampaign("from-name-blank");
+    await updateCampaignFromName(workspaceId, campaignId, "Persisted Sender Name");
+    const recording = recordingSendMail();
+
+    const result = await processSendJob(
+      {
+        workspaceId,
+        campaignId,
+        kind: "test",
+        testTo: "marketer@fixture.test",
+        fromName: "   ",
+      },
+      { sendMail: recording.fn, redisClient }
+    );
+
+    expect(result.outcome).toBe("sent");
+    expect(recording.lastPayload()?.from).toEqual({ email: "sender@fixture.test" });
+  });
+
   describe("campaign dispatch path (SC2: launch and schedule converge here, both row-derived)", () => {
     it("row-derived after a save: a kind='campaign' job sends the campaign's NEW template after an edit", async () => {
       const { workspaceId, campaignId } = await seedFixtureCampaign("tmpl-campaign-row-derived");
       const contactId = await createFixtureContact(workspaceId);
       // The "marketer saved a new template" step of the original bug scenario.
       await updateCampaignTemplateId(workspaceId, campaignId, "d-fixture-template-NEW");
+      await updateCampaignFromName(workspaceId, campaignId, "Campaign Sender Name");
       const recording = recordingSendMail();
 
       const result = await processSendJob(
@@ -191,11 +233,13 @@ describe("test-send-template-snapshot (TMPL-03, D-12)", () => {
       expect(payload?.template_id, "launch/schedule pick up the saved template with no snapshot involved").toBe(
         "d-fixture-template-NEW"
       );
+      expect(payload?.from).toEqual({ email: "sender@fixture.test", name: "Campaign Sender Name" });
     });
 
     it("snapshot scoping pin: a kind='campaign' job carrying a templateId field is ignored -- the ROW's template is sent", async () => {
       const { workspaceId, campaignId } = await seedFixtureCampaign("tmpl-campaign-scoping-pin");
       const contactId = await createFixtureContact(workspaceId);
+      await updateCampaignFromName(workspaceId, campaignId, "Persisted Campaign Name");
       const recording = recordingSendMail();
 
       const result = await processSendJob(
@@ -209,6 +253,7 @@ describe("test-send-template-snapshot (TMPL-03, D-12)", () => {
           // branch must never consult them -- T-20-04-01.
           templateId: "d-should-be-ignored",
           fromEmail: "should-be-ignored@fixture.test",
+          fromName: "Should Be Ignored",
         },
         { sendMail: recording.fn, redisClient }
       );
@@ -216,7 +261,7 @@ describe("test-send-template-snapshot (TMPL-03, D-12)", () => {
       expect(result.outcome).toBe("sent");
       const payload = recording.lastPayload();
       expect(payload?.template_id, "a campaign job can never be redirected by its own payload").toBe("d-fixture-template");
-      expect(payload?.from.email).toBe("sender@fixture.test");
+      expect(payload?.from).toEqual({ email: "sender@fixture.test", name: "Persisted Campaign Name" });
     });
   });
 });

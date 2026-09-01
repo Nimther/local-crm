@@ -193,6 +193,7 @@ function laneForSendJobKind(kind: "campaign" | "test" | "flow"): TenantLane {
 interface CampaignRow {
   templateId: string | null;
   fromEmail: string | null;
+  fromName: string | null;
   status: string;
 }
 
@@ -208,13 +209,15 @@ interface SendPrereqs {
   rps: number;
   templateId: string;
   fromEmail: string;
+  fromName: string | null;
   /** CR-06: the campaign's live status -- claimCampaignSend gates kind='campaign' dispatch on this being 'sending'; the kind='test' path never reads it. */
   status: string;
 }
 
 /**
- * TMPL-03/D-12 (plan 20-04): an optional override for `readSendPrereqs`'s
- * templateId/fromEmail resolution. ONLY the `kind === "test"` branch below
+ * TMPL-03/D-12 (plan 20-04, extended by quick 260901-lwg): optional
+ * overrides for `readSendPrereqs`'s templateId/fromEmail/fromName resolution.
+ * ONLY the `kind === "test"` branch below
  * ever passes one -- `claimCampaignSend` and the flow claim path
  * (`flows/flow-send.ts`) call `readSendPrereqs` with no override at all, so
  * launch/schedule dispatch keeps re-deriving from the row byte-for-byte
@@ -226,11 +229,12 @@ interface SendPrereqs {
 interface SendPrereqsOverride {
   templateId?: string;
   fromEmail?: string;
+  fromName?: string;
 }
 
 /**
  * Reads the tenant's decrypted SendGrid key, send settings (RPS), and the
- * campaign's templateId/fromEmail -- shared by both the campaign-claim
+ * campaign's templateId/fromEmail/fromName -- shared by both the campaign-claim
  * transaction and the test-send transaction so the two dispatch paths can
  * never drift on how these prerequisites are resolved.
  *
@@ -262,7 +266,7 @@ async function readSendPrereqs(
   const rps = settings.rpsLimit ?? DEFAULT_TENANT_RPS;
 
   const { rows: campaignRows } = await client.query<CampaignRow>(
-    `SELECT template_id as "templateId", from_email as "fromEmail", status
+    `SELECT template_id as "templateId", from_email as "fromEmail", from_name as "fromName", status
      FROM campaigns WHERE id = $1 AND workspace_id = $2`,
     [campaignId, workspaceId]
   );
@@ -273,11 +277,12 @@ async function readSendPrereqs(
 
   const templateId = override.templateId ?? campaign.templateId;
   const fromEmail = override.fromEmail ?? campaign.fromEmail;
+  const fromName = override.fromName !== undefined ? override.fromName : campaign.fromName;
   if (!templateId || !fromEmail) {
     throw new Error(`Campaign ${campaignId} is missing a templateId/fromEmail for dispatch`);
   }
 
-  return { apiKey, rps, templateId, fromEmail, status: campaign.status };
+  return { apiKey, rps, templateId, fromEmail, fromName, status: campaign.status };
 }
 
 interface ClaimedCampaignSend extends SendPrereqs {
@@ -489,7 +494,7 @@ export async function processSendJob(
   }
 
   const job = emailBroadcastJobSchema.parse(data);
-  const { workspaceId, campaignId, kind, contactId, testTo, testData, templateId, fromEmail } = job;
+  const { workspaceId, campaignId, kind, contactId, testTo, testData, templateId, fromEmail, fromName } = job;
 
   return withTenant(workspaceId, async () => {
     if (kind === "campaign") {
@@ -563,6 +568,7 @@ export async function processSendJob(
             to: claim.to,
             templateId: claim.templateId,
             fromEmail: claim.fromEmail,
+            fromName: claim.fromName,
             dynamicTemplateData: claim.dynamicTemplateData,
             listUnsubscribeUrl: claim.unsubscribeUrl,
             sendId: claim.sendId,
@@ -707,7 +713,7 @@ export async function processSendJob(
       // the queue. Absent fields fall back to the row read (rolling-deploy
       // safety for a pre-Phase-20 job carrying neither).
       const prereqs = await withTenantTransaction((client) =>
-        readSendPrereqs(client, workspaceId, campaignId, { templateId, fromEmail })
+        readSendPrereqs(client, workspaceId, campaignId, { templateId, fromEmail, fromName })
       );
 
       // WRK-02: the SAME lane-slot gate as the campaign/flow branches above,
@@ -733,6 +739,7 @@ export async function processSendJob(
           to: testTo,
           templateId: prereqs.templateId,
           fromEmail: prereqs.fromEmail,
+          fromName: prereqs.fromName,
           dynamicTemplateData,
           listUnsubscribeUrl: unsubscribeUrl,
           sendId,

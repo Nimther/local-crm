@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { Pool } from "pg";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { createEphemeralDatabase, dropEphemeralDatabase } from "@mega-crm/test-support";
 
@@ -16,19 +16,16 @@ import { createEphemeralDatabase, dropEphemeralDatabase } from "@mega-crm/test-s
  * exactly what that rule forbids). That makes this migration safe ONLY
  * while `events_default`/`send_events_default` are still empty, which is
  * only guaranteed before 2026-09-01 (the literal boundary this migration's
- * own partitions start at). This suite proves the migration refuses to
- * apply at all once that boundary has passed, converting a silent
- * twenty-partition ACCESS EXCLUSIVE lock storm into a loud, immediate
- * migration failure.
+ * own partitions start at). After that boundary, an empty DEFAULT partition
+ * is still safe to attach around, while a non-empty one must keep failing
+ * closed. This suite proves both sides of that boundary.
  *
  * Postgres's `now()` cannot be faked from a test without a server-side
  * extension this repository does not depend on, so this suite executes the
  * REAL migration file's own guard clause directly (extracted verbatim, not
- * retyped) against a real ephemeral Postgres -- proving two things about
- * the actual shipped SQL: (1) it is silent today (the real "now" is before
- * 2026-09-01), and (2) substituting only the cutoff literal for a
- * definitely-past date makes it raise, proving the guard's polarity is
- * correct.
+ * retyped) against real partition tables in an ephemeral Postgres. Replacing
+ * only the cutoff literal with a definitely-past date keeps the test stable
+ * after the real deadline and exercises the exact shipped state predicate.
  */
 
 const MIGRATION_PATH = path.resolve(
@@ -66,6 +63,17 @@ describe("migration 0038 deadline guard (09-REVIEW WR-01)", () => {
     databaseName = created.databaseName;
     adminDsn = created.adminDsn;
     pool = new Pool({ connectionString: created.dsn, max: 2 });
+
+    await pool.query(`
+      CREATE TABLE events (occurred_at timestamptz NOT NULL) PARTITION BY RANGE (occurred_at);
+      CREATE TABLE events_default PARTITION OF events DEFAULT;
+      CREATE TABLE send_events (occurred_at timestamptz NOT NULL) PARTITION BY RANGE (occurred_at);
+      CREATE TABLE send_events_default PARTITION OF send_events DEFAULT;
+    `);
+  });
+
+  beforeEach(async () => {
+    await pool.query("TRUNCATE events_default, send_events_default");
   });
 
   afterAll(async () => {
@@ -78,17 +86,24 @@ describe("migration 0038 deadline guard (09-REVIEW WR-01)", () => {
     expect(guardBlock).toMatch(/RAISE EXCEPTION/i);
   });
 
-  it("test 2: the guard, as shipped, does not trip today (real \"now\" is before the cutoff)", async () => {
-    await expect(pool.query(guardBlock)).resolves.toBeDefined();
+  it("test 2: post-cutoff application is allowed when both DEFAULT partitions are empty", async () => {
+    const postCutoffGuard = guardBlock.replace(CUTOFF_LITERAL, "2000-01-01 00:00:00+00");
+    expect(postCutoffGuard).not.toBe(guardBlock);
+
+    await expect(pool.query(postCutoffGuard)).resolves.toBeDefined();
   });
 
-  it("test 3: the exact same guard, with only the cutoff literal moved into the past, raises", async () => {
-    const pastCutoffGuard = guardBlock.replace(CUTOFF_LITERAL, "2000-01-01 00:00:00+00");
-    // Sanity: the substitution must actually have found and replaced the
-    // literal, or this test would vacuously pass by re-running the
-    // never-trips original.
-    expect(pastCutoffGuard).not.toBe(guardBlock);
+  it("test 3: post-cutoff application fails closed when events_default holds a row", async () => {
+    await pool.query("INSERT INTO events_default (occurred_at) VALUES ('2030-01-01T00:00:00Z')");
+    const postCutoffGuard = guardBlock.replace(CUTOFF_LITERAL, "2000-01-01 00:00:00+00");
 
-    await expect(pool.query(pastCutoffGuard)).rejects.toThrow(/must not apply|refuses to apply/i);
+    await expect(pool.query(postCutoffGuard)).rejects.toThrow(/refuses to apply/i);
+  });
+
+  it("test 4: post-cutoff application fails closed when send_events_default holds a row", async () => {
+    await pool.query("INSERT INTO send_events_default (occurred_at) VALUES ('2030-01-01T00:00:00Z')");
+    const postCutoffGuard = guardBlock.replace(CUTOFF_LITERAL, "2000-01-01 00:00:00+00");
+
+    await expect(pool.query(postCutoffGuard)).rejects.toThrow(/refuses to apply/i);
   });
 });

@@ -55,7 +55,16 @@ describe("SendGrid key connect (TENANT-04, D-02/D-19/D-21)", () => {
   function mockVerifiedSenders(apiKey: string) {
     return nock("https://api.sendgrid.com", { reqheaders: { authorization: `Bearer ${apiKey}` } })
       .get("/v3/verified_senders")
-      .reply(200, { results: [{ id: 1, from_email: "hello@tenant.example", nickname: "Main" }] });
+      .reply(200, {
+        results: [
+          {
+            id: 1,
+            from_email: "hello@tenant.example",
+            from_name: "Tenant Marketing",
+            nickname: "Main account label",
+          },
+        ],
+      });
   }
 
   async function signUp(email: string, password: string, name: string) {
@@ -111,7 +120,14 @@ describe("SendGrid key connect (TENANT-04, D-02/D-19/D-21)", () => {
     const body = res.json();
     expect(body.connected).toBe(true);
     expect(body.status).toBe("active");
-    expect(body.verifiedSenders).toEqual([{ id: 1, fromEmail: "hello@tenant.example", nickname: "Main" }]);
+    expect(body.verifiedSenders).toEqual([
+      {
+        id: 1,
+        fromEmail: "hello@tenant.example",
+        fromName: "Tenant Marketing",
+        nickname: "Main account label",
+      },
+    ]);
     expect(body.keyMask).toMatch(/^.+…\w{4}$/);
   });
 

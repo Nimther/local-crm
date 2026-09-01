@@ -4,9 +4,9 @@ milestone: v1.2
 milestone_name: Data Lifecycle & Delivery Trust
 status: Awaiting next milestone
 stopped_at: Phase 22 complete — milestone v1.2 100% (all 5 phases, 35/35 plans), ready to archive
-last_updated: "2026-08-24T13:27:30.477Z"
-last_activity: 2026-08-24
-last_activity_desc: Milestone v1.2 completed and archived
+last_updated: "2026-09-01T11:02:45.000Z"
+last_activity: 2026-09-01
+last_activity_desc: "Completed quick task 260901-lwg: SendGrid campaign From Name"
 progress:
   total_phases: 5
   completed_phases: 5
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-08-24 after v1.2 milestone)
 Phase: Milestone v1.2 complete
 Plan: —
 Status: Awaiting next milestone
-Last activity: 2026-08-28 — Completed quick task 260828-p1t: Resolve WINDOWS ids 8 and 9 with merged UUID evidence and the ratified WAL acceptance criterion
+Last activity: 2026-09-01 — Completed quick task 260901-lwg: SendGrid campaign From Name
 
 ### Milestone v1.2 phase map
 
@@ -121,6 +121,7 @@ Research flag: RESOLVED — Phase 22's plan-time research mapped the full FK gra
 | 260821-p8i | Зафиксировать изменение .planning/debug/knowledge-base.md как документационное | 2026-08-21 | ccc23ba | Complete | [260821-p8i-planning-debug-knowledge-base-md](./quick/260821-p8i-planning-debug-knowledge-base-md/) |
 | 260825-qhm | Evidence-based audit of .planning/WINDOWS.md open items before next milestone | 2026-08-25 | 8489c0c | Complete | [260825-qhm-evidence-based-audit-of-planning-windows](./quick/260825-qhm-evidence-based-audit-of-planning-windows/) |
 | 260828-p1t | Resolve WINDOWS ids 8 and 9 with merged UUID evidence and the ratified WAL acceptance criterion | 2026-08-28 | 54a1f5f | Complete | [260828-p1t-resolve-windows-ids-8-and-9-with-merged-](./quick/260828-p1t-resolve-windows-ids-8-and-9-with-merged-/) |
+| 260901-lwg | SendGrid campaign From Name | 2026-09-01 | 9bb896cc | Complete | [260901-lwg-from-name-sendgrid-verified-sender](./quick/260901-lwg-from-name-sendgrid-verified-sender/) |
 
 ## Deferred Items
 

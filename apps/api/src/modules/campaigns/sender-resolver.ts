@@ -5,8 +5,8 @@ import { validateTenantSendGridKey } from "../tenancy/sendgrid-client.js";
 import type { CampaignRow } from "./campaign.repository.js";
 
 /**
- * CR-02: thrown by `resolveCampaignSenderEmail` when a campaign's
- * `fromSenderId` cannot be turned into a concrete verified sender email --
+ * CR-02: thrown by `resolveCampaignSender` when a campaign's
+ * `fromSenderId` cannot be turned into a concrete verified sender identity --
  * `no_key` when the workspace has no connected/valid SendGrid key, or
  * `sender_not_found` when the id isn't present in `/v3/verified_senders`
  * (or both fromSenderId and fromEmail are unset). Mirrors
@@ -23,6 +23,11 @@ export class CampaignSenderError extends Error {
 }
 
 export type CampaignSenderInput = Pick<CampaignRow, "id" | "fromSenderId" | "fromEmail">;
+
+export interface ResolvedCampaignSender {
+  fromEmail: string;
+  fromName: string | null;
+}
 
 /**
  * TMPL-02/TMPL-03/RESEARCH Pitfall #1: the sole implementation of sender
@@ -42,23 +47,25 @@ export type CampaignSenderInput = Pick<CampaignRow, "id" | "fromSenderId" | "fro
  * - `fromSenderId` set: decrypts the tenant's connected SendGrid key, lists
  *   verified senders (T-04-09-01: only an id SendGrid itself vouches for is
  *   ever trusted), matches `String(sender.id) === fromSenderId`, and
- *   returns the matched `fromEmail` -- WITHOUT persisting it.
+ *   returns the matched `fromEmail` and SendGrid `fromName` -- WITHOUT
+ *   persisting either value. `nickname` is intentionally ignored because it
+ *   is only SendGrid's account/UI label, not the message's From Name.
  * - `fromSenderId` set but no connected/valid key: throws `no_key`.
  * - `fromSenderId` set but absent from `/v3/verified_senders`: throws
  *   `sender_not_found`.
  * - `fromSenderId` unset but `fromEmail` set (manual-entry fallback path):
- *   returns `fromEmail` unchanged, no SendGrid call.
+ *   returns `fromEmail` unchanged with no name, no SendGrid call.
  * - Neither set: throws `sender_not_found`.
  *
  * The decrypted key is never logged (T-04-09-02).
  */
-export async function resolveCampaignSenderEmail(
+export async function resolveCampaignSender(
   workspaceId: string,
   campaign: CampaignSenderInput
-): Promise<string> {
+): Promise<ResolvedCampaignSender> {
   if (!campaign.fromSenderId) {
     if (campaign.fromEmail) {
-      return campaign.fromEmail;
+      return { fromEmail: campaign.fromEmail, fromName: null };
     }
     throw new CampaignSenderError("Campaign has no sender configured", "sender_not_found");
   }
@@ -95,6 +102,6 @@ export async function resolveCampaignSenderEmail(
       );
     }
 
-    return matched.fromEmail;
+    return { fromEmail: matched.fromEmail, fromName: matched.fromName?.trim() || null };
   });
 }
