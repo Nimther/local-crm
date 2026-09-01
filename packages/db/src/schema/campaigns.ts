@@ -57,6 +57,7 @@ export const campaigns = pgTable("campaigns", {
   templateId: text("template_id"),
   fromSenderId: text("from_sender_id"),
   fromEmail: text("from_email"),
+  fromName: text("from_name"),
   scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
   sendableTotal: integer("sendable_total"),
   sentCount: integer("sent_count").notNull().default(0),

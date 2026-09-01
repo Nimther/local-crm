@@ -3,6 +3,7 @@ import { withTenant, withTenantTransaction } from "@mega-crm/tenant-context";
 import { encryptTenantSecret } from "@mega-crm/kms";
 import { buildServer } from "../../../server.js";
 import { ensureTestDbMigrated, getTestDatabaseUrl } from "../../../test/db-fixture.js";
+import { emailBroadcastQueue } from "../campaign-queues.js";
 
 /**
  * CR-02 gap-closure (CAMP-01/02/04): the campaign builder only ever writes
@@ -24,6 +25,8 @@ describe("Campaign sender resolution (CR-02, CAMP-01/02/04)", () => {
   let app: Awaited<ReturnType<typeof buildServer>>;
   const VERIFIED_SENDER_ID = 98765;
   const VERIFIED_SENDER_EMAIL = "verified@sender.test";
+  const VERIFIED_SENDER_FROM_NAME = "Verified Sender Name";
+  const VERIFIED_SENDER_NICKNAME = "Internal account label";
   const UNKNOWN_SENDER_ID = "00000";
 
   beforeAll(async () => {
@@ -64,7 +67,14 @@ describe("Campaign sender resolution (CR-02, CAMP-01/02/04)", () => {
       if (url.includes("/v3/verified_senders")) {
         return new Response(
           JSON.stringify({
-            results: [{ id: VERIFIED_SENDER_ID, from_email: VERIFIED_SENDER_EMAIL, nickname: "Marketing" }],
+            results: [
+              {
+                id: VERIFIED_SENDER_ID,
+                from_email: VERIFIED_SENDER_EMAIL,
+                from_name: VERIFIED_SENDER_FROM_NAME,
+                nickname: VERIFIED_SENDER_NICKNAME,
+              },
+            ],
           }),
           { status: 200, headers: { "Content-Type": "application/json" } }
         );
@@ -157,7 +167,12 @@ describe("Campaign sender resolution (CR-02, CAMP-01/02/04)", () => {
       payload: body,
     });
     expect(res.statusCode, `create campaign failed: ${res.body}`).toBe(201);
-    return res.json<{ id: string; fromEmail: string | null; fromSenderId: string | null }>();
+    return res.json<{
+      id: string;
+      fromEmail: string | null;
+      fromName: string | null;
+      fromSenderId: string | null;
+    }>();
   }
 
   async function getCampaign(cookie: string, slug: string, id: string) {
@@ -167,7 +182,12 @@ describe("Campaign sender resolution (CR-02, CAMP-01/02/04)", () => {
       headers: { cookie },
     });
     expect(res.statusCode, `get campaign failed: ${res.body}`).toBe(200);
-    return res.json<{ id: string; fromEmail: string | null; fromSenderId: string | null }>();
+    return res.json<{
+      id: string;
+      fromEmail: string | null;
+      fromName: string | null;
+      fromSenderId: string | null;
+    }>();
   }
 
   it("launch resolves a fromSenderId-only campaign to its verified sender email and persists it", async () => {
@@ -183,6 +203,7 @@ describe("Campaign sender resolution (CR-02, CAMP-01/02/04)", () => {
       fromSenderId: String(VERIFIED_SENDER_ID),
     });
     expect(campaign.fromEmail).toBeNull();
+    expect(campaign.fromName).toBeNull();
 
     const launchRes = await app.inject({
       method: "POST",
@@ -196,13 +217,52 @@ describe("Campaign sender resolution (CR-02, CAMP-01/02/04)", () => {
       payload: { expectedVersion: 1 },
     });
     expect(launchRes.statusCode, `launch failed: ${launchRes.body}`).toBe(200);
-    const launchBody = launchRes.json<{ fromEmail: string | null; status: string; version: number }>();
+    const launchBody = launchRes.json<{
+      fromEmail: string | null;
+      fromName: string | null;
+      status: string;
+      version: number;
+    }>();
     expect(launchBody.fromEmail).toBe(VERIFIED_SENDER_EMAIL);
+    expect(launchBody.fromName).toBe(VERIFIED_SENDER_FROM_NAME);
+    expect(launchBody.fromName).not.toBe(VERIFIED_SENDER_NICKNAME);
     expect(launchBody.status).toBe("sending");
     expect(launchBody.version).toBe(2);
 
     const persisted = await getCampaign(cookie, workspace.slug, campaign.id);
     expect(persisted.fromEmail).toBe(VERIFIED_SENDER_EMAIL);
+    expect(persisted.fromName).toBe(VERIFIED_SENDER_FROM_NAME);
+  });
+
+  it("schedule resolves and persists the verified sender's real From Name", async () => {
+    stubSendGridFetch();
+    const { cookie, workspace } = await owner("sender-resolve-schedule");
+    await connectFixtureSendgridKey(workspace.id);
+    const segment = await createSegment(cookie, workspace.slug, "All contacts");
+    const campaign = await createCampaign(cookie, workspace.slug, {
+      name: "Schedule with sender id only",
+      segmentId: segment.id,
+      templateId: "d-test-1",
+      fromSenderId: String(VERIFIED_SENDER_ID),
+    });
+
+    const scheduleRes = await app.inject({
+      method: "POST",
+      url: `/api/workspaces/${workspace.slug}/campaigns/${campaign.id}/schedule`,
+      headers: { cookie },
+      payload: {
+        scheduledAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+        expectedVersion: 1,
+      },
+    });
+    expect(scheduleRes.statusCode, `schedule failed: ${scheduleRes.body}`).toBe(200);
+    const body = scheduleRes.json<{ fromEmail: string | null; fromName: string | null }>();
+    expect(body.fromEmail).toBe(VERIFIED_SENDER_EMAIL);
+    expect(body.fromName).toBe(VERIFIED_SENDER_FROM_NAME);
+    expect(body.fromName).not.toBe(VERIFIED_SENDER_NICKNAME);
+
+    const persisted = await getCampaign(cookie, workspace.slug, campaign.id);
+    expect(persisted.fromName).toBe(VERIFIED_SENDER_FROM_NAME);
   });
 
   it("test-send resolves a fromSenderId-only campaign to its verified sender email and persists it", async () => {
@@ -218,6 +278,7 @@ describe("Campaign sender resolution (CR-02, CAMP-01/02/04)", () => {
       fromSenderId: String(VERIFIED_SENDER_ID),
     });
     expect(campaign.fromEmail).toBeNull();
+    expect(campaign.fromName).toBeNull();
 
     const testSendRes = await app.inject({
       method: "POST",
@@ -232,6 +293,12 @@ describe("Campaign sender resolution (CR-02, CAMP-01/02/04)", () => {
 
     const persisted = await getCampaign(cookie, workspace.slug, campaign.id);
     expect(persisted.fromEmail).toBe(VERIFIED_SENDER_EMAIL);
+    expect(persisted.fromName).toBe(VERIFIED_SENDER_FROM_NAME);
+
+    const jobs = await emailBroadcastQueue.getJobs(["waiting", "delayed", "prioritized", "paused"]);
+    const queued = jobs.find((job) => job.data.campaignId === campaign.id);
+    expect(queued?.data.fromName).toBe(VERIFIED_SENDER_FROM_NAME);
+    expect(queued?.data.fromName).not.toBe(VERIFIED_SENDER_NICKNAME);
   });
 
   it("launch fails with 422 when fromSenderId does not match any verified sender", async () => {

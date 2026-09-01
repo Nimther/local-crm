@@ -87,9 +87,9 @@ describe("checkEmptyDiff against the real repository (the CI-enforced copy of db
     // change) -- same precedent as 0065/0067, so it ships NO snapshot of its
     // own. comparedAgainstSnapshot and snapshotFileCount are therefore
     // UNCHANGED by this migration; only shippedMigrationCount grows to 71.
-    expect(result.comparedAgainstSnapshot).toBe("0069_snapshot.json");
-    expect(result.shippedMigrationCount).toBe(71);
-    expect(result.snapshotFileCount).toBe(16);
+    expect(result.comparedAgainstSnapshot).toBe("0071_snapshot.json");
+    expect(result.shippedMigrationCount).toBe(72);
+    expect(result.snapshotFileCount).toBe(17);
 
     // Never touches the repository -- proven, not assumed: the directory
     // listing (every file under packages/db/migrations, recursively) is
@@ -116,7 +116,7 @@ describe("checkEmptyDiff against the real repository (the CI-enforced copy of db
     // migration overall. This assertion tracks the JOURNAL's newest tag,
     // which is now 0070.
     const newestTag = journal.entries[journal.entries.length - 1]?.tag;
-    expect(newestTag).toBe("0070_scan_policies_exclude_deleted_workspaces");
+    expect(newestTag).toBe("0071_campaign_from_name");
   });
 });
 
@@ -179,6 +179,6 @@ describe("listSnapshotFiles", () => {
     const files = listSnapshotFiles(path.join(REAL_MIGRATIONS_DIR, "meta"));
     expect(files).not.toContain("_journal.json");
     expect(files).toEqual([...files].sort());
-    expect(files[files.length - 1]).toBe("0069_snapshot.json");
+    expect(files[files.length - 1]).toBe("0071_snapshot.json");
   });
 });

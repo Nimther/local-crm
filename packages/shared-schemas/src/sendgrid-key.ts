@@ -9,6 +9,7 @@ export type ConnectSendgridKeyInput = z.infer<typeof connectSendgridKeySchema>;
 export const verifiedSenderSchema = z.object({
   id: z.number(),
   fromEmail: z.string(),
+  fromName: z.string().optional(),
   nickname: z.string().optional(),
 });
 export type VerifiedSender = z.infer<typeof verifiedSenderSchema>;

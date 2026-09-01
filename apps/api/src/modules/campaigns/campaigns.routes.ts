@@ -33,7 +33,7 @@ import {
   type CampaignRow,
 } from "./campaign.repository.js";
 import { campaignKickoffQueue, emailBroadcastQueue } from "./campaign-queues.js";
-import { CampaignSenderError, resolveCampaignSenderEmail } from "./sender-resolver.js";
+import { CampaignSenderError, resolveCampaignSender } from "./sender-resolver.js";
 
 /**
  * WR-03/T-03-04-style DoS-bounding statement_timeout, reused here for the
@@ -108,7 +108,7 @@ function mapCampaignStateError(err: unknown): { code: number; body: Record<strin
 
 /**
  * CR-02: maps a `CampaignSenderError` (thrown by `resolveCampaignFromEmail`
- * or `resolveCampaignSenderEmail` when a campaign's `fromSenderId` cannot
+ * or `resolveCampaignSender` when a campaign's `fromSenderId` cannot
  * be resolved to a verified email) to the same 422 + `fields.sender` shape
  * `launchIncompleteFields` already uses, so the UI's sender-field error
  * rendering handles both cases identically. Carries `code` for the same
@@ -132,6 +132,7 @@ function toCampaignResponse(row: CampaignRow) {
     templateId: row.templateId,
     fromSenderId: row.fromSenderId,
     fromEmail: row.fromEmail,
+    fromName: row.fromName,
     scheduledAt: row.scheduledAt ? row.scheduledAt.toISOString() : null,
     sendableTotal: row.sendableTotal,
     sentCount: row.sentCount,
@@ -339,13 +340,17 @@ export async function registerCampaignsRoutes(fastify: FastifyInstance): Promise
         // the version bump, so a fromSenderId-based launch never bumps the
         // version more than once per marketer click.
         const preLaunch = await withTenant(workspace.id, () => getCampaign(id));
-        const resolvedFromEmail =
+        const resolvedSender =
           preLaunch && (preLaunch.fromSenderId || preLaunch.fromEmail)
-            ? await resolveCampaignSenderEmail(workspace.id, preLaunch)
+            ? await resolveCampaignSender(workspace.id, preLaunch)
             : null;
 
         const launched = await withTenant(workspace.id, () =>
-          launchCampaign(id, { expectedVersion: parsed.data.expectedVersion, resolvedFromEmail })
+          launchCampaign(id, {
+            expectedVersion: parsed.data.expectedVersion,
+            resolvedFromEmail: resolvedSender?.fromEmail ?? null,
+            resolvedFromName: resolvedSender?.fromName ?? null,
+          })
         );
         // SEND-03: the kickoff worker (04-06) re-derives recipients/template/
         // sender from the campaign row itself -- the job only ever carries ids.
@@ -402,16 +407,17 @@ export async function registerCampaignsRoutes(fastify: FastifyInstance): Promise
         // from_email at send time; it just gets written under the lock now,
         // not in a separate transaction ahead of it.
         const preSchedule = await withTenant(workspace.id, () => getCampaign(id));
-        const resolvedFromEmail =
+        const resolvedSender =
           preSchedule && (preSchedule.fromSenderId || preSchedule.fromEmail)
-            ? await resolveCampaignSenderEmail(workspace.id, preSchedule)
+            ? await resolveCampaignSender(workspace.id, preSchedule)
             : null;
 
         const scheduled = await withTenant(workspace.id, () =>
           scheduleCampaign(id, {
             scheduledAt: scheduledAtDate,
             expectedVersion: parsed.data.expectedVersion,
-            resolvedFromEmail,
+            resolvedFromEmail: resolvedSender?.fromEmail ?? null,
+            resolvedFromName: resolvedSender?.fromName ?? null,
           })
         );
         return reply.send(toCampaignResponse(scheduled));
@@ -512,11 +518,12 @@ export async function registerCampaignsRoutes(fastify: FastifyInstance): Promise
     // never `request.body` (SC4).
     let prepared: CampaignRow;
     try {
-      const resolvedFromEmail = await resolveCampaignSenderEmail(workspace.id, campaign);
+      const resolvedSender = await resolveCampaignSender(workspace.id, campaign);
       prepared = await withTenant(workspace.id, () =>
         prepareCampaignTestSend(id, {
           expectedVersion: parsed.data.expectedVersion,
-          resolvedFromEmail,
+          resolvedFromEmail: resolvedSender.fromEmail,
+          resolvedFromName: resolvedSender.fromName,
         })
       );
     } catch (err) {
@@ -556,6 +563,7 @@ export async function registerCampaignsRoutes(fastify: FastifyInstance): Promise
         // this already-queued test send.
         ...(prepared.templateId !== null ? { templateId: prepared.templateId } : {}),
         ...(prepared.fromEmail !== null ? { fromEmail: prepared.fromEmail } : {}),
+        ...(prepared.fromName !== null ? { fromName: prepared.fromName } : {}),
         ...(requestId !== undefined ? { requestId } : {}),
       },
       { jobId }

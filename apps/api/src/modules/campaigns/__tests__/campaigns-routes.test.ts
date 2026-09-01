@@ -637,6 +637,7 @@ describe("campaign routes (CAMP-01..05)", () => {
       expect(jobs).toHaveLength(1);
       expect(jobs[0]?.data.templateId).toBe("d-template-1");
       expect(jobs[0]?.data.fromEmail).toBe("marketing@example.com");
+      expect(jobs[0]?.data.fromName).toBeUndefined();
     });
 
     it("a template change after enqueue does not redirect the already-queued test send (TMPL-03 async-gap proof)", async () => {

@@ -12,6 +12,7 @@ export interface CampaignRow {
   templateId: string | null;
   fromSenderId: string | null;
   fromEmail: string | null;
+  fromName: string | null;
   scheduledAt: Date | null;
   sendableTotal: number | null;
   sentCount: number;
@@ -42,6 +43,7 @@ const CAMPAIGN_COLUMNS = `
   template_id as "templateId",
   from_sender_id as "fromSenderId",
   from_email as "fromEmail",
+  from_name as "fromName",
   scheduled_at as "scheduledAt",
   sendable_total as "sendableTotal",
   sent_count as "sentCount",
@@ -195,6 +197,8 @@ export async function updateCampaign(id: string, patch: UpdateCampaignInput): Pr
     const nextTemplateId = patch.templateId !== undefined ? patch.templateId : existing.templateId;
     const nextFromSenderId = patch.fromSenderId !== undefined ? patch.fromSenderId : existing.fromSenderId;
     const nextFromEmail = patch.fromEmail !== undefined ? patch.fromEmail : existing.fromEmail;
+    const nextFromName =
+      patch.fromSenderId !== undefined || patch.fromEmail !== undefined ? null : existing.fromName;
 
     const { rows: updated } = await client.query<CampaignRow>(
       `UPDATE campaigns SET
@@ -203,11 +207,12 @@ export async function updateCampaign(id: string, patch: UpdateCampaignInput): Pr
          template_id = $5,
          from_sender_id = $6,
          from_email = $7,
+         from_name = $8,
          version = version + 1,
          updated_at = now()
        WHERE workspace_id = $1 AND id = $2
        RETURNING ${CAMPAIGN_COLUMNS}`,
-      [workspaceId, id, nextName, nextSegmentId, nextTemplateId, nextFromSenderId, nextFromEmail]
+      [workspaceId, id, nextName, nextSegmentId, nextTemplateId, nextFromSenderId, nextFromEmail, nextFromName]
     );
     return updated[0];
   });
@@ -227,6 +232,8 @@ export interface LaunchCampaignOptions {
    * spurious `version_conflict` on the very next comparison.
    */
   resolvedFromEmail: string | null;
+  /** The verified sender's SendGrid `from_name`; null for manual/nameless senders. */
+  resolvedFromName?: string | null;
 }
 
 /**
@@ -274,16 +281,20 @@ export async function launchCampaign(
       );
     }
 
+    const resolvedFromName =
+      "resolvedFromName" in options ? options.resolvedFromName ?? null : existing.fromName;
+
     const { rows: updated } = await client.query<CampaignRow>(
       `UPDATE campaigns SET
          status = 'sending',
          sending_started_at = now(),
          from_email = COALESCE($3, from_email),
+         from_name = $4,
          version = version + 1,
          updated_at = now()
        WHERE workspace_id = $1 AND id = $2
        RETURNING ${CAMPAIGN_COLUMNS}`,
-      [workspaceId, id, options.resolvedFromEmail]
+      [workspaceId, id, options.resolvedFromEmail, resolvedFromName]
     );
     return updated[0];
   });
@@ -303,6 +314,8 @@ export interface ScheduleCampaignOptions {
    * `resolvedFromEmail` field.
    */
   resolvedFromEmail: string | null;
+  /** The verified sender's SendGrid `from_name`; null for manual/nameless senders. */
+  resolvedFromName?: string | null;
 }
 
 /**
@@ -340,16 +353,20 @@ export async function scheduleCampaign(id: string, options: ScheduleCampaignOpti
       );
     }
 
+    const resolvedFromName =
+      "resolvedFromName" in options ? options.resolvedFromName ?? null : existing.fromName;
+
     const { rows: updated } = await client.query<CampaignRow>(
       `UPDATE campaigns SET
          status = 'scheduled',
          scheduled_at = $3,
          from_email = COALESCE($4, from_email),
+         from_name = $5,
          version = version + 1,
          updated_at = now()
        WHERE workspace_id = $1 AND id = $2
        RETURNING ${CAMPAIGN_COLUMNS}`,
-      [workspaceId, id, options.scheduledAt, options.resolvedFromEmail]
+      [workspaceId, id, options.scheduledAt, options.resolvedFromEmail, resolvedFromName]
     );
     return updated[0];
   });
@@ -416,6 +433,8 @@ export interface PrepareCampaignTestSendOptions {
    * set.
    */
   resolvedFromEmail: string | null;
+  /** The verified sender's SendGrid `from_name`; null for manual/nameless senders. */
+  resolvedFromName?: string | null;
 }
 
 /**
@@ -474,6 +493,8 @@ export async function prepareCampaignTestSend(
       );
     }
     const effectiveFromEmail = options.resolvedFromEmail ?? existing.fromEmail;
+    const effectiveFromName =
+      "resolvedFromName" in options ? options.resolvedFromName ?? null : existing.fromName;
     if (!effectiveFromEmail) {
       throw new CampaignStateError(
         "Campaign is missing a required field (sender) before a test send",
@@ -484,11 +505,13 @@ export async function prepareCampaignTestSend(
     const { rows: updated } = await client.query<CampaignRow>(
       `UPDATE campaigns SET
          from_email = $3,
+         from_name = $4,
          version = version + 1,
          updated_at = now()
-       WHERE workspace_id = $1 AND id = $2 AND from_email IS DISTINCT FROM $3
+       WHERE workspace_id = $1 AND id = $2
+         AND (from_email IS DISTINCT FROM $3 OR from_name IS DISTINCT FROM $4)
        RETURNING ${CAMPAIGN_COLUMNS}`,
-      [workspaceId, id, effectiveFromEmail]
+      [workspaceId, id, effectiveFromEmail, effectiveFromName]
     );
     return updated[0] ?? existing;
   });
@@ -508,8 +531,8 @@ export async function duplicateCampaign(id: string, createdByUserId: string): Pr
     }
 
     const { rows: created } = await client.query<CampaignRow>(
-      `INSERT INTO campaigns (workspace_id, name, segment_id, template_id, from_sender_id, from_email, created_by_user_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO campaigns (workspace_id, name, segment_id, template_id, from_sender_id, from_email, from_name, created_by_user_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING ${CAMPAIGN_COLUMNS}`,
       [
         workspaceId,
@@ -518,6 +541,7 @@ export async function duplicateCampaign(id: string, createdByUserId: string): Pr
         existing.templateId,
         existing.fromSenderId,
         existing.fromEmail,
+        existing.fromName,
         createdByUserId,
       ]
     );

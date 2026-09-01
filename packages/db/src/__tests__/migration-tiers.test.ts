@@ -124,7 +124,7 @@ describe("newestAutoReversibleTier", () => {
     }
   });
 
-  it("returns an empty run -- 0070_scan_policies_exclude_deleted_workspaces is the newest shipped migration and is itself forward-only", () => {
+  it("returns the trailing 0071 additive migration after 0070's forward-only boundary", () => {
     // Phase 15 (OPS-13, plan 15-14, Task 1): 0065 is a grants-only migration
     // (column-level GRANT + CREATE POLICY on workspace_webhook_endpoints,
     // human-approved override of this plan's own "no new migration"
@@ -168,7 +168,10 @@ describe("newestAutoReversibleTier", () => {
     // forward-only, so the trailing run stays EMPTY. Pinned explicitly so a
     // future migration silently changing this fails loudly here rather than
     // only inside the rehearsal test.
-    expect(newestAutoReversibleTier(MIGRATIONS_DIR)).toEqual([]);
+    //
+    // Quick 260901-lwg: 0071_campaign_from_name is one nullable ADD COLUMN
+    // with no backfill, so it starts a new one-item auto-reversible tail.
+    expect(newestAutoReversibleTier(MIGRATIONS_DIR)).toEqual(["0071_campaign_from_name"]);
   });
 
   it("returns an empty run when the newest migration is forward-only", () => {

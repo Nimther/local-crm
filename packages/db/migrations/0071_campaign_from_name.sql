@@ -1,0 +1,1 @@
+ALTER TABLE "campaigns" ADD COLUMN "from_name" text;

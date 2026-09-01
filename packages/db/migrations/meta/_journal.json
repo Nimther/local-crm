@@ -498,6 +498,13 @@
       "when": 1786598400007,
       "tag": "0070_scan_policies_exclude_deleted_workspaces",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1788260017426,
+      "tag": "0071_campaign_from_name",
+      "breakpoints": true
     }
   ]
 }

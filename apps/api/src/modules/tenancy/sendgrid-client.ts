@@ -13,6 +13,7 @@
 export interface SendGridVerifiedSender {
   id: number;
   fromEmail: string;
+  fromName?: string;
   nickname?: string;
 }
 
@@ -34,7 +35,7 @@ interface SendGridScopesResponse {
 }
 
 interface SendGridVerifiedSendersResponse {
-  results: Array<{ id: number; from_email: string; nickname?: string }>;
+  results: Array<{ id: number; from_email: string; from_name?: string; nickname?: string }>;
 }
 
 export interface SendGridDynamicTemplate {
@@ -71,6 +72,7 @@ export async function validateTenantSendGridKey(apiKey: string): Promise<Validat
     ? ((await sendersRes.json()) as SendGridVerifiedSendersResponse).results.map((sender) => ({
         id: sender.id,
         fromEmail: sender.from_email,
+        fromName: sender.from_name,
         nickname: sender.nickname,
       }))
     : [];
